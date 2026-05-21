@@ -35,9 +35,9 @@ Beispiel: `mdai-plan:mdai-skill-integration` (plan-id == `id` aus YAML-Frontmatt
 
 ## Operationen
 
-| op           | Aufruf                                                               |
-|--------------|----------------------------------------------------------------------|
-| `start`      | `remember(topic, body={phases, current_phase=phases[0], ...})`       |
-| `<id>-done`  | `recall` → `completed.append(<id>)`; `current_phase=next` → `remember` |
-| `all-done`   | `recall` → `status="done"` → `remember`                              |
-| `resume`     | `recall(topic)` liefert vollen Stand                                 |
+| op          | Aufruf                                                                 |
+| ----------- | ---------------------------------------------------------------------- |
+| `start`     | `remember(topic, body={phases, current_phase=phases[0], ...})`         |
+| `<id>-done` | `recall` → `completed.append(<id>)`; `current_phase=next` → `remember` |
+| `all-done`  | `recall` → `status="done"` → `remember`                                |
+| `resume`    | `recall(topic)` liefert vollen Stand                                   |

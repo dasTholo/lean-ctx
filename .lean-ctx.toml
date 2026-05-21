@@ -1,4 +1,10 @@
 [autonomy]
-auto_dedup = true
-auto_consolidate = true
-auto_preload = true
+enabled = true                    # Master switch for all autonomy features
+auto_preload = true               # Pre-cache imported files after ctx_read
+auto_dedup = true                 # Auto-deduplicate at 8+ cached files
+auto_related = true               # Suggest related files via import graph
+auto_consolidate = true           # Auto-consolidate knowledge periodically
+silent_preload = true             # Cache files without output
+dedup_threshold = 8               # Files before auto-dedup triggers
+consolidate_every_calls = 25      # Run consolidation every N tool calls
+consolidate_cooldown_secs = 120   # Minimum seconds between consolidations
