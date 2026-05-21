@@ -1,0 +1,4 @@
+[autonomy]
+auto_dedup = true
+auto_consolidate = true
+auto_preload = true
