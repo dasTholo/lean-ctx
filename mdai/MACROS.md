@@ -22,8 +22,7 @@ Quelle der Wahrheit für alle versionierten mdai-Macros. Konsumiert von den drei
 | `core/tool-quick-ref.md`                    | include     | always                  | (text only)                                                                                            |
 | `core/ctx-tools.md`                         | import-only | always                  | ctx_read, ctx_search, ctx_tree, ctx_shell, ctx_edit                                                    |
 | `core/mcp-markdownai.md`                    | import-only | always                  | read_phase, list_phases, get_constraints                                                               |
-| `core/ctx-knowledge.md`                     | import-only | always                  | remember_plan, recall_plan                                                                             |
-| `core/gotchas.md`                           | import-only | always                  | add_gotcha, list_gotchas                                                                               |
+| `core/ctx-knowledge.md`                     | import-only | always                  | remember_plan, recall_plan, add_gotcha, list_gotchas                                                   |
 | `lang/rust.md`                              | import-only | MDAI_PROJECT_LANG=rust  | cargo_nextest, cargo_clippy, cargo_fmt                                                                 |
 | `tooling/jetbrains.md`                      | import-only | MDAI_HAS_JETBRAINS=true | reformat_file, step_reformat_commit                                                                    |
 | `tooling/serena.md`                         | import-only | MDAI_HAS_SERENA=true    | find_symbol, replace_symbol_body, insert_before_symbol, insert_after_symbol, symbols_overview          |
@@ -35,8 +34,11 @@ Quelle der Wahrheit für alle versionierten mdai-Macros. Konsumiert von den drei
 
 - **Frontmatter pro Pack-File:** siehe Spec §9.2 / Anhang A. Jedes File hat `lib_version`,
   `mdai-pack: { mode, exports }`. Optional `status: experimental` für Staging, `deprecated_since: 0.x` für Deprecation.
-- **`mode: include`** rendert Inline-Text + lädt `@define`s. Wird genutzt für Regel-Files (hard-rules, tool-quick-ref). Diese Files dürfen **keine** YAML-Frontmatter tragen — `@include` walked alle AST-Nodes und leakt sonst die Frontmatter als Text. Mode-Bestimmung erfolgt am Use-Site über `@include`-Direktive.
-- **`mode: import-only`** lädt nur `@define`s, kein Inline-Output. Default für alle Macro-Files. YAML-Frontmatter ist hier sicher (`@import` verarbeitet nur define/env/connect/import-Nodes, Text wird ignoriert).
+- **`mode: include`** rendert Inline-Text + lädt `@define`s. Wird genutzt für Regel-Files (hard-rules, tool-quick-ref).
+  Diese Files dürfen **keine** YAML-Frontmatter tragen — `@include` walked alle AST-Nodes und leakt sonst die
+  Frontmatter als Text. Mode-Bestimmung erfolgt am Use-Site über `@include`-Direktive.
+- **`mode: import-only`** lädt nur `@define`s, kein Inline-Output. Default für alle Macro-Files. YAML-Frontmatter ist
+  hier sicher (`@import` verarbeitet nur define/env/connect/import-Nodes, Text wird ignoriert).
 - **Naming:** `snake_case` für Macro-Namen (`write_spec`, nicht `writeSpec`). `kebab-case` für Filenames (
   `write-spec.md`).
 - **Bootstrap:** Jeder konsumierende Skill ruft `@call mdai_bootstrap()` als erste Zeile in `pre-context`. Setzt
@@ -48,8 +50,9 @@ Quelle der Wahrheit für alle versionierten mdai-Macros. Konsumiert von den drei
 
 Initial release.
 
-- **Cross-skill core (7 Files):** startup-check, hard-rules, tool-quick-ref, ctx-tools, mcp-markdownai, ctx-knowledge,
-  gotchas.
+- **Cross-skill core (6 Files):** startup-check, hard-rules, tool-quick-ref, ctx-tools, mcp-markdownai, ctx-knowledge.
+- **Refactor in v0.1.0:** former gotchas pack merged into ctx-knowledge (category="gotcha" in ctx_knowledge is a
+  first-class salience category; file-append wrapper deleted).
 - **Opt-in lang/tooling (3 Files):** rust, jetbrains, serena.
 - **Skill A Pack (3 Files):** write-spec, write-mdai-plan, spec-reviewer (migriert aus inline `@define`s im Skill-A-Spec
   §6.1).
