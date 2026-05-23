@@ -2,7 +2,7 @@
 lib_version: 0.1.0
 mdai-pack:
   mode: import-only
-  exports: [cargo_nextest, cargo_clippy, cargo_fmt]
+  exports: [cargo_nextest, cargo_clippy, cargo_fmt, rustfmt_file]
 ---
 
 @markdownai v1.0
@@ -21,4 +21,14 @@ Mandates from `~/.claude/CLAUDE.md` + project `CLAUDE.md`: nextest instead of `c
 
 @define cargo_fmt()
 @query mcp lean-ctx ctx_shell command="cargo fmt"
+@end
+
+# Single-file formatting. Choose between:
+#   - `@call rustfmt_file(file=...)`     — rustfmt directly (no IDE required).
+#   - `@call reformat_file(file=...)`    — JetBrains reformat from `mdai/tooling/jetbrains.md`
+#                                          (preferred when MDAI_HAS_JETBRAINS=true; respects
+#                                          IDE-wide code-style settings beyond rustfmt rules).
+# For workspace-wide formatting use `@call cargo_fmt()`.
+@define rustfmt_file(file)
+@query mcp lean-ctx ctx_shell command="rustfmt {{ file }}"
 @end
