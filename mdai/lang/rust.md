@@ -9,7 +9,7 @@ mdai-pack:
 
 # Rust Pack (opt-in via MDAI_PROJECT_LANG=rust)
 
-Mandates from `~/.claude/CLAUDE.md` + project `CLAUDE.md`: nextest instead of `cargo test`, clippy with `-D warnings`, `cargo fmt` before `git add`.
+Mandates from `~/.claude/CLAUDE.md` + project `CLAUDE.md`: nextest instead of `cargo test`, clippy with `-D warnings`, and `@call step_reformat_commit(file, message)` (from `mdai/tooling/jetbrains.md`) for the reformat + `git add` + `git commit` sequence on every changed file. `@call cargo_fmt()` here is workspace-wide; per-file formatting before staging goes through `step_reformat_commit` when JetBrains is available, otherwise through `@call rustfmt_file(file)`.
 
 @define cargo_nextest()
 @query mcp lean-ctx ctx_shell command="cargo nextest run"
