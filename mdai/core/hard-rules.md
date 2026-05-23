@@ -1,10 +1,10 @@
 @markdownai v1.0
 
-## Hard Rules (aus `CLAUDE.md`, immer-an)
+## Hard Rules (from `CLAUDE.md`, always-on)
 
-- Tests: **immer** `cargo nextest run`, nie `cargo test`.
-- Vor `git add`: `@call step_reformat_commit(file=<path>, message=<msg>)` (lädt `tooling/jetbrains.md`).
-- **Keine** `&&`-Bash-Chains — jeden Befehl einzeln.
-- **Keine** Worktrees.
-- Rust-Edits: bevorzugt `@call replace_symbol_body(name=..., path=..., body=...)` / `insert_*_symbol` aus `tooling/serena.md`.
-- lean-ctx-Tools bevorzugen: `@call ctx_read`, `@call ctx_search`, `@call ctx_shell`, `@call ctx_tree`, `@call ctx_edit` (aus `core/ctx-tools.md`).
+- Tests: **always** `cargo nextest run`, never `cargo test`.
+- Before `git add`: `@call step_reformat_commit(file=<path>, message=<msg>)` (loads `tooling/jetbrains.md`).
+- **No** `&&` bash chains — issue each command separately.
+- **No** worktrees.
+- Rust edits: prefer `@call replace_symbol_body(name=..., path=..., body=...)` / `insert_*_symbol` from `tooling/serena.md`.
+- Prefer lean-ctx tools: `@call ctx_read`, `@call ctx_search`, `@call ctx_shell`, `@call ctx_tree`, `@call ctx_edit` (from `core/ctx-tools.md`).

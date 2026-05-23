@@ -2,7 +2,7 @@
 lib_version: 0.1.0
 mdai-pack:
   mode: import-only
-  exports: [remember_plan, recall_plan, add_gotcha, list_gotchas]
+  exports: [ remember_plan, recall_plan, add_gotcha, list_gotchas ]
 ---
 
 @markdownai v1.0
@@ -10,6 +10,7 @@ mdai-pack:
 # ctx_knowledge wrappers (project-persistent state)
 
 # Plan-state: category="plan", key=plan_id, value=body.
+
 @define remember_plan(plan_id, body)
 @query mcp lean-ctx ctx_knowledge action="remember" category="plan" key="{{ plan_id }}" value="{{ body }}"
 @end
@@ -19,7 +20,9 @@ mdai-pack:
 @end
 
 # Gotchas: category="gotcha" (first-class in ctx_knowledge with salience 75).
+
 # Replaces the deleted gotchas.md file-append wrapper.
+
 @define add_gotcha(title, body)
 @query mcp lean-ctx ctx_knowledge action="remember" category="gotcha" key="{{ title }}" value="{{ body }}"
 @end

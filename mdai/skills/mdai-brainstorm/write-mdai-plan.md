@@ -18,10 +18,12 @@ created: $(date -u +%Y-%m-%d)
 @end
 
 @define plan_step(check, body)
+
 - [{{ check | default(' ') }}] {{ body }}
-@end
+  @end
 
 @define plan_phase(id, title, files, steps)
+
 ## Phase {{ id }}: {{ title }}
 
 **Files:**

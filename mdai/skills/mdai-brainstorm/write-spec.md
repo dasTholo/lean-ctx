@@ -23,10 +23,14 @@ echo \"wrote $SPEC_PATH\"
 
 @define render_spec(slug, target)
 @if {{ target }} == "none"
-  # no-op
+
+# no-op
+
 @elseif {{ target }} == "chat"
-  @query mcp markdownai read_file file="docs/mdai/specs/$(date -u +%Y-%m-%d)-{{ slug }}-design.mdai.md"
+@query mcp markdownai read_file file="docs/mdai/specs/$(date -u +%Y-%m-%d)-{{ slug }}-design.mdai.md"
 @elseif {{ target }} == "file"
-  @query mcp lean-ctx ctx_shell command="mkdir -p docs/mdai/specs/rendered && (cd /home/tholo/Scripts/lean-ctx/markdownai && npx mai render \"../docs/mdai/specs/$(date -u +%Y-%m-%d)-{{ slug }}-design.mdai.md\" > \"../docs/mdai/specs/rendered/$(date -u +%Y-%m-%d)-{{ slug }}.rendered.md\")"
+@query mcp lean-ctx ctx_shell command="mkdir -p docs/mdai/specs/rendered && (cd /home/tholo/Scripts/lean-ctx/markdownai && npx mai render \"../docs/mdai/specs/$(
+date -u +%Y-%m-%d)-{{ slug }}-design.mdai.md\" > \"../docs/mdai/specs/rendered/$(date -u +%Y-%m-%d)-{{ slug
+}}.rendered.md\")"
 @endif
 @end

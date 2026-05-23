@@ -9,8 +9,7 @@ mdai-pack:
 
 # Rust Pack (opt-in via MDAI_PROJECT_LANG=rust)
 
-Mandates aus `~/.claude/CLAUDE.md` + Project-CLAUDE.md: nextest statt test, clippy mit `-D warnings`,
-fmt vor `git add`.
+Mandates from `~/.claude/CLAUDE.md` + project `CLAUDE.md`: nextest instead of `cargo test`, clippy with `-D warnings`, `cargo fmt` before `git add`.
 
 @define cargo_nextest()
 @query mcp lean-ctx ctx_shell command="cargo nextest run"

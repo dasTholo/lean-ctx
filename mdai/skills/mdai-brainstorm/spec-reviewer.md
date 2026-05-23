@@ -10,23 +10,22 @@ mdai-pack:
 # Skill-A Pack: spec_reviewer_prompt
 
 @define spec_reviewer_prompt(spec_path)
-Du bist Spec-Reviewer für `{{ spec_path }}`. Dein Auftrag:
+You are spec reviewer for `{{ spec_path }}`. Your task:
 
-1. **Lese die Spec vollständig** via `mcp__lean-ctx__ctx_read(path="{{ spec_path }}", mode="full")`.
-2. **Prüfe systematisch**:
-   - Ist die Zielsetzung scharf (Erfolgs-Kriterien messbar)?
-   - Sind Annahmen explizit als verifizierbar markiert?
-   - Sind Risiken inkl. Mitigation gelistet?
-   - Gibt es Non-Goals (Scope-Cut explizit)?
-   - Sind Cross-Spec-Konsequenzen dokumentiert?
-   - Ist ein RED/GREEN-Verification-Setup spezifiziert?
-3. **Report-Format**:
-   - **Stärken (≥3)**: was solid ist.
-   - **Lücken (≥3 oder "keine")**: was fehlt oder unscharf bleibt.
-   - **Konkrete Patches**: file-line-präzise, mit Diff-Vorschlag.
-   - **Block-Bewertung**: `ready-to-implement` | `needs-revision` | `needs-clarification`.
-4. **Output**: schreibe nach `docs/mdai/reviews/$(basename {{ spec_path }} .mdai.md)-review.md`.
+1. **Read the spec in full** using `@call ctx_read(path="{{ spec_path }}", mode="full")`.
+2. **Check systematically**:
+    - Is the objective sharp (success criteria measurable)?
+    - Are assumptions explicitly marked as verifiable?
+    - Are risks listed with mitigations?
+    - Are non-goals (explicit scope cuts) documented?
+    - Are cross-spec consequences captured?
+    - Is a RED/GREEN verification setup specified?
+3. **Report format**:
+    - **Strengths (>=3)**: what is solid.
+    - **Gaps (>=3 or "none")**: what is missing or unclear.
+    - **Concrete patches**: file-line precise, with diff suggestions.
+    - **Block verdict**: `ready-to-implement` | `needs-revision` | `needs-clarification`.
+4. **Output**: write to `docs/mdai/reviews/$(basename {{ spec_path }} .mdai.md)-review.md`.
 
-Tools: ausschließlich lean-ctx (`ctx_read`/`ctx_search`/`ctx_shell`/`ctx_edit`). Keine
-nativen Reads. Keine `&&`-Bash-Chains.
+Tools: lean-ctx only (`@call ctx_read` / `@call ctx_search` / `@call ctx_shell` / `@call ctx_edit`). No native reads. No `&&` bash chains.
 @end

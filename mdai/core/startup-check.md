@@ -16,80 +16,89 @@ mdai-pack:
 @define service_check(service, mcp_tool, required)
 @query mcp {{ service }} {{ mcp_tool }}
 @if @result.success
-  [mdai-bootstrap OK] {{ service }} MCP reachable
+[mdai-bootstrap OK] {{ service }} MCP reachable
 @else
-  @if {{ required }} == "true"
-    [mdai-bootstrap FAIL] required service '{{ service }}' MCP unreachable.
-      Reason: {{ @result.error | default("no response") }}
-      Action: run `/mcp` to inspect connection, reconnect, then re-trigger skill.
-      Blocking: skill cannot continue without '{{ service }}'.
-    @query mcp lean-ctx ctx_shell command="exit 1"
-  @else
-    [mdai-bootstrap WARN] optional service '{{ service }}' MCP unreachable — skipping {{ service }} pack.
-      Reason: {{ @result.error | default("no response") }}
-      Impact: any later @call to {{ service }}-pack macros will be a no-op.
-  @endif
+@if {{ required }} == "true"
+[mdai-bootstrap FAIL] required service '{{ service }}' MCP unreachable.
+Reason: {{ @result.error | default("no response") }}
+Action: run `/mcp` to inspect connection, reconnect, then re-trigger skill.
+Blocking: skill cannot continue without '{{ service }}'.
+@query mcp lean-ctx ctx_shell command="exit 1"
+@else
+[mdai-bootstrap WARN] optional service '{{ service }}' MCP unreachable — skipping {{ service }} pack.
+Reason: {{ @result.error | default("no response") }}
+Impact: any later @call to {{ service }}-pack macros will be a no-op.
+@endif
 @endif
 @end
 
 @define detect_project_lang()
 @query mcp lean-ctx ctx_overview task="lang detect"
+
 # Result contains WAKEUP block with "architecture/languages_top=<LANG>:<N>,...".
+
 # Parse the first token before the first ":" as primary language.
-@query mcp lean-ctx ctx_shell command="echo '{{ @result.stdout | default('') }}' | grep -oE 'architecture/languages_top=[a-z]+' | head -1 | cut -d= -f2"
+
+@query mcp lean-ctx ctx_shell command="echo '{{ @result.stdout | default('') }}' | grep -oE '
+architecture/languages_top=[a-z]+' | head -1 | cut -d= -f2"
 @if @result.stdout != ""
-  [mdai-bootstrap] project lang detected via ctx_overview: {{ @result.stdout }}
+[mdai-bootstrap] project lang detected via ctx_overview: {{ @result.stdout }}
 @else
-  # last-resort shell heuristic
-  @query mcp lean-ctx ctx_shell command="
-    if [ -f Cargo.toml ]; then echo rust
-    elif [ -f pyproject.toml ] || [ -f setup.py ]; then echo python
-    elif [ -f package.json ]; then echo node
-    else echo unknown
-    fi
-  "
-  [mdai-bootstrap] project lang detected via shell heuristic: {{ @result.stdout }}
+
+# last-resort shell heuristic
+
+@query mcp lean-ctx ctx_shell command="
+if [ -f Cargo.toml ]; then echo rust
+elif [ -f pyproject.toml ] || [ -f setup.py ]; then echo python
+elif [ -f package.json ]; then echo node
+else echo unknown
+fi
+"
+[mdai-bootstrap] project lang detected via shell heuristic: {{ @result.stdout }}
 @endif
 @end
 
 @define detect_tooling()
 @query mcp lean-ctx ctx_shell command="claude mcp list | grep -E 'jetbrains|serena' || true"
+
 # Flags: MDAI_HAS_JETBRAINS, MDAI_HAS_SERENA.
+
 # @if-logic matches @result.stdout directly (no ctx_session key-store in v0.1.0).
+
 @if @result.stdout matches "jetbrains"
-  [mdai-bootstrap] jetbrains MCP available
+[mdai-bootstrap] jetbrains MCP available
 @else
-  [mdai-bootstrap] jetbrains MCP NOT available
+[mdai-bootstrap] jetbrains MCP NOT available
 @endif
 @if @result.stdout matches "serena"
-  [mdai-bootstrap] serena MCP available
+[mdai-bootstrap] serena MCP available
 @else
-  [mdai-bootstrap] serena MCP NOT available
+[mdai-bootstrap] serena MCP NOT available
 @endif
 @end
 
 @define load_lang_pack()
 @if @env MDAI_PROJECT_LANG == "rust"
-  @include mdai/lang/rust.md
+@include mdai/lang/rust.md
 @elseif @env MDAI_PROJECT_LANG == "python"
-  @include mdai/lang/python.md
+@include mdai/lang/python.md
 @elseif @env MDAI_PROJECT_LANG == "node"
-  @include mdai/lang/node.md
+@include mdai/lang/node.md
 @endif
 @end
 
 @define load_tooling_packs()
 @if @env MDAI_HAS_JETBRAINS == "true"
-  @include mdai/tooling/jetbrains.md
+@include mdai/tooling/jetbrains.md
 @endif
 @if @env MDAI_HAS_SERENA == "true"
-  @include mdai/tooling/serena.md
+@include mdai/tooling/serena.md
 @endif
 @end
 
 @define mdai_bootstrap()
-@call service_check(service="lean_ctx",   mcp_tool="ctx_session action=status",   required="true")
-@call service_check(service="markdownai", mcp_tool="list_phases file=.",           required="true")
+@call service_check(service="lean_ctx", mcp_tool="ctx_session action=status", required="true")
+@call service_check(service="markdownai", mcp_tool="list_phases file=.", required="true")
 @call detect_tooling()
 @call detect_project_lang()
 @end

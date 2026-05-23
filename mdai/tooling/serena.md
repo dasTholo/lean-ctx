@@ -15,7 +15,8 @@ mdai-pack:
 # Serena Pack (opt-in via MDAI_HAS_SERENA=true)
 
 @define find_symbol(name, path, include_body)
-@query mcp serena jet_brains_find_symbol name_path="{{ name }}" relative_path="{{ path }}" include_body="{{ include_body | default('false') }}"
+@query mcp serena jet_brains_find_symbol name_path="{{ name }}" relative_path="{{ path }}" include_body="{{
+include_body | default('false') }}"
 @end
 
 @define replace_symbol_body(name, path, body)
