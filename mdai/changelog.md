@@ -12,7 +12,7 @@ Initial release.
 ### Known limitations v0.1.0
 
 - `mai` CLI does not execute `@query` directives — live MCP probes (cache hit / service-fail / lang-detection) are observable only from a Claude Code session with active MCP servers, not from the CLI render. Details: `docs/mdai/green-verification/library/v0.1.0-bootstrap-findings.md`.
-- No bootstrap cache: `ctx_session` does not provide an arbitrary key-value store (only structured task/finding/decision actions). Each render re-runs the bootstrap probes (acceptable per library spec §14).
+- Bootstrap cache uses `ctx_session action="finding" / "status"` (session-scoped). The cache is automatically invalidated when the chat session restarts. To force re-detection in the same session, run `ctx_session action="reset"` (note: this also clears other session state). Cache marker format: `[mdai-bootstrap-cache] tooling=detected lang=<LANG> jetbrains=<bool> serena=<bool>`.
 - `mode: include` files must not carry YAML frontmatter (markdownai parser leaks frontmatter as text via `@include`).
 
 ### Skill A status

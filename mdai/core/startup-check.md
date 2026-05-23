@@ -9,6 +9,7 @@ mdai-pack:
     - load_lang_pack
     - load_tooling_packs
     - mdai_bootstrap
+    - mdai_bootstrap_check_cache
 ---
 
 @markdownai v1.0
@@ -96,9 +97,31 @@ fi
 @endif
 @end
 
+# Session-scoped cache helper: probes ctx_session status for an existing
+# [mdai-bootstrap-cache] finding. Sets @result.cache_hit (truthy on hit).
+@define mdai_bootstrap_check_cache()
+@query mcp lean-ctx ctx_session action="status"
+@end
+
+# Top-level orchestrator. Session-scoped cache via ctx_session findings:
+#   - First call per chat-session: runs full detection + writes a finding
+#     with prefix `[mdai-bootstrap-cache]` capturing tooling/lang flags.
+#   - Subsequent calls: read ctx_session status, match the prefix, skip
+#     detection. session_id changes on session restart -> natural invalidation.
+# To force re-detection in the same session: `ctx_session action="reset"`
+# (note: this also clears other session state).
 @define mdai_bootstrap()
-@call service_check(service="lean_ctx", mcp_tool="ctx_session action=status", required="true")
-@call service_check(service="markdownai", mcp_tool="list_phases file=.", required="true")
-@call detect_tooling()
-@call detect_project_lang()
+@call mdai_bootstrap_check_cache()
+@if @result.stdout matches "\[mdai-bootstrap-cache\]"
+  [mdai-bootstrap CACHED] session-scoped cache hit; skipping detection.
+  # Cache line (verbatim from ctx_session status):
+  {{ @result.stdout }}
+@else
+  @call service_check(service="lean_ctx",   mcp_tool="ctx_session action=status", required="true")
+  @call service_check(service="markdownai", mcp_tool="list_phases file=.",        required="true")
+  @call detect_tooling()
+  @call detect_project_lang()
+  # Persist cache marker for the rest of this session.
+  @query mcp lean-ctx ctx_session action="finding" value="[mdai-bootstrap-cache] tooling=detected lang={{ @env MDAI_PROJECT_LANG | default('unknown') }} jetbrains={{ @env MDAI_HAS_JETBRAINS | default('false') }} serena={{ @env MDAI_HAS_SERENA | default('false') }}"
+@endif
 @end
