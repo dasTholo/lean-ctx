@@ -1,10 +1,3 @@
----
-lib_version: 0.1.0
-mdai-pack:
-  mode: include
-  exports: []
----
-
 @markdownai v1.0
 
 ## Hard Rules (aus `CLAUDE.md`, immer-an)
