@@ -12,7 +12,8 @@ Preference: `@call <macro>` from `mdai/core/*.md` and `mdai/tooling/*.md` > nati
 | Shell                       | `@call ctx_shell(cmd)`                             | `mcp__lean-ctx__ctx_shell`                                          |
 | File edit (no read needed)  | `@call ctx_edit(path, old, new)`                   | `mcp__lean-ctx__ctx_edit`                                           |
 | Reformat before git add     | `@call reformat_file(file)`                        | `mcp__jetbrains__reformat_file`                                     |
-| Single-file rustfmt | `@call rustfmt_file(file)` | `rustfmt <file>` |
+| Single-file rustfmt (no IDE) | `@call rustfmt_file(file)` | `rustfmt <file>` |
+| Format single rust file (dispatcher) | `@call format_file(file)` | — (library composite: reformat_file if MDAI_HAS_JETBRAINS else rustfmt_file) |
 | IDE file errors / inspections | `@call get_file_errors(file, errors_only)` | `mcp__jetbrains__get_file_problems` |
 | Composite reformat + commit | `@call step_reformat_commit(file, message)`        | — (library-only)                                                    |
 | Read Rust symbol body       | `@call find_symbol(name, path, include_body=true)` | `mcp__serena__jet_brains_find_symbol`                               |

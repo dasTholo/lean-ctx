@@ -22,7 +22,7 @@ Source of truth for all versioned mdai macros. Consumed by the three mdai skills
 | `core/ctx-tools.md`                         | import-only | always                  | ctx_read, ctx_search, ctx_tree, ctx_shell, ctx_edit                                                    |
 | `core/mcp-markdownai.md`                    | import-only | always                  | read_phase, list_phases, get_constraints                                                               |
 | `core/ctx-knowledge.md`                     | import-only | always                  | remember_plan, recall_plan, add_gotcha, list_gotchas                                                   |
-| `lang/rust.md`                              | import-only | MDAI_PROJECT_LANG=rust  | cargo_nextest, cargo_clippy, cargo_fmt, rustfmt_file                                                                 |
+| `lang/rust.md`                              | import-only | MDAI_PROJECT_LANG=rust  | cargo_nextest, cargo_clippy, cargo_fmt, rustfmt_file, format_file                                                                 |
 | `tooling/jetbrains.md`                      | import-only | MDAI_HAS_JETBRAINS=true | reformat_file, step_reformat_commit, get_file_errors                                                                    |
 | `tooling/serena.md`                         | import-only | MDAI_HAS_SERENA=true    | find_symbol, replace_symbol_body, insert_before_symbol, insert_after_symbol, symbols_overview          |
 | `skills/mdai-brainstorm/write-spec.md`      | import-only | skill A only            | write_spec, render_spec                                                                                |
