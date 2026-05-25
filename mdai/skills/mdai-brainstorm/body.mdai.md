@@ -10,6 +10,8 @@
 
 @call mdai_bootstrap()
 
+@call detect_mai_hook_version()
+
 @include ${MDAI_LIBRARY_ROOT}/core/hard-rules.md
 @include ${MDAI_LIBRARY_ROOT}/core/tool-quick-ref.md
 
@@ -124,39 +126,17 @@ code is the failure mode.
 3. Ask clarifying questions — one at a time.
 4. Propose 2–3 approaches with trade-offs.
 5. Present design sections, get approval after each.
-6. Write design doc to `docs/mdai/specs/` (NOT `docs/superpowers/specs/`).
-7. Spec Self-Review (5 checks — see "Spec Self-Review" below).
-   7.5 OPTIONAL: dispatch reviewer-subagent via `@call spec_reviewer_prompt` (mdai-Augmentation).
-8. User reviews written spec (exact wording — see "User-Review-Gate").
-9. Transition: invoke writing-plans skill (currently `superpowers:writing-plans`;
-   future: `mdai-writing-plans` once that skill exists per Spec §14 Backlog #1)
-   — THIS SKILL DOES NOT WRITE THE PLAN.
-
-## The Process — Details
-
-[hand-ported from superpowers:brainstorming/SKILL.md, lines 70-104]
-
-- **Understanding the idea:** scope check, decomposition for large projects,
-  one question at a time, no batched "tell me everything" prompts.
-- **Exploring approaches:** 2–3 alternatives with explicit trade-offs, lead
-  with recommendation but make alternatives real (not strawmen).
-- **Presenting the design:** scaled to complexity, approval-per-section,
-  user reads each section before next is drafted.
-- **Design for isolation and clarity:** small units, clear interfaces, no
-  premature abstractions.
-- **Working in existing codebases:** follow existing patterns, no unrelated
-  refactoring, no scope-creep into adjacent files.
-
-## Key Principles
-
-[hand-ported from superpowers:brainstorming/SKILL.md, lines 140-145]
-
-- One question at a time.
-- Multiple choice preferred over open-ended where it fits.
-- YAGNI ruthlessly.
-- Explore alternatives before settling.
-- Incremental validation.
-- Be flexible — go back when something doesn't make sense.
+6. Switch to write-outputs phase:
+   `mcp__markdownai__resolve_phase(file="mdai/skills/mdai-brainstorm/body.mdai.md", phase="write-outputs", cwd="<repo>")`
+    - Apply spec-directive-conventions (rendered via @include) while finalizing design_content.
+    - Invoke write_spec via call_macro pointer there.
+7. Switch to handoff phase:
+   `mcp__markdownai__resolve_phase(file="mdai/skills/mdai-brainstorm/body.mdai.md", phase="handoff", cwd="<repo>")`
+   7a. Invoke spec_self_review via call_macro.
+   7b. Apply review findings inline.
+   7c. opt: dispatch spec_reviewer_prompt via call_macro.
+8. User-Review-Gate (in handoff phase, exact wording).
+9. Transition: invoke writing-plans skill.
 
 ## Visual companion offer (step 2, conditional)
 
@@ -183,122 +163,37 @@ then re-load this phase so the include below fires.
 @include ${MDAI_LIBRARY_ROOT}/skills/mdai-brainstorm/visual-companion-offer.md
 @endif
 
-## Spec Self-Review (step 7, MANDATORY, Claude himself)
-
-After the spec source (`.mdai.md`) is written, look at it with fresh eyes:
-
-1. **Placeholder scan:** any "TBD", "TODO", incomplete sections, vague
-   requirements? Fix inline.
-2. **Internal consistency:** sections contradict each other? Architecture
-   matches feature descriptions?
-3. **Scope check:** focused enough for a single plan? Or needs decomposition
-   into sub-projects?
-4. **Ambiguity check:** any requirement interpretable two different ways?
-   Pick one, make it explicit.
-5. **mdai directive usage (Discipline §10.4 #9):** Does the spec body include
-   markdownai directives for live content where semantically appropriate? If
-   the spec is pure plain Markdown: is that justified with
-   `markdownai_directives_omitted: <reason>` in the frontmatter? If not:
-   extend the spec body with suitable directives (e.g. `@tree mdai/` instead
-   of a static directory listing).
-
-Fix issues inline. No re-review loop — fix and move on.
-
-## Spec reviewer dispatch (step 7.5, OPTIONAL, mdai-Augmentation)
-
-**Lazy-load** the reviewer macro just before dispatch:
-
-@import ${MDAI_LIBRARY_ROOT}/skills/mdai-brainstorm/spec-reviewer.md
-
-Then dispatch a reviewer subagent with `@call spec_reviewer_prompt(spec_path=<path>)`
-as the prompt body. Returns Status (Approved | Needs-Revision | Needs-Clarification)
-
-+ Strengths + Gaps + Concrete patches + Recommendations. Apply issues inline;
-  surface recommendations.
-
-Trigger: spec touches MCP signatures, Library packs, or render flow. Skip
-for pure-prose specs (Self-Review §7 is sufficient).
-
-## User-Review-Gate (step 8, exact wording, MANDATORY)
-
-After Self-Review (and optional reviewer dispatch), ask the user with this
-exact wording:
-
-> "Spec written and committed to `<path>`. Please review and give feedback on
-> whether you want changes, before invoking `/superpowers:writing-plans <path>`
-> as the next step (or `/mdai-writing-plans` once that skill exists)."
-
-Wait for explicit response. If user requests changes → patch inline → re-run
-Self-Review §7. Only proceed to write-outputs phase once user explicitly approves.
-
-Collect for the next phase:
-
-- `slug` — kebab-case topic name (e.g. "user-onboarding-flow").
-- `design_content` — full design body as Markdown.
-
-## Spec body mdai directive conventions (mandatory reading for Step 6)
-
-Operationalizes Discipline §10.4 #9. Mandatory at the "Write design doc" step.
-
-| Use-Case | Best Practice | Anti-Pattern |
-| Date in file paths | `{{ @date format='YYYY-MM-DD' }}`                                | hard-coded `2026-05-24` in
-spec body |
-| Directory listing | `@tree mdai/ depth=2`                                            | manually typed-out tree
-output |
-| File-system status (report)  | `@call file_check(path="...")` (from `core/file-utils.md`)       | `ls -la` output
-copied + committed |
-| Branching on file existence | inline `@if file.exists "..."` + `@else` + `@endif` at call site | `@call file_check` (
-status only, not flow)                |
-| Structured data | `@list <file.yaml> \| @render type="table" columns="..."`        | plain Markdown table at >50 rows
-or with external SoT |
-| Counts / Statistics | `{{ @count ./src "*.ts" }}` (inline)                             | hard-coded numbers that go
-stale |
-| Cross-File-Content | `@include ./CHANGELOG.md` or `@include <file> lines=N-M`         | copy-paste between specs |
-| Machine-Readable Constraints | `@constraint id="..." severity="high"` + body + `@end`           | prosaic "Important:"
-hints |
-| Project-Context (live)       | `@call ctx_overview(task="...")` or `@call ctx_tree(...)`         | manually copied
-project description |
-
-**Anti-pattern: `file_check` is not branching.** `@call file_check(path="x.md")`
-renders status only (`- x.md exists` / `- x.md MISSING`) — no control flow.
-For branching ALWAYS inline at the call site:
-
-@if file.exists "x.md"
-
-- do this when exists
-  @else
-- do that when missing
-  @endif
-
-**Exception** (per §10.4 #9): specs for purely algorithmic topics without
-file/tool/data dependencies may stay plain Markdown — then set
-`markdownai_directives_omitted: <reason>` in the frontmatter.
-
-<!--
-  Drift-Tracking: hand-ported from superpowers/5.1.0/.../brainstorming/SKILL.md,
-  lines 16-20 (anti-pattern), 22-32 (checklist), 70-104 (process details),
-  107-136 (after-the-design: documentation/self-review/user-review-gate/
-  implementation-transition), 140-145 (key principles).
--->
+@include ${MDAI_LIBRARY_ROOT}/skills/mdai-brainstorm/process-principles.md
 @end
 
 @phase write-outputs
 
-@import ${MDAI_LIBRARY_ROOT}/skills/mdai-brainstorm/write-spec.md
+@include ${MDAI_LIBRARY_ROOT}/skills/mdai-brainstorm/spec-directive-conventions.md
 
-@call write_spec(slug={{ slug }}, body={{ design_content }})
-@call render_spec(slug={{ slug }}, target={{ render_target | default("none") }})
+Apply the conventions above when finalizing design_content. Then invoke write_spec
+via call_macro:
+
+mcp__markdownai__call_macro(
+file="mdai/skills/mdai-brainstorm/write-spec.md",
+macro="write_spec",
+args={ "slug": "{{ slug }}", "body": "{{ design_content }}" },
+cwd="<repo>"
+)
+
+Optional inline-render (only when explicitly requested):
+
+@set render_target_resolved = render_target | default("none")
+
+mcp__markdownai__call_macro(
+file="mdai/skills/mdai-brainstorm/write-spec.md",
+macro="render_spec",
+args={ "slug": "{{ slug }}", "target": "{{ render_target_resolved }}" },
+cwd="<repo>"
+)
 
 Default output (one file staged in working tree):
 
 - `docs/mdai/specs/<date>-<slug>-design.mdai.md` (spec source, consumer="ai")
-
-Opt-in render targets (passed via `render_target` from dialog step 6):
-
-- `target="none"` (default) → no render
-- `target="chat"` → render inline via `mcp__markdownai__read_file`
-- `target="file"` → adds `docs/mdai/specs/rendered/<date>-<slug>.rendered.md`
-  via `npx mai render`
 
 Verification:
 @call ctx_tree(path="docs/mdai/specs/", depth=1)
@@ -309,18 +204,34 @@ Note: NO plan file is written here. Plan-write is a separate skill invocation.
 
 @phase handoff
 
-Spec ready for plan-write. Next step (manual, separate skill invocation):
+Spec Self-Review (5+1 checks). Invoke library-pack:
 
-`/superpowers:writing-plans docs/mdai/specs/<date>-<slug>-design.mdai.md`
+mcp__markdownai__call_macro(
+file="mdai/skills/mdai-brainstorm/spec-self-review.md",
+macro="spec_self_review",
+args={ "spec_path": "{{ spec_path }}" },
+cwd="<repo>"
+)
 
-This skill does NOT write the plan. Plan-write is the responsibility of a
-separate writing-plans skill:
+Apply review findings inline.
 
-- **Now:** `/superpowers:writing-plans <spec-path>` (upstream)
-- **Future:** `/mdai-writing-plans <spec-path>` — once Spec §14 Backlog #1 is
-  shipped, use that instead (produces `.mdai.md` plan with `@phase` markers,
-  compatible with `mdai-execution`).
+Optional: dispatch full reviewer subagent:
 
-Verify spec file is in place:
-@call ctx_read(path="docs/mdai/specs/<date>-<slug>-design.mdai.md", mode="map")
+mcp__markdownai__call_macro(
+file="mdai/skills/mdai-brainstorm/spec-reviewer.md",
+macro="spec_reviewer_prompt",
+args={ "spec_path": "{{ spec_path }}" },
+cwd="<repo>"
+)
+
+## User-Review-Gate (exact wording, MANDATORY)
+
+> "Spec written and committed to `<path>`. Please review and give feedback on
+> whether you want changes, before invoking `/superpowers:writing-plans <path>`
+> as the next step (or `/mdai-writing-plans` once that skill exists)."
+
+Wait for explicit response. If user requests changes → patch inline → re-run
+spec_self_review via call_macro. Only proceed once user explicitly approves.
+
+Next: invoke writing-plans skill.
 @end

@@ -10,6 +10,7 @@ mdai-pack:
     - load_tooling_packs
     - mdai_bootstrap
     - mdai_bootstrap_check_cache
+    - detect_mai_hook_version
 ---
 
 @markdownai v1.0
@@ -135,5 +136,17 @@ architecture/languages_top=[a-z]+' | head -1 | cut -d= -f2"
 @query mcp lean-ctx ctx_session action="finding" value="[mdai-bootstrap-cache] tooling=detected lang={{ @env
 MDAI_PROJECT_LANG | default('unknown') }} jetbrains={{ @env MDAI_HAS_JETBRAINS | default('false') }} serena={{ @env
 MDAI_HAS_SERENA | default('false') }}"
+@endif
+@end
+
+@define detect_mai_hook_version()
+@if file.exists "/home/tholo/.markdownai/hooks/preToolUse.mjs"
+@if file.containsLine "/home/tholo/.markdownai/hooks/preToolUse.mjs" "isMarkdownAIDocument"
+[mdai-bootstrap] mai-hook: v1.0 (frontmatter-aware)
+@else
+[mdai-bootstrap] mai-hook: v0.x — RUN `node markdownai/packages/core/dist/cli.js init`
+@endif
+@else
+[mdai-bootstrap] mai-hook: not installed — RUN init
 @endif
 @end

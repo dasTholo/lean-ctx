@@ -1,8 +1,8 @@
 ---
-lib_version: 0.1.0
+lib_version: 0.1.1
 mdai-pack:
   mode: import-only
-  exports: [write_spec, render_spec]
+  exports: [write_spec, render_spec, write_review_report]
 ---
 
 @markdownai v1.0
@@ -52,4 +52,17 @@ mdai-pack:
     @endif
 @endswitch
 
+@end
+
+@define write_review_report(slug, spec_path, date, status, strengths, issues, recommendations)
+@mkdir docs/mdai/reviews
+@render-template from="mdai/skills/mdai-brainstorm/templates/review-template.md" to="docs/mdai/reviews/{{ slug }}-review.md" force
+  spec_path={{ spec_path }}
+  date={{ date }}
+  status={{ status }}
+  strengths={{ strengths }}
+  issues={{ issues }}
+  recommendations={{ recommendations }}
+@end
+- wrote docs/mdai/reviews/{{ slug }}-review.md
 @end
