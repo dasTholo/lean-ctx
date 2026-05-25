@@ -49,13 +49,13 @@ architecture/languages_top=[a-z]+' | head -1 | cut -d= -f2"
 # last-resort shell heuristic
 
 @if file.exists "Cargo.toml"
-  rust
+@set detected_lang = "rust"
 @elseif file.exists "pyproject.toml"
-  python
+@set detected_lang = "python"
 @elseif file.exists "package.json"
-  node
+@set detected_lang = "node"
 @endif
-[mdai-bootstrap] project lang detected via file heuristic: {{ @result.stdout }}
+[mdai-bootstrap] project lang detected via file heuristic: {{ detected_lang }}
 @endif
 @end
 
@@ -66,59 +66,74 @@ architecture/languages_top=[a-z]+' | head -1 | cut -d= -f2"
 
 @set tools = ["jetbrains", "serena"]
 @foreach tool in tools
-  @if @result.stdout matches "{{ tool }}"
-    [mdai-bootstrap] tool found: {{ tool }}
-  @else
-    [mdai-bootstrap] tool NOT found: {{ tool }}
-  @endif
+@if @result.stdout matches "{{ tool }}"
+[mdai-bootstrap] tool found: {{ tool }}
+@else
+[mdai-bootstrap] tool NOT found: {{ tool }}
+@endif
 @end
 @end
 
 @define load_lang_pack()
 @switch @env MDAI_PROJECT_LANG
-  @case "rust"
-    @include ${MDAI_LIBRARY_ROOT}/lang/rust.md
-  @case "python"
-    @include ${MDAI_LIBRARY_ROOT}/lang/python.md
-  @case "node"
-    @include ${MDAI_LIBRARY_ROOT}/lang/node.md
+@case "rust"
+@include ${MDAI_LIBRARY_ROOT}/lang/rust.md
+@case "python"
+@include ${MDAI_LIBRARY_ROOT}/lang/python.md
+@case "node"
+@include ${MDAI_LIBRARY_ROOT}/lang/node.md
 @endswitch
 @end
 
 @define load_tooling_packs()
 @set tooling_packs = [{name="jetbrains", flag="MDAI_HAS_JETBRAINS"}, {name="serena", flag="MDAI_HAS_SERENA"}]
 @foreach pack in tooling_packs
-  @if @env {{ pack.flag }} == "true"
-    @include ${MDAI_LIBRARY_ROOT}/tooling/{{ pack.name }}.md
-  @endif
+@if @env {{ pack.flag }} == "true"
+@include ${MDAI_LIBRARY_ROOT}/tooling/{{ pack.name }}.md
+@endif
 @end
 @end
 
 # Session-scoped cache helper: probes ctx_session status for an existing
+
 # [mdai-bootstrap-cache] finding. Sets @result.cache_hit (truthy on hit).
+
 @define mdai_bootstrap_check_cache()
 @query mcp lean-ctx ctx_session action="status"
 @end
 
 # Top-level orchestrator. Session-scoped cache via ctx_session findings:
-#   - First call per chat-session: runs full detection + writes a finding
-#     with prefix `[mdai-bootstrap-cache]` capturing tooling/lang flags.
-#   - Subsequent calls: read ctx_session status, match the prefix, skip
-#     detection. session_id changes on session restart -> natural invalidation.
+
+# - First call per chat-session: runs full detection + writes a finding
+
+# with prefix `[mdai-bootstrap-cache]` capturing tooling/lang flags.
+
+# - Subsequent calls: read ctx_session status, match the prefix, skip
+
+# detection. session_id changes on session restart -> natural invalidation.
+
 # To force re-detection in the same session: `ctx_session action="reset"`
+
 # (note: this also clears other session state).
+
 @define mdai_bootstrap()
 @call mdai_bootstrap_check_cache()
 @if @result.stdout matches "\[mdai-bootstrap-cache\]"
-  [mdai-bootstrap CACHED] session-scoped cache hit; skipping detection.
-  # Cache line (verbatim from ctx_session status):
-  {{ @result.stdout }}
+[mdai-bootstrap CACHED] session-scoped cache hit; skipping detection.
+
+# Cache line (verbatim from ctx_session status):
+
+{{ @result.stdout }}
 @else
-  @call service_check(service="lean_ctx",   mcp_tool="ctx_session action=status", required="true")
-  @call service_check(service="markdownai", mcp_tool="list_phases file=.",        required="true")
-  @call detect_tooling()
-  @call detect_project_lang()
-  # Persist cache marker for the rest of this session.
-  @query mcp lean-ctx ctx_session action="finding" value="[mdai-bootstrap-cache] tooling=detected lang={{ @env MDAI_PROJECT_LANG | default('unknown') }} jetbrains={{ @env MDAI_HAS_JETBRAINS | default('false') }} serena={{ @env MDAI_HAS_SERENA | default('false') }}"
+@call service_check(service="lean_ctx", mcp_tool="ctx_session action=status", required="true")
+@call service_check(service="markdownai", mcp_tool="list_phases file=.", required="true")
+@call detect_tooling()
+@call detect_project_lang()
+
+# Persist cache marker for the rest of this session.
+
+@query mcp lean-ctx ctx_session action="finding" value="[mdai-bootstrap-cache] tooling=detected lang={{ @env
+MDAI_PROJECT_LANG | default('unknown') }} jetbrains={{ @env MDAI_HAS_JETBRAINS | default('false') }} serena={{ @env
+MDAI_HAS_SERENA | default('false') }}"
 @endif
 @end
