@@ -15,7 +15,7 @@ writing (next skill: `superpowers:writing-plans` or `mdai-writing-plans` once av
 
 ## 0. Lean-Context-Discipline (always-on, rendered inline)
 
-@include mdai/core/lean-context.md
+@include ${MDAI_LIBRARY_ROOT}/core/lean-context.md
 
 You are bound by the table above. The ONLY legitimate `mode="full"` call in this entire review is the spec-source
 read in §1. Every cross-file read uses `@call ctx_read_map(path)` / `@call ctx_read_signatures(path)` /

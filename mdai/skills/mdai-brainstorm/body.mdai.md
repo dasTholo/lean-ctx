@@ -10,8 +10,8 @@
 
 @call mdai_bootstrap()
 
-@include mdai/core/hard-rules.md
-@include mdai/core/tool-quick-ref.md
+@include ${MDAI_LIBRARY_ROOT}/core/hard-rules.md
+@include ${MDAI_LIBRARY_ROOT}/core/tool-quick-ref.md
 
 ## Pre-resolved project context
 
@@ -180,7 +180,7 @@ then re-load this phase so the include below fires.
 @query mcp lean-ctx ctx_session action="status"
 
 @if @result.stdout matches "\[mdai-brainstorm\] visual=true"
-@include mdai/skills/mdai-brainstorm/visual-companion-offer.md
+@include ${MDAI_LIBRARY_ROOT}/skills/mdai-brainstorm/visual-companion-offer.md
 @endif
 
 ## Spec Self-Review (step 7, MANDATORY, Claude himself)
@@ -208,7 +208,7 @@ Fix issues inline. No re-review loop — fix and move on.
 
 **Lazy-load** the reviewer macro just before dispatch:
 
-@import mdai/skills/mdai-brainstorm/spec-reviewer.md
+@import ${MDAI_LIBRARY_ROOT}/skills/mdai-brainstorm/spec-reviewer.md
 
 Then dispatch a reviewer subagent with `@call spec_reviewer_prompt(spec_path=<path>)`
 as the prompt body. Returns Status (Approved | Needs-Revision | Needs-Clarification)
@@ -284,7 +284,7 @@ file/tool/data dependencies may stay plain Markdown — then set
 
 @phase write-outputs
 
-@import mdai/skills/mdai-brainstorm/write-spec.md
+@import ${MDAI_LIBRARY_ROOT}/skills/mdai-brainstorm/write-spec.md
 
 @call write_spec(slug={{ slug }}, body={{ design_content }})
 @call render_spec(slug={{ slug }}, target={{ render_target | default("none") }})

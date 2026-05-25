@@ -80,20 +80,20 @@ fi
 
 @define load_lang_pack()
 @if @env MDAI_PROJECT_LANG == "rust"
-@include mdai/lang/rust.md
+@include ${MDAI_LIBRARY_ROOT}/lang/rust.md
 @elseif @env MDAI_PROJECT_LANG == "python"
-@include mdai/lang/python.md
+@include ${MDAI_LIBRARY_ROOT}/lang/python.md
 @elseif @env MDAI_PROJECT_LANG == "node"
-@include mdai/lang/node.md
+@include ${MDAI_LIBRARY_ROOT}/lang/node.md
 @endif
 @end
 
 @define load_tooling_packs()
 @if @env MDAI_HAS_JETBRAINS == "true"
-@include mdai/tooling/jetbrains.md
+@include ${MDAI_LIBRARY_ROOT}/tooling/jetbrains.md
 @endif
 @if @env MDAI_HAS_SERENA == "true"
-@include mdai/tooling/serena.md
+@include ${MDAI_LIBRARY_ROOT}/tooling/serena.md
 @endif
 @end
 
