@@ -12,9 +12,15 @@ Beispiel: `mdai-plan:mdai-skill-integration` (plan-id == `id` aus YAML-Frontmatt
 
 ```json
 {
-  "phases": ["P0-leanctx-setup", "A1-mdai-plans-skill", "..."],
+  "phases": [
+    "P0-leanctx-setup",
+    "A1-mdai-plans-skill",
+    "..."
+  ],
   "current_phase": "A1-mdai-plans-skill",
-  "completed": ["P0-leanctx-setup"],
+  "completed": [
+    "P0-leanctx-setup"
+  ],
   "started_at": "2026-05-21T10:00:00Z",
   "status": "in-progress"
 }
@@ -36,7 +42,7 @@ Beispiel: `mdai-plan:mdai-skill-integration` (plan-id == `id` aus YAML-Frontmatt
 ## Operationen
 
 | op          | Aufruf                                                                 |
-| ----------- | ---------------------------------------------------------------------- |
+|-------------|------------------------------------------------------------------------|
 | `start`     | `remember(topic, body={phases, current_phase=phases[0], ...})`         |
 | `<id>-done` | `recall` → `completed.append(<id>)`; `current_phase=next` → `remember` |
 | `all-done`  | `recall` → `status="done"` → `remember`                                |

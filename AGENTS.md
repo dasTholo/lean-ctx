@@ -50,6 +50,7 @@ Append to `memory-bank/decisions.md` when making architecture decisions.
 Prefer lean-ctx MCP tools over native equivalents for token savings.
 Full rules: @LEAN-CTX.md
 <!-- /lean-ctx -->
+
 <!-- lean-ctx-compression -->
 OUTPUT STYLE: dense
 - Each statement = one atomic fact line

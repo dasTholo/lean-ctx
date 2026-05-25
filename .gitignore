@@ -60,3 +60,4 @@ worktrees/website/generated/
 AGENTS.md.lean-ctx.*.bak
 /tmp/
 tmp/
+.superpowers/
