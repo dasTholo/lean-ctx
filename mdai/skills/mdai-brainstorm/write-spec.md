@@ -17,7 +17,11 @@ mdai-pack:
 - Not overwriting to prevent silent data loss.
 @else
 @mkdir docs/mdai/specs
-@query mcp lean-ctx ctx_shell cmd="cat > \"docs/mdai/specs/{{ @date format='YYYY-MM-DD' }}-{{ slug }}-design.mdai.md\" <<'SPEC_EOF'\n---\nslug: {{ slug }}\ndate: {{ @date format='YYYY-MM-DD' }}\nstatus: ready-for-review\n---\n\n@markdownai v1.0\n\n# {{ slug }}\n\n{{ body }}\nSPEC_EOF"
+@render-template from="mdai/skills/mdai-brainstorm/templates/spec-template.md" to="docs/mdai/specs/{{ @date format='YYYY-MM-DD' }}-{{ slug }}-design.mdai.md" force
+  slug={{ slug }}
+  date={{ @date format='YYYY-MM-DD' }}
+  body={{ body }}
+@end
 - wrote docs/mdai/specs/{{ @date format='YYYY-MM-DD' }}-{{ slug }}-design.mdai.md
 @endif
 
