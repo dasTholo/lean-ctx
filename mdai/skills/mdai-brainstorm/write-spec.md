@@ -11,17 +11,14 @@ mdai-pack:
 
 @define write_spec(slug, body)
 
-@set spec_date = "{{ @date format='YYYY-MM-DD' }}"
-@set spec_path = "docs/mdai/specs/{{ spec_date }}-{{ slug }}-design.mdai.md"
-
-@if file.exists "{{ spec_path }}"
-- ABORT: Spec file already exists at {{ spec_path }}
+@if file.exists "docs/mdai/specs/{{ @date format='YYYY-MM-DD' }}-{{ slug }}-design.mdai.md"
+- ABORT: Spec file already exists at docs/mdai/specs/{{ @date format='YYYY-MM-DD' }}-{{ slug }}-design.mdai.md
 - Choose a different slug, delete the existing file first, or amend the body in place.
 - Not overwriting to prevent silent data loss.
 @else
 @mkdir docs/mdai/specs
-@query mcp lean-ctx ctx_shell cmd="cat > \"{{ spec_path }}\" <<'SPEC_EOF'\n---\nslug: {{ slug }}\ndate: {{ spec_date }}\nstatus: ready-for-review\n---\n\n@markdownai v1.0\n\n# {{ slug }}\n\n{{ body }}\nSPEC_EOF"
-- wrote {{ spec_path }}
+@query mcp lean-ctx ctx_shell cmd="cat > \"docs/mdai/specs/{{ @date format='YYYY-MM-DD' }}-{{ slug }}-design.mdai.md\" <<'SPEC_EOF'\n---\nslug: {{ slug }}\ndate: {{ @date format='YYYY-MM-DD' }}\nstatus: ready-for-review\n---\n\n@markdownai v1.0\n\n# {{ slug }}\n\n{{ body }}\nSPEC_EOF"
+- wrote docs/mdai/specs/{{ @date format='YYYY-MM-DD' }}-{{ slug }}-design.mdai.md
 @endif
 
 @end
