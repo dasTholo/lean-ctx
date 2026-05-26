@@ -54,6 +54,7 @@ pub fn write_config_with_options(
         ConfigType::HermesYaml => write_hermes_yaml(target, binary, opts),
         ConfigType::GeminiSettings => write_gemini_settings(target, binary, opts),
         ConfigType::QoderSettings => write_qoder_settings(target, binary, opts),
+        ConfigType::AugmentVsCode => write_augment_vscode(target, binary, opts),
     }
 }
 
@@ -136,6 +137,9 @@ pub fn remove_lean_ctx_server(
         }
         ConfigType::Amp => remove_lean_ctx_amp_server(&target.config_path, opts),
         ConfigType::HermesYaml => remove_lean_ctx_hermes_yaml_server(&target.config_path),
+        ConfigType::AugmentVsCode => {
+            remove_lean_ctx_augment_vscode_server(&target.config_path, opts)
+        }
     }
 }
 
@@ -831,7 +835,7 @@ fn write_vscode_mcp(
 ) -> Result<WriteResult, String> {
     let data_dir = crate::core::data_dir::lean_ctx_data_dir()
         .map(|d| d.to_string_lossy().to_string())
-        .unwrap_or_default();
+        .map_err(|_| "LEAN_CTX_DATA_DIR unavailable".to_string())?;
     let desired = serde_json::json!({ "type": "stdio", "command": binary, "args": [], "env": { "LEAN_CTX_DATA_DIR": data_dir } });
 
     if target.config_path.exists() {
@@ -887,7 +891,7 @@ fn write_vscode_mcp_fresh(
 ) -> Result<WriteResult, String> {
     let data_dir = crate::core::data_dir::lean_ctx_data_dir()
         .map(|d| d.to_string_lossy().to_string())
-        .unwrap_or_default();
+        .map_err(|_| "LEAN_CTX_DATA_DIR unavailable".to_string())?;
     let content = serde_json::to_string_pretty(&serde_json::json!({
         "servers": { "lean-ctx": { "type": "stdio", "command": binary, "args": [], "env": { "LEAN_CTX_DATA_DIR": data_dir } } }
     }))
@@ -910,7 +914,7 @@ fn write_copilot_cli(
 ) -> Result<WriteResult, String> {
     let data_dir = crate::core::data_dir::lean_ctx_data_dir()
         .map(|d| d.to_string_lossy().to_string())
-        .unwrap_or_default();
+        .map_err(|_| "LEAN_CTX_DATA_DIR unavailable".to_string())?;
     let desired = serde_json::json!({
         "type": "local",
         "command": binary,
@@ -992,7 +996,7 @@ fn write_opencode_config(
 ) -> Result<WriteResult, String> {
     let data_dir = crate::core::data_dir::lean_ctx_data_dir()
         .map(|d| d.to_string_lossy().to_string())
-        .unwrap_or_default();
+        .map_err(|_| "LEAN_CTX_DATA_DIR unavailable".to_string())?;
     let desired = serde_json::json!({
         "type": "local",
         "command": [binary],
@@ -1050,7 +1054,7 @@ fn write_opencode_fresh(
 ) -> Result<WriteResult, String> {
     let data_dir = crate::core::data_dir::lean_ctx_data_dir()
         .map(|d| d.to_string_lossy().to_string())
-        .unwrap_or_default();
+        .map_err(|_| "LEAN_CTX_DATA_DIR unavailable".to_string())?;
     let content = serde_json::to_string_pretty(&serde_json::json!({
         "$schema": "https://opencode.ai/config.json",
         "mcp": { "lean-ctx": { "type": "local", "command": [binary], "enabled": true, "environment": { "LEAN_CTX_DATA_DIR": data_dir } } }
@@ -1074,7 +1078,7 @@ fn write_jetbrains_config(
 ) -> Result<WriteResult, String> {
     let data_dir = crate::core::data_dir::lean_ctx_data_dir()
         .map(|d| d.to_string_lossy().to_string())
-        .unwrap_or_default();
+        .map_err(|_| "LEAN_CTX_DATA_DIR unavailable".to_string())?;
     // JetBrains AI Assistant expects an "mcpServers" mapping in the JSON snippet
     // you paste into Settings | Tools | AI Assistant | Model Context Protocol (MCP).
     // We write that snippet to a file for easy copy/paste.
@@ -1143,7 +1147,7 @@ fn write_amp_config(
 ) -> Result<WriteResult, String> {
     let data_dir = crate::core::data_dir::lean_ctx_data_dir()
         .map(|d| d.to_string_lossy().to_string())
-        .unwrap_or_default();
+        .map_err(|_| "LEAN_CTX_DATA_DIR unavailable".to_string())?;
     let entry = serde_json::json!({
         "command": binary,
         "env": { "LEAN_CTX_DATA_DIR": data_dir }
@@ -1207,7 +1211,7 @@ fn write_crush_config(
 ) -> Result<WriteResult, String> {
     let data_dir = crate::core::data_dir::lean_ctx_data_dir()
         .map(|d| d.to_string_lossy().to_string())
-        .unwrap_or_default();
+        .map_err(|_| "LEAN_CTX_DATA_DIR unavailable".to_string())?;
     let desired = serde_json::json!({
         "type": "stdio",
         "command": binary,
@@ -1366,7 +1370,7 @@ fn write_gemini_settings(
 ) -> Result<WriteResult, String> {
     let data_dir = crate::core::data_dir::lean_ctx_data_dir()
         .map(|d| d.to_string_lossy().to_string())
-        .unwrap_or_default();
+        .map_err(|_| "LEAN_CTX_DATA_DIR unavailable".to_string())?;
     let entry = serde_json::json!({
         "command": binary,
         "env": { "LEAN_CTX_DATA_DIR": data_dir },
@@ -1439,8 +1443,19 @@ fn write_hermes_yaml(
         let content = std::fs::read_to_string(&target.config_path).map_err(|e| e.to_string())?;
 
         if content.contains("lean-ctx") {
+            let has_correct_binary = content.contains(binary);
+            let has_correct_data_dir = content.contains(&data_dir);
+            if has_correct_binary && has_correct_data_dir {
+                return Ok(WriteResult {
+                    action: WriteAction::Already,
+                    note: None,
+                });
+            }
+            let cleaned = remove_hermes_yaml_lean_ctx_block(&content);
+            let updated = upsert_hermes_yaml_mcp(&cleaned, &lean_ctx_block);
+            crate::config_io::write_atomic_with_backup(&target.config_path, &updated)?;
             return Ok(WriteResult {
-                action: WriteAction::Already,
+                action: WriteAction::Updated,
                 note: None,
             });
         }
@@ -1517,6 +1532,30 @@ fn upsert_hermes_yaml_mcp(existing: &str, lean_ctx_block: &str) -> String {
     out
 }
 
+fn remove_hermes_yaml_lean_ctx_block(content: &str) -> String {
+    let mut out = String::with_capacity(content.len());
+    let mut skip = false;
+    for line in content.lines() {
+        if line.trim_start().starts_with("lean-ctx:")
+            && (line.starts_with("  ") || line.starts_with('\t'))
+        {
+            skip = true;
+            continue;
+        }
+        if skip {
+            let indented = line.starts_with("    ") || line.starts_with("\t\t");
+            let empty = line.trim().is_empty();
+            if indented || empty {
+                continue;
+            }
+            skip = false;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
 fn write_qoder_settings(
     target: &EditorTarget,
     binary: &str,
@@ -1575,6 +1614,163 @@ fn write_qoder_settings(
     }
 
     write_mcp_json_fresh(&target.config_path, &desired, None)
+}
+
+// ---------------------------------------------------------------------------
+// Augment VS Code extension writer
+//
+// `augment.vscode-augment` persists registered MCP servers as a top-level JSON
+// array under its globalStorage directory. The extension keys entries by the
+// `id` field (a UUID), and we need that id to stay stable so repeated
+// `init --agent augment` calls don't litter the list with duplicates.
+//
+// Schema (validated empirically 2026-05-21):
+//   { type, id, name, disabled, command, args, env, useShellInterpolation }
+// ---------------------------------------------------------------------------
+
+/// Fixed UUIDv4-shaped id reserved for lean-ctx in Augment's VS Code MCP list.
+/// The first segment hex-encodes "lean" (6c 65 61 6e) and the last segment
+/// hex-encodes "leanct" (6c 65 61 6e 63 74) — a 6-byte ASCII tag that fits
+/// exactly in the 12-hex-char node field. The middle bytes preserve the
+/// version-4 / variant-RFC-4122 nibbles so the value parses as a valid UUID.
+/// Only stability matters — the writer uses this id to locate and update its
+/// own entry idempotently without colliding with user-added servers.
+const LEAN_CTX_AUGMENT_VSCODE_ID: &str = "6c65616e-c747-4000-8000-6c65616e6374";
+
+fn lean_ctx_augment_vscode_entry(binary: &str, data_dir: &str) -> Value {
+    serde_json::json!({
+        "type": "stdio",
+        "id": LEAN_CTX_AUGMENT_VSCODE_ID,
+        "name": "lean-ctx",
+        "disabled": false,
+        "command": binary,
+        "args": [],
+        "useShellInterpolation": false,
+        "env": {
+            "LEAN_CTX_DATA_DIR": data_dir
+        }
+    })
+}
+
+fn write_augment_vscode(
+    target: &EditorTarget,
+    binary: &str,
+    opts: WriteOptions,
+) -> Result<WriteResult, String> {
+    let data_dir = default_data_dir()?;
+    let desired = lean_ctx_augment_vscode_entry(binary, &data_dir);
+
+    if !target.config_path.exists() {
+        let arr = serde_json::Value::Array(vec![desired]);
+        let content = serde_json::to_string_pretty(&arr).map_err(|e| e.to_string())?;
+        crate::config_io::write_atomic_with_backup(&target.config_path, &content)?;
+        return Ok(WriteResult {
+            action: WriteAction::Created,
+            note: None,
+        });
+    }
+
+    let content = std::fs::read_to_string(&target.config_path).map_err(|e| e.to_string())?;
+    let mut json: Value = match crate::core::jsonc::parse_jsonc(&content) {
+        Ok(v) => v,
+        Err(e) => {
+            if !opts.overwrite_invalid {
+                return Err(e.to_string());
+            }
+            eprintln!(
+                "\x1b[33m⚠\x1b[0m  {} has JSON syntax errors — replacing with a clean array.",
+                target.config_path.display()
+            );
+            backup_invalid_file(&target.config_path)?;
+            let arr = serde_json::Value::Array(vec![desired]);
+            let content = serde_json::to_string_pretty(&arr).map_err(|e| e.to_string())?;
+            crate::config_io::write_atomic_with_backup(&target.config_path, &content)?;
+            return Ok(WriteResult {
+                action: WriteAction::Updated,
+                note: Some("replaced invalid JSON with clean array".to_string()),
+            });
+        }
+    };
+
+    let arr = json.as_array_mut().ok_or_else(|| {
+        "augment vscode mcpServers.json must contain a top-level JSON array".to_string()
+    })?;
+
+    if let Some(existing) = arr.iter_mut().find(|entry| {
+        entry.get("name").and_then(|n| n.as_str()) == Some("lean-ctx")
+            || entry.get("id").and_then(|i| i.as_str()) == Some(LEAN_CTX_AUGMENT_VSCODE_ID)
+    }) {
+        if *existing == desired {
+            return Ok(WriteResult {
+                action: WriteAction::Already,
+                note: None,
+            });
+        }
+        *existing = desired;
+    } else {
+        arr.push(desired);
+    }
+
+    let formatted = serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?;
+    crate::config_io::write_atomic_with_backup(&target.config_path, &formatted)?;
+    Ok(WriteResult {
+        action: WriteAction::Updated,
+        note: None,
+    })
+}
+
+fn remove_lean_ctx_augment_vscode_server(
+    path: &std::path::Path,
+    opts: WriteOptions,
+) -> Result<WriteResult, String> {
+    if !path.exists() {
+        return Ok(WriteResult {
+            action: WriteAction::Already,
+            note: Some("augment vscode mcpServers.json not found".to_string()),
+        });
+    }
+
+    let content = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let mut json: Value = match crate::core::jsonc::parse_jsonc(&content) {
+        Ok(v) => v,
+        Err(e) => {
+            if !opts.overwrite_invalid {
+                return Err(e.to_string());
+            }
+            eprintln!(
+                "\x1b[33m⚠\x1b[0m  {} has JSON syntax errors — skipping removal.",
+                path.display()
+            );
+            return Ok(WriteResult {
+                action: WriteAction::Already,
+                note: Some("invalid JSON — cannot safely remove lean-ctx entry".to_string()),
+            });
+        }
+    };
+
+    let arr = json
+        .as_array_mut()
+        .ok_or_else(|| "augment vscode mcpServers.json must be a JSON array".to_string())?;
+
+    let before = arr.len();
+    arr.retain(|entry| {
+        let name_match = entry.get("name").and_then(|n| n.as_str()) == Some("lean-ctx");
+        let id_match = entry.get("id").and_then(|i| i.as_str()) == Some(LEAN_CTX_AUGMENT_VSCODE_ID);
+        !(name_match || id_match)
+    });
+    if arr.len() == before {
+        return Ok(WriteResult {
+            action: WriteAction::Already,
+            note: Some("lean-ctx not configured".to_string()),
+        });
+    }
+
+    let formatted = serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?;
+    crate::config_io::write_atomic_with_backup(path, &formatted)?;
+    Ok(WriteResult {
+        action: WriteAction::Updated,
+        note: Some("removed lean-ctx from augment vscode mcp list".to_string()),
+    })
 }
 
 fn backup_invalid_file(path: &std::path::Path) -> Result<std::path::PathBuf, String> {
@@ -2032,7 +2228,7 @@ approval_mode = \"approve\"
 
         let t = EditorTarget {
             name: "Antigravity",
-            agent_key: "gemini".to_string(),
+            agent_key: "antigravity".to_string(),
             config_path: path.clone(),
             detect_path: PathBuf::from("/nonexistent"),
             config_type: ConfigType::McpJson,
@@ -2073,9 +2269,12 @@ approval_mode = \"approve\"
     fn hermes_yaml_skips_if_already_present() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.yaml");
+        let data_dir = crate::core::data_dir::lean_ctx_data_dir()
+            .map(|d| d.to_string_lossy().to_string())
+            .unwrap_or_default();
         std::fs::write(
             &path,
-            "mcp_servers:\n  lean-ctx:\n    command: \"lean-ctx\"\n",
+            format!("mcp_servers:\n  lean-ctx:\n    command: \"lean-ctx\"\n    env:\n      LEAN_CTX_DATA_DIR: \"{data_dir}\"\n"),
         )
         .unwrap();
         let t = target("test", path.clone(), ConfigType::HermesYaml);
@@ -2276,5 +2475,106 @@ command = \"probe\"
             final_content.contains("BROKEN"),
             "original content preserved"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Augment VS Code extension (top-level JSON array) writer/remover tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn augment_vscode_creates_array_with_lean_ctx_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("mcpServers.json");
+        let t = target("Augment (VS Code)", path.clone(), ConfigType::AugmentVsCode);
+
+        let res = write_config_with_options(&t, "lean-ctx", WriteOptions::default()).unwrap();
+        assert_eq!(res.action, WriteAction::Created);
+
+        let arr: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let entries = arr.as_array().expect("top-level must be array");
+        assert_eq!(entries.len(), 1);
+        let e = &entries[0];
+        assert_eq!(e["name"], "lean-ctx");
+        assert_eq!(e["type"], "stdio");
+        assert_eq!(e["command"], "lean-ctx");
+        assert_eq!(e["disabled"], false);
+        assert_eq!(e["useShellInterpolation"], false);
+        assert!(e["id"].as_str().is_some());
+        assert!(e["env"]["LEAN_CTX_DATA_DIR"].as_str().is_some());
+    }
+
+    #[test]
+    fn augment_vscode_preserves_existing_entries_and_upserts() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("mcpServers.json");
+        std::fs::write(
+            &path,
+            r#"[{"type":"stdio","id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","name":"github","disabled":false,"command":"gh-mcp","args":[],"env":{}}]"#,
+        )
+        .unwrap();
+
+        let t = target("Augment (VS Code)", path.clone(), ConfigType::AugmentVsCode);
+        let res = write_config_with_options(&t, "lean-ctx", WriteOptions::default()).unwrap();
+        assert_eq!(res.action, WriteAction::Updated);
+
+        let arr: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let entries = arr.as_array().unwrap();
+        assert_eq!(entries.len(), 2, "github entry must be preserved");
+        assert!(entries.iter().any(|e| e["name"] == "github"));
+        assert!(entries.iter().any(|e| e["name"] == "lean-ctx"));
+    }
+
+    #[test]
+    fn augment_vscode_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("mcpServers.json");
+        let t = target("Augment (VS Code)", path.clone(), ConfigType::AugmentVsCode);
+
+        let first = write_config_with_options(&t, "lean-ctx", WriteOptions::default()).unwrap();
+        let second = write_config_with_options(&t, "lean-ctx", WriteOptions::default()).unwrap();
+        assert_eq!(first.action, WriteAction::Created);
+        assert_eq!(second.action, WriteAction::Already);
+
+        let arr: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let entries = arr.as_array().unwrap();
+        assert_eq!(
+            entries.iter().filter(|e| e["name"] == "lean-ctx").count(),
+            1,
+            "lean-ctx must not duplicate"
+        );
+    }
+
+    #[test]
+    fn augment_vscode_remove_only_drops_lean_ctx_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("mcpServers.json");
+        let t = target("Augment (VS Code)", path.clone(), ConfigType::AugmentVsCode);
+
+        // Seed: github + lean-ctx (via the writer so the id matches).
+        std::fs::write(
+            &path,
+            r#"[{"type":"stdio","id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","name":"github","disabled":false,"command":"gh-mcp","args":[],"env":{}}]"#,
+        )
+        .unwrap();
+        write_config_with_options(&t, "lean-ctx", WriteOptions::default()).unwrap();
+
+        let res = remove_lean_ctx_server(&t, WriteOptions::default()).unwrap();
+        assert_eq!(res.action, WriteAction::Updated);
+
+        let arr: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let entries = arr.as_array().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["name"], "github");
+    }
+
+    #[test]
+    fn augment_vscode_remove_is_noop_when_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("mcpServers.json");
+        std::fs::write(&path, "[]").unwrap();
+        let t = target("Augment (VS Code)", path.clone(), ConfigType::AugmentVsCode);
+
+        let res = remove_lean_ctx_server(&t, WriteOptions::default()).unwrap();
+        assert_eq!(res.action, WriteAction::Already);
     }
 }

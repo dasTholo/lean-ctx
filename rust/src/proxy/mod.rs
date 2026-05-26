@@ -220,6 +220,7 @@ async fn proxy_auth_guard(
         return Ok(next.run(req).await);
     }
 
+    // Accept Bearer token (lean-ctx session token)
     if let Some(auth) = req
         .headers()
         .get("authorization")
@@ -232,9 +233,17 @@ async fn proxy_auth_guard(
         }
     }
 
+    // Accept provider API keys on provider routes (loopback-only, host_guard runs first).
+    // AI tools like Claude Code send x-api-key, not Bearer tokens. Since the proxy
+    // only binds to 127.0.0.1, the presence of a valid API key header is sufficient
+    // to authenticate the request as coming from a local AI tool.
+    if has_provider_api_key(&req) && is_provider_route(path) {
+        return Ok(next.run(req).await);
+    }
+
     let cfg = crate::core::config::Config::load();
     let hint = match cfg.proxy_enabled {
-        Some(true) => "lean-ctx proxy requires a Bearer token. Check LEAN_CTX_PROXY_TOKEN.",
+        Some(true) => "lean-ctx proxy requires authentication. Use a Bearer token (LEAN_CTX_PROXY_TOKEN) or configure your AI tool's API key.",
         Some(false) => "lean-ctx proxy is disabled but still running. Run: lean-ctx proxy cleanup",
         None => "lean-ctx proxy is not configured. Your AI tool's ANTHROPIC_BASE_URL may be pointing here by mistake. Fix: lean-ctx proxy cleanup  OR  lean-ctx proxy enable",
     };
@@ -248,6 +257,31 @@ async fn proxy_auth_guard(
     });
 
     Err((StatusCode::UNAUTHORIZED, axum::Json(body)).into_response())
+}
+
+fn has_provider_api_key(req: &axum::extract::Request) -> bool {
+    let headers = req.headers();
+    for key in ["x-api-key", "x-goog-api-key", "api-key"] {
+        if headers
+            .get(key)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| !v.trim().is_empty())
+        {
+            return true;
+        }
+    }
+    if let Some(auth) = headers.get("authorization").and_then(|v| v.to_str().ok()) {
+        if auth.starts_with("Bearer sk-") || auth.starts_with("Bearer gsk_") {
+            return true;
+        }
+    }
+    false
+}
+
+fn is_provider_route(path: &str) -> bool {
+    path.starts_with("/v1/")
+        || path.starts_with("/v1beta/")
+        || path.starts_with("/chat/completions")
 }
 
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
@@ -268,7 +302,6 @@ async fn host_guard(
             return Ok(next.run(req).await);
         }
     }
-    // Missing or non-loopback host header → reject (DNS rebinding protection)
     Err(StatusCode::FORBIDDEN)
 }
 
@@ -292,5 +325,93 @@ async fn fallback_router(State(state): State<ProxyState>, req: Request<Body>) ->
                 "lean-ctx proxy: no handler for {method} {path}"
             )))
             .expect("BUG: building 404 response should never fail")
+    }
+}
+
+#[cfg(test)]
+mod auth_tests {
+    use super::*;
+
+    #[test]
+    fn is_provider_route_v1() {
+        assert!(is_provider_route("/v1/chat/completions"));
+        assert!(is_provider_route("/v1/messages"));
+        assert!(is_provider_route("/v1/completions"));
+    }
+
+    #[test]
+    fn is_provider_route_v1beta() {
+        assert!(is_provider_route("/v1beta/models"));
+    }
+
+    #[test]
+    fn is_provider_route_chat() {
+        assert!(is_provider_route("/chat/completions"));
+    }
+
+    #[test]
+    fn is_provider_route_rejects_non_provider() {
+        assert!(!is_provider_route("/health"));
+        assert!(!is_provider_route("/api/v2/test"));
+        assert!(!is_provider_route("/"));
+    }
+
+    fn build_request(headers: &[(&str, &str)], path: &str) -> axum::extract::Request {
+        let mut builder = axum::http::Request::builder().uri(path);
+        for (k, v) in headers {
+            builder = builder.header(*k, *v);
+        }
+        builder.body(axum::body::Body::empty()).unwrap()
+    }
+
+    #[test]
+    fn has_provider_api_key_x_api_key() {
+        let req = build_request(&[("x-api-key", "sk-ant-abc123")], "/v1/messages");
+        assert!(has_provider_api_key(&req));
+    }
+
+    #[test]
+    fn has_provider_api_key_x_goog() {
+        let req = build_request(&[("x-goog-api-key", "AIzaSyAbc")], "/v1beta/models");
+        assert!(has_provider_api_key(&req));
+    }
+
+    #[test]
+    fn has_provider_api_key_azure() {
+        let req = build_request(&[("api-key", "deadbeef")], "/v1/completions");
+        assert!(has_provider_api_key(&req));
+    }
+
+    #[test]
+    fn has_provider_api_key_bearer_sk() {
+        let req = build_request(
+            &[("authorization", "Bearer sk-proj-abc123")],
+            "/v1/chat/completions",
+        );
+        assert!(has_provider_api_key(&req));
+    }
+
+    #[test]
+    fn has_provider_api_key_empty_rejected() {
+        let req = build_request(&[("x-api-key", "  ")], "/v1/messages");
+        assert!(!has_provider_api_key(&req));
+    }
+
+    #[test]
+    fn has_provider_api_key_no_headers() {
+        let req = build_request(&[], "/v1/messages");
+        assert!(!has_provider_api_key(&req));
+    }
+
+    #[test]
+    fn has_provider_api_key_regular_bearer_rejected() {
+        let req = build_request(
+            &[("authorization", "Bearer some-session-token")],
+            "/v1/chat",
+        );
+        assert!(
+            !has_provider_api_key(&req),
+            "non-sk/gsk Bearer should not count as provider key"
+        );
     }
 }

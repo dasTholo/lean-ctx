@@ -158,6 +158,8 @@ pub fn run_setup() {
         );
     }
 
+    configure_plan_mode_settings(&newly_configured, &already_configured);
+
     // Step 4: Agent rules injection
     terminal_ui::print_step_header(4, 11, "Agent Rules");
     let rules_result = crate::rules_inject::inject_all_rules(&home);
@@ -820,22 +822,34 @@ pub fn run_setup_with_options(opts: SetupOptions) -> Result<SetupReport, String>
             note: Some("Proxy not enabled (run `lean-ctx proxy enable`)".to_string()),
         });
     } else {
-        let proxy_port = crate::proxy_setup::default_port();
-        crate::proxy_autostart::install(proxy_port, true);
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        crate::proxy_setup::install_proxy_env(&home, proxy_port, opts.json);
-        proxy_step.items.push(SetupItem {
-            name: "proxy_autostart".to_string(),
-            status: "installed".to_string(),
-            path: None,
-            note: Some("LaunchAgent/systemd auto-start on login".to_string()),
-        });
-        proxy_step.items.push(SetupItem {
-            name: "proxy_env".to_string(),
-            status: "configured".to_string(),
-            path: None,
-            note: Some("ANTHROPIC_BASE_URL, OPENAI_BASE_URL, GEMINI_API_BASE_URL".to_string()),
-        });
+        let proxy_cfg = crate::core::config::Config::load();
+        if proxy_cfg.proxy_enabled == Some(true) {
+            let proxy_port = crate::proxy_setup::default_port();
+            crate::proxy_autostart::install(proxy_port, true);
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            crate::proxy_setup::install_proxy_env(&home, proxy_port, opts.json);
+            proxy_step.items.push(SetupItem {
+                name: "proxy_autostart".to_string(),
+                status: "installed".to_string(),
+                path: None,
+                note: Some("LaunchAgent/systemd auto-start on login".to_string()),
+            });
+            proxy_step.items.push(SetupItem {
+                name: "proxy_env".to_string(),
+                status: "configured".to_string(),
+                path: None,
+                note: Some("ANTHROPIC_BASE_URL, OPENAI_BASE_URL, GEMINI_API_BASE_URL".to_string()),
+            });
+        } else {
+            proxy_step.items.push(SetupItem {
+                name: "proxy".to_string(),
+                status: "skipped".to_string(),
+                path: None,
+                note: Some(
+                    "Proxy not opted-in (run `lean-ctx proxy enable` to activate)".to_string(),
+                ),
+            });
+        }
     }
     steps.push(proxy_step);
 
@@ -1052,6 +1066,19 @@ pub fn configure_agent_mcp(agent: &str) -> Result<(), String> {
         install_kiro_steering(&home);
     }
 
+    if agent == "vscode" || agent == "copilot" {
+        if let Err(e) = crate::core::editor_registry::plan_mode::write_vscode_plan_settings() {
+            eprintln!("\x1b[33m⚠\x1b[0m  VS Code plan mode: {e}");
+        }
+    }
+    if agent == "claude" || agent == "claude-code" {
+        if let Err(e) =
+            crate::core::editor_registry::plan_mode::write_claude_code_plan_permissions()
+        {
+            eprintln!("\x1b[33m⚠\x1b[0m  Claude Code plan mode: {e}");
+        }
+    }
+
     if errors.is_empty() {
         Ok(())
     } else {
@@ -1093,6 +1120,20 @@ fn agent_mcp_targets(agent: &str, home: &std::path::Path) -> Result<Vec<EditorTa
             crate::core::editor_registry::claude_mcp_json_path(home),
             ConfigType::McpJson,
         ),
+        "augment" => {
+            push(
+                &mut targets,
+                "Augment CLI",
+                crate::core::editor_registry::augment_cli_settings_path(home),
+                ConfigType::McpJson,
+            );
+            push(
+                &mut targets,
+                "Augment (VS Code)",
+                crate::core::editor_registry::augment_vscode_mcp_path(home),
+                ConfigType::AugmentVsCode,
+            );
+        }
         "windsurf" => push(
             &mut targets,
             "Windsurf",
@@ -1118,15 +1159,27 @@ fn agent_mcp_targets(agent: &str, home: &std::path::Path) -> Result<Vec<EditorTa
             );
             push(
                 &mut targets,
-                "Antigravity",
+                "Antigravity IDE",
                 home.join(".gemini/antigravity/mcp_config.json"),
+                ConfigType::McpJson,
+            );
+            push(
+                &mut targets,
+                "Antigravity CLI",
+                home.join(".gemini/antigravity-cli/mcp_config.json"),
                 ConfigType::McpJson,
             );
         }
         "antigravity" => push(
             &mut targets,
-            "Antigravity",
+            "Antigravity IDE",
             home.join(".gemini/antigravity/mcp_config.json"),
+            ConfigType::McpJson,
+        ),
+        "antigravity-cli" => push(
+            &mut targets,
+            "Antigravity CLI",
+            home.join(".gemini/antigravity-cli/mcp_config.json"),
             ConfigType::McpJson,
         ),
         "copilot" => push(
@@ -1177,8 +1230,8 @@ fn agent_mcp_targets(agent: &str, home: &std::path::Path) -> Result<Vec<EditorTa
             home.join(".verdent/mcp.json"),
             ConfigType::McpJson,
         ),
-        "jetbrains" | "amp" => {
-            // Handled by dedicated install hooks (servers[] array / amp.mcpServers)
+        "jetbrains" | "amp" | "openclaw" => {
+            // Handled by dedicated install hooks (servers[] array / amp.mcpServers / mcp.servers)
         }
         "qwen" => push(
             &mut targets,
@@ -1305,6 +1358,20 @@ pub fn disable_agent_mcp(agent: &str, overwrite_invalid: bool) -> Result<(), Str
             crate::core::editor_registry::claude_mcp_json_path(&home),
             ConfigType::McpJson,
         ),
+        "augment" => {
+            push(
+                &mut targets,
+                "Augment CLI",
+                crate::core::editor_registry::augment_cli_settings_path(&home),
+                ConfigType::McpJson,
+            );
+            push(
+                &mut targets,
+                "Augment (VS Code)",
+                crate::core::editor_registry::augment_vscode_mcp_path(&home),
+                ConfigType::AugmentVsCode,
+            );
+        }
         "windsurf" => push(
             &mut targets,
             "Windsurf",
@@ -1330,15 +1397,27 @@ pub fn disable_agent_mcp(agent: &str, overwrite_invalid: bool) -> Result<(), Str
             );
             push(
                 &mut targets,
-                "Antigravity",
+                "Antigravity IDE",
                 home.join(".gemini/antigravity/mcp_config.json"),
+                ConfigType::McpJson,
+            );
+            push(
+                &mut targets,
+                "Antigravity CLI",
+                home.join(".gemini/antigravity-cli/mcp_config.json"),
                 ConfigType::McpJson,
             );
         }
         "antigravity" => push(
             &mut targets,
-            "Antigravity",
+            "Antigravity IDE",
             home.join(".gemini/antigravity/mcp_config.json"),
+            ConfigType::McpJson,
+        ),
+        "antigravity-cli" => push(
+            &mut targets,
+            "Antigravity CLI",
+            home.join(".gemini/antigravity-cli/mcp_config.json"),
             ConfigType::McpJson,
         ),
         "copilot" => push(
@@ -1389,7 +1468,7 @@ pub fn disable_agent_mcp(agent: &str, overwrite_invalid: bool) -> Result<(), Str
             home.join(".verdent/mcp.json"),
             ConfigType::McpJson,
         ),
-        "jetbrains" | "amp" => {
+        "jetbrains" | "amp" | "openclaw" => {
             // Not supported for disable via this helper.
         }
         "qwen" => push(
@@ -1512,6 +1591,59 @@ fn install_kiro_steering(home: &std::path::Path) {
     let _ = std::fs::create_dir_all(&steering_dir);
     let _ = std::fs::write(&steering_file, crate::hooks::KIRO_STEERING_TEMPLATE);
     println!("  \x1b[32m✓\x1b[0m Created .kiro/steering/lean-ctx.md (Kiro will now prefer lean-ctx tools)");
+}
+
+fn configure_plan_mode_settings(newly_configured: &[&str], already_configured: &[&str]) {
+    use crate::terminal_ui;
+
+    let all_configured: Vec<&str> = newly_configured
+        .iter()
+        .chain(already_configured.iter())
+        .copied()
+        .collect();
+
+    let has_vscode = all_configured.contains(&"VS Code");
+    let has_claude = all_configured.contains(&"Claude Code");
+
+    if !has_vscode && !has_claude {
+        return;
+    }
+
+    if has_vscode {
+        match crate::core::editor_registry::plan_mode::write_vscode_plan_settings() {
+            Ok(r) if r.action == WriteAction::Already => {
+                terminal_ui::print_status_ok(
+                    "VS Code            \x1b[2mplan mode already configured\x1b[0m",
+                );
+            }
+            Ok(_) => {
+                terminal_ui::print_status_new(
+                    "VS Code            \x1b[2mplan mode tools configured\x1b[0m",
+                );
+            }
+            Err(e) => {
+                terminal_ui::print_status_warn(&format!("VS Code plan mode: {e}"));
+            }
+        }
+    }
+
+    if has_claude {
+        match crate::core::editor_registry::plan_mode::write_claude_code_plan_permissions() {
+            Ok(r) if r.action == WriteAction::Already => {
+                terminal_ui::print_status_ok(
+                    "Claude Code        \x1b[2mplan mode permissions present\x1b[0m",
+                );
+            }
+            Ok(_) => {
+                terminal_ui::print_status_new(
+                    "Claude Code        \x1b[2mplan mode permissions added\x1b[0m",
+                );
+            }
+            Err(e) => {
+                terminal_ui::print_status_warn(&format!("Claude Code plan mode: {e}"));
+            }
+        }
+    }
 }
 
 fn shorten_path(path: &str, home: &str) -> String {

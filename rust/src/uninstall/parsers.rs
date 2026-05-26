@@ -461,6 +461,14 @@ fn remove_lean_ctx_from_json_serde(content: &str) -> Option<String> {
         modified |= mcp.remove("lean-ctx").is_some();
     }
 
+    // Zed uses `context_servers` instead of `mcpServers`
+    if let Some(ctx) = parsed
+        .get_mut("context_servers")
+        .and_then(|s| s.as_object_mut())
+    {
+        modified |= ctx.remove("lean-ctx").is_some();
+    }
+
     if let Some(amp) = parsed
         .get_mut("amp.mcpServers")
         .and_then(|s| s.as_object_mut())
@@ -567,7 +575,7 @@ pub(super) fn remove_lean_ctx_from_toml(content: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::super::agents::{
-        remove_lean_ctx_from_hooks_json, remove_lean_ctx_section_from_rules,
+        remove_lean_ctx_from_hooks_json, remove_lean_ctx_section_from_rules, HookCleanupResult,
     };
     use super::super::{backup_before_modify, bak_path_for, remove_marked_block};
     use super::*;
@@ -810,7 +818,10 @@ command = \"other\"
     ]
   }
 }"#;
-        let result = remove_lean_ctx_from_hooks_json(input).expect("should return cleaned JSON");
+        let result = match remove_lean_ctx_from_hooks_json(input) {
+            HookCleanupResult::Cleaned(s) => s,
+            other => panic!("expected Cleaned, got {other:?}"),
+        };
         assert!(!result.contains("lean-ctx"), "lean-ctx should be removed");
         assert!(
             result.contains("my-other-tool"),
@@ -819,7 +830,28 @@ command = \"other\"
     }
 
     #[test]
-    fn hooks_json_returns_none_when_only_lean_ctx() {
+    fn hooks_json_entirely_lean_ctx_no_other_keys() {
+        let input = r#"{
+  "hooks": {
+    "preToolUse": [
+      {
+        "matcher": "Shell",
+        "command": "lean-ctx hook rewrite"
+      }
+    ]
+  }
+}"#;
+        assert!(
+            matches!(
+                remove_lean_ctx_from_hooks_json(input),
+                HookCleanupResult::EntirelyLeanCtx
+            ),
+            "should return EntirelyLeanCtx when all hooks are lean-ctx and no other keys"
+        );
+    }
+
+    #[test]
+    fn hooks_json_preserves_version_key_when_hooks_cleaned() {
         let input = r#"{
   "version": 1,
   "hooks": {
@@ -827,17 +859,157 @@ command = \"other\"
       {
         "matcher": "Shell",
         "command": "lean-ctx hook rewrite"
-      },
-      {
-        "matcher": "Read|Grep",
-        "command": "lean-ctx hook redirect"
       }
     ]
   }
 }"#;
+        let result = match remove_lean_ctx_from_hooks_json(input) {
+            HookCleanupResult::Cleaned(s) => s,
+            other => panic!("expected Cleaned, got {other:?}"),
+        };
         assert!(
-            remove_lean_ctx_from_hooks_json(input).is_none(),
-            "should return None when all hooks are lean-ctx"
+            result.contains("version"),
+            "version key should be preserved"
+        );
+        assert!(!result.contains("lean-ctx"), "lean-ctx should be removed");
+    }
+
+    #[test]
+    fn hooks_json_handles_nested_claude_format() {
+        let input = r#"{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "lean-ctx hook rewrite"
+          }
+        ]
+      },
+      {
+        "matcher": "Other",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "my-other-tool check"
+          }
+        ]
+      }
+    ]
+  }
+}"#;
+        let result = match remove_lean_ctx_from_hooks_json(input) {
+            HookCleanupResult::Cleaned(s) => s,
+            other => panic!("expected Cleaned, got {other:?}"),
+        };
+        assert!(
+            !result.contains("lean-ctx"),
+            "lean-ctx nested entry removed"
+        );
+        assert!(
+            result.contains("my-other-tool"),
+            "non-lean-ctx entries preserved"
+        );
+    }
+
+    #[test]
+    fn hooks_json_mixed_nested_group_preserves_user_hooks() {
+        let input = r#"{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "lean-ctx hook rewrite" },
+          { "type": "command", "command": "my-custom-guard" }
+        ]
+      }
+    ]
+  }
+}"#;
+        let result = match remove_lean_ctx_from_hooks_json(input) {
+            HookCleanupResult::Cleaned(s) => s,
+            other => panic!("expected Cleaned, got {other:?}"),
+        };
+        assert!(!result.contains("lean-ctx"), "lean-ctx sub-hook removed");
+        assert!(
+            result.contains("my-custom-guard"),
+            "user sub-hook in same group preserved"
+        );
+    }
+
+    #[test]
+    fn hooks_json_copilot_bash_format() {
+        let input = r#"{
+  "hooks": {
+    "preToolUse": [
+      { "bash": "lean-ctx hook rewrite" },
+      { "bash": "my-other-hook" }
+    ]
+  }
+}"#;
+        let result = match remove_lean_ctx_from_hooks_json(input) {
+            HookCleanupResult::Cleaned(s) => s,
+            other => panic!("expected Cleaned, got {other:?}"),
+        };
+        assert!(!result.contains("lean-ctx"), "lean-ctx bash entry removed");
+        assert!(
+            result.contains("my-other-hook"),
+            "other bash hook preserved"
+        );
+    }
+
+    #[test]
+    fn hooks_json_permissions_only_not_deleted() {
+        let input = r#"{
+  "permissions": {
+    "allow": [
+      "mcp__lean-ctx__ctx_read",
+      "mcp__lean-ctx__ctx_search",
+      "mcp__other-tool__do_stuff"
+    ]
+  }
+}"#;
+        let result = match remove_lean_ctx_from_hooks_json(input) {
+            HookCleanupResult::Cleaned(s) => s,
+            other => panic!("expected Cleaned (permissions remain), got {other:?}"),
+        };
+        assert!(!result.contains("lean-ctx"), "lean-ctx permissions removed");
+        assert!(
+            result.contains("mcp__other-tool"),
+            "other permissions preserved"
+        );
+    }
+
+    #[test]
+    fn hooks_json_parse_error_does_not_delete() {
+        let input = "{ this is not valid JSON at all !!!";
+        assert!(
+            matches!(
+                remove_lean_ctx_from_hooks_json(input),
+                HookCleanupResult::ParseError
+            ),
+            "parse errors should return ParseError, not delete the file"
+        );
+    }
+
+    #[test]
+    fn hooks_json_no_lean_ctx_returns_unchanged() {
+        let input = r#"{
+  "hooks": {
+    "preToolUse": [
+      { "command": "some-other-tool" }
+    ]
+  }
+}"#;
+        assert!(
+            matches!(
+                remove_lean_ctx_from_hooks_json(input),
+                HookCleanupResult::Unchanged
+            ),
+            "should return Unchanged when no lean-ctx found"
         );
     }
 

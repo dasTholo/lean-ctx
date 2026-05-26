@@ -10,6 +10,7 @@ mod gemini;
 mod hermes;
 mod jetbrains;
 mod kiro;
+mod openclaw;
 mod opencode;
 mod pi;
 mod qoder;
@@ -17,7 +18,7 @@ mod shared;
 mod windsurf;
 
 pub(super) use amp::install_amp_hook;
-pub(super) use antigravity::install_antigravity_hook;
+pub(super) use antigravity::{install_antigravity_cli_hook, install_antigravity_hook};
 pub(super) use claude::{
     install_claude_hook_config, install_claude_hook_scripts, install_claude_hook_with_mode,
     install_claude_project_hooks,
@@ -36,6 +37,7 @@ pub(super) use gemini::{
 pub(super) use hermes::install_hermes_hook_with_mode;
 pub(super) use jetbrains::install_jetbrains_hook;
 pub(super) use kiro::install_kiro_hook;
+pub(super) use openclaw::install_openclaw_hook;
 pub(super) use opencode::install_opencode_hook_with_mode;
 pub(super) use pi::install_pi_hook_with_mode;
 pub(super) use qoder::install_qoder_hook_with_mode;

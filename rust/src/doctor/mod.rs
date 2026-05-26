@@ -607,6 +607,124 @@ fn pi_outcome() -> Option<Outcome> {
     }
 }
 
+fn provider_outcome() -> Outcome {
+    let registry = crate::core::providers::global_registry();
+    let ids = registry.available_provider_ids();
+    if ids.is_empty() {
+        return Outcome {
+            ok: true,
+            line: format!(
+                "{BOLD}Providers{RST}  {DIM}none configured (enable via [providers] in config.toml){RST}"
+            ),
+        };
+    }
+    let labels: Vec<String> = ids
+        .iter()
+        .map(|id| {
+            if let Some(p) = registry.get(id) {
+                if p.is_available() {
+                    format!("{GREEN}{id}{RST}")
+                } else {
+                    format!("{YELLOW}{id}(no auth){RST}")
+                }
+            } else {
+                format!("{RED}{id}(missing){RST}")
+            }
+        })
+        .collect();
+    Outcome {
+        ok: true,
+        line: format!("{BOLD}Providers{RST}  {}", labels.join(", ")),
+    }
+}
+
+fn mcp_bridge_outcomes() -> Vec<Outcome> {
+    let cfg = crate::core::config::Config::load();
+    let bridges = &cfg.providers.mcp_bridges;
+    if bridges.is_empty() {
+        return Vec::new();
+    }
+
+    let mut results = Vec::new();
+
+    let auto_idx = if cfg.providers.auto_index {
+        format!("{GREEN}auto_index=true{RST}")
+    } else {
+        format!("{YELLOW}auto_index=false (provider data won't be indexed into BM25/Graph/Knowledge){RST}")
+    };
+    results.push(Outcome {
+        ok: cfg.providers.auto_index,
+        line: format!("{BOLD}Provider indexing{RST}  {auto_idx}"),
+    });
+
+    for (name, entry) in bridges {
+        let url = entry.url.as_deref().unwrap_or("");
+        let cmd = entry.command.as_deref().unwrap_or("");
+        let source = if !url.is_empty() {
+            format!("url={url}")
+        } else if !cmd.is_empty() {
+            format!("cmd={cmd}")
+        } else {
+            "no url/command".to_string()
+        };
+
+        let ok = !url.is_empty() || !cmd.is_empty();
+        let status = if ok {
+            format!("{GREEN}configured{RST}")
+        } else {
+            format!("{RED}missing url/command{RST}")
+        };
+
+        results.push(Outcome {
+            ok,
+            line: format!("{BOLD}MCP Bridge{RST}  mcp:{name} ({source}) [{status}]"),
+        });
+    }
+
+    results
+}
+
+fn plan_mode_outcomes() -> Vec<Outcome> {
+    let status = crate::core::editor_registry::plan_mode::check_plan_mode_status();
+    let mut results = Vec::new();
+
+    if let Some(configured) = status.vscode_configured {
+        if configured {
+            results.push(Outcome {
+                ok: true,
+                line: format!(
+                    "{BOLD}Plan mode{RST}  VS Code  {GREEN}planAgent tools configured{RST}"
+                ),
+            });
+        } else {
+            results.push(Outcome {
+                ok: false,
+                line: format!(
+                    "{BOLD}Plan mode{RST}  VS Code  {YELLOW}not configured{RST}  {DIM}(run: lean-ctx setup){RST}"
+                ),
+            });
+        }
+    }
+
+    if let Some(configured) = status.claude_configured {
+        if configured {
+            results.push(Outcome {
+                ok: true,
+                line: format!("{BOLD}Plan mode{RST}  Claude Code  {GREEN}permissions present{RST}"),
+            });
+        } else {
+            results.push(Outcome {
+                ok: false,
+                line: format!(
+                    "{BOLD}Plan mode{RST}  Claude Code  {YELLOW}not configured{RST}  {DIM}(run: lean-ctx setup){RST}"
+                ),
+            });
+        }
+    }
+
+    results
+}
+
 fn session_state_outcome() -> Outcome {
     use crate::core::session::SessionState;
 
@@ -900,22 +1018,33 @@ pub fn run() {
 
     // Daemon status
     #[cfg(unix)]
-    let daemon_outcome = if crate::daemon::is_daemon_running() {
-        let pid_path = crate::daemon::daemon_pid_path();
-        let pid_str = std::fs::read_to_string(&pid_path).unwrap_or_default();
-        Outcome {
-            ok: true,
-            line: format!(
-                "{BOLD}Daemon{RST}  {GREEN}running (PID {}){RST}",
-                pid_str.trim()
-            ),
-        }
-    } else {
-        Outcome {
-            ok: true,
-            line: format!(
-                "{BOLD}Daemon{RST}  {YELLOW}not running{RST}  {DIM}(run: lean-ctx serve -d){RST}"
-            ),
+    let daemon_outcome = {
+        let autostart = crate::daemon_autostart::is_installed();
+        let autostart_tag = if autostart {
+            format!("  {DIM}[autostart: on]{RST}")
+        } else {
+            String::new()
+        };
+        if crate::daemon::is_daemon_running() {
+            let pid_path = crate::daemon::daemon_pid_path();
+            let pid_str = std::fs::read_to_string(&pid_path).unwrap_or_default();
+            Outcome {
+                ok: true,
+                line: format!(
+                    "{BOLD}Daemon{RST}  {GREEN}running (PID {}){RST}{autostart_tag}",
+                    pid_str.trim()
+                ),
+            }
+        } else {
+            let hint = if autostart {
+                format!("{DIM}(autostart enabled, will restart){RST}")
+            } else {
+                format!("{DIM}(run: lean-ctx daemon start  or: lean-ctx daemon enable){RST}")
+            };
+            Outcome {
+                ok: true,
+                line: format!("{BOLD}Daemon{RST}  {YELLOW}not running{RST}  {hint}"),
+            }
         }
     };
     #[cfg(not(unix))]
@@ -927,6 +1056,69 @@ pub fn run() {
         passed += 1;
     }
     print_check(&daemon_outcome);
+
+    // Daemon diagnostics: systemctl is-active, linger, crash-loop log
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(o) = std::process::Command::new("systemctl")
+            .args(["--user", "is-active", "lean-ctx-daemon.service"])
+            .output()
+        {
+            let state = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            if state != "active" {
+                println!(
+                    "  {DIM}  systemd unit state: {YELLOW}{state}{RST}{DIM} (expected: active){RST}"
+                );
+            }
+        }
+        let username = std::env::var("USER")
+            .or_else(|_| std::env::var("LOGNAME"))
+            .unwrap_or_else(|_| "$(whoami)".to_string());
+        if let Ok(o) = std::process::Command::new("loginctl")
+            .args(["show-user", &username, "-p", "Linger", "--value"])
+            .output()
+        {
+            let val = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            if val != "yes" {
+                println!(
+                    "  {YELLOW}⚠{RST}  Linger not enabled — daemon won't start at boot without login"
+                );
+                println!("     {DIM}Fix: loginctl enable-linger {username}{RST}");
+            }
+        }
+    }
+    if let Some(log_path) = crate::core::startup_guard::crash_loop_log_path(
+        crate::core::startup_guard::MCP_PROCESS_NAME,
+    ) {
+        if log_path.exists() {
+            if let Ok(contents) = std::fs::read_to_string(&log_path) {
+                let lines: Vec<&str> = contents.lines().collect();
+                if lines.len() >= 5 {
+                    println!(
+                        "  {YELLOW}⚠{RST}  Crash-loop log: {} recent restarts  {DIM}({}){RST}",
+                        lines.len(),
+                        log_path.display()
+                    );
+                }
+            }
+        }
+    }
+
+    // Providers
+    let provider_outcome = provider_outcome();
+    print_check(&provider_outcome);
+
+    // MCP Bridges
+    let bridge_outcomes = mcp_bridge_outcomes();
+    for bridge_check in &bridge_outcomes {
+        print_check(bridge_check);
+    }
+
+    // Plan mode
+    let plan_outcomes = plan_mode_outcomes();
+    for plan_check in &plan_outcomes {
+        print_check(plan_check);
+    }
 
     // 9) Session state (project_root + shell_cwd)
     let session_outcome = session_state_outcome();
@@ -1074,7 +1266,7 @@ fn skill_files_outcome() -> Outcome {
         ),
         (
             "GitHub Copilot",
-            home.join(".vscode/skills/lean-ctx/SKILL.md"),
+            home.join(".copilot/skills/lean-ctx/SKILL.md"),
         ),
     ];
 
@@ -1103,6 +1295,34 @@ fn skill_files_outcome() -> Outcome {
     }
 }
 
+fn proxy_auth_probe(port: u16) -> bool {
+    use std::io::{Read, Write};
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
+
+    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
+    let token = crate::core::session_token::resolve_proxy_token("LEAN_CTX_PROXY_TOKEN");
+
+    let Ok(mut stream) = TcpStream::connect_timeout(&addr, crate::proxy_setup::proxy_timeout())
+    else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(3)));
+
+    let req = format!(
+        "GET /health HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n\r\n"
+    );
+    if stream.write_all(req.as_bytes()).is_err() {
+        return false;
+    }
+
+    let mut buf = [0u8; 128];
+    let Ok(n) = stream.read(&mut buf) else {
+        return false;
+    };
+    let response = String::from_utf8_lossy(&buf[..n]);
+    response.contains("200") || response.contains("ok")
+}
+
 fn proxy_health_outcome() -> Outcome {
     use crate::core::config::Config;
 
@@ -1112,20 +1332,29 @@ fn proxy_health_outcome() -> Outcome {
     match cfg.proxy_enabled {
         Some(true) => {
             let installed = crate::proxy_autostart::is_installed();
-            let reachable = std::net::TcpStream::connect_timeout(
-                &format!("127.0.0.1:{port}")
-                    .parse()
-                    .expect("BUG: invalid hardcoded address"),
-                std::time::Duration::from_millis(200),
-            )
-            .is_ok();
+            let reachable = {
+                use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
+                let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
+                TcpStream::connect_timeout(&addr, crate::proxy_setup::proxy_timeout()).is_ok()
+            };
 
             if installed && reachable {
-                Outcome {
-                    ok: true,
-                    line: format!(
-                        "{BOLD}Proxy{RST}  {GREEN}enabled, running on port {port}{RST}"
-                    ),
+                // Verify auth works: probe /health (no auth needed) to confirm HTTP layer
+                let auth_ok = proxy_auth_probe(port);
+                if auth_ok {
+                    Outcome {
+                        ok: true,
+                        line: format!(
+                            "{BOLD}Proxy{RST}  {GREEN}enabled, running on port {port}{RST}"
+                        ),
+                    }
+                } else {
+                    Outcome {
+                        ok: false,
+                        line: format!(
+                            "{BOLD}Proxy{RST}  {YELLOW}running on port {port} but auth probe failed{RST}  {YELLOW}fix: lean-ctx proxy restart{RST}"
+                        ),
+                    }
                 }
             } else if installed && !reachable {
                 Outcome {

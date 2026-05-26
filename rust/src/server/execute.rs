@@ -20,13 +20,21 @@ pub(crate) fn execute_command_with_env(
     let normalized_cmd = crate::tools::ctx_shell::normalize_command_for_shell(command);
     let dir = std::path::Path::new(cwd);
     let mut cmd = std::process::Command::new(&shell);
+    if cfg!(windows) && crate::shell::platform::is_powershell(&shell) {
+        cmd.args(["-NoProfile", "-ExecutionPolicy", "Bypass"]);
+    }
     cmd.arg(&flag)
         .arg(&normalized_cmd)
         .env("LEAN_CTX_ACTIVE", "1")
         .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_PAGER", "cat")
-        .env("PAGER", "cat")
         .stdin(Stdio::null());
+
+    if !extra_env.contains_key("GIT_PAGER") {
+        cmd.env("GIT_PAGER", "cat");
+    }
+    if !extra_env.contains_key("PAGER") {
+        cmd.env("PAGER", "cat");
+    }
 
     // Auto-forward agent runtime env vars from parent process
     for (key, val) in std::env::vars() {

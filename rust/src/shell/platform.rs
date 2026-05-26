@@ -20,6 +20,12 @@ pub fn decode_output(bytes: &[u8]) -> String {
 fn decode_windows_output(bytes: &[u8]) -> String {
     use std::os::windows::ffi::OsStringExt;
 
+    let lossy = String::from_utf8_lossy(bytes);
+    let replacement_count = lossy.chars().filter(|&c| c == '\u{FFFD}').count();
+    if replacement_count == 0 {
+        return lossy.into_owned();
+    }
+
     extern "system" {
         fn GetACP() -> u32;
         fn MultiByteToWideChar(
@@ -44,7 +50,7 @@ fn decode_windows_output(bytes: &[u8]) -> String {
         )
     };
     if wide_len <= 0 {
-        return String::from_utf8_lossy(bytes).into_owned();
+        return lossy.into_owned();
     }
     let mut wide: Vec<u16> = vec![0u16; wide_len as usize];
     unsafe {
@@ -100,6 +106,16 @@ pub fn is_container() -> bool {
 /// Returns true if stdin is NOT a terminal (pipe, /dev/null, etc.)
 pub fn is_non_interactive() -> bool {
     !io::stdin().is_terminal()
+}
+
+/// Returns `true` when `shell_path` points to a PowerShell executable.
+pub(crate) fn is_powershell(shell_path: &str) -> bool {
+    let name = std::path::Path::new(shell_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    name.contains("powershell") || name.contains("pwsh")
 }
 
 /// Windows only: argument that passes one command string to the shell binary.
@@ -191,10 +207,8 @@ fn find_real_shell() -> String {
             }
         }
     }
-    if is_running_in_powershell() {
-        if let Ok(pwsh) = which_powershell() {
-            return pwsh;
-        }
+    if let Ok(pwsh) = which_powershell() {
+        return pwsh;
     }
     if let Ok(comspec) = std::env::var("COMSPEC") {
         return comspec;
@@ -205,14 +219,6 @@ fn find_real_shell() -> String {
 #[cfg(windows)]
 fn is_running_in_msys_or_gitbash() -> bool {
     std::env::var("MSYSTEM").is_ok() || std::env::var("MINGW_PREFIX").is_ok()
-}
-
-#[cfg(windows)]
-fn is_running_in_powershell() -> bool {
-    if is_running_in_msys_or_gitbash() {
-        return false;
-    }
-    std::env::var("PSModulePath").is_ok()
 }
 
 #[cfg(windows)]
@@ -411,6 +417,45 @@ mod join_command_tests {
     fn powershell_single_no_spaces_still_uses_call_operator() {
         let args: Vec<String> = vec!["git".into()];
         assert_eq!(join_command_for(&args, "-Command"), "& git");
+    }
+}
+
+#[cfg(test)]
+mod is_powershell_tests {
+    use super::is_powershell;
+
+    #[test]
+    fn detects_pwsh_exe() {
+        assert!(is_powershell("pwsh.exe"));
+    }
+
+    #[test]
+    fn detects_powershell_exe() {
+        assert!(is_powershell("powershell.exe"));
+    }
+
+    #[test]
+    fn rejects_cmd() {
+        assert!(!is_powershell("cmd.exe"));
+    }
+
+    #[test]
+    fn rejects_bash() {
+        assert!(!is_powershell("/usr/bin/bash"));
+    }
+
+    #[test]
+    fn case_insensitive() {
+        assert!(is_powershell("PWSH.EXE"));
+        assert!(is_powershell("PowerShell.exe"));
+    }
+
+    #[test]
+    fn full_path_with_pwsh() {
+        assert!(is_powershell(
+            "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+        ));
+        assert!(is_powershell("/usr/local/bin/pwsh"));
     }
 }
 

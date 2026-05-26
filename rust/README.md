@@ -181,8 +181,8 @@ lean-ctx deps .                          # Project dependencies summary
 lean-ctx pack create --name my-pkg          # Bundle Knowledge + Graph + Session + Gotchas
 lean-ctx pack list                          # List installed packages
 lean-ctx pack info my-pkg                   # Detailed view (stats, integrity, provenance)
-lean-ctx pack export my-pkg -o my.lctxpkg   # Export to portable .lctxpkg file
-lean-ctx pack import my.lctxpkg --apply     # Import and apply to current project
+lean-ctx pack export my-pkg -o my.ctxpkg   # Export to portable .ctxpkg file
+lean-ctx pack import my.ctxpkg --apply     # Import and apply to current project
 lean-ctx pack install my-pkg                # Apply package (merge knowledge, import graph)
 lean-ctx pack auto-load my-pkg              # Auto-load on ctx_overview session start
 lean-ctx pack remove my-pkg                 # Remove from local registry
@@ -587,19 +587,15 @@ Add to `~/.config/opencode/opencode.json` (global) or `opencode.json` (project):
 
 ### OpenClaw
 
-OpenClaw uses a skills-based system instead of MCP. LeanCTX integrates via the **shell hook** — all commands OpenClaw runs through its `exec` tool are automatically compressed when the lean-ctx aliases are active.
+OpenClaw supports MCP servers natively. Run the init command to configure lean-ctx as an MCP server and install skills:
 
 ```bash
-# 1. Install shell aliases (if not done already)
-lean-ctx init --global
-source ~/.zshrc
-
-# 2. (Optional) Install the LeanCTX skill for deeper integration
-mkdir -p ~/.openclaw/skills/lean-ctx
-cp skills/lean-ctx/SKILL.md ~/.openclaw/skills/lean-ctx/
+lean-ctx init --agent openclaw
 ```
 
-The skill teaches OpenClaw to prefer `lean-ctx -c <command>` for shell operations, use compressed file reads, and leverage the dashboard for analytics.
+This writes the MCP server entry to `~/.openclaw/openclaw.json` under `mcp.servers`, installs global rules, and copies the LeanCTX skill to `~/.openclaw/skills/lean-ctx/`. Restart OpenClaw to activate.
+
+You can verify the configuration with `openclaw mcp list`.
 
 ### Cursor Terminal Profile
 

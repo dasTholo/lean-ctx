@@ -134,7 +134,7 @@ Know exactly where your context budget goes. Control it.
 - **Multi-Agent** (`ctx_agent`, `ctx_handoff`): agent handoff with context transfer bundles, diary system, synchronized shared state
 - **Archive Full-Text Search** (`ctx_expand search_all`): FTS5-powered cross-archive search over all previously archived tool outputs
 - **PR Context Packs**: `lean-ctx pack --pr` builds a PR-ready context pack (changed files, related tests, impact, artifacts)
-- **Context Packages**: `lean-ctx pack create` bundles Knowledge + Graph + Session into portable `.lctxpkg` files with SHA-256 integrity
+- **Context Packages**: `lean-ctx pack create` bundles Knowledge + Graph + Session into portable `.ctxpkg` files with SHA-256 integrity
 - **Observability**: `lean-ctx gain --live` for real-time savings, `lean-ctx wrapped` for weekly/monthly summaries, `lean-ctx watch` for TUI monitoring
 - **HTTP mode**: `lean-ctx serve` for Streamable HTTP MCP + `/v1/tools/call` (used by the Cookbook + SDK)
 
@@ -203,6 +203,7 @@ lean-ctx is a standard **MCP server**, so it works with any MCP-compatible clien
 |---|:---:|:---:|---|
 | Cursor | ● | | `lean-ctx init --agent cursor` |
 | Claude Code | ● | | `lean-ctx init --agent claude` |
+| Augment CLI / VS Code | ● | | `lean-ctx init --agent augment` |
 | Codex CLI | ● | | `lean-ctx init --agent codex` |
 | Gemini CLI | ● | | `lean-ctx init --agent gemini` |
 | Windsurf | ● | | `lean-ctx init --agent windsurf` |
@@ -296,6 +297,7 @@ lean-ctx benchmark report .
 - Comparison (vs RTK, Context+, MemGPT): https://leanctx.com/compare/
 - FAQ: [discord-faq.md](discord-faq.md)
 - Feature catalog (SSOT snapshot): [LEANCTX_FEATURE_CATALOG.md](LEANCTX_FEATURE_CATALOG.md)
+- Monorepo guide: [docs/guides/monorepo.md](docs/guides/monorepo.md)
 - Architecture: [ARCHITECTURE.md](ARCHITECTURE.md)
 - Vision: [VISION.md](VISION.md)
 

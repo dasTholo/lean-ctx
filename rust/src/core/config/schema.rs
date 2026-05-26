@@ -172,6 +172,22 @@ impl ConfigSchema {
             ),
         );
         root.insert(
+            "default_tool_categories".into(),
+            key(
+                "string[]",
+                serde_json::json!(cfg.default_tool_categories),
+                "Tool categories active by default (core, arch, debug, memory, metrics, session). Override via LCTX_DEFAULT_CATEGORIES",
+            ),
+        );
+        root.insert(
+            "no_degrade".into(),
+            key(
+                "boolean",
+                serde_json::json!(cfg.no_degrade),
+                "Disable all automatic read-mode degradation. Override via LCTX_NO_DEGRADE=1",
+            ),
+        );
+        root.insert(
             "rules_scope".into(),
             key_enum(
                 &["both", "global", "project"],
@@ -334,6 +350,14 @@ impl ConfigSchema {
                 "u16?",
                 serde_json::json!(null),
                 "Custom proxy port (default: 4444). Useful for multi-user systems. Env: LEAN_CTX_PROXY_PORT",
+            ),
+        );
+        root.insert(
+            "proxy_timeout_ms".into(),
+            key(
+                "u64?",
+                serde_json::json!(null),
+                "Proxy reachability timeout in ms (default: 200). Override via LEAN_CTX_PROXY_TIMEOUT_MS",
             ),
         );
         root.insert(
@@ -626,11 +650,43 @@ impl ConfigSchema {
                 "GitLab API base URL (for self-hosted instances)",
             ),
         );
+        providers.insert(
+            "mcp_bridges.<name>.url".into(),
+            key(
+                "string",
+                serde_json::json!(null),
+                "HTTP/SSE URL for a remote MCP server",
+            ),
+        );
+        providers.insert(
+            "mcp_bridges.<name>.command".into(),
+            key(
+                "string",
+                serde_json::json!(null),
+                "Command to spawn a local MCP server (stdio transport)",
+            ),
+        );
+        providers.insert(
+            "mcp_bridges.<name>.args".into(),
+            key(
+                "array",
+                serde_json::json!([]),
+                "Arguments for the MCP server command",
+            ),
+        );
+        providers.insert(
+            "mcp_bridges.<name>.auth_env".into(),
+            key(
+                "string",
+                serde_json::json!(null),
+                "Environment variable name containing auth token for MCP server",
+            ),
+        );
         sections.insert(
             "providers".into(),
             SectionSchema {
                 description:
-                    "External context providers (GitHub, GitLab, Jira, etc.). Set tokens via env vars (GITHUB_TOKEN, GITLAB_TOKEN)."
+                    "External context providers (GitHub, GitLab, Jira, MCP bridges, etc.). Set tokens via env vars (GITHUB_TOKEN, GITLAB_TOKEN). MCP bridges connect external MCP servers as context sources."
                         .into(),
                 keys: providers,
             },

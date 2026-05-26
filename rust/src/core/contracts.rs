@@ -21,6 +21,21 @@ pub const MEMORY_BOUNDARY_V1_SCHEMA_VERSION: u32 = 1;
 pub const GOTCHAS_REMINDERS_V1_SCHEMA_VERSION: u32 = 1;
 pub const PROVIDER_FRAMEWORK_V1_SCHEMA_VERSION: u32 = 1;
 pub const CONTEXT_PACKAGE_V1_SCHEMA_VERSION: u32 = 1;
+pub const CONTEXT_PACKAGE_V2_SCHEMA_VERSION: u32 = 2;
+
+pub const PACKAGE_EXTENSION: &str = "ctxpkg";
+pub const LEGACY_PACKAGE_EXTENSION: &str = "lctxpkg";
+pub const MAX_PACKAGE_FILE_BYTES: u64 = 10 * 1024 * 1024; // 10 MB
+
+pub fn is_package_file(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|ext| ext == PACKAGE_EXTENSION || ext == LEGACY_PACKAGE_EXTENSION)
+}
+
+pub fn default_package_filename(name: &str, version: &str) -> String {
+    format!("{name}-{version}.{PACKAGE_EXTENSION}")
+}
 
 // Documentation-level contracts (do not have a schema field in payloads).
 pub const HTTP_MCP_CONTRACT_VERSION: u32 = 1;
@@ -107,6 +122,10 @@ pub fn versions_kv() -> BTreeMap<&'static str, u32> {
         (
             "leanctx.contract.context_package_v1.schema_version",
             CONTEXT_PACKAGE_V1_SCHEMA_VERSION,
+        ),
+        (
+            "leanctx.contract.context_package_v2.schema_version",
+            CONTEXT_PACKAGE_V2_SCHEMA_VERSION,
         ),
         (
             "leanctx.contract.http_mcp.contract_version",

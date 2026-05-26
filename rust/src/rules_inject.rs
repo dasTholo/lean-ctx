@@ -207,6 +207,8 @@ fn match_agent_name(cli_key: &str, target_name: &str) -> bool {
         || (needle == "continue" && tn.contains("continue"))
         || (needle == "qwen" && tn.contains("qwen"))
         || (needle == "antigravity" && tn.contains("antigravity"))
+        || (needle == "augment" && tn.contains("augment"))
+        || (needle == "openclaw" && tn.contains("openclaw"))
         || (needle == "vscode" && (tn.contains("vs code") || tn.contains("vscode")))
 }
 
@@ -353,7 +355,7 @@ fn append_to_shared(path: &std::path::Path) -> Result<RulesResult, String> {
     content.push_str(RULES_SHARED);
     content.push('\n');
 
-    std::fs::write(path, content).map_err(|e| e.to_string())?;
+    crate::config_io::write_atomic_with_backup(path, &content)?;
     Ok(RulesResult::Injected)
 }
 
@@ -384,7 +386,7 @@ fn replace_markdown_section(path: &std::path::Path, content: &str) -> Result<Rul
         _ => return Ok(RulesResult::AlreadyPresent),
     };
 
-    std::fs::write(path, new_content).map_err(|e| e.to_string())?;
+    crate::config_io::write_atomic_with_backup(path, &new_content)?;
     Ok(RulesResult::Updated)
 }
 
@@ -394,7 +396,7 @@ fn write_dedicated(path: &std::path::Path, content: &'static str) -> Result<Rule
         existing.contains(MARKER)
     };
 
-    std::fs::write(path, content).map_err(|e| e.to_string())?;
+    crate::config_io::write_atomic_with_backup(path, content)?;
 
     if is_update {
         Ok(RulesResult::Updated)
@@ -441,6 +443,13 @@ fn is_tool_detected(target: &RulesTarget, home: &std::path::Path) -> bool {
         "AWS Kiro" => home.join(".kiro").exists(),
         "Crush" => home.join(".config/crush").exists() || command_exists("crush"),
         "Verdent" => home.join(".verdent").exists(),
+        // Augment ships as either the `auggie` CLI (writes to ~/.augment/) or
+        // the VS Code extension (`augment.vscode-augment` globalStorage).
+        "Augment" => {
+            command_exists("auggie")
+                || home.join(".augment").exists()
+                || detect_extension_installed(home, "augment.vscode-augment")
+        }
         _ => false,
     }
 }
@@ -643,6 +652,16 @@ fn build_rules_targets(home: &std::path::Path) -> Vec<RulesTarget> {
             path: home.join(".config/crush/rules/lean-ctx.md"),
             format: RulesFormat::DedicatedMarkdown,
         },
+        RulesTarget {
+            name: "Augment",
+            path: home.join(".augment/rules/lean-ctx.md"),
+            format: RulesFormat::DedicatedMarkdown,
+        },
+        RulesTarget {
+            name: "OpenClaw",
+            path: home.join(".openclaw/rules/lean-ctx.md"),
+            format: RulesFormat::DedicatedMarkdown,
+        },
     ]
 }
 
@@ -682,7 +701,7 @@ fn build_skill_targets(home: &std::path::Path) -> Vec<SkillTarget> {
         SkillTarget {
             agent_key: "claude",
             display_name: "Claude Code",
-            skill_dir: home.join(".claude/skills/lean-ctx"),
+            skill_dir: crate::setup::claude_config_dir(home).join("skills/lean-ctx"),
         },
         SkillTarget {
             agent_key: "cursor",
@@ -700,6 +719,11 @@ fn build_skill_targets(home: &std::path::Path) -> Vec<SkillTarget> {
             agent_key: "copilot",
             display_name: "GitHub Copilot",
             skill_dir: home.join(".copilot/skills/lean-ctx"),
+        },
+        SkillTarget {
+            agent_key: "openclaw",
+            display_name: "OpenClaw",
+            skill_dir: home.join(".openclaw/skills/lean-ctx"),
         },
     ]
 }
@@ -722,6 +746,7 @@ fn is_skill_agent_detected(agent_key: &str, home: &std::path::Path) -> bool {
                 || home.join(".copilot/mcp-config.json").exists()
                 || command_exists("copilot")
         }
+        "openclaw" => home.join(".openclaw").exists() || command_exists("openclaw"),
         _ => false,
     }
 }
@@ -744,7 +769,7 @@ pub fn install_skill_for_agent(home: &std::path::Path, agent_key: &str) -> Resul
         }
     }
 
-    std::fs::write(&skill_path, SKILL_TEMPLATE).map_err(|e| e.to_string())?;
+    crate::config_io::write_atomic_with_backup(&skill_path, SKILL_TEMPLATE)?;
     Ok(skill_path)
 }
 
@@ -776,7 +801,7 @@ pub fn install_all_skills(home: &std::path::Path) -> Vec<(String, bool)> {
             continue;
         }
 
-        match std::fs::write(&skill_path, SKILL_TEMPLATE) {
+        match crate::config_io::write_atomic_with_backup(&skill_path, SKILL_TEMPLATE) {
             Ok(()) => results.push((target.display_name.to_string(), true)),
             Err(e) => {
                 tracing::warn!("Failed to write SKILL.md for {}: {e}", target.display_name);
@@ -953,7 +978,7 @@ mod tests {
     fn target_count() {
         let home = std::path::PathBuf::from("/tmp/fake_home");
         let targets = build_rules_targets(&home);
-        assert_eq!(targets.len(), 21);
+        assert_eq!(targets.len(), 23);
     }
 
     #[test]
@@ -966,7 +991,7 @@ mod tests {
     fn skill_targets_count() {
         let home = std::path::PathBuf::from("/tmp/fake_home");
         let targets = build_skill_targets(&home);
-        assert_eq!(targets.len(), 4);
+        assert_eq!(targets.len(), 5);
     }
 
     #[test]
@@ -1031,6 +1056,8 @@ mod tests {
         assert!(match_agent_name("continue", "Continue"));
         assert!(match_agent_name("antigravity", "Antigravity"));
         assert!(match_agent_name("gemini", "Gemini CLI"));
+        assert!(match_agent_name("augment", "Augment"));
+        assert!(match_agent_name("openclaw", "OpenClaw"));
     }
 
     #[test]

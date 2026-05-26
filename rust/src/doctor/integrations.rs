@@ -137,9 +137,11 @@ fn integration_generic(
             checks.push(check_codex_hooks_enabled(home));
             checks.push(check_codex_hooks_json(home));
         }
-        crate::core::editor_registry::types::ConfigType::VsCodeMcp
-        | crate::core::editor_registry::types::ConfigType::CopilotCli => {
+        crate::core::editor_registry::types::ConfigType::VsCodeMcp => {
             checks.push(check_vscode_mcp(&target.config_path, binary, data_dir));
+        }
+        crate::core::editor_registry::types::ConfigType::CopilotCli => {
+            checks.push(check_copilot_cli_mcp(&target.config_path, binary, data_dir));
         }
         crate::core::editor_registry::types::ConfigType::OpenCode => {
             checks.push(check_opencode_config(&target.config_path, binary, data_dir));
@@ -156,6 +158,13 @@ fn integration_generic(
         crate::core::editor_registry::types::ConfigType::GeminiSettings => {
             checks.push(check_mcp_json(&target.config_path, binary, data_dir));
             checks.push(check_gemini_trust_and_hooks(home, binary));
+        }
+        crate::core::editor_registry::types::ConfigType::AugmentVsCode => {
+            checks.push(check_augment_vscode_mcp(
+                &target.config_path,
+                binary,
+                data_dir,
+            ));
         }
     }
 
@@ -347,6 +356,7 @@ fn rules_path_for(name: &str, home: &std::path::Path) -> Option<std::path::PathB
         "Amazon Q Developer" => Some(home.join(".aws/amazonq/rules/lean-ctx.md")),
         "JetBrains IDEs" => Some(home.join(".jb-rules/lean-ctx.md")),
         "Antigravity" => Some(home.join(".gemini/antigravity/rules/lean-ctx.md")),
+        "Augment CLI" | "Augment (VS Code)" => Some(home.join(".augment/rules/lean-ctx.md")),
         "Pi Coding Agent" => Some(home.join(".pi/rules/lean-ctx.md")),
         "Crush" => Some(home.join(".config/crush/rules/lean-ctx.md")),
         _ => None,
@@ -437,6 +447,118 @@ fn check_vscode_mcp(path: &std::path::Path, binary: &str, data_dir: &str) -> Nam
     let ok = ty_ok && cmd_ok && env_ok;
     NamedCheck {
         name: "VS Code MCP".to_string(),
+        ok,
+        detail: if ok {
+            format!("ok ({})", path.display())
+        } else {
+            format!("drift ({})", path.display())
+        },
+    }
+}
+
+fn check_augment_vscode_mcp(path: &std::path::Path, binary: &str, data_dir: &str) -> NamedCheck {
+    if !path.exists() {
+        return NamedCheck {
+            name: "Augment VS Code MCP".to_string(),
+            ok: false,
+            detail: format!("missing ({})", path.display()),
+        };
+    }
+    let content = std::fs::read_to_string(path).unwrap_or_default();
+    let Some(v) = crate::core::jsonc::parse_jsonc(&content).ok() else {
+        return NamedCheck {
+            name: "Augment VS Code MCP".to_string(),
+            ok: false,
+            detail: format!("invalid JSON ({})", path.display()),
+        };
+    };
+    let Some(arr) = v.as_array() else {
+        return NamedCheck {
+            name: "Augment VS Code MCP".to_string(),
+            ok: false,
+            detail: format!("expected top-level array ({})", path.display()),
+        };
+    };
+    let Some(e) = arr
+        .iter()
+        .find(|e| e.get("name").and_then(|n| n.as_str()) == Some("lean-ctx"))
+    else {
+        return NamedCheck {
+            name: "Augment VS Code MCP".to_string(),
+            ok: false,
+            detail: format!("lean-ctx entry missing ({})", path.display()),
+        };
+    };
+
+    let ty_ok = e.get("type").and_then(|t| t.as_str()) == Some("stdio");
+    let cmd_ok = e
+        .get("command")
+        .and_then(|c| c.as_str())
+        .is_some_and(|c| cmd_matches_expected(c, binary));
+    let env_ok = e
+        .get("env")
+        .and_then(|env| env.get("LEAN_CTX_DATA_DIR"))
+        .and_then(|d| d.as_str())
+        .is_some_and(|d| d.trim() == data_dir.trim());
+    // The Augment VS Code panel persists user toggles via the `disabled` flag.
+    // An entry with `disabled: true` is present-but-inert, so doctor must
+    // surface that as drift instead of silently passing. A missing key,
+    // explicit `false`, or any non-boolean value is treated as enabled — only
+    // an explicit `true` counts as a user-initiated disable.
+    let not_disabled = e.get("disabled").and_then(serde_json::Value::as_bool) != Some(true);
+
+    let ok = ty_ok && cmd_ok && env_ok && not_disabled;
+    NamedCheck {
+        name: "Augment VS Code MCP".to_string(),
+        ok,
+        detail: if ok {
+            format!("ok ({})", path.display())
+        } else if !not_disabled {
+            format!("disabled ({})", path.display())
+        } else {
+            format!("drift ({})", path.display())
+        },
+    }
+}
+
+fn check_copilot_cli_mcp(path: &std::path::Path, binary: &str, data_dir: &str) -> NamedCheck {
+    if !path.exists() {
+        return NamedCheck {
+            name: "Copilot CLI MCP".to_string(),
+            ok: false,
+            detail: format!("missing ({})", path.display()),
+        };
+    }
+    let content = std::fs::read_to_string(path).unwrap_or_default();
+    let parsed = crate::core::jsonc::parse_jsonc(&content).ok();
+    let Some(v) = parsed else {
+        return NamedCheck {
+            name: "Copilot CLI MCP".to_string(),
+            ok: false,
+            detail: format!("invalid JSON ({})", path.display()),
+        };
+    };
+    let Some(e) = v.get("mcpServers").and_then(|m| m.get("lean-ctx")) else {
+        return NamedCheck {
+            name: "Copilot CLI MCP".to_string(),
+            ok: false,
+            detail: format!("lean-ctx missing in mcpServers ({})", path.display()),
+        };
+    };
+
+    let cmd_ok = e
+        .get("command")
+        .and_then(|c| c.as_str())
+        .is_some_and(|c| cmd_matches_expected(c, binary));
+    let env_ok = e
+        .get("env")
+        .and_then(|env| env.get("LEAN_CTX_DATA_DIR"))
+        .and_then(|d| d.as_str())
+        .is_some_and(|d| d.trim() == data_dir.trim());
+
+    let ok = cmd_ok && env_ok;
+    NamedCheck {
+        name: "Copilot CLI MCP".to_string(),
         ok,
         detail: if ok {
             format!("ok ({})", path.display())

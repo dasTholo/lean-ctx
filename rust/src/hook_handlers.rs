@@ -381,11 +381,8 @@ fn cap_content(s: &str) -> String {
     if s.len() <= MAX_CONTENT_CHARS {
         s.to_string()
     } else {
-        format!(
-            "{}…\n\n[truncated: {} total chars]",
-            &s[..MAX_CONTENT_CHARS],
-            s.len()
-        )
+        let truncated = safe_truncate(s, MAX_CONTENT_CHARS);
+        format!("{}…\n\n[truncated: {} total chars]", truncated, s.len())
     }
 }
 
@@ -393,8 +390,20 @@ fn truncate_str(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.to_string()
     } else {
-        format!("{}...", &s[..max])
+        format!("{}...", safe_truncate(s, max))
     }
+}
+
+/// Truncate a string at a char boundary <= max bytes. Never panics on multi-byte UTF-8.
+fn safe_truncate(s: &str, max: usize) -> &str {
+    if max >= s.len() {
+        return s;
+    }
+    let mut end = max;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
 }
 
 fn append_radar_event(event: &ObserveEvent) {
@@ -578,8 +587,13 @@ fn is_rewritable(cmd: &str) -> bool {
 }
 
 fn wrap_single_command(cmd: &str, binary: &str) -> String {
-    let shell_escaped = cmd.replace('\'', "'\\''");
-    format!("{binary} -c '{shell_escaped}'")
+    if cfg!(windows) {
+        let escaped = cmd.replace('"', "\\\"");
+        format!("{binary} -c \"{escaped}\"")
+    } else {
+        let shell_escaped = cmd.replace('\'', "'\\''");
+        format!("{binary} -c '{shell_escaped}'")
+    }
 }
 
 fn rewrite_candidate(cmd: &str, binary: &str) -> Option<String> {
@@ -622,72 +636,108 @@ fn rewrite_file_read_command(cmd: &str, binary: &str) -> Option<String> {
         return None;
     }
 
-    let parts: Vec<&str> = cmd.split_whitespace().collect();
+    let parts = shell_tokenize(cmd);
     if parts.len() < 2 {
         return None;
     }
 
-    match parts[0] {
+    match parts[0].as_str() {
         "cat" => {
             let path = parts[1..].join(" ");
-            Some(format!("{binary} read {path}"))
+            Some(format!("{binary} read {}", shell_quote(&path)))
         }
         "head" => {
-            let (n, path) = parse_head_tail_args(&parts[1..]);
+            let refs: Vec<&str> = parts[1..].iter().map(String::as_str).collect();
+            let (n, path) = parse_head_tail_args(&refs);
             let path = path?;
+            let qp = shell_quote(path);
             match n {
-                Some(lines) => Some(format!("{binary} read {path} -m lines:1-{lines}")),
-                None => Some(format!("{binary} read {path} -m lines:1-10")),
+                Some(lines) => Some(format!("{binary} read {qp} -m lines:1-{lines}")),
+                None => Some(format!("{binary} read {qp} -m lines:1-10")),
             }
         }
         "tail" => {
-            let (n, path) = parse_head_tail_args(&parts[1..]);
+            let refs: Vec<&str> = parts[1..].iter().map(String::as_str).collect();
+            let (n, path) = parse_head_tail_args(&refs);
             let path = path?;
+            let qp = shell_quote(path);
             let lines = n.unwrap_or(10);
-            Some(format!("{binary} read {path} -m lines:-{lines}"))
+            Some(format!("{binary} read {qp} -m lines:-{lines}"))
         }
         _ => None,
     }
 }
 
 /// Rewrites `rg <pattern> [path]` to `lean-ctx grep <pattern> [path]` for simple forms.
-///
-/// Falls back to `lean-ctx -c 'rg ...'` for flags/complex quoting (handled elsewhere).
 fn rewrite_search_command(cmd: &str, binary: &str) -> Option<String> {
-    let parts: Vec<&str> = cmd.split_whitespace().collect();
-    if parts.first().copied() != Some("rg") {
+    let parts = shell_tokenize(cmd);
+    if parts.first().map(String::as_str) != Some("rg") {
         return None;
     }
-    if parts.len() < 2 {
+    if parts.len() < 2 || parts.len() > 3 {
         return None;
     }
     if parts[1].starts_with('-') {
         return None;
     }
-    if parts.len() > 3 {
-        return None;
-    }
-    let pattern = parts[1];
-    let path = parts.get(2).copied();
-    match path {
+    let pattern = &parts[1];
+    match parts.get(2) {
         Some(p) if p.starts_with('-') => None,
-        Some(p) => Some(format!("{binary} grep {pattern} {p}")),
+        Some(p) => Some(format!("{binary} grep {pattern} {}", shell_quote(p))),
         None => Some(format!("{binary} grep {pattern}")),
     }
 }
 
 /// Rewrites simple `ls [path]` to `lean-ctx ls [path]`.
-///
-/// Falls back to `lean-ctx -c 'ls ...'` for flags (handled elsewhere).
 fn rewrite_dir_list_command(cmd: &str, binary: &str) -> Option<String> {
-    let parts: Vec<&str> = cmd.split_whitespace().collect();
-    if parts.first().copied() != Some("ls") {
+    let parts = shell_tokenize(cmd);
+    if parts.first().map(String::as_str) != Some("ls") {
         return None;
     }
     match parts.len() {
         1 => Some(format!("{binary} ls")),
-        2 if !parts[1].starts_with('-') => Some(format!("{binary} ls {}", parts[1])),
+        2 if !parts[1].starts_with('-') => Some(format!("{binary} ls {}", shell_quote(&parts[1]))),
         _ => None,
+    }
+}
+
+/// Tokenize a shell command respecting single/double quotes and backslash escapes.
+pub fn shell_tokenize(input: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut chars = input.chars().peekable();
+    let mut in_single = false;
+    let mut in_double = false;
+
+    while let Some(c) = chars.next() {
+        match c {
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            '\\' if !in_single => {
+                if let Some(next) = chars.next() {
+                    current.push(next);
+                }
+            }
+            c if c.is_whitespace() && !in_single && !in_double => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+            }
+            _ => current.push(c),
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
+}
+
+/// Quote a path/arg for shell if it contains spaces or special chars.
+pub fn shell_quote(s: &str) -> String {
+    if s.contains(|c: char| c.is_whitespace() || c == '\'' || c == '"' || c == '\\') {
+        format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+    } else {
+        s.to_string()
     }
 }
 
@@ -1111,6 +1161,16 @@ fn extract_json_field(input: &str, field: &str) -> Option<String> {
 mod tests {
     use super::*;
 
+    fn expect_wrapped(cmd: &str, binary: &str) -> String {
+        if cfg!(windows) {
+            let escaped = cmd.replace('"', "\\\"");
+            format!("{binary} -c \"{escaped}\"")
+        } else {
+            let shell_escaped = cmd.replace('\'', "'\\''");
+            format!("{binary} -c '{shell_escaped}'")
+        }
+    }
+
     #[test]
     fn is_rewritable_basic() {
         assert!(is_rewritable("git status"));
@@ -1195,13 +1255,16 @@ mod tests {
     #[test]
     fn wrap_single() {
         let r = wrap_single_command("git status", "lean-ctx");
-        assert_eq!(r, "lean-ctx -c 'git status'");
+        assert_eq!(r, expect_wrapped("git status", "lean-ctx"));
     }
 
     #[test]
     fn wrap_with_quotes() {
         let r = wrap_single_command(r#"curl -H "Auth" https://api.com"#, "lean-ctx");
-        assert_eq!(r, r#"lean-ctx -c 'curl -H "Auth" https://api.com'"#);
+        assert_eq!(
+            r,
+            expect_wrapped(r#"curl -H "Auth" https://api.com"#, "lean-ctx")
+        );
     }
 
     #[test]
@@ -1216,7 +1279,7 @@ mod tests {
     fn rewrite_candidate_wraps_single_command() {
         assert_eq!(
             rewrite_candidate("git status", "lean-ctx"),
-            Some("lean-ctx -c 'git status'".to_string())
+            Some(expect_wrapped("git status", "lean-ctx"))
         );
     }
 
@@ -1254,19 +1317,15 @@ mod tests {
     #[test]
     fn compound_rewrite_and_chain() {
         let result = build_rewrite_compound("cd src && git status && echo done", "lean-ctx");
-        assert_eq!(
-            result,
-            Some("cd src && lean-ctx -c 'git status' && echo done".into())
-        );
+        let w = expect_wrapped("git status", "lean-ctx");
+        assert_eq!(result, Some(format!("cd src && {w} && echo done")));
     }
 
     #[test]
     fn compound_rewrite_pipe() {
         let result = build_rewrite_compound("git log --oneline | head -5", "lean-ctx");
-        assert_eq!(
-            result,
-            Some("lean-ctx -c 'git log --oneline' | head -5".into())
-        );
+        let w = expect_wrapped("git log --oneline", "lean-ctx");
+        assert_eq!(result, Some(format!("{w} | head -5")));
     }
 
     #[test]
@@ -1278,37 +1337,32 @@ mod tests {
     #[test]
     fn compound_rewrite_multiple_rewritable() {
         let result = build_rewrite_compound("git add . && cargo test && npm run lint", "lean-ctx");
-        assert_eq!(
-            result,
-            Some(
-                "lean-ctx -c 'git add .' && lean-ctx -c 'cargo test' && lean-ctx -c 'npm run lint'"
-                    .into()
-            )
-        );
+        let w1 = expect_wrapped("git add .", "lean-ctx");
+        let w2 = expect_wrapped("cargo test", "lean-ctx");
+        let w3 = expect_wrapped("npm run lint", "lean-ctx");
+        assert_eq!(result, Some(format!("{w1} && {w2} && {w3}")));
     }
 
     #[test]
     fn compound_rewrite_semicolons() {
         let result = build_rewrite_compound("git add .; git commit -m 'fix'", "lean-ctx");
-        assert_eq!(
-            result,
-            Some("lean-ctx -c 'git add .' ; lean-ctx -c 'git commit -m '\\''fix'\\'''".into())
-        );
+        let w1 = expect_wrapped("git add .", "lean-ctx");
+        let w2 = expect_wrapped("git commit -m 'fix'", "lean-ctx");
+        assert_eq!(result, Some(format!("{w1} ; {w2}")));
     }
 
     #[test]
     fn compound_rewrite_or_chain() {
         let result = build_rewrite_compound("git pull || echo failed", "lean-ctx");
-        assert_eq!(result, Some("lean-ctx -c 'git pull' || echo failed".into()));
+        let w = expect_wrapped("git pull", "lean-ctx");
+        assert_eq!(result, Some(format!("{w} || echo failed")));
     }
 
     #[test]
     fn compound_skips_already_rewritten() {
         let result = build_rewrite_compound("lean-ctx -c git status && git diff", "lean-ctx");
-        assert_eq!(
-            result,
-            Some("lean-ctx -c git status && lean-ctx -c 'git diff'".into())
-        );
+        let w = expect_wrapped("git diff", "lean-ctx");
+        assert_eq!(result, Some(format!("lean-ctx -c git status && {w}")));
     }
 
     #[test]
@@ -1424,42 +1478,40 @@ mod tests {
     #[test]
     fn wrap_single_command_em_dash() {
         let r = wrap_single_command("gh --comment \"closing — see #407\"", "lean-ctx");
-        assert_eq!(r, "lean-ctx -c 'gh --comment \"closing — see #407\"'");
+        assert_eq!(
+            r,
+            expect_wrapped("gh --comment \"closing — see #407\"", "lean-ctx")
+        );
     }
 
     #[test]
     fn wrap_single_command_dollar_sign() {
         let r = wrap_single_command("echo $HOME", "lean-ctx");
-        assert_eq!(r, "lean-ctx -c 'echo $HOME'");
+        assert_eq!(r, expect_wrapped("echo $HOME", "lean-ctx"));
     }
 
     #[test]
     fn wrap_single_command_backticks() {
         let r = wrap_single_command("echo `date`", "lean-ctx");
-        assert_eq!(r, "lean-ctx -c 'echo `date`'");
+        assert_eq!(r, expect_wrapped("echo `date`", "lean-ctx"));
     }
 
     #[test]
     fn wrap_single_command_nested_single_quotes() {
         let r = wrap_single_command("echo 'hello world'", "lean-ctx");
-        assert_eq!(r, r"lean-ctx -c 'echo '\''hello world'\'''");
+        assert_eq!(r, expect_wrapped("echo 'hello world'", "lean-ctx"));
     }
 
     #[test]
     fn wrap_single_command_exclamation_mark() {
         let r = wrap_single_command("echo hello!", "lean-ctx");
-        assert_eq!(r, "lean-ctx -c 'echo hello!'");
+        assert_eq!(r, expect_wrapped("echo hello!", "lean-ctx"));
     }
 
     #[test]
     fn wrap_single_command_find_with_many_excludes() {
-        let r = wrap_single_command(
-            "find . -not -path ./node_modules -not -path ./.git -not -path ./dist",
-            "lean-ctx",
-        );
-        assert_eq!(
-            r,
-            "lean-ctx -c 'find . -not -path ./node_modules -not -path ./.git -not -path ./dist'"
-        );
+        let cmd = "find . -not -path ./node_modules -not -path ./.git -not -path ./dist";
+        let r = wrap_single_command(cmd, "lean-ctx");
+        assert_eq!(r, expect_wrapped(cmd, "lean-ctx"));
     }
 }

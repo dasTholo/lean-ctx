@@ -1,6 +1,28 @@
 use std::io::Read as _;
 use std::path::PathBuf;
 
+/// Parse a package reference like `name@version` or `@scope/name@version`.
+/// Scoped names start with `@`, so a bare `@scope/name` has no version,
+/// while `@scope/name@1.0.0` splits at the *last* `@` that follows a `/`.
+fn parse_pkg_ref(s: &str) -> (&str, Option<&str>) {
+    if s.starts_with('@') {
+        if let Some(slash_pos) = s.find('/') {
+            let after_scope = &s[slash_pos..];
+            if let Some(at_pos) = after_scope.rfind('@') {
+                if at_pos > 0 {
+                    let split = slash_pos + at_pos;
+                    return (&s[..split], Some(&s[split + 1..]));
+                }
+            }
+        }
+        (s, None)
+    } else if let Some(at_pos) = s.rfind('@') {
+        (&s[..at_pos], Some(&s[at_pos + 1..]))
+    } else {
+        (s, None)
+    }
+}
+
 pub(crate) fn cmd_pack(args: &[String]) {
     let project_root = super::common::detect_project_root(args);
 
@@ -19,6 +41,7 @@ pub(crate) fn cmd_pack(args: &[String]) {
         "export" => cmd_pack_export(args),
         "import" => cmd_pack_import(args, &project_root),
         "auto-load" => cmd_pack_auto_load(args),
+        "publish" => cmd_pack_publish(args),
         "send" => cmd_pack_send(args, &project_root),
         "receive" => cmd_pack_receive(args, &project_root),
         "help" | "--help" | "-h" => print_usage(),
@@ -118,6 +141,8 @@ fn cmd_pack_create(args: &[String], project_root: &str) {
     let mut author: Option<String> = None;
     let mut tags: Vec<String> = Vec::new();
     let mut layers_str: Option<String> = None;
+    let mut level: u32 = 1;
+    let mut scope: Option<String> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -158,6 +183,20 @@ fn cmd_pack_create(args: &[String], project_root: &str) {
             tags = v.split(',').map(|s| s.trim().to_string()).collect();
         } else if let Some(v) = a.strip_prefix("--layers=") {
             layers_str = Some(v.to_string());
+        } else if let Some(v) = a.strip_prefix("--level=") {
+            level = v.parse::<u32>().unwrap_or(1).clamp(1, 3);
+        } else if a == "--level" {
+            i += 1;
+            if let Some(v) = args.get(i).filter(|v| !v.starts_with("--")) {
+                level = v.parse::<u32>().unwrap_or(1).clamp(1, 3);
+            }
+        } else if let Some(v) = a.strip_prefix("--scope=") {
+            scope = Some(v.to_string());
+        } else if a == "--scope" {
+            i += 1;
+            if let Some(v) = args.get(i).filter(|v| !v.starts_with("--")) {
+                scope = Some(v.clone());
+            }
         }
         i += 1;
     }
@@ -168,23 +207,34 @@ fn cmd_pack_create(args: &[String], project_root: &str) {
     };
 
     let requested_layers: Vec<&str> = layers_str.as_deref().map_or_else(
-        || vec!["knowledge", "graph", "session", "gotchas", "patterns"],
+        || vec!["knowledge", "graph", "session", "gotchas"],
         |s| s.split(',').map(str::trim).collect(),
     );
 
     let mut builder = crate::core::context_package::PackageBuilder::new(&pkg_name, &version)
         .description(&description)
-        .tags(tags);
+        .tags(tags)
+        .level(level);
 
     if let Some(ref a) = author {
         builder = builder.author(a);
+    }
+    if let Some(ref s) = scope {
+        builder = builder.scope(s);
     }
 
     let phash = crate::core::project_hash::hash_project_root(project_root);
     builder = builder.project_hash(&phash);
 
+    if level >= 2 {
+        builder.build_context_graph(project_root);
+    }
+
     if requested_layers.contains(&"knowledge") || requested_layers.contains(&"patterns") {
         builder = builder.add_knowledge_from_project(project_root);
+    }
+    if requested_layers.contains(&"patterns") {
+        builder = builder.add_patterns_from_project(project_root);
     }
     if requested_layers.contains(&"graph") {
         builder = builder.add_graph_from_project(project_root);
@@ -213,6 +263,13 @@ fn cmd_pack_create(args: &[String], project_root: &str) {
                     println!("Package created successfully:");
                     println!("  Name:    {}", manifest.name);
                     println!("  Version: {}", manifest.version);
+                    println!("  Schema:  v{}", manifest.schema_version);
+                    if let Some(lvl) = manifest.conformance_level {
+                        println!("  Level:   {lvl}");
+                    }
+                    if let Some(ref s) = manifest.scope {
+                        println!("  Scope:   {s}");
+                    }
                     println!(
                         "  Layers:  {}",
                         manifest
@@ -232,6 +289,15 @@ fn cmd_pack_create(args: &[String], project_root: &str) {
                         "    Compression:     {:.1}%",
                         manifest.stats.compression_ratio * 100.0
                     );
+                    if let Some(ref gs) = manifest.graph_summary {
+                        println!("  Graph v2:");
+                        println!("    Nodes:      {}", gs.node_count);
+                        println!("    Edges:      {}", gs.edge_count);
+                        if let Some(mean) = gs.activation_mean {
+                            println!("    Activation: {mean:.2}");
+                        }
+                        println!("    Types:      {}", gs.node_types.join(", "));
+                    }
                     println!("  Size:    {} bytes", manifest.integrity.byte_size);
                     println!(
                         "  SHA256:  {}...{}",
@@ -261,12 +327,10 @@ fn cmd_pack_install(args: &[String], project_root: &str) {
         } else if let Some(v) = a.strip_prefix("--version=") {
             pkg_version = Some(v.to_string());
         } else if !a.starts_with("--") && pkg_name.is_none() {
-            if a.contains('@') {
-                let parts: Vec<&str> = a.splitn(2, '@').collect();
-                pkg_name = Some(parts[0].to_string());
-                pkg_version = Some(parts[1].to_string());
-            } else {
-                pkg_name = Some(a.clone());
+            let (parsed_name, parsed_ver) = parse_pkg_ref(a);
+            pkg_name = Some(parsed_name.to_string());
+            if let Some(v) = parsed_ver {
+                pkg_version = Some(v.to_string());
             }
         }
     }
@@ -303,8 +367,11 @@ fn cmd_pack_install(args: &[String], project_root: &str) {
         }
     };
 
-    let version = pkg_version.as_deref().unwrap_or_else(|| {
-        registry
+    let resolved_version;
+    let version = if let Some(v) = pkg_version.as_deref() {
+        v
+    } else {
+        resolved_version = registry
             .list()
             .ok()
             .and_then(|entries| {
@@ -314,9 +381,9 @@ fn cmd_pack_install(args: &[String], project_root: &str) {
                     .max_by(|a, b| a.installed_at.cmp(&b.installed_at))
                     .map(|e| e.version.clone())
             })
-            .unwrap_or_default()
-            .leak()
-    });
+            .unwrap_or_default();
+        &resolved_version
+    };
 
     apply_package(&name, version, project_root);
 }
@@ -391,12 +458,7 @@ fn cmd_pack_info(args: &[String]) {
         return;
     };
 
-    let (name, version) = if pkg_ref.contains('@') {
-        let parts: Vec<&str> = pkg_ref.splitn(2, '@').collect();
-        (parts[0], Some(parts[1]))
-    } else {
-        (pkg_ref.as_str(), None)
-    };
+    let (name, version) = parse_pkg_ref(pkg_ref);
 
     let registry = match crate::core::context_package::LocalRegistry::open() {
         Ok(r) => r,
@@ -406,8 +468,11 @@ fn cmd_pack_info(args: &[String]) {
         }
     };
 
-    let ver = version.unwrap_or_else(|| {
-        registry
+    let resolved_ver;
+    let ver = if let Some(v) = version {
+        v
+    } else {
+        resolved_ver = registry
             .list()
             .ok()
             .and_then(|entries| {
@@ -417,13 +482,26 @@ fn cmd_pack_info(args: &[String]) {
                     .max_by(|a, b| a.installed_at.cmp(&b.installed_at))
                     .map(|e| e.version.clone())
             })
-            .unwrap_or_default()
-            .leak()
-    });
+            .unwrap_or_default();
+        &resolved_ver
+    };
 
     match registry.load_package(name, ver) {
         Ok((manifest, content)) => {
             println!("Package: {} v{}", manifest.name, manifest.version);
+            println!("Schema:  v{}", manifest.schema_version);
+            if let Some(lvl) = manifest.conformance_level {
+                let label = match lvl {
+                    1 => "Basic",
+                    2 => "Graph",
+                    3 => "Cognitive",
+                    _ => "Unknown",
+                };
+                println!("Level:   {lvl} ({label})");
+            }
+            if let Some(ref s) = manifest.scope {
+                println!("Scope:   {s}");
+            }
             if !manifest.description.is_empty() {
                 println!("Description: {}", manifest.description);
             }
@@ -456,6 +534,17 @@ fn cmd_pack_info(args: &[String]) {
                 "  Compression:      {:.1}%",
                 manifest.stats.compression_ratio * 100.0
             );
+            if let Some(ref gs) = manifest.graph_summary {
+                println!("\nGraph v2:");
+                println!("  Nodes:       {}", gs.node_count);
+                println!("  Edges:       {}", gs.edge_count);
+                if let Some(mean) = gs.activation_mean {
+                    println!("  Activation:  {mean:.2}");
+                }
+                if !gs.node_types.is_empty() {
+                    println!("  Types:       {}", gs.node_types.join(", "));
+                }
+            }
             println!("  Est. tokens:      ~{}", content.estimated_token_count());
             println!("\nIntegrity:");
             println!("  SHA256:       {}", manifest.integrity.sha256);
@@ -487,12 +576,7 @@ fn cmd_pack_remove(args: &[String]) {
         return;
     };
 
-    let (name, version) = if pkg_ref.contains('@') {
-        let parts: Vec<&str> = pkg_ref.splitn(2, '@').collect();
-        (parts[0], Some(parts[1]))
-    } else {
-        (pkg_ref.as_str(), None)
-    };
+    let (name, version) = parse_pkg_ref(pkg_ref);
 
     let registry = match crate::core::context_package::LocalRegistry::open() {
         Ok(r) => r,
@@ -531,9 +615,9 @@ fn cmd_pack_export(args: &[String]) {
         return;
     };
 
-    let (name, version) = if pkg_ref.contains('@') {
-        let parts: Vec<&str> = pkg_ref.splitn(2, '@').collect();
-        (parts[0].to_string(), parts[1].to_string())
+    let (parsed_name, parsed_ver) = parse_pkg_ref(pkg_ref);
+    let (name, version) = if let Some(v) = parsed_ver {
+        (parsed_name.to_string(), v.to_string())
     } else {
         let registry = match crate::core::context_package::LocalRegistry::open() {
             Ok(r) => r,
@@ -548,15 +632,16 @@ fn cmd_pack_export(args: &[String]) {
             .and_then(|entries| {
                 entries
                     .iter()
-                    .filter(|e| e.name == pkg_ref)
+                    .filter(|e| e.name == parsed_name)
                     .max_by(|a, b| a.installed_at.cmp(&b.installed_at))
                     .map(|e| e.version.clone())
             })
             .unwrap_or_default();
-        (pkg_ref.to_string(), ver)
+        (parsed_name.to_string(), ver)
     };
 
-    let out_path = output.unwrap_or_else(|| format!("{name}-{version}.lctxpkg"));
+    let out_path =
+        output.unwrap_or_else(|| crate::core::contracts::default_package_filename(&name, &version));
 
     let registry = match crate::core::context_package::LocalRegistry::open() {
         Ok(r) => r,
@@ -579,7 +664,7 @@ fn cmd_pack_import(args: &[String], project_root: &str) {
     let apply = args.iter().any(|a| a == "--apply");
 
     let Some(file_path) = file_path else {
-        eprintln!("Usage: lean-ctx pack import <file.lctxpkg> [--apply]");
+        eprintln!("Usage: lean-ctx pack import <file.ctxpkg> [--apply]");
         return;
     };
 
@@ -655,9 +740,9 @@ fn cmd_pack_auto_load(args: &[String]) {
         return;
     };
 
-    let (name, version) = if pkg_ref.contains('@') {
-        let parts: Vec<&str> = pkg_ref.splitn(2, '@').collect();
-        (parts[0], parts[1].to_string())
+    let (parsed_name, parsed_ver) = parse_pkg_ref(pkg_ref);
+    let (name, version) = if let Some(v) = parsed_ver {
+        (parsed_name, v.to_string())
     } else {
         let Ok(registry) = crate::core::context_package::LocalRegistry::open() else {
             eprintln!("Failed to open package registry");
@@ -669,12 +754,12 @@ fn cmd_pack_auto_load(args: &[String]) {
             .and_then(|entries| {
                 entries
                     .iter()
-                    .filter(|e| e.name == pkg_ref)
+                    .filter(|e| e.name == parsed_name)
                     .max_by(|a, b| a.installed_at.cmp(&b.installed_at))
                     .map(|e| e.version.clone())
             })
             .unwrap_or_default();
-        (pkg_ref, ver)
+        (parsed_name, ver)
     };
 
     let registry = match crate::core::context_package::LocalRegistry::open() {
@@ -707,24 +792,54 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
+fn cmd_pack_publish(args: &[String]) {
+    let file = args.iter().find(|a| a.ends_with(".ctxpkg"));
+
+    let Some(file) = file else {
+        eprintln!("Usage: lean-ctx pack publish <file.ctxpkg> [--registry <url>]");
+        eprintln!();
+        eprintln!("Publish is not yet available. The CTXPKG Registry is in development.");
+        eprintln!("Follow progress at https://ctxpkg.com");
+        return;
+    };
+
+    let registry_url = args
+        .windows(2)
+        .find(|w| w[0] == "--registry")
+        .map_or("https://registry.ctxpkg.com", |w| w[1].as_str());
+
+    let path = std::path::Path::new(file);
+    if !path.exists() {
+        eprintln!("File not found: {file}");
+        return;
+    }
+
+    eprintln!("Publishing to {registry_url} is not yet available.");
+    eprintln!("The CTXPKG Registry is in development at https://ctxpkg.com");
+    eprintln!();
+    eprintln!("In the meantime, you can share packages using:");
+    eprintln!("  lean-ctx pack send {file} --target=<url>");
+    eprintln!("  lean-ctx pack export <name>");
+}
+
 fn cmd_pack_send(args: &[String], project_root: &str) {
     use crate::core::a2a_transport::{
         serialize_envelope, AgentIdentityV1, TransportContentType, TransportEnvelopeV1,
     };
 
-    let file: Option<String> = args.iter().find(|a| a.ends_with(".lctxpkg")).cloned();
-    let target_url: Option<String> = args
+    let file: Option<String> = args
         .iter()
-        .find_map(|a| a.strip_prefix("--target=").map(String::from));
-    let recipient: Option<String> = args
-        .iter()
-        .find_map(|a| a.strip_prefix("--to=").map(String::from));
-    let secret: Option<String> = args
-        .iter()
-        .find_map(|a| a.strip_prefix("--secret=").map(String::from));
+        .find(|a| crate::core::contracts::is_package_file(std::path::Path::new(a.as_str())))
+        .cloned();
+    let target_url = parse_flag(args, "--target");
+    let recipient = parse_flag(args, "--to");
+    let secret = parse_flag(args, "--secret");
 
     let Some(f) = file else {
-        eprintln!("Usage: lean-ctx pack send <file.lctxpkg> [--target=<url>] [--to=<agent>] [--secret=<key>]");
+        eprintln!(
+            "Usage: lean-ctx pack send <file.{ext}> [--target <url>] [--to <agent>] [--secret <key>]",
+            ext = crate::core::contracts::PACKAGE_EXTENSION
+        );
         return;
     };
     let pkg_file = PathBuf::from(f);
@@ -776,12 +891,20 @@ fn cmd_pack_send(args: &[String], project_root: &str) {
             .send(&body)
         {
             Ok(resp) => {
-                eprintln!("Sent to {endpoint} — HTTP {}", resp.status());
+                let status = resp.status();
+                if (200..300).contains(&status.as_u16()) {
+                    eprintln!("Sent to {endpoint} — HTTP {status}");
+                } else {
+                    eprintln!("ERROR: server returned HTTP {status} for {endpoint}");
+                }
             }
             Err(e) => eprintln!("Send failed: {e}"),
         }
     } else {
-        let out_path = pkg_file.with_extension("lctxpkg.envelope.json");
+        let out_path = pkg_file.with_extension(format!(
+            "{}.envelope.json",
+            crate::core::contracts::PACKAGE_EXTENSION
+        ));
         match std::fs::write(&out_path, &json) {
             Ok(()) => eprintln!("Envelope written: {}", out_path.display()),
             Err(e) => eprintln!("Write failed: {e}"),
@@ -795,14 +918,13 @@ fn cmd_pack_receive(args: &[String], project_root: &str) {
     let file: Option<String> = args
         .iter()
         .find(|a| {
-            std::path::Path::new(a.as_str())
-                .extension()
-                .is_some_and(|ext| ext == "json" || ext == "lctxpkg")
+            let p = std::path::Path::new(a.as_str());
+            p.extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext == "json" || crate::core::contracts::is_package_file(p))
         })
         .cloned();
-    let secret: Option<String> = args
-        .iter()
-        .find_map(|a| a.strip_prefix("--secret=").map(String::from));
+    let secret = parse_flag(args, "--secret");
     let apply = args.iter().any(|a| a == "--apply");
 
     let Some(f) = file else {
@@ -846,18 +968,30 @@ fn cmd_pack_receive(args: &[String], project_root: &str) {
 
     match envelope.content_type {
         TransportContentType::ContextPackage => {
-            let tmp = std::env::temp_dir().join("lean-ctx-received.lctxpkg");
+            let tmp = std::env::temp_dir().join(format!(
+                "lean-ctx-received-{}.{}",
+                std::process::id(),
+                crate::core::contracts::PACKAGE_EXTENSION
+            ));
             if let Err(e) = std::fs::write(&tmp, &envelope.payload_json) {
                 eprintln!("Error writing temp file: {e}");
                 return;
             }
             if apply {
-                let import_args = vec![
-                    tmp.display().to_string(),
-                    "--apply".to_string(),
-                    format!("--project={project_root}"),
-                ];
-                super::pack_cmd::cmd_pack(&import_args);
+                let registry = match crate::core::context_package::LocalRegistry::open() {
+                    Ok(r) => r,
+                    Err(e) => {
+                        eprintln!("ERROR: {e}");
+                        return;
+                    }
+                };
+                match registry.import_from_file(&tmp) {
+                    Ok(manifest) => {
+                        eprintln!("Imported: {} v{}", manifest.name, manifest.version);
+                        apply_package(&manifest.name, &manifest.version, project_root);
+                    }
+                    Err(e) => eprintln!("ERROR: import failed: {e}"),
+                }
             } else {
                 eprintln!("Package saved to {}. Use --apply to import.", tmp.display());
             }
@@ -885,24 +1019,45 @@ fn cmd_pack_receive(args: &[String], project_root: &str) {
     }
 }
 
+/// Parse `--flag=value` or `--flag value` from args.
+fn parse_flag(args: &[String], flag: &str) -> Option<String> {
+    let prefix = format!("{flag}=");
+    let mut iter = args.iter();
+    while let Some(a) = iter.next() {
+        if let Some(v) = a.strip_prefix(&prefix) {
+            return Some(v.to_string());
+        }
+        if a == flag {
+            if let Some(next) = iter.next() {
+                if !next.starts_with("--") {
+                    return Some(next.clone());
+                }
+            }
+        }
+    }
+    None
+}
+
 fn print_usage() {
+    let ext = crate::core::contracts::PACKAGE_EXTENSION;
     eprintln!(
         "lean-ctx pack — Context Package Manager\n\n\
          SUBCOMMANDS:\n\
          \n\
          Create & Manage:\n\
-         \x20 create   --name <name> [--version <v>] [--description <d>] [--author <a>] [--tags <t>] [--layers <l>]\n\
+         \x20 create   --name <name> [--version <v>] [--level 1|2|3] [--scope @ns] [--description <d>] [--author <a>] [--tags <t>] [--layers <l>]\n\
          \x20 list     List all installed packages\n\
          \x20 info     <name>[@version]  Show package details\n\
          \x20 remove   <name>[@version]  Remove a package\n\
          \n\
          Share & Distribute:\n\
-         \x20 export   <name>[@version] [--output=<path>]  Export to .lctxpkg file\n\
-         \x20 import   <file.lctxpkg> [--apply]            Import from file\n\
+         \x20 export   <name>[@version] [--output=<path>]  Export to .{ext} file\n\
+         \x20 import   <file.{ext}> [--apply]            Import from file\n\
          \x20 install  <name>[@version] [--file=<path>]    Apply package to current project\n\
+         \x20 publish  <file.{ext}> [--registry <url>]   Publish to registry (coming soon)\n\
          \n\
          A2A Transport:\n\
-         \x20 send     <file.lctxpkg> [--target <url>] [--to <agent>] [--secret <key>]\n\
+         \x20 send     <file.{ext}> [--target <url>] [--to <agent>] [--secret <key>]\n\
          \x20 receive  <envelope.json> [--secret <key>] [--apply]\n\
          \n\
          Automation:\n\
@@ -911,10 +1066,16 @@ fn print_usage() {
          PR Pack:\n\
          \x20 pr       [--base <ref>] [--format json|markdown] [--depth <n>]  PR context pack\n\
          \n\
+         CONFORMANCE LEVELS:\n\
+         \x20 1 (Basic)     Flat nodes, no edges (any tool can implement)\n\
+         \x20 2 (Graph)     Typed nodes + edges, dependency resolution, graph-merge\n\
+         \x20 3 (Cognitive)  Activation energy, Hebbian weights, temporal decay\n\
+         \n\
          EXAMPLES:\n\
          \x20 lean-ctx pack create --name rust-patterns --description \"Rust best practices\"\n\
-         \x20 lean-ctx pack export rust-patterns --output=rust-patterns.lctxpkg\n\
-         \x20 lean-ctx pack send rust-patterns.lctxpkg --target http://remote:3344\n\
+         \x20 lean-ctx pack create --name auth-service --level 2 --scope @company\n\
+         \x20 lean-ctx pack export rust-patterns --output=rust-patterns.{ext}\n\
+         \x20 lean-ctx pack send rust-patterns.{ext} --target http://remote:3344\n\
          \x20 lean-ctx pack receive envelope.json --secret mykey --apply\n\
          \x20 lean-ctx pack list\n"
     );

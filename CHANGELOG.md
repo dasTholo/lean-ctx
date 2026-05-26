@@ -5,6 +5,157 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [3.6.17] — 2026-05-25
+
+### Added
+
+- **Antigravity CLI 2.0 as separate init target** — `lean-ctx init --agent antigravity-cli` writes MCP config to `~/.gemini/antigravity-cli/mcp_config.json`, distinct from the IDE target (`antigravity`). `lean-ctx init --agent gemini` now auto-configures both Antigravity IDE and CLI paths (#284)
+- **Doctor: daemon diagnostics** — `lean-ctx doctor` shows `systemctl --user is-active` state on Linux, warns when `loginctl enable-linger` is not set (required for boot-time start without login), and displays crash-loop log restart count with file path (#288, #289)
+- **Crash-loop log path API** — New `crash_loop_log_path()` public function for programmatic access to the MCP server restart history
+
+### Fixed
+
+- **Uninstall completeness (#274)** — `.bak` files containing lean-ctx content, `.lean-ctx.invalid.*.bak` temporaries, `~/.config/lean-ctx` XDG data directory, and project-local `.lean-ctx/` + `.lean-ctx-id` files are now cleaned up. Claude CLI MCP registry entries removed via `claude mcp remove`. `--keep-config` flag preserves MCP configs and rules for reinstall
+- **Linux daemon autostart (#288, #289)** — `systemctl --user enable` failures now print actionable error messages with manual fix commands. `is_installed()` checks `systemctl is-enabled` in addition to service file existence. Linger hint displayed when linger is not active
+- **Windows paths with spaces** — Shell hook rewrites use `shell_tokenize()` (respects single/double quotes, backslash escapes) instead of `split_whitespace()`. `shell_quote()` properly quotes arguments containing special characters
+- **Windows drive-letter grep parsing** — `parse_grep_line()` and `extract_file_from_match()` correctly skip `C:` drive prefix, preventing misinterpretation as file path separator
+- **Panic loop-undo (#277, #271)** — `catch_unwind` handler in `call_tool` now calls `record_error_outcome()` on the loop detector, so panicking tools are correctly counted as failures and subject to throttling instead of infinite retry
+- **PowerShell detection DRY (#286)** — Replaced inline `shell.to_lowercase().contains("powershell")` check in `shell/exec.rs` with `platform::is_powershell()`, single source of truth
+- **Windows CI (#286)** — Fixed `unused variable: quiet` in `daemon_autostart.rs` on non-Unix platforms. Shell wrapping tests now use platform-aware assertions (`expect_wrapped()` helper) that work on both Unix (single-quotes) and Windows (double-quotes with escaping)
+- **Index scoping** — Project index scans restricted to project root via `is_safe_scan_root()` guard. `index status` CLI output shows real values instead of nulls
+- **Workflow singleton** — Workflow state is now agent-scoped (`workflow-{agent_id}.json`) instead of global `active.json`. Stale workflows auto-cleaned after TTL expiry
+- **JSONC UTF-8 safety** — `strip_json_comments` uses `floor_char_boundary`/`ceil_char_boundary` for all string slicing, preventing panics on multi-byte characters in comments
+- **`ls -lah` size passthrough** — Human-readable sizes (e.g. `4.0K`, `1.2M`) from `ls -lh`/`ls -lah` are preserved instead of being converted to `0B`
+- **MCP server crash hardening** — `Mutex::lock().unwrap()` in hot paths replaced with graceful fallbacks. `memory_guard` uses eviction loop instead of `process::exit`. CSPRNG fallback for dashboard nonce generation
+- **Proxy: accept provider API keys on loopback** — Provider routes now accept API keys from local clients (#276)
+
+### Changed
+
+- **Antigravity IDE renamed** — The existing Antigravity target is now labeled "Antigravity IDE" in display names and doctor output, distinguishing it from the new "Antigravity CLI" target
+
+## [3.6.16] — 2026-05-22
+
+### Added
+
+- **First-class OpenClaw agent support** — `lean-ctx init --agent openclaw` writes the MCP server entry to `~/.openclaw/openclaw.json` under `mcp.servers.lean-ctx` (nested JSON structure), installs global rules to `~/.openclaw/rules/lean-ctx.md`, and copies the LeanCTX SKILL.md to `~/.openclaw/skills/lean-ctx/`. `lean-ctx doctor` detects OpenClaw installations. `lean-ctx setup` auto-configures when `~/.openclaw/` exists
+- **Context package graph-native architecture (`.ctxpkg` v2)** — New `ContextGraph` data model (`ContextNode`, `ContextEdge`) with activation weights and temporal metadata. Graph-merge composition with conflict detection and contradiction resolution. Ed25519 package signing with hex-encoded key verification. Manifest schema version 2 with scoped package names (`@scope/name`) and conformance levels (Basic, Graph, Cognitive). New `docs/specs/` with JSON schema
+- **LeanCTX Custom GPT documentation** — Knowledge base and system prompt prepared for creating a ChatGPT Custom GPT to answer lean-ctx documentation questions (files in `docs/gpt/`, gitignored)
+
+### Fixed
+
+- **`ctx_session` finding panic on em-dash (#272)** — `parse_finding_value` crashed on multi-byte separators like `" — "` (space + U+2014 EM DASH + space = 5 bytes) because the code assumed a 3-byte ASCII separator. Now dynamically determines separator length using `str::len()`. Added 6 regression tests including exact repro with Cyrillic text from the issue report
+- **Panic handler returns `isError: false`** — The `catch_unwind` block in the MCP server returned panics as successful tool results (`isError: false`), hiding crashes from AI agents. Now returns `CallToolResult::error` so `isError: true` is set correctly
+
+## [3.6.15] — 2026-05-22
+
+### Fixed
+
+- **MCP crash: "Cannot read properties of undefined (reading 'invoke')"** — Identified and fixed 4 distinct crash vectors that caused intermittent MCP server death on v3.6.14 (#271):
+  - 5 `Mutex::lock().unwrap()` calls in the MCP request hot path (`list_tools`, `active_tool_defs`, `ctx_load_tools`) replaced with graceful fallbacks that degrade instead of crashing
+  - `memory_guard` hard `process::exit(137)` replaced with 3-attempt eviction loop — server now aggressively reclaims memory but never hard-exits
+  - Nested `block_in_place` in `bounded_lock` eliminated to prevent Tokio blocking-pool exhaustion under concurrent tool calls
+  - CSPRNG `expect()` in dashboard nonce/token generation replaced with time-based fallback
+- **`parse().unwrap()` for SocketAddr** in 2 dashboard routes replaced with direct `SocketAddr::new()` construction
+- **`tempfile().expect()` in `ctx_execute`** replaced with graceful error return
+
+### Changed
+
+- **Dashboard: modular route architecture** — Monolithic `context.rs` (617 lines) and `graph.rs` (364 lines) split into focused sub-modules (`context/{core,overlay,diagnostics,aggregated}.rs`, `graph/{deps,callgraph,analysis}.rs`)
+- **Dashboard: API consolidation** — 3 new aggregated endpoints (`/api/context-summary`, `/api/context-capabilities`, `/api/context-history`) reduce parallel fetches from 18 to 11 in the Context Manager view
+- **Dashboard: shared frontend utilities** — Extracted common rendering logic (gauges, formatters, path shortening) into `lib/shared.js`; TTL-cached API layer in `lib/api.js` with event-based data broadcasting
+- **Dashboard: removed dead code** — Deleted legacy `dashboard.html` (3057 lines) and `CockpitContextLayer` component
+
+### Added
+
+- **Context Commander** — New action-oriented dashboard component with context pressure visualization, budget bands, and risk analysis
+- **Configurable proxy timeout** — `LEAN_CTX_PROXY_TIMEOUT_MS` env var / `proxy_timeout_ms` in config.toml (default: 200ms) (#270)
+- **Dynamic tool categories** — `LCTX_DEFAULT_CATEGORIES` env var / `default_tool_categories` in config.toml to control which tool categories are active by default
+- **Global degradation disable** — `LCTX_NO_DEGRADE=1` env var / `no_degrade = true` in config.toml to globally disable all read mode degradation
+
+## [3.6.14] — 2026-05-22
+
+### Added
+
+- **First-class Augment AI agent support** — `lean-ctx init --agent augment` wires up both Augment configuration surfaces: Auggie CLI (`~/.augment/settings.json`) and VS Code extension (`globalStorage/augment.vscode-augment/.../mcpServers.json`, JSON array with stable UUID-keyed upserts). Rules injected at `~/.augment/rules/lean-ctx.md`. `lean-ctx doctor` reports per-surface MCP drift including `"disabled": true` detection. Full cross-platform support (Linux, macOS, Windows). Contributed by @parker-brown-family (#264, #267)
+- **Context package system renamed to `.ctxpkg`** — Package format, CLI commands, transport envelopes, and documentation all use `.ctxpkg` extension. Legacy `.lctxpkg` files remain importable for backward compatibility
+- **`ctx_multi_read` server-side output cap** — Output capped at 512KB by default (configurable via `LCTX_MAX_MULTI_READ_BYTES`) to prevent MCP client-side truncation. When exceeded, remaining files are skipped with a clear warning (#263)
+- **Degradation policy warning** — `auto_degrade_read_mode()` now emits an explicit `⚠ Context pressure` warning when `mode=full` is downgraded to `mode=map` or `mode=signatures`, including the verdict and bypass hint (`start_line=1` or `ctx_compress`) (#262)
+- **28 new regression tests** — 14 UTF-8 boundary tests (Cyrillic, CJK, emoji, exact user scenario), 10 degradation verdict tests, 4 `ctx_multi_read` cap tests
+
+### Fixed
+
+- **UTF-8 character boundary panics** — 13 string truncation sites across the codebase now use `str::floor_char_boundary()` / `str::ceil_char_boundary()` instead of raw byte slicing, preventing panics on multi-byte characters like Cyrillic, CJK, or emoji. Affected: `hash_fast` (4096 byte prefix/suffix), curl/cargo/test/just pattern compression, codebook display, gotcha tracker, mcp_compress, ctx_edit preview, ctx_preload hints, dashboard context, tool_defs, stats format, dashboard token masking, cloud email masking. Report and initial PR by @cburgess (#265, #266)
+- **Context package system hardening** — Fixed critical `receive --apply` bug, Graph edge import (uses `get_node_by_symbol` instead of `get_node_by_path`), Session/Patterns/Insights import, auto-load caching (prevents re-application), registry validation, HMAC signing (signs all fields including metadata), CLI flag parsing (`--flag value` and `--flag=value`), memory leaks (`.leak()` removed), HTTP response status checking for `send`
+- **`lean-ctx update` proxy race condition** — `post_update_rewire()` now restarts the proxy and waits for health before writing `ANTHROPIC_BASE_URL` to Claude Code settings, preventing a connectivity gap (#234)
+
+### Changed
+
+- **Removed `PackageLayer::Artifacts`** — Dead enum variant removed; builder derives layers from actual content
+- **Manifest validation expanded** — Checks hex format of hashes, `byte_size > 0`, duplicate layers
+- **Import hardened** — File extension check (accepts `.ctxpkg` and `.lctxpkg`), size limit (`MAX_PACKAGE_FILE_BYTES`)
+
+## [3.6.13] — 2026-05-21
+
+### Added
+
+- **Plan mode support for VS Code, Claude Code, and Windsurf** — New `plan_mode.rs` module detects IDE plan/read-only contexts and exposes a curated subset of 12 read-only tools (`ctx_read`, `ctx_search`, `ctx_tree`, `ctx_overview`, `ctx_plan`, `ctx_metrics`, `ctx_compress`, `ctx_session`, `ctx_knowledge`, `ctx_graph`, `ctx_retrieve`, `ctx_provider`). `lean-ctx setup` auto-configures VS Code `planAgent.additionalTools` and Claude Code `permissions.allow` entries. Includes `lean-ctx doctor` plan mode status check
+- **MCP `readOnlyHint` tool annotations** — All read-only MCP tools now declare `readOnlyHint: true` in their tool definitions, enabling IDE plan agents to use them without explicit user approval. Write tools (`ctx_edit`, `ctx_fill`, `ctx_delta`, `ctx_handoff`, `ctx_ledger`, `ctx_multi_read`) correctly declare `readOnlyHint: false`
+- **Dynamic tool filtering** — New `server/dynamic_tools.rs` module filters exposed tools based on client capabilities. Plan-mode clients only see read-only tools; full-mode clients see all 62 tools
+- **GitLab provider** — Built-in GitLab data source provider (issues, merge requests, pipelines) activates automatically when `GITLAB_TOKEN` is set. Joins GitHub, Jira, and PostgreSQL as built-in providers
+- **Provider consolidation pipeline (production-wired)** — `apply_artifacts_to_stores()` now runs in a background thread from both `ctx_provider` and `ctx_preload`, indexing provider data into BM25, Graph, Knowledge, and Session Cache. Previously, provider data was only cached — now it's fully searchable, generates cross-source hints in `ctx_read`, and contributes knowledge facts
+- **MCP Bridge stdio transport support** — `[providers.mcp_bridges.<name>]` now accepts `command` + `args` for stdio-based MCP servers in addition to HTTP `url`. Bridges register with unique IDs (`mcp:<name>`) and support `resources`, `read_resource`, and `tools` actions
+- **Cross-source hints in `ctx_read`** — When reading a file, `ctx_read` now shows related issues, PRs, and external data linked via the graph index (e.g., "Related: [Issue] github://issues/42 — Auth bug")
+- **`ctx_semantic_search` external result attribution** — Search results from external providers now show clear type labels: `[Issue]`, `[PR]`, `[Ticket]`, `[Schema]`, `[Wiki]` with full provider URIs
+- **`lean-ctx doctor` MCP bridge diagnostics** — New diagnostic section validates configured MCP bridges (URL reachability, config completeness, `auto_index` status warning)
+- **`lean-ctx doctor` plan mode check** — Reports whether VS Code and Claude Code are configured for plan mode tool access
+- **13 wiring-proof integration tests** — New `provider_wiring_proof.rs` test suite proves every connection in the provider pipeline is functional (consolidation → BM25/Graph/Knowledge/Cache → search/hints/recall). Catches "functional silos" where code exists but isn't connected to runtime
+- **10 E2E provider pipeline scenarios** — New `provider_pipeline_e2e.rs` covers full pipeline, cross-source edges, knowledge extraction, MCP bridge registration, multi-source consolidation
+- **Plan mode scenario tests** — New `plan_mode_scenarios.rs` with 11 tests covering VS Code settings injection, Claude Code permissions, idempotency, merge behavior, and status detection
+- **Power user worksession test suite** — New `power_user_worksession.rs` with 12 end-to-end scenarios simulating a full coding session: initial read → edit → diff → search → knowledge → cache → overview → multi-read → compress → graph → context
+- **Lock contention hardening tests** — New `lock_contention_hardening.rs` with 14 scenarios testing bounded lock timeouts, concurrent access, I/O health escalation, and WSL2/NFS environment detection
+- **`LEAN_CTX_CLIENT_HINT` env override** — Client capability detection can now be overridden for testing and edge-case environments
+- **`lean-ctx doctor` provider status** — Shows active providers and their auth status
+- **`lean-ctx doctor` Copilot CLI MCP check** — Separate diagnostic for Copilot CLI MCP configuration (distinct from VS Code MCP)
+- **VS Code Extension `.vscode/mcp.json` support** — New standard path with `type: "stdio"` transport
+- **`ctx_ledger reset` clears cache delivery flags** — Prevents stale "already delivered" states
+- **Knowledge.json size warning** — Warns when knowledge file exceeds 1 MB during load
+- **CLI smoke tests** — New integration tests for `gain --json`, `grep`, `ls`, `doctor` commands
+
+### Fixed
+
+- **PowerShell `@args` splatting fails on single commands** — `_lc` function now resolves the native command via `Get-Command -CommandType Application` before invocation, preventing "not recognized" errors when `@args` is used with compound argument strings
+- **Fish shell `lean-ctx-off` leaks env var** — `set -e LEAN_CTX_ENABLED` (which removes the var) changed to `set -gx LEAN_CTX_ENABLED 0` (which sets it to 0), matching Bash/Zsh behavior and preventing child shells from re-activating
+- **Bash/Zsh `lean-ctx-off` leaks env var** — `unset LEAN_CTX_ENABLED` changed to `export LEAN_CTX_ENABLED=0` for consistent disable semantics across shells
+- **Provider init ignores project root** — `ctx_provider` and `ctx_preload` now call `init_with_project_root(Some(root))` instead of `init_builtin_providers()`, enabling config-based provider discovery scoped to the actual project directory
+- **Windows CI failure: dead `is_running_in_powershell()`** — Removed unused `#[cfg(windows)]` function that triggered `-Dwarnings` failure on `windows-latest` CI
+- **Lock contention in 12 MCP tools** — `ctx_read`, `ctx_edit`, `ctx_delta`, `ctx_fill`, `ctx_handoff`, `ctx_knowledge`, `ctx_multi_read`, `ctx_smart_read`, `ctx_prefetch`, `ctx_ledger`, `ctx_preload`, `ctx_provider` now use bounded lock acquisition with adaptive timeouts instead of indefinite waits
+- **Adaptive timeout death spiral** — SlowFs/Degraded environments now get *longer* timeouts (1.5×/2×), not shorter, preventing cascading failures
+- **UTF-8 safe truncation** — No more panics on multi-byte character boundaries in hook handlers, `ctx_read`, `ctx_overview`, and server dispatch
+- **Cache staleness for missing files** — A missing file is now correctly treated as stale (previously wasn't)
+- **`compound_lexer` Unicode** — Switched from byte-based to char-based parsing; fixed `$(…)` subshell detection
+- **Windows shell output decoding** — Tries UTF-8 first, then Active Code Page (ACP) as fallback
+- **`ctx_read` lock contention** — Returns actionable error message instead of hanging silently
+- **`ctx_read` not-found** — Provides actionable hint after retry failure
+- **BM25 zstd decompression bomb** — Bounded decode prevents memory exhaustion from malformed compressed index
+- **Copilot hooks merge** — No longer overwrites existing hooks during setup
+- **`ctx_knowledge` rehydrate time budget** — Capped at 10 seconds to prevent blocking
+- **`ctx_execute` respects `GIT_PAGER`/`PAGER`** — Only sets pager env vars when not already set by user
+
+### Changed
+
+- **`providers.auto_index` default is now `true`** — New installations automatically index provider data into BM25/Graph/Knowledge stores. Previously defaulted to `false` (cache-only)
+- **MCP tool count** — 61 → 62 (added `ctx_provider`)
+- **Tool descriptions** — Updated `pkgdesc` in AUR packages and `description` in Cargo.toml to reflect 62 tools
+- **`ctx_read` post-dispatch** — Enrichment bounded to 3s; ledger/eviction/elicitation run async (no longer inline in output)
+- **VS Code/Copilot client detection** — Now also recognizes "Visual Studio Code" and "vscode" client identifiers
+- **Knowledge rehydrate limit** — Maximum archives reduced from 12 to 4 for faster startup
+- **Shell pattern pipeline** — ANSI-stripped output flows through all compressor stages
+
+### Removed
+
+- **Dead code cleanup** — Removed `Config::providers_mcp_bridges()` (unused after `init.rs` refactoring), `hints_from_index()` (unused wrapper), `is_running_in_powershell()` (Windows-only, never called), unused `ProjectIndex` import
+- **Inline eviction/elicitation hints in `ctx_read` response** — Now only debug-logged, no longer appended to tool output
+
 ## [3.6.12] — 2026-05-21
 
 ### Added
@@ -13,6 +164,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Config-based data source providers** — Connect any REST API to lean-ctx without code. Drop a TOML/JSON file into `~/.config/lean-ctx/providers/` and lean-ctx auto-discovers it. Supports 6 auth methods (bearer, API key, basic, header, query param, none), dot-notation response extraction, and project-local providers
 - **Built-in providers** — GitHub (issues, PRs, actions), Jira (issues, sprints, projects), PostgreSQL (tables, schema, queries) activate automatically when their env vars are set
 - **`ctx_provider` tool** — MCP tool to query any registered data source: `ctx_provider(provider="github", resource="issues", params={...})`
+- **MCP Bridge integration** — Connect external MCP servers as data sources via `[providers.mcp_bridges.<name>]` config. Supports HTTP (`url`) and stdio (`command`+`args`) transports. Each bridge gets a unique ID (`mcp:<name>`), supports `resources`, `read_resource`, and `tools` actions. New `mcp_resources` convenience action on `ctx_provider` lists all resources from configured bridges
+- **Full provider consolidation pipeline** — All provider data (GitHub, GitLab, Jira, Postgres, MCP bridges, custom REST) now flows through the complete consolidation pipeline into BM25 index, Graph index, Knowledge facts, AND session cache. Background thread applies artifacts to all stores without blocking tool responses
+- **`lean-ctx doctor` MCP bridge check** — New diagnostic section validates configured MCP bridges (URL reachability, config completeness, `auto_index` status)
 - **`core/io_health` module** — Environment detection (WSL2, NFS, FUSE, sshfs), freeze counter with 60s decay window, adaptive timeout calculation (Fast/SlowFs/Degraded escalation levels)
 - **`server/bounded_lock` module** — Self-healing lock acquisition helpers for all MCP tools; returns `None` on timeout allowing graceful degradation instead of indefinite hangs
 - **`core/output_sanitizer` module** — Last-pass output filter that detects and removes degenerate CJK runs, symbol floods, and garbled artifacts before output reaches the client
@@ -36,6 +190,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **`providers.auto_index` default is now `true`** — New installations automatically index provider data into BM25/Graph/Knowledge. Previously defaulted to `false` (cache-only)
+- **`ctx_semantic_search` external result formatting** — Provider-sourced results now show clear attribution: `[Issue] github://issues/42 — Auth bug` instead of raw URIs
+- **MCP Bridge unique IDs** — Each configured MCP bridge registers with `mcp:<name>` instead of shared `mcp_bridge`, allowing multiple bridges to coexist
 - **MCP tool count** — 61 → 62 (added `ctx_provider`)
 - **Compression symbols** — TDD shortcuts now use ASCII-safe symbols (`->` instead of `→`, `ok` instead of `✓`) for better downstream model compatibility
 - **Rules injection** — Cursor config files (`.cursorrules`, `.cursor/rules/`) now receive ASCII-safe compression prompts; other editors get full Unicode prompts

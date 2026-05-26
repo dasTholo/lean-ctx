@@ -104,27 +104,42 @@ pub(super) fn remove_project_agent_files(dry_run: bool) -> bool {
         removed = true;
     }
 
+    // Project-level MCP/hook JSON files: surgically remove lean-ctx entries
+    for (rel, label) in [
+        (".vscode/mcp.json", "Project .vscode/mcp.json"),
+        (".github/mcp.json", "Project .github/mcp.json"),
+        (
+            ".github/hooks/hooks.json",
+            "Project .github/hooks/hooks.json",
+        ),
+    ] {
+        let path = cwd.join(rel);
+        if !path.exists() {
+            continue;
+        }
+        let Ok(content) = fs::read_to_string(&path) else {
+            continue;
+        };
+        if !content.contains("lean-ctx") {
+            continue;
+        }
+        backup_before_modify(&path, dry_run);
+        // These files use standard MCP JSON format — try hook cleanup which handles both
+        removed |= apply_hook_cleanup(&path, label, &content, dry_run);
+    }
+
     // Project-level .claude/settings.local.json: surgically remove lean-ctx hooks
     let claude_settings = cwd.join(".claude/settings.local.json");
     if claude_settings.exists() {
         if let Ok(content) = fs::read_to_string(&claude_settings) {
             if content.contains("lean-ctx") {
                 backup_before_modify(&claude_settings, dry_run);
-                match remove_lean_ctx_from_hooks_json(&content) {
-                    Some(cleaned) if !cleaned.trim().is_empty() => {
-                        let _ = safe_write(&claude_settings, &cleaned, dry_run);
-                        let verb = if dry_run { "Would clean" } else { "✓" };
-                        println!(
-                            "  {verb} Project: cleaned .claude/settings.local.json (user hooks preserved)"
-                        );
-                    }
-                    _ => {
-                        let _ = safe_remove(&claude_settings, dry_run);
-                        let verb = if dry_run { "Would remove" } else { "✓" };
-                        println!("  {verb} Project: removed .claude/settings.local.json");
-                    }
-                }
-                removed = true;
+                removed |= apply_hook_cleanup(
+                    &claude_settings,
+                    "Project .claude/settings.local.json",
+                    &content,
+                    dry_run,
+                );
             }
         }
     }
@@ -181,7 +196,9 @@ pub(super) fn remove_shell_hook(home: &Path, dry_run: bool) -> bool {
     let shell = std::env::var("SHELL").unwrap_or_default();
     let mut removed = false;
 
-    if !dry_run {
+    if dry_run {
+        println!("  Would remove shell hook dropin files (.zshenv.d, .bashenv.d)");
+    } else {
         crate::shell_hook::uninstall_all(false);
     }
 
@@ -273,7 +290,7 @@ pub(super) fn remove_mcp_configs(home: &Path, dry_run: bool) -> bool {
         || PathBuf::from("/nonexistent"),
         |d| PathBuf::from(d).join(".claude.json"),
     );
-    let configs: Vec<(&str, PathBuf)> = vec![
+    let mut configs: Vec<(&str, PathBuf)> = vec![
         ("Cursor", home.join(".cursor/mcp.json")),
         ("Claude Code (config dir)", claude_cfg_dir_json),
         ("Claude Code (home)", home.join(".claude.json")),
@@ -311,7 +328,28 @@ pub(super) fn remove_mcp_configs(home: &Path, dry_run: bool) -> bool {
         ("Cline", crate::core::editor_registry::cline_mcp_path()),
         ("Roo Code", crate::core::editor_registry::roo_mcp_path()),
         ("Hermes Agent", home.join(".hermes/config.yaml")),
+        ("OpenClaw", home.join(".openclaw/openclaw.json")),
+        ("Augment CLI", home.join(".augment/settings.json")),
+        (
+            "Augment VS Code",
+            crate::core::editor_registry::augment_vscode_mcp_path(home),
+        ),
+        ("Qoder", home.join(".qoder/mcp.json")),
+        ("QoderWork", home.join(".qoderwork/mcp.json")),
+        ("Aider", home.join(".aider/mcp.json")),
+        ("Continue", home.join(".continue/mcp.json")),
+        ("Neovim (mcphub)", home.join(".config/mcphub/servers.json")),
+        ("Emacs", home.join(".emacs.d/mcp.json")),
+        ("Sublime Text", home.join(".config/sublime-text/mcp.json")),
+        ("Copilot CLI", home.join(".copilot/mcp-config.json")),
     ];
+
+    // Add platform-specific paths (Qoder macOS Application Support etc.)
+    for path in crate::core::editor_registry::qoder_all_mcp_paths(home) {
+        if !configs.iter().any(|(_, p)| *p == path) {
+            configs.push(("Qoder", path));
+        }
+    }
 
     let mut removed = false;
 
@@ -350,14 +388,21 @@ pub(super) fn remove_mcp_configs(home: &Path, dry_run: bool) -> bool {
         }
     }
 
+    // Zed: uses `context_servers` key — handled by remove_lean_ctx_from_json
     let zed_path = crate::core::editor_registry::zed_settings_path(home);
     if zed_path.exists() {
         if let Ok(content) = fs::read_to_string(&zed_path) {
             if content.contains("lean-ctx") {
-                println!(
-                    "  ⚠ Zed: manually remove lean-ctx from {}",
-                    shorten(&zed_path, home)
-                );
+                backup_before_modify(&zed_path, dry_run);
+                if let Some(cleaned) = remove_lean_ctx_from_json(&content) {
+                    if let Err(e) = safe_write(&zed_path, &cleaned, dry_run) {
+                        tracing::warn!("Failed to update Zed config: {e}");
+                    } else {
+                        let verb = if dry_run { "Would update" } else { "✓" };
+                        println!("  {verb} MCP config removed from Zed");
+                        removed = true;
+                    }
+                }
             }
         }
     }
@@ -379,6 +424,50 @@ pub(super) fn remove_mcp_configs(home: &Path, dry_run: bool) -> bool {
             }
         }
     }
+
+    removed
+}
+
+// ---------------------------------------------------------------------------
+// Plan mode settings cleanup
+// ---------------------------------------------------------------------------
+
+pub(super) fn remove_plan_mode_settings(_home: &Path, dry_run: bool) -> bool {
+    let mut removed = false;
+
+    // VS Code settings.json: remove lean-ctx plan tools from additionalTools array
+    if let Some(vscode_settings) = crate::core::editor_registry::plan_mode::vscode_settings_path() {
+        if vscode_settings.exists() {
+            if let Ok(content) = fs::read_to_string(&vscode_settings) {
+                if content.contains("lean-ctx") {
+                    if let Ok(mut parsed) = crate::core::jsonc::parse_jsonc(&content) {
+                        let mut modified = false;
+                        let key = "github.copilot.chat.planAgent.additionalTools";
+                        if let Some(tools) = parsed.get_mut(key).and_then(|t| t.as_array_mut()) {
+                            let before = tools.len();
+                            tools.retain(|t| !t.as_str().is_some_and(|s| s.contains("lean-ctx")));
+                            if tools.len() < before {
+                                modified = true;
+                            }
+                        }
+                        if modified {
+                            backup_before_modify(&vscode_settings, dry_run);
+                            if let Ok(cleaned) = serde_json::to_string_pretty(&parsed) {
+                                let _ = safe_write(&vscode_settings, &(cleaned + "\n"), dry_run);
+                                let verb = if dry_run { "Would clean" } else { "✓" };
+                                println!(
+                                    "  {verb} VS Code plan mode tools cleaned (other tools preserved)"
+                                );
+                                removed = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Claude Code: permissions.allow cleaned via hook cleanup (already handled there)
 
     removed
 }
@@ -430,6 +519,14 @@ pub(super) fn remove_rules_files(home: &Path, dry_run: bool) -> bool {
         ("AWS Kiro", home.join(".kiro/steering/lean-ctx.md")),
         ("Verdent", home.join(".verdent/rules/lean-ctx.md")),
         ("Crush", home.join(".config/crush/rules/lean-ctx.md")),
+        ("OpenClaw", home.join(".openclaw/rules/lean-ctx.md")),
+        ("Augment", home.join(".augment/rules/lean-ctx.md")),
+        ("Qoder", home.join(".qoder/rules/lean-ctx.md")),
+        ("Hermes Agent", home.join(".hermes/rules/lean-ctx.md")),
+        (
+            "OpenCode Plugin",
+            home.join(".config/opencode/plugins/lean-ctx.ts"),
+        ),
     ];
 
     // Shared files: contain user content + lean-ctx block with markers.
@@ -450,6 +547,13 @@ pub(super) fn remove_rules_files(home: &Path, dry_run: bool) -> bool {
         ("VS Code", copilot_instructions_path(home)),
         ("Copilot CLI", home.join(".copilot/instructions.md")),
         ("OpenCode", home.join(".config/opencode/AGENTS.md")),
+        (
+            "Codex CLI",
+            crate::core::home::resolve_codex_dir()
+                .unwrap_or_else(|| home.join(".codex"))
+                .join("AGENTS.md"),
+        ),
+        ("Hermes Agent", home.join(".hermes/HERMES.md")),
     ];
 
     let mut removed = false;
@@ -473,8 +577,12 @@ pub(super) fn remove_rules_files(home: &Path, dry_run: bool) -> bool {
     }
 
     // --- Shared: surgically remove lean-ctx section, keep user content ---
-    const RULES_MARKER: &str = "# lean-ctx — Context Engineering Layer";
-    const RULES_END: &str = "<!-- /lean-ctx -->";
+    // Two marker styles exist:
+    //   1. Heading-based: `# lean-ctx — Context Engineering Layer` … `<!-- /lean-ctx -->`
+    //   2. HTML comments: `<!-- lean-ctx -->` … `<!-- /lean-ctx -->`
+    const HEADING_MARKER: &str = "# lean-ctx — Context Engineering Layer";
+    const HTML_START: &str = "<!-- lean-ctx -->";
+    const HTML_END: &str = "<!-- /lean-ctx -->";
 
     for (name, path) in &shared_files {
         if !path.exists() {
@@ -487,8 +595,10 @@ pub(super) fn remove_rules_files(home: &Path, dry_run: bool) -> bool {
             continue;
         }
 
-        let cleaned = if content.contains(RULES_END) {
-            remove_marked_block(&content, RULES_MARKER, RULES_END)
+        let cleaned = if content.contains(HEADING_MARKER) && content.contains(HTML_END) {
+            remove_marked_block(&content, HEADING_MARKER, HTML_END)
+        } else if content.contains(HTML_START) && content.contains(HTML_END) {
+            remove_marked_block(&content, HTML_START, HTML_END)
         } else {
             remove_lean_ctx_block_from_md(&content)
         };
@@ -586,6 +696,35 @@ fn remove_lean_ctx_block_from_md(content: &str) -> String {
 // Hook files removal
 // ---------------------------------------------------------------------------
 
+/// Apply hook cleanup result to a file: write cleaned content, remove if entirely
+/// lean-ctx, or leave untouched on parse error / no changes.
+fn apply_hook_cleanup(path: &Path, label: &str, content: &str, dry_run: bool) -> bool {
+    let verb = if dry_run { "Would" } else { "✓" };
+    match remove_lean_ctx_from_hooks_json(content) {
+        HookCleanupResult::Cleaned(cleaned) => {
+            if let Err(e) = safe_write(path, &cleaned, dry_run) {
+                tracing::warn!("Failed to update {label}: {e}");
+                return false;
+            }
+            println!("  {verb} {label} cleaned (user settings preserved)");
+            true
+        }
+        HookCleanupResult::EntirelyLeanCtx => {
+            if let Err(e) = safe_remove(path, dry_run) {
+                tracing::warn!("Failed to remove {label}: {e}");
+                return false;
+            }
+            println!("  {verb} {label} removed");
+            true
+        }
+        HookCleanupResult::Unchanged => false,
+        HookCleanupResult::ParseError => {
+            tracing::warn!("Could not parse {label}, leaving untouched");
+            false
+        }
+    }
+}
+
 pub(super) fn remove_hook_files(home: &Path, dry_run: bool) -> bool {
     let claude_hooks_dir = crate::core::editor_registry::claude_state_dir(home).join("hooks");
     let hook_files: Vec<PathBuf> = vec![
@@ -603,6 +742,12 @@ pub(super) fn remove_hook_files(home: &Path, dry_run: bool) -> bool {
         crate::core::home::resolve_codex_dir()
             .unwrap_or_else(|| home.join(".codex"))
             .join("hooks/lean-ctx-rewrite-codex.sh"),
+        home.join(".codeium/windsurf/hooks/lean-ctx-rewrite.sh"),
+        home.join(".codeium/windsurf/hooks/lean-ctx-redirect.sh"),
+        home.join(".github/hooks/lean-ctx-rewrite.sh"),
+        home.join(".github/hooks/lean-ctx-redirect.sh"),
+        home.join(".qoder/hooks/lean-ctx-rewrite.sh"),
+        home.join(".qoder/hooks/lean-ctx-redirect.sh"),
     ];
 
     let mut removed = false;
@@ -621,6 +766,29 @@ pub(super) fn remove_hook_files(home: &Path, dry_run: bool) -> bool {
         println!("  {verb} Hook scripts removed");
     }
 
+    // Claude Code global settings: surgically remove lean-ctx hook entries
+    // Both settings.json and settings.local.json can contain hooks
+    for claude_settings_name in ["settings.json", "settings.local.json"] {
+        let claude_settings =
+            crate::core::editor_registry::claude_state_dir(home).join(claude_settings_name);
+        if !claude_settings.exists() {
+            continue;
+        }
+        let Ok(content) = fs::read_to_string(&claude_settings) else {
+            continue;
+        };
+        if !content.contains("lean-ctx") {
+            continue;
+        }
+        backup_before_modify(&claude_settings, dry_run);
+        removed |= apply_hook_cleanup(
+            &claude_settings,
+            &format!("Claude Code {claude_settings_name}"),
+            &content,
+            dry_run,
+        );
+    }
+
     // hooks.json: surgically remove lean-ctx entries instead of deleting
     for (label, hj_path) in [
         ("Cursor", home.join(".cursor/hooks.json")),
@@ -630,6 +798,10 @@ pub(super) fn remove_hook_files(home: &Path, dry_run: bool) -> bool {
                 .unwrap_or_else(|| home.join(".codex"))
                 .join("hooks.json"),
         ),
+        ("Windsurf", home.join(".codeium/windsurf/hooks.json")),
+        ("Qoder", home.join(".qoder/settings.json")),
+        ("Copilot (global)", home.join(".github/hooks/hooks.json")),
+        ("Gemini CLI", home.join(".gemini/settings.json")),
     ] {
         if !hj_path.exists() {
             continue;
@@ -642,48 +814,117 @@ pub(super) fn remove_hook_files(home: &Path, dry_run: bool) -> bool {
         }
 
         backup_before_modify(&hj_path, dry_run);
-
-        match remove_lean_ctx_from_hooks_json(&content) {
-            Some(cleaned) if !cleaned.trim().is_empty() => {
-                if let Err(e) = safe_write(&hj_path, &cleaned, dry_run) {
-                    tracing::warn!("Failed to update {label} hooks.json: {e}");
-                } else {
-                    let verb = if dry_run { "Would clean" } else { "✓" };
-                    println!("  {verb} {label} hooks.json cleaned (non-lean-ctx hooks preserved)");
-                    removed = true;
-                }
-            }
-            _ => {
-                if let Err(e) = safe_remove(&hj_path, dry_run) {
-                    tracing::warn!("Failed to remove {label} hooks.json: {e}");
-                } else {
-                    let verb = if dry_run { "Would remove" } else { "✓" };
-                    println!("  {verb} {label} hooks.json removed");
-                    removed = true;
-                }
-            }
-        }
+        removed |= apply_hook_cleanup(&hj_path, label, &content, dry_run);
     }
 
     removed
 }
 
-/// Remove lean-ctx hook entries from hooks.json, preserving other hooks.
-/// Returns `Some(cleaned_json)` if non-lean-ctx hooks remain, `None` if empty.
-pub(super) fn remove_lean_ctx_from_hooks_json(content: &str) -> Option<String> {
-    let mut parsed: serde_json::Value = crate::core::jsonc::parse_jsonc(content).ok()?;
+/// Result of attempting to remove lean-ctx from a JSON config file.
+#[derive(Debug)]
+pub(super) enum HookCleanupResult {
+    /// No lean-ctx references found; file unchanged.
+    Unchanged,
+    /// lean-ctx entries removed; cleaned JSON content with remaining settings returned.
+    Cleaned(String),
+    /// File is entirely lean-ctx-only; safe to delete.
+    EntirelyLeanCtx,
+    /// JSON parse failed; file should NOT be touched.
+    ParseError,
+}
+
+/// Check if a single string value references lean-ctx.
+fn str_is_lean_ctx(s: &str) -> bool {
+    s.contains("lean-ctx")
+}
+
+/// For flat hook entries: check `command`, `bash`, or any string field for lean-ctx.
+fn flat_entry_is_lean_ctx(entry: &serde_json::Value) -> bool {
+    let Some(obj) = entry.as_object() else {
+        return false;
+    };
+    for key in ["command", "bash"] {
+        if let Some(serde_json::Value::String(s)) = obj.get(key) {
+            if str_is_lean_ctx(s) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// For nested hook entries (`{matcher, hooks: [{command: ...}]}`):
+/// Remove only lean-ctx sub-hooks, preserving user hooks in the same group.
+/// Returns true if the entry was modified or should be removed entirely.
+fn clean_nested_entry(entry: &mut serde_json::Value) -> bool {
+    let Some(obj) = entry.as_object_mut() else {
+        return false;
+    };
+    let Some(sub_hooks) = obj.get_mut("hooks").and_then(|h| h.as_array_mut()) else {
+        return false;
+    };
+    let before = sub_hooks.len();
+    sub_hooks.retain(|h| !flat_entry_is_lean_ctx(h));
+    sub_hooks.len() < before
+}
+
+/// Remove lean-ctx hook entries from hooks/settings JSON, preserving other entries.
+///
+/// Handles multiple formats:
+/// - Flat: `{command: "lean-ctx ..."}` (Cursor hooks.json)
+/// - Nested: `{matcher: "...", hooks: [{type: "command", command: "lean-ctx ..."}]}` (Claude/Codex)
+/// - Copilot: `{bash: "lean-ctx ..."}` (Copilot hooks)
+pub(super) fn remove_lean_ctx_from_hooks_json(content: &str) -> HookCleanupResult {
+    let Ok(mut parsed) = crate::core::jsonc::parse_jsonc(content) else {
+        return HookCleanupResult::ParseError;
+    };
     let mut modified = false;
+
+    // Clean permissions.allow AND permissions.deny entries like "mcp__lean-ctx__*"
+    for perm_key in ["allow", "deny"] {
+        if let Some(perms) = parsed
+            .get_mut("permissions")
+            .and_then(|p| p.get_mut(perm_key))
+            .and_then(|a| a.as_array_mut())
+        {
+            let before = perms.len();
+            perms.retain(|p| !p.as_str().is_some_and(|s| s.contains("lean-ctx")));
+            if perms.len() < before {
+                modified = true;
+            }
+        }
+    }
 
     if let Some(hooks) = parsed.get_mut("hooks").and_then(|h| h.as_object_mut()) {
         for entries in hooks.values_mut() {
             if let Some(arr) = entries.as_array_mut() {
                 let before = arr.len();
+
+                // First: clean sub-hooks inside nested entries
+                for entry in arr.iter_mut() {
+                    if clean_nested_entry(entry) {
+                        modified = true;
+                    }
+                }
+
+                // Remove entries that are now empty nested groups
                 arr.retain(|entry| {
-                    !entry
-                        .get("command")
-                        .and_then(|c| c.as_str())
-                        .is_some_and(|cmd| cmd.contains("lean-ctx"))
+                    if let Some(sub) = entry.get("hooks").and_then(|h| h.as_array()) {
+                        if sub.is_empty() {
+                            return false;
+                        }
+                    }
+                    true
                 });
+
+                // Then: remove flat entries that are lean-ctx
+                arr.retain(|entry| {
+                    if entry.get("hooks").is_some() {
+                        return true; // nested — already handled above
+                    }
+                    !flat_entry_is_lean_ctx(entry)
+                });
+
                 if arr.len() < before {
                     modified = true;
                 }
@@ -692,22 +933,56 @@ pub(super) fn remove_lean_ctx_from_hooks_json(content: &str) -> Option<String> {
     }
 
     if !modified {
-        return None;
+        return HookCleanupResult::Unchanged;
     }
 
-    let has_remaining_hooks =
-        parsed
-            .get("hooks")
-            .and_then(|h| h.as_object())
-            .is_some_and(|hooks| {
-                hooks
-                    .values()
-                    .any(|entries| entries.as_array().is_some_and(|a| !a.is_empty()))
-            });
+    // Remove empty event arrays after cleanup
+    if let Some(hooks) = parsed.get_mut("hooks").and_then(|h| h.as_object_mut()) {
+        hooks.retain(|_, v| v.as_array().is_none_or(|a| !a.is_empty()));
+    }
 
-    if has_remaining_hooks {
-        Some(serde_json::to_string_pretty(&parsed).ok()? + "\n")
+    // Remove empty permissions arrays and empty permissions object
+    if let Some(perms) = parsed
+        .get_mut("permissions")
+        .and_then(|p| p.as_object_mut())
+    {
+        for key in ["allow", "deny"] {
+            if perms
+                .get(key)
+                .and_then(|a| a.as_array())
+                .is_some_and(Vec::is_empty)
+            {
+                perms.remove(key);
+            }
+        }
+    }
+    if parsed
+        .get("permissions")
+        .and_then(|p| p.as_object())
+        .is_some_and(serde_json::Map::is_empty)
+    {
+        parsed.as_object_mut().map(|o| o.remove("permissions"));
+    }
+
+    // Check if any meaningful content remains
+    let has_remaining = parsed.as_object().is_some_and(|obj| {
+        obj.iter().any(|(key, val)| {
+            if key == "hooks" {
+                val.as_object().is_some_and(|h| !h.is_empty())
+            } else {
+                !val.is_null()
+            }
+        })
+    });
+
+    let pretty = match serde_json::to_string_pretty(&parsed) {
+        Ok(s) => s + "\n",
+        Err(_) => return HookCleanupResult::ParseError,
+    };
+
+    if has_remaining {
+        HookCleanupResult::Cleaned(pretty)
     } else {
-        None
+        HookCleanupResult::EntirelyLeanCtx
     }
 }

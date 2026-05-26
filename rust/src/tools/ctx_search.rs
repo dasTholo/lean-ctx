@@ -106,6 +106,7 @@ pub fn handle(
     // Deterministic search: stable file ordering makes max_results truncation reproducible.
     files.sort_unstable_by(|a, b| a.as_os_str().cmp(b.as_os_str()));
 
+    let root_str = root.to_string_lossy();
     for path in &files {
         if matches.len() >= max_results {
             break;
@@ -120,7 +121,8 @@ pub fn handle(
 
         for (i, line) in content.lines().enumerate() {
             if re.is_match(line) {
-                let short_path = protocol::shorten_path(&path.to_string_lossy());
+                let short_path =
+                    protocol::shorten_path_relative(&path.to_string_lossy(), &root_str);
                 // Count raw tokens incrementally (avoids separate Vec + join)
                 raw_tokens_accum += count_tokens(line.trim()) + 2;
                 let shown = if redact {
@@ -160,7 +162,7 @@ pub fn handle(
         matches
             .iter()
             .filter_map(|m| {
-                let file = m.split(':').next()?;
+                let file = extract_file_from_match(m);
                 if seen.insert(file) {
                     Some(file)
                 } else {
@@ -290,11 +292,27 @@ fn is_generated_file(path: &Path) -> bool {
         || name.ends_with(".css.map")
 }
 
+/// Extract file path from a grep match line, handling Windows drive letters (e.g. "C:").
+fn extract_file_from_match(line: &str) -> &str {
+    let start = if line.len() >= 2
+        && line.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
+        && line.as_bytes().get(1) == Some(&b':')
+    {
+        2
+    } else {
+        0
+    };
+    match line[start..].find(':') {
+        Some(pos) => &line[..start + pos],
+        None => line,
+    }
+}
+
 fn monorepo_scope_hint(matches: &[String], search_dir: &str) -> Option<String> {
     let top_dirs: HashSet<&str> = matches
         .iter()
         .filter_map(|m| {
-            let path = m.split(':').next()?;
+            let path = extract_file_from_match(m);
             let relative = path.strip_prefix("./").unwrap_or(path);
             let relative = relative.strip_prefix(search_dir).unwrap_or(relative);
             let relative = relative.strip_prefix('/').unwrap_or(relative);
