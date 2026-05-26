@@ -62,3 +62,7 @@ AGENTS.md.lean-ctx.*.bak
 tmp/
 .superpowers/
 docs/gpt/
+
+# ── Local tool caches / scratch dirs ──
+.tmp-bt/
+.claude/skills/
