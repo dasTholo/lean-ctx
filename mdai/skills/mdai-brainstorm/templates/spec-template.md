@@ -1,6 +1,6 @@
 ---
-slug: {{ slug }}
-date: {{ date }}
+slug: { { slug } }
+date: { { date } }
 status: ready-for-review
 ---
 

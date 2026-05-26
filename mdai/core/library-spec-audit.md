@@ -2,14 +2,17 @@
 lib_version: 0.1.1
 mdai-pack:
   mode: import-only
-  exports: [library_spec_audit]
+  exports: [ library_spec_audit ]
 ---
+
 @markdownai v1.0
 
 @define library_spec_audit(spec_path)
+
 # Library-Spec Audit für {{ spec_path }}
 
 Each check verifies the spec covers a key library-pack concern. For each:
+
 - run `mcp__lean-ctx__ctx_search(pattern="<anchor>", path="{{ spec_path }}")` (or frontmatter-field check)
 - if PRESENT → ✓
 - if MISSING → flag with guidance

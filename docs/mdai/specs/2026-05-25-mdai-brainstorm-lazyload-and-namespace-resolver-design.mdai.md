@@ -99,11 +99,12 @@ Ein kohärenter v0.1.x-Patch ohne Skill-Version-Bump.
 - Neue Tests: `engine/__tests__/resolve-mdai-root.test.ts`,
   `mcp/__tests__/server.test.ts` (Erweiterung),
   `core/__tests__/cli-mdai-namespace.test.ts`.
-@end
+  @end
 
 ### 1.3 Out-of-Scope
 
 @prompt role="reference"
+
 - **ctx_session-Adoption über Visual-Gate (S2) hinaus.** S3 (Skill-Handoff-Path),
   S1 (Cross-Session-Resume) bleiben Backlog.
 - **Skill-Version-Bump.** `mdai-brainstorm` bleibt v0.1.x. lib_version-Felder in
@@ -123,11 +124,12 @@ Ein kohärenter v0.1.x-Patch ohne Skill-Version-Bump.
 - **`spec-directive-conventions.md` ins `mdai/core/` promoten** (V2 in Brainstorm
   verworfen, weil dieser Skill der einzige Spec-Produzent ist und L1 skill-local
   bleibt).
-@end
+  @end
 
 ### 1.4 Success Criteria
 
 @prompt role="reference"
+
 1. `body.mdai.md` dialog-process-Phase Source schrumpft von 986 W → ≤ 600 W (mit
    Reserve, Ziel ~510 W).
 2. pre-context-Phase lädt `mdai/core/lean-context.md` zusätzlich erfolgreich
@@ -143,7 +145,7 @@ Ein kohärenter v0.1.x-Patch ohne Skill-Version-Bump.
 7. spec-reviewer-Prompt-Body bei dispatch reduziert sich von ~1533 W auf ~340 W
    für Design-Doc-Pfad (Library-Spec-Pfad mit `@call library_spec_audit`:
    zusätzlich +700 W, also ~1040 W — immer noch unter dem ursprünglichen 1533 W).
-@end
+   @end
 
 ## 2. File-Layout-Diff
 
@@ -156,11 +158,11 @@ Ein kohärenter v0.1.x-Patch ohne Skill-Version-Bump.
 
 **Neu (3 Files):**
 
-| File | Mode | Inhalt | ~Wörter |
-|---|---|---|---:|
-| `spec-directive-conventions.md` | `include` | Direktiven-Konventions-Tabelle (9 Use-Cases × 3 Spalten) + `file_check`-Anti-Pattern + Plain-Markdown-Exception | ~360 |
-| `spec-self-review.md` | `include` | 5 existierende Checks + neuer Check #6 (lean-context spot) + Reviewer-Dispatch-Block + User-Review-Gate-Wording | ~290 |
-| `process-principles.md` | `include` | hand-portierte Process-Details (5 Bullets) + Key-Principles (6 Bullets) + Drift-Tracking-Kommentar | ~250 |
+| File                            | Mode      | Inhalt                                                                                                          | ~Wörter |
+|---------------------------------|-----------|-----------------------------------------------------------------------------------------------------------------|--------:|
+| `spec-directive-conventions.md` | `include` | Direktiven-Konventions-Tabelle (9 Use-Cases × 3 Spalten) + `file_check`-Anti-Pattern + Plain-Markdown-Exception |    ~360 |
+| `spec-self-review.md`           | `include` | 5 existierende Checks + neuer Check #6 (lean-context spot) + Reviewer-Dispatch-Block + User-Review-Gate-Wording |    ~290 |
+| `process-principles.md`         | `include` | hand-portierte Process-Details (5 Bullets) + Key-Principles (6 Bullets) + Drift-Tracking-Kommentar              |    ~250 |
 
 Alle drei: keine YAML-Frontmatter (für `mode: include` safe), kein `@define`,
 kein eigener `@markdownai v1.0` Header.
@@ -168,12 +170,12 @@ kein eigener `@markdownai v1.0` Header.
 **Modifiziert:**
 
 - `body.mdai.md`: pre-context (+ `@call detect_mdai_root()`,
-  + `@include mdai/core/lean-context.md`, ~ `tool-selection`-Constraint
-  geschrumpft); dialog-process (~ Process-Checklist Schritt 6-9 mit
-  Phase-Transitions, ~ Z 137-160 → `@include ./process-principles.md`,
-  − Z 188-220 + Z 222-238 + Z 240-282 alle raus); write-outputs
-  (+ `@include ./spec-directive-conventions.md` vor write_spec); handoff
-  (+ `@include ./spec-self-review.md` + User-Gate-Wording aus dialog-process).
+    + `@include mdai/core/lean-context.md`, ~ `tool-selection`-Constraint
+      geschrumpft); dialog-process (~ Process-Checklist Schritt 6-9 mit
+      Phase-Transitions, ~ Z 137-160 → `@include ./process-principles.md`,
+      − Z 188-220 + Z 222-238 + Z 240-282 alle raus); write-outputs
+      (+ `@include ./spec-directive-conventions.md` vor write_spec); handoff
+      (+ `@include ./spec-self-review.md` + User-Gate-Wording aus dialog-process).
 - `write-spec.md`: + Macro `write_review_report(spec_path, status, strengths,
   issues, recommendations)`.
 - `spec-reviewer.md`: komplett re-shape — siehe §3.5.
@@ -190,10 +192,10 @@ kein eigener `@markdownai v1.0` Header.
 
 **Neu (2 Files):**
 
-| File | Mode | Inhalt | ~Wörter |
-|---|---|---|---:|
-| `lean-context-audit.md` | `import-only` | `@define lean_context_audit(spec_path)` — 6-Anchor-Sweep | ~200 |
-| `library-spec-audit.md` | `import-only` | `@define library_spec_audit(spec_path)` — 7 Library-Spec-Checks | ~700 |
+| File                    | Mode          | Inhalt                                                          | ~Wörter |
+|-------------------------|---------------|-----------------------------------------------------------------|--------:|
+| `lean-context-audit.md` | `import-only` | `@define lean_context_audit(spec_path)` — 6-Anchor-Sweep        |    ~200 |
+| `library-spec-audit.md` | `import-only` | `@define library_spec_audit(spec_path)` — 7 Library-Spec-Checks |    ~700 |
 
 **Modifiziert:**
 
@@ -223,11 +225,11 @@ kein eigener `@markdownai v1.0` Header.
 
 **Neu (Tests):**
 
-| File | Coverage |
-|---|---|
+| File                                             | Coverage                                                                |
+|--------------------------------------------------|-------------------------------------------------------------------------|
 | `engine/src/__tests__/resolve-mdai-root.test.ts` | env-var-hit, walk-up-hit (parent-1, parent-N), jailRoot-respect, no-hit |
-| `mcp/src/__tests__/server.test.ts` (Erweiterung) | read_file mit MDAI_LIBRARY_ROOT, mit walk-up, mit invalid env |
-| `core/src/__tests__/cli-mdai-namespace.test.ts` | mai-CLI render gegen Fixture mit `@include mdai/...` (env + walk-up) |
+| `mcp/src/__tests__/server.test.ts` (Erweiterung) | read_file mit MDAI_LIBRARY_ROOT, mit walk-up, mit invalid env           |
+| `core/src/__tests__/cli-mdai-namespace.test.ts`  | mai-CLI render gegen Fixture mit `@include mdai/...` (env + walk-up)    |
 
 **Unangetastet:**
 
@@ -336,6 +338,7 @@ Spec ready for plan-write. Next step (manual, separate skill invocation):
 `/superpowers:writing-plans docs/mdai/specs/<date>-<slug>-design.mdai.md`
 
 # ... existing handoff message ...
+
 @end
 ```
 
@@ -387,11 +390,11 @@ nicht dass er `read_file(phase=...)` für die nächsten Schritte aufrufen muss:
 4. Propose 2–3 approaches with trade-offs.
 5. Present design sections, get approval after each.
 6. Switch to `write-outputs` phase: `read_file(phase="write-outputs")`.
-   - Apply spec-directive-conventions while finalizing design_content.
-   - `@call write_spec(slug, design_content)`.
+    - Apply spec-directive-conventions while finalizing design_content.
+    - `@call write_spec(slug, design_content)`.
 7. Switch to `handoff` phase: `read_file(phase="handoff")`.
-   - Spec Self-Review (5 + 1 checks).
-   - 7.5 OPTIONAL: dispatch `spec_reviewer_prompt(spec_path)`.
+    - Spec Self-Review (5 + 1 checks).
+    - 7.5 OPTIONAL: dispatch `spec_reviewer_prompt(spec_path)`.
 8. User-Review-Gate (in same handoff phase, exact wording).
 9. Transition: invoke writing-plans skill — THIS SKILL DOES NOT WRITE THE PLAN.
 ```
@@ -407,6 +410,7 @@ mdai-pack:
   mode: import-only
   exports: [spec_reviewer_prompt]
 ---
+
 @markdownai v1.0
 
 @import mdai/skills/mdai-brainstorm/write-spec.md
@@ -448,7 +452,7 @@ Approve unless there are serious gaps that would lead to a flawed plan.
 
 a. **Language convention** (CLAUDE.md): spec body German, code/snippets English.
 b. **mdai directives in body** (Discipline §10.4 #9): ≥3 distinct directive
-   types in body, OR frontmatter has `markdownai_directives_omitted: <reason>`.
+types in body, OR frontmatter has `markdownai_directives_omitted: <reason>`.
 c. **Lean-context audit:** `@call lean_context_audit(spec_path={{ spec_path }})`.
 
 ## 5. Heavy library-spec checks (conditional)
@@ -507,14 +511,14 @@ Neuer Check zusätzlich zu den 5 existierenden:
 ```markdown
 6. **Lean-context defaults spot check** (light variant of Reviewer-Check #10):
    Schnell-Scan auf häufigste lean-context-Violations:
-   - `@call ctx_search(pattern="mode=\"full\"", path="<spec_path>")` → flag jeden
-     match ohne adjacent `@note visible consumer="human"` Block.
-   - `@call ctx_search(pattern="raw=true", path="<spec_path>")` → flag ohne
-     `@note visible`.
-   - `@call ctx_search(pattern="fresh=true", path="<spec_path>")` → flag wenn
-     nicht IMMEDIATELY nach einem write/edit zum gleichen Pfad.
-   Fix inline. Heavy-Variante (6-Anchor-Sweep) bleibt im optional dispatched
-   Reviewer (`@call lean_context_audit`).
+    - `@call ctx_search(pattern="mode=\"full\"", path="<spec_path>")` → flag jeden
+      match ohne adjacent `@note visible consumer="human"` Block.
+    - `@call ctx_search(pattern="raw=true", path="<spec_path>")` → flag ohne
+      `@note visible`.
+    - `@call ctx_search(pattern="fresh=true", path="<spec_path>")` → flag wenn
+      nicht IMMEDIATELY nach einem write/edit zum gleichen Pfad.
+      Fix inline. Heavy-Variante (6-Anchor-Sweep) bleibt im optional dispatched
+      Reviewer (`@call lean_context_audit`).
 ```
 
 ## 4. markdownai `mdai/`-Namespace-Resolver
@@ -718,48 +722,56 @@ v0.1.0-Smoke-Artefakt FEHLT — Plan muss Re-Run gegen aktuelle Skill-Realität 
 
 **Erwartete Status-Änderungen:**
 
-| Test | v0.1.0 | v0.1.1 erwartet | Begründung |
-|---|---|---|---|
-| §8.1 Pointer-Compliance | deferred | deferred | User-Action |
-| §8.2 Discipline-Fidelity | deferred | deferred | User-Action |
-| §8.3 Output-Test | deferred | deferred | User-Action |
-| §8.4 Phase-Budget | pass-with-concern | **pass** | dialog-process Source ~510 W << 600 W Target |
-| §8.5 Library-Import | tooling-discrepancy | **pass** | Namespace-Resolver löst `@include mdai/...` uniform |
-| §8.5.1 `@date`-Resolve | pass-structural | pass-structural | Unverändert |
-| §8.5.2 False-Branch | fail | **fail (unchanged) — Backlog** | markdownai-Upstream-Edge-Case |
-| §8.6 Lean-Context-Discipline | pass | **pass** + 2 neue Anchors | erweiterte Discipline durch lean-context-audit |
+| Test                         | v0.1.0              | v0.1.1 erwartet                | Begründung                                          |
+|------------------------------|---------------------|--------------------------------|-----------------------------------------------------|
+| §8.1 Pointer-Compliance      | deferred            | deferred                       | User-Action                                         |
+| §8.2 Discipline-Fidelity     | deferred            | deferred                       | User-Action                                         |
+| §8.3 Output-Test             | deferred            | deferred                       | User-Action                                         |
+| §8.4 Phase-Budget            | pass-with-concern   | **pass**                       | dialog-process Source ~510 W << 600 W Target        |
+| §8.5 Library-Import          | tooling-discrepancy | **pass**                       | Namespace-Resolver löst `@include mdai/...` uniform |
+| §8.5.1 `@date`-Resolve       | pass-structural     | pass-structural                | Unverändert                                         |
+| §8.5.2 False-Branch          | fail                | **fail (unchanged) — Backlog** | markdownai-Upstream-Edge-Case                       |
+| §8.6 Lean-Context-Discipline | pass                | **pass** + 2 neue Anchors      | erweiterte Discipline durch lean-context-audit      |
 
 ### 5.2 §8.7 (NEU): Namespace-Resolver Tests
 
 **§8.7.1 — Env-var-Pfad:**
+
 ```bash
 MDAI_LIBRARY_ROOT=$PWD/mdai npx mai render mdai/skills/mdai-brainstorm/body.mdai.md
 ```
+
 Pass: 0 ENOENT-Warnings für die 3 `@include mdai/core/...`-Direktiven.
 
 **§8.7.2 — Walk-Up-Pfad (kein env-var):**
+
 ```bash
 unset MDAI_LIBRARY_ROOT
 npx mai render mdai/skills/mdai-brainstorm/body.mdai.md
 ```
+
 Pass: 0 ENOENT-Warnings, walk-up findet `<repo-root>/mdai/`.
 
 **§8.7.3 — Symlink-Pfad (Production via Claude Code):**
+
 ```
 mcp__markdownai__read_file(
   path="/abs/path/.claude/skills/mdai-brainstorm/body.mdai.md",
   phase="pre-context"
 )
 ```
+
 Pass: 0 ENOENT-Warnings (Resolver walks up from symlink-target via Marker; oder
 findet via env wenn gesetzt).
 
 **§8.7.4 — Negativ-Test:**
 Aus temp-dir OHNE mdai/-Bibliothek im Ancestry und ohne env-var:
+
 ```bash
 cd /tmp/empty && unset MDAI_LIBRARY_ROOT
 npx mai render <synthetic-fixture-with-@include-mdai>
 ```
+
 Pass: klare ENOENT-Warning mit Error-Message aus §4.5.
 
 ### 5.3 §8.8 (NEU): Phase-Transition-Workflow
@@ -786,6 +798,7 @@ npx mai render --macro spec_reviewer_prompt \
 ```
 
 Pass:
+
 - Output enthält die 6 Sektionen (Read / What to Check / Calibration /
   mdai-Augmentations / Heavy library-spec checks / Output)
 - `@prompt role="reference"` + `@prompt role="calibration"` Blöcke im
@@ -799,17 +812,21 @@ Pass:
 **§8.10.1 — lean-context-audit:**
 
 Fixture mit künstlichem Spec der `mode="full"` ohne `@note` enthält:
+
 ```bash
 npx mai render <fixture-spec.mdai.md>
 ```
+
 Expected: 1 flagged match für `mode="full"`.
 
 **§8.10.2 — library-spec-audit:**
 
 Fixture mit MCP-Signatur-Lock im Spec-Body:
+
 ```bash
 npx mai render <library-spec-fixture.mdai.md>
 ```
+
 Expected: Check #1 flag MCP-Signatur-Verifikation needed.
 
 Pass: beide Audit-Macros laden via `@import mdai/core/...` (Namespace-Resolver
@@ -821,6 +838,7 @@ Dispatch Reviewer mit `@call spec_reviewer_prompt(spec_path=<test-spec>)`,
 Subagent ruft `@call write_review_report(spec_path=<test-spec>, status="Approved", ...)`.
 
 Pass:
+
 - Datei `docs/mdai/reviews/<test-spec-basename>-review.md` existiert
 - Frontmatter enthält korrekt `target`, `reviewer`, `date`
 - Body enthält Status-Sektion, Strengths, Issues, Recommendations
@@ -828,14 +846,14 @@ Pass:
 
 ### 5.7 Erwartetes Phase-Budget (Source-Wörter)
 
-| Phase | v0.1.0 Actual | v0.1.1 Budget | v0.1.1 Erwartet |
-|---|---:|---:|---:|
-| pre-context | 162 | ≤250 | ~170 |
-| dialog-rules | 703 | ≤750 | 703 |
-| dialog-process | 986 | **≤600** | **~510** (mit L3-inline) |
-| write-outputs | 92 | ≤500 | ~470 |
-| handoff | 66 | ≤500 | ~430 |
-| **Σ Source** | **2009** | — | ~2283 |
+| Phase          | v0.1.0 Actual | v0.1.1 Budget |          v0.1.1 Erwartet |
+|----------------|--------------:|--------------:|-------------------------:|
+| pre-context    |           162 |          ≤250 |                     ~170 |
+| dialog-rules   |           703 |          ≤750 |                      703 |
+| dialog-process |           986 |      **≤600** | **~510** (mit L3-inline) |
+| write-outputs  |            92 |          ≤500 |                     ~470 |
+| handoff        |            66 |          ≤500 |                     ~430 |
+| **Σ Source**   |      **2009** |             — |                    ~2283 |
 
 Source-Total wächst leicht (+274 W) durch Phase-Transitions + Foundation-Includes.
 Aber: dialog-process-Render schrumpft drastisch — und das ist die Phase, die der
@@ -869,6 +887,7 @@ Erzeugt nach v0.1.1-Implementation:
 `docs/mdai/green-verification/skill/mdai-brainstorm-v0.1.1-smoke.md`
 
 Format analog v0.1.0:
+
 - Summary-Tabelle (§8.1-§8.11 mit Status, Notes)
 - Phase-Budget-Tabelle (Vorher/Nachher/Budget/Δ)
 - Diagnose-Notes pro non-pass-Test
@@ -882,14 +901,22 @@ Format analog v0.1.0:
 @prompt role="reference"
 | Risk | Severity | Mitigation |
 |---|---|---|
-| Walk-Up findet falsche `mdai/`-Library (mehrere Forks im Filesystem-Ancestry) | mittel | env-var `MDAI_LIBRARY_ROOT` als expliziter Override dokumentiert. `detect_mdai_root` Output zeigt resolved path beim Bootstrap. |
-| markdownai-Engine-Bump nötig → koordinierter Release | hoch | Engine-Change additiv (`@include mdai/...` ohne Resolver = ENOENT wie bisher = kein Regress). Konsumenten migrieren stufenweise. |
-| Phase-Split bricht UX wenn Agent Phase-Transitions ignoriert | mittel | Process-Checklist Schritt 6-9 enthält explizite `read_file(phase=...)`-Aufrufe. dialog-process render endet mit deutlicher Next-Zeile. |
-| Lean-Reviewer wirft Library-Spec-Checks raus die bei meta-Specs nötig waren | niedrig | `@call library_spec_audit` bleibt aufrufbar; Reviewer-Trigger-Sektion erklärt wann. Self-Review-Check #6 fängt häufigste Verletzungen ab. |
-| mai-CLI vs MCP-Server Behavior-Divergence beim Resolver | mittel | §8.7 Smoke-Tests prüfen beide Pfade. Engine-Logik ist single-source-of-truth, beide Consumer rufen dieselbe Fn. |
-| `@prompt`-Blöcke in spec-reviewer.md werden bei consumer=human gestrippt | niedrig | Reviewer-Dispatch via Skill geht IMMER über consumer=ai. Doc-String weist explizit darauf hin. |
-| Bestehende Skills mit lokalem `mdai/`-Subdir brechen wegen Namespace-Capture | sehr niedrig | Workaround `./mdai/...` dokumentiert. Audit-Sweep nach Release. |
-| `library-spec-audit.md` enthält 7 Checks — Engine-Bump kann Check #3 brechen | niedrig | Drift-Anker im File-Kopf: `# Last verified against markdownai vX.Y.Z`. |
+| Walk-Up findet falsche `mdai/`-Library (mehrere Forks im Filesystem-Ancestry) | mittel | env-var `MDAI_LIBRARY_ROOT`
+als expliziter Override dokumentiert. `detect_mdai_root` Output zeigt resolved path beim Bootstrap. |
+| markdownai-Engine-Bump nötig → koordinierter Release | hoch | Engine-Change additiv (`@include mdai/...` ohne
+Resolver = ENOENT wie bisher = kein Regress). Konsumenten migrieren stufenweise. |
+| Phase-Split bricht UX wenn Agent Phase-Transitions ignoriert | mittel | Process-Checklist Schritt 6-9 enthält
+explizite `read_file(phase=...)`-Aufrufe. dialog-process render endet mit deutlicher Next-Zeile. |
+| Lean-Reviewer wirft Library-Spec-Checks raus die bei meta-Specs nötig waren | niedrig | `@call library_spec_audit`
+bleibt aufrufbar; Reviewer-Trigger-Sektion erklärt wann. Self-Review-Check #6 fängt häufigste Verletzungen ab. |
+| mai-CLI vs MCP-Server Behavior-Divergence beim Resolver | mittel | §8.7 Smoke-Tests prüfen beide Pfade. Engine-Logik
+ist single-source-of-truth, beide Consumer rufen dieselbe Fn. |
+| `@prompt`-Blöcke in spec-reviewer.md werden bei consumer=human gestrippt | niedrig | Reviewer-Dispatch via Skill geht
+IMMER über consumer=ai. Doc-String weist explizit darauf hin. |
+| Bestehende Skills mit lokalem `mdai/`-Subdir brechen wegen Namespace-Capture | sehr niedrig | Workaround `./mdai/...`
+dokumentiert. Audit-Sweep nach Release. |
+| `library-spec-audit.md` enthält 7 Checks — Engine-Bump kann Check #3 brechen | niedrig | Drift-Anker im File-Kopf:
+`# Last verified against markdownai vX.Y.Z`. |
 @end
 
 ### 6.2 Migration
@@ -961,6 +988,7 @@ per-Process). Aktuell out-of-scope.
 ## 7. Annahmen
 
 @prompt role="reference"
+
 1. markdownai-Repo (`markdownai/packages/`) ist Teil dieses Workspaces und kann
    im selben Plan-Zyklus mit-implementiert werden. Falls nicht: Spec muss in
    zwei Phasen umgesetzt werden (Engine-PR zuerst, dann Skill-Refactor wenn
@@ -975,11 +1003,12 @@ per-Process). Aktuell out-of-scope.
 5. mdai-Library wird in Install-Varianten parallel zum Skill-Verzeichnis
    bereitgestellt (entweder im Projekt-Repo oder global). Skill ist ohne
    Library nicht funktional — das ist intendiert.
-@end
+   @end
 
 ## 8. Open Questions
 
 @prompt role="reference"
+
 1. Soll `detect_mdai_root` aus `mdai_bootstrap()` automatisch aufgerufen
    werden oder optional? — Empfehlung: automatisch, aber mit Cache (analog
    detect_tooling).
@@ -991,9 +1020,10 @@ per-Process). Aktuell out-of-scope.
 4. Soll `lib_version` in den modifizierten Pack-Files (`write-spec.md`,
    `spec-reviewer.md`) zu 0.1.1 bumpen? — Empfehlung: ja, Patch-Tracking. Skill
    selbst bleibt v0.1.x.
-@end
+   @end
 
 ---
 
-**Spec-Ende.** Nächster Schritt: `/superpowers:writing-plans docs/mdai/specs/2026-05-25-mdai-brainstorm-lazyload-and-namespace-resolver-design.mdai.md`
+**Spec-Ende.** Nächster Schritt:
+`/superpowers:writing-plans docs/mdai/specs/2026-05-25-mdai-brainstorm-lazyload-and-namespace-resolver-design.mdai.md`
 (oder `/mdai-writing-plans <path>` wenn dieser Skill mal existiert).
