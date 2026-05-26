@@ -19,7 +19,8 @@ Zwei vergleichbare `mdai-brainstorm`-Engine-Pfade, je 4 Smokes:
 
 - **Smoke 1:** `mcp__markdownai__list_phases` auf `mdai/skills/mdai-brainstorm/body.mdai.md` — Phasenmetadaten.
 - **Smoke 2:** `mcp__markdownai__resolve_phase` mit Phase `pre-context` — Library-`@include`-Auflösung.
-- **Smoke 3:** vollständiger `mdai-brainstorm`-Skill-Lauf (nicht `/superpowers:brainstorming` — siehe Plan-Korrektur unten), alle
+- **Smoke 3:** vollständiger `mdai-brainstorm`-Skill-Lauf (nicht `/superpowers:brainstorming` — siehe Plan-Korrektur
+  unten), alle
   5 Phasen via `mcp__markdownai__read_file phase=...`. Spec-Self-Review + Spec-Write übersprungen (minimaler Run, nur
   Engine-Resolution-Evidence).
 - **Smoke 4:** `mcp__markdownai__call_macro` auf 3 Bootstrap-Macros (`mdai_bootstrap`, `detect_mai_hook_version`,
@@ -50,18 +51,18 @@ den MCP-Server.
 
 ## Vergleichstabelle
 
-| Kriterium                                | Variante A (kein env)                        | Variante B (Status quo)                                     |
-|------------------------------------------|----------------------------------------------|-------------------------------------------------------------|
-| Setup-Cost (one-time)                    | `security.json filesystem`-Block neu (1x)    | `MDAI_LIBRARY_ROOT` in `~/.zshrc`/`~/.bashrc` exportieren   |
-| Setup-Cost (neuer Dev / CI)              | nur `security.json`-Template kopieren        | env-var setzen + shell sourcen (oder CI-`env:`-Block)       |
-| Portabilität Library → andere Repos      | **NEIN** — `source_root` absolut hardcoded   | **JA** — env-var portabel über Repos                        |
-| Subagent-env-Vererbung (Finding §7)      | nicht betroffen (kein env in Resolution)     | weiterhin Stolperfalle ohne explizites env-Passthrough      |
-| MCP-Tool-Schema-Eignung                  | passt (kein env-Param nötig)                 | passt nur via Inheritance — keine explizite `env=`-API      |
-| Smoke 1 (list_phases)                    | **PASS** — 5 Phases korrekt                  | **PASS** — 5 Phases identisch                               |
-| Smoke 2 (resolve_phase pre-context)      | **FAIL** — 9 warnings, davon 2 ENOENT critical | **PASS** — `warnings: []` (0 warnings)                    |
-| Smoke 3 (full brainstorm, 5 Phasen)      | NOT-RUN (predicted FAIL aus Smoke-2-Evidence) | **PASS** — 5/5 Phases, 0 ENOENT, 16 nicht-kritische warns  |
-| Smoke 4 (call_macro × 3 Bootstrap)       | mdai_bs=DEGRADED, detect_hook=PASS, lean_ctx_audit=PASS_param | identisch (no ENOENT in beiden — top-level macro calls) |
-| Render-Output gegen Library funktionsfähig | **NEIN** — file-relative @include resolution bricht  | **JA** — `${MDAI_LIBRARY_ROOT}` expandiert korrekt          |
+| Kriterium                                  | Variante A (kein env)                                         | Variante B (Status quo)                                   |
+|--------------------------------------------|---------------------------------------------------------------|-----------------------------------------------------------|
+| Setup-Cost (one-time)                      | `security.json filesystem`-Block neu (1x)                     | `MDAI_LIBRARY_ROOT` in `~/.zshrc`/`~/.bashrc` exportieren |
+| Setup-Cost (neuer Dev / CI)                | nur `security.json`-Template kopieren                         | env-var setzen + shell sourcen (oder CI-`env:`-Block)     |
+| Portabilität Library → andere Repos        | **NEIN** — `source_root` absolut hardcoded                    | **JA** — env-var portabel über Repos                      |
+| Subagent-env-Vererbung (Finding §7)        | nicht betroffen (kein env in Resolution)                      | weiterhin Stolperfalle ohne explizites env-Passthrough    |
+| MCP-Tool-Schema-Eignung                    | passt (kein env-Param nötig)                                  | passt nur via Inheritance — keine explizite `env=`-API    |
+| Smoke 1 (list_phases)                      | **PASS** — 5 Phases korrekt                                   | **PASS** — 5 Phases identisch                             |
+| Smoke 2 (resolve_phase pre-context)        | **FAIL** — 9 warnings, davon 2 ENOENT critical                | **PASS** — `warnings: []` (0 warnings)                    |
+| Smoke 3 (full brainstorm, 5 Phasen)        | NOT-RUN (predicted FAIL aus Smoke-2-Evidence)                 | **PASS** — 5/5 Phases, 0 ENOENT, 16 nicht-kritische warns |
+| Smoke 4 (call_macro × 3 Bootstrap)         | mdai_bs=DEGRADED, detect_hook=PASS, lean_ctx_audit=PASS_param | identisch (no ENOENT in beiden — top-level macro calls)   |
+| Render-Output gegen Library funktionsfähig | **NEIN** — file-relative @include resolution bricht           | **JA** — `${MDAI_LIBRARY_ROOT}` expandiert korrekt        |
 
 ### Variante-A Root-Cause-Analyse (kritisch)
 
@@ -83,12 +84,14 @@ Variante A in der aktuellen v1.0-Engine **nicht funktionsfähig** — egal welch
 
 ### Nebenbefunde aus den Smokes (für Findings-v2 in Part-B)
 
-- **`mdai_bootstrap` Output garbled (16 warnings)** in beiden Varianten — `@query`-Commands von der `shell.allow_patterns`-Allowlist
+- **`mdai_bootstrap` Output garbled (16 warnings)** in beiden Varianten — `@query`-Commands von der
+  `shell.allow_patterns`-Allowlist
   geblockt. Output bricht mid-template. Separater Engine/Macro-Bug, nicht Library-Root-bezogen.
 - **`detect_mai_hook_version` Output A vs. B unterschiedlich:** A=„not installed", B=„v0.x — RUN init". Variante A's
   security.json hat `~/.markdownai/hooks/**` nicht in `allowed_data_paths` → `file.containsLine` wahrscheinlich
   blockiert → false-Zweig. Variante B hat den Pfad whitelisted. Macht Sinn, ist erwartet.
-- **Variante B write-outputs Phase:** zusätzlich zur erwarteten Template-Var-Unresolved-warnings (`slug`, `design_content`,
+- **Variante B write-outputs Phase:** zusätzlich zur erwarteten Template-Var-Unresolved-warnings (`slug`,
+  `design_content`,
   `render_target_resolved`) ein **harter Engine-Error** `"@set" cannot be used as a pipe source`. Potenzielles
   Update zu Finding §2 oder §5 (Macro-Body-Edge-Cases).
 
@@ -96,11 +99,14 @@ Variante A in der aktuellen v1.0-Engine **nicht funktionsfähig** — egal welch
 
 **Variante A ist mit dem aktuellen v1.0-Engine-Verhalten nicht umsetzbar.** Die Annahme „`source_root` ersetzt
 `${MDAI_LIBRARY_ROOT}` als Resolution-Root" trifft nicht zu — `@include`-Pfade werden weiterhin file-relative aufgelöst.
-Eine Migration zu Variante A würde einen **Engine-Patch in markdownai** erfordern (z.B. neue Directive `@include-from-root`
+Eine Migration zu Variante A würde einen **Engine-Patch in markdownai** erfordern (z.B. neue Directive
+`@include-from-root`
 oder `source_root`-aware-Resolution), nicht nur eine Sed-Substitution + `security.json`-Anpassung.
 
-**Empfehlung: Variante B (Status quo) beibehalten** in v0.1.3. Variante A ist Engine-Roadmap-Material — nicht Adoption-Plan.
-Wenn der Wunsch nach Repo-Portabilität bleibt: Engine-Issue in markdownai für `source_root`-relative `@include`-Resolution
+**Empfehlung: Variante B (Status quo) beibehalten** in v0.1.3. Variante A ist Engine-Roadmap-Material — nicht
+Adoption-Plan.
+Wenn der Wunsch nach Repo-Portabilität bleibt: Engine-Issue in markdownai für `source_root`-relative `@include`
+-Resolution
 öffnen, dann Variante A in einem späteren Release re-evaluieren.
 
 **Mitigation für Variante-B-Stolperfalle (Finding §7 — env-Vererbung):** In `mdai/core/hard-rules.md` einen Hinweis
