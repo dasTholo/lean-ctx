@@ -16,9 +16,9 @@ predecessor_smoke: docs/mdai/green-verification/skill/mdai-brainstorm-v0.1.0-smo
 
 | Smoke | Status        | Notes                                                                    |
 |-------|---------------|--------------------------------------------------------------------------|
-| §8.1  | deferred      | user-driven (T19)                                                        |
-| §8.2  | deferred      | user-driven (T19)                                                        |
-| §8.3  | deferred      | user-driven (T19)                                                        |
+| §8.1  | PASS          | list_phases — 5 Phases korrekt (Variante-B, T0.1-audit 2026-05-26)      |
+| §8.2  | PASS          | resolve_phase pre-context — warnings: [] (Variante-B, T0.1-audit)       |
+| §8.3  | PASS          | full brainstorm 5/5 + call_macro×3 — 0 ENOENT (Variante-B, T0.1-audit) |
 | §8.4  | PASS          | dialog-process 256W (≤600W)                                              |
 | §8.5  | PASS          | ${MDAI_LIBRARY_ROOT} globs in body.mdai.md                               |
 | §8.6  | PASS          | lean-context-discipline anchors flagged via static checklist             |

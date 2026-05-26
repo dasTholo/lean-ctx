@@ -313,6 +313,12 @@ Library-Pack-Call-Sites fehlt.
 
 ## Was in v0.1.3 fließt
 
+**Cleanup-Status (T6 — 2026-05-26):**
+- `~/.markdownai/hooks/preToolUse.mjs.pre-v1.0` — deleted.
+- `~/.claude/settings.json.pre-v1.0` — deleted.
+- `markdownai/` tag `pre-v1.0-bump` — deleted.
+- `~/.markdownai/security.json.pre-audit` — deleted.
+
 Pointer auf `docs/mdai/audits/2026-05-26-mdai-v1.0-adoption-audit.md` Sektion 3 (Action-Items).
 
 Aus User-Decision T0.3 (`v0.1.3_action_items: [§1..§12 all-12]`): alle 12 Findings werden im v0.1.3-Plan
