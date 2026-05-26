@@ -24,6 +24,7 @@ markiert.
 ## Status-Übersicht
 
 | §  | Topic                                       | v1.0-Status                            | Migration |
+| --- | --- | --- | --- |
 |----|---------------------------------------------|----------------------------------------|-----------|
 | 1  | Closer-Syntax                               | still-valid                            | no        |
 | 2  | @set+@foreach+{{var}} in @define            | still-valid                            | yes       |
@@ -233,12 +234,12 @@ fehl (`Error: filesystem writes are disabled`) wenn `filesystem.write_enabled` i
 `~/.markdownai/security.json` nicht auf `true` gesetzt ist.
 
 **HINWEIS aus Part-A T2:** Status ist `still-valid-with-new-mechanism` (NICHT `workaround-deprecated`).
-`write_enabled` bleibt primary gate (`engine.ts:118-119`, `write-ops.ts:26`), v1.0 ergänzt `write_root` +
+`write_enabled` bleibt primary gate (`engine.ts:118-119`, `write-ops.ts:25`), v1.0 ergänzt `write_root` +
 `allowed_write_paths` als **granulare Controls daneben** — kein Replacement. Empfehlung: beide Layer
 (legacy `write_enabled` + neue granulare Controls) als Cookbook-Eintrag dokumentieren.
 
 **v1.0-Status:** still-valid-with-new-mechanism (evidence: `engine.ts:118-119`
-`writeEnabled = fsConfig?.write_enabled ?? false` + `write-ops.ts:26` `ensureWriteEnabled` prüft dieses
+`writeEnabled = fsConfig?.write_enabled ?? false` + `write-ops.ts:25` `ensureWriteEnabled` prüft dieses
 Gate; v1.0 ergänzt `write_root` (default: cwd) und `allowed_write_paths` als granulare Controls neben
 `write_enabled` — `write_enabled=false` blockt weiterhin alle Writes).
 
