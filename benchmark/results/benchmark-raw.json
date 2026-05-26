@@ -4,74 +4,158 @@
       "ext": "rs",
       "modes": [
         {
-          "latency_us": 187211,
+          "latency_us": 535993,
           "mode": "map",
-          "preservation": 79.17,
-          "savings_pct": 99.21,
-          "tokens": 130
+          "preservation": 80.0,
+          "savings_pct": 99.22,
+          "tokens": 136
         },
         {
-          "latency_us": 7457,
+          "latency_us": 22227,
           "mode": "signatures",
-          "preservation": 75.0,
-          "savings_pct": 99.11,
+          "preservation": 72.0,
+          "savings_pct": 99.16,
           "tokens": 146
         },
         {
-          "latency_us": 366,
+          "latency_us": 878,
           "mode": "aggressive",
           "preservation": 100.0,
-          "savings_pct": 4.45,
-          "tokens": 15681
+          "savings_pct": 4.56,
+          "tokens": 16649
         },
         {
-          "latency_us": 26540,
+          "latency_us": 54126,
           "mode": "entropy",
           "preservation": 100.0,
-          "savings_pct": 0.12,
-          "tokens": 16392
+          "savings_pct": 0.15,
+          "tokens": 17417
         },
         {
           "latency_us": 0,
           "mode": "cache_hit",
           "preservation": null,
-          "savings_pct": 99.92,
+          "savings_pct": 99.93,
           "tokens": 13
         }
       ],
       "path": "rust/src/cli/dispatch.rs",
-      "raw_tokens": 16412
+      "raw_tokens": 17444
     },
     {
       "ext": "rs",
       "modes": [
         {
-          "latency_us": 9977,
+          "latency_us": 30160,
+          "mode": "map",
+          "preservation": 64.89,
+          "savings_pct": 94.23,
+          "tokens": 1249
+        },
+        {
+          "latency_us": 29513,
+          "mode": "signatures",
+          "preservation": 97.87,
+          "savings_pct": 92.3,
+          "tokens": 1668
+        },
+        {
+          "latency_us": 840,
+          "mode": "aggressive",
+          "preservation": 100.0,
+          "savings_pct": 4.23,
+          "tokens": 20734
+        },
+        {
+          "latency_us": 66207,
+          "mode": "entropy",
+          "preservation": 100.0,
+          "savings_pct": 1.56,
+          "tokens": 21312
+        },
+        {
+          "latency_us": 0,
+          "mode": "cache_hit",
+          "preservation": null,
+          "savings_pct": 99.94,
+          "tokens": 13
+        }
+      ],
+      "path": "rust/src/core/editor_registry/writers.rs",
+      "raw_tokens": 21649
+    },
+    {
+      "ext": "md",
+      "modes": [
+        {
+          "latency_us": 1536,
+          "mode": "map",
+          "preservation": 100.0,
+          "savings_pct": 100.0,
+          "tokens": 0
+        },
+        {
+          "latency_us": 248,
+          "mode": "signatures",
+          "preservation": 100.0,
+          "savings_pct": 100.0,
+          "tokens": 0
+        },
+        {
+          "latency_us": 274,
+          "mode": "aggressive",
+          "preservation": 100.0,
+          "savings_pct": 9.3,
+          "tokens": 21169
+        },
+        {
+          "latency_us": 68997,
+          "mode": "entropy",
+          "preservation": 100.0,
+          "savings_pct": 0.72,
+          "tokens": 23170
+        },
+        {
+          "latency_us": 0,
+          "mode": "cache_hit",
+          "preservation": null,
+          "savings_pct": 99.94,
+          "tokens": 13
+        }
+      ],
+      "path": "docs/mdai/specs/2026-05-24-mdai-brainstorm-design.mdai.md",
+      "raw_tokens": 23339
+    },
+    {
+      "ext": "rs",
+      "modes": [
+        {
+          "latency_us": 30651,
           "mode": "map",
           "preservation": 100.0,
           "savings_pct": 99.51,
-          "tokens": 82
+          "tokens": 81
         },
         {
-          "latency_us": 9628,
+          "latency_us": 29843,
           "mode": "signatures",
           "preservation": 66.67,
           "savings_pct": 99.7,
           "tokens": 49
         },
         {
-          "latency_us": 237,
+          "latency_us": 592,
           "mode": "aggressive",
           "preservation": 100.0,
           "savings_pct": 0.3,
-          "tokens": 16553
+          "tokens": 16560
         },
         {
-          "latency_us": 23070,
+          "latency_us": 44802,
           "mode": "entropy",
           "preservation": 100.0,
           "savings_pct": 0.0,
-          "tokens": 16602
+          "tokens": 16609
         },
         {
           "latency_us": 0,
@@ -82,38 +166,38 @@
         }
       ],
       "path": "rust/src/tool_defs/granular.rs",
-      "raw_tokens": 16602
+      "raw_tokens": 16609
     },
     {
-      "ext": "rs",
+      "ext": "html",
       "modes": [
         {
-          "latency_us": 8495,
+          "latency_us": 414,
           "mode": "map",
-          "preservation": 66.67,
-          "savings_pct": 93.79,
-          "tokens": 1113
+          "preservation": 100.0,
+          "savings_pct": 100.0,
+          "tokens": 0
         },
         {
-          "latency_us": 8147,
+          "latency_us": 382,
           "mode": "signatures",
-          "preservation": 97.62,
-          "savings_pct": 91.8,
-          "tokens": 1469
+          "preservation": 100.0,
+          "savings_pct": 100.0,
+          "tokens": 0
         },
         {
-          "latency_us": 332,
+          "latency_us": 588,
           "mode": "aggressive",
           "preservation": 100.0,
-          "savings_pct": 3.77,
-          "tokens": 17243
+          "savings_pct": 2.87,
+          "tokens": 17915
         },
         {
-          "latency_us": 28732,
+          "latency_us": 55096,
           "mode": "entropy",
-          "preservation": 97.62,
-          "savings_pct": 1.43,
-          "tokens": 17661
+          "preservation": 100.0,
+          "savings_pct": 0.35,
+          "tokens": 18379
         },
         {
           "latency_us": 0,
@@ -123,39 +207,165 @@
           "tokens": 13
         }
       ],
-      "path": "rust/src/core/editor_registry/writers.rs",
-      "raw_tokens": 17918
+      "path": "markdownai/docs/index.html",
+      "raw_tokens": 18444
+    },
+    {
+      "ext": "rs",
+      "modes": [
+        {
+          "latency_us": 20739,
+          "mode": "map",
+          "preservation": 66.67,
+          "savings_pct": 94.5,
+          "tokens": 937
+        },
+        {
+          "latency_us": 20096,
+          "mode": "signatures",
+          "preservation": 98.97,
+          "savings_pct": 92.03,
+          "tokens": 1358
+        },
+        {
+          "latency_us": 656,
+          "mode": "aggressive",
+          "preservation": 100.0,
+          "savings_pct": 8.72,
+          "tokens": 15551
+        },
+        {
+          "latency_us": 50990,
+          "mode": "entropy",
+          "preservation": 100.0,
+          "savings_pct": 0.06,
+          "tokens": 17026
+        },
+        {
+          "latency_us": 0,
+          "mode": "cache_hit",
+          "preservation": null,
+          "savings_pct": 99.92,
+          "tokens": 13
+        }
+      ],
+      "path": "rust/src/core/config/mod.rs",
+      "raw_tokens": 17036
     },
     {
       "ext": "md",
       "modes": [
         {
-          "latency_us": 801,
+          "latency_us": 292,
+          "mode": "map",
+          "preservation": 100.0,
+          "savings_pct": 99.97,
+          "tokens": 6
+        },
+        {
+          "latency_us": 260,
+          "mode": "signatures",
+          "preservation": 100.0,
+          "savings_pct": 99.97,
+          "tokens": 6
+        },
+        {
+          "latency_us": 330,
+          "mode": "aggressive",
+          "preservation": 100.0,
+          "savings_pct": 12.46,
+          "tokens": 15740
+        },
+        {
+          "latency_us": 67228,
+          "mode": "entropy",
+          "preservation": 100.0,
+          "savings_pct": 3.05,
+          "tokens": 17433
+        },
+        {
+          "latency_us": 0,
+          "mode": "cache_hit",
+          "preservation": null,
+          "savings_pct": 99.93,
+          "tokens": 13
+        }
+      ],
+      "path": "markdownai/README.md",
+      "raw_tokens": 17981
+    },
+    {
+      "ext": "rs",
+      "modes": [
+        {
+          "latency_us": 19745,
+          "mode": "map",
+          "preservation": 53.45,
+          "savings_pct": 97.26,
+          "tokens": 378
+        },
+        {
+          "latency_us": 19173,
+          "mode": "signatures",
+          "preservation": 84.48,
+          "savings_pct": 94.43,
+          "tokens": 770
+        },
+        {
+          "latency_us": 684,
+          "mode": "aggressive",
+          "preservation": 100.0,
+          "savings_pct": 5.17,
+          "tokens": 13106
+        },
+        {
+          "latency_us": 42414,
+          "mode": "entropy",
+          "preservation": 100.0,
+          "savings_pct": 0.08,
+          "tokens": 13809
+        },
+        {
+          "latency_us": 0,
+          "mode": "cache_hit",
+          "preservation": null,
+          "savings_pct": 99.91,
+          "tokens": 13
+        }
+      ],
+      "path": "rust/src/server/mod.rs",
+      "raw_tokens": 13820
+    },
+    {
+      "ext": "md",
+      "modes": [
+        {
+          "latency_us": 266,
           "mode": "map",
           "preservation": 100.0,
           "savings_pct": 100.0,
           "tokens": 0
         },
         {
-          "latency_us": 157,
+          "latency_us": 244,
           "mode": "signatures",
           "preservation": 100.0,
           "savings_pct": 100.0,
           "tokens": 0
         },
         {
-          "latency_us": 140,
+          "latency_us": 329,
           "mode": "aggressive",
           "preservation": 100.0,
           "savings_pct": 0.24,
-          "tokens": 14941
+          "tokens": 14995
         },
         {
-          "latency_us": 25101,
+          "latency_us": 46098,
           "mode": "entropy",
           "preservation": 100.0,
           "savings_pct": 0.01,
-          "tokens": 14976
+          "tokens": 15030
         },
         {
           "latency_us": 0,
@@ -166,41 +376,41 @@
         }
       ],
       "path": "ARCHITECTURE.md",
-      "raw_tokens": 14977
+      "raw_tokens": 15031
     },
     {
       "ext": "rs",
       "modes": [
         {
-          "latency_us": 6618,
+          "latency_us": 19596,
           "mode": "map",
           "preservation": 100.0,
-          "savings_pct": 95.0,
+          "savings_pct": 95.01,
           "tokens": 835
         },
         {
-          "latency_us": 6198,
+          "latency_us": 19227,
           "mode": "signatures",
           "preservation": 83.72,
-          "savings_pct": 95.79,
+          "savings_pct": 95.8,
           "tokens": 703
         },
         {
-          "latency_us": 253,
+          "latency_us": 551,
           "mode": "aggressive",
           "preservation": 100.0,
-          "savings_pct": 4.87,
-          "tokens": 15896
+          "savings_pct": 4.86,
+          "tokens": 15918
         },
         {
-          "latency_us": 28704,
+          "latency_us": 52698,
           "mode": "entropy",
           "preservation": 100.0,
           "savings_pct": 0.14,
-          "tokens": 16686
+          "tokens": 16708
         },
         {
-          "latency_us": 1,
+          "latency_us": 0,
           "mode": "cache_hit",
           "preservation": null,
           "savings_pct": 99.92,
@@ -208,80 +418,122 @@
         }
       ],
       "path": "rust/tests/intensive_benchmarks.rs",
-      "raw_tokens": 16710
+      "raw_tokens": 16732
     },
     {
-      "ext": "json",
+      "ext": "md",
       "modes": [
         {
-          "latency_us": 263,
+          "latency_us": 322,
           "mode": "map",
           "preservation": 100.0,
           "savings_pct": 100.0,
           "tokens": 0
         },
         {
-          "latency_us": 273,
+          "latency_us": 283,
           "mode": "signatures",
           "preservation": 100.0,
           "savings_pct": 100.0,
           "tokens": 0
         },
         {
-          "latency_us": 327,
+          "latency_us": 362,
           "mode": "aggressive",
           "preservation": 100.0,
-          "savings_pct": 0.45,
-          "tokens": 14240
+          "savings_pct": 2.73,
+          "tokens": 16399
         },
         {
-          "latency_us": 19716,
+          "latency_us": 56848,
           "mode": "entropy",
           "preservation": 100.0,
-          "savings_pct": 0.0,
-          "tokens": 14305
+          "savings_pct": 3.35,
+          "tokens": 16296
         },
         {
           "latency_us": 0,
           "mode": "cache_hit",
           "preservation": null,
-          "savings_pct": 99.91,
+          "savings_pct": 99.92,
           "tokens": 13
         }
       ],
-      "path": "website/generated/mcp-tools.json",
-      "raw_tokens": 14305
+      "path": "markdownai/changed.md",
+      "raw_tokens": 16860
     },
     {
       "ext": "rs",
       "modes": [
         {
-          "latency_us": 6165,
+          "latency_us": 18359,
           "mode": "map",
-          "preservation": 95.12,
-          "savings_pct": 96.83,
-          "tokens": 438
+          "preservation": 85.71,
+          "savings_pct": 96.06,
+          "tokens": 623
         },
         {
-          "latency_us": 5868,
+          "latency_us": 17773,
           "mode": "signatures",
-          "preservation": 85.37,
-          "savings_pct": 97.35,
-          "tokens": 366
+          "preservation": 88.89,
+          "savings_pct": 95.8,
+          "tokens": 665
         },
         {
-          "latency_us": 260,
+          "latency_us": 656,
           "mode": "aggressive",
           "preservation": 100.0,
-          "savings_pct": 4.81,
-          "tokens": 13136
+          "savings_pct": 6.5,
+          "tokens": 14797
         },
         {
-          "latency_us": 20700,
+          "latency_us": 47178,
           "mode": "entropy",
           "preservation": 100.0,
-          "savings_pct": 0.5,
-          "tokens": 13731
+          "savings_pct": 0.03,
+          "tokens": 15822
+        },
+        {
+          "latency_us": 0,
+          "mode": "cache_hit",
+          "preservation": null,
+          "savings_pct": 99.92,
+          "tokens": 13
+        }
+      ],
+      "path": "rust/src/doctor/mod.rs",
+      "raw_tokens": 15826
+    },
+    {
+      "ext": "rs",
+      "modes": [
+        {
+          "latency_us": 18492,
+          "mode": "map",
+          "preservation": 95.24,
+          "savings_pct": 96.89,
+          "tokens": 460
+        },
+        {
+          "latency_us": 17994,
+          "mode": "signatures",
+          "preservation": 85.71,
+          "savings_pct": 97.38,
+          "tokens": 388
+        },
+        {
+          "latency_us": 640,
+          "mode": "aggressive",
+          "preservation": 100.0,
+          "savings_pct": 4.78,
+          "tokens": 14103
+        },
+        {
+          "latency_us": 41387,
+          "mode": "entropy",
+          "preservation": 100.0,
+          "savings_pct": 0.22,
+          "tokens": 14778
         },
         {
           "latency_us": 0,
@@ -292,122 +544,38 @@
         }
       ],
       "path": "rust/src/setup.rs",
-      "raw_tokens": 13800
-    },
-    {
-      "ext": "rs",
-      "modes": [
-        {
-          "latency_us": 5695,
-          "mode": "map",
-          "preservation": 70.78,
-          "savings_pct": 94.18,
-          "tokens": 780
-        },
-        {
-          "latency_us": 5457,
-          "mode": "signatures",
-          "preservation": 98.7,
-          "savings_pct": 92.13,
-          "tokens": 1055
-        },
-        {
-          "latency_us": 223,
-          "mode": "aggressive",
-          "preservation": 100.0,
-          "savings_pct": 8.49,
-          "tokens": 12262
-        },
-        {
-          "latency_us": 20786,
-          "mode": "entropy",
-          "preservation": 100.0,
-          "savings_pct": 0.0,
-          "tokens": 13400
-        },
-        {
-          "latency_us": 0,
-          "mode": "cache_hit",
-          "preservation": null,
-          "savings_pct": 99.9,
-          "tokens": 13
-        }
-      ],
-      "path": "rust/src/core/config/mod.rs",
-      "raw_tokens": 13400
-    },
-    {
-      "ext": "rs",
-      "modes": [
-        {
-          "latency_us": 6142,
-          "mode": "map",
-          "preservation": 51.92,
-          "savings_pct": 97.29,
-          "tokens": 319
-        },
-        {
-          "latency_us": 5898,
-          "mode": "signatures",
-          "preservation": 86.54,
-          "savings_pct": 94.01,
-          "tokens": 705
-        },
-        {
-          "latency_us": 253,
-          "mode": "aggressive",
-          "preservation": 100.0,
-          "savings_pct": 4.78,
-          "tokens": 11210
-        },
-        {
-          "latency_us": 19095,
-          "mode": "entropy",
-          "preservation": 100.0,
-          "savings_pct": 0.21,
-          "tokens": 11748
-        },
-        {
-          "latency_us": 0,
-          "mode": "cache_hit",
-          "preservation": null,
-          "savings_pct": 99.89,
-          "tokens": 13
-        }
-      ],
-      "path": "rust/src/server/mod.rs",
-      "raw_tokens": 11773
+      "raw_tokens": 14811
     },
     {
       "ext": "css",
       "modes": [
         {
-          "latency_us": 181,
+          "latency_us": 285,
           "mode": "map",
           "preservation": 100.0,
           "savings_pct": 100.0,
           "tokens": 0
         },
         {
-          "latency_us": 167,
+          "latency_us": 261,
           "mode": "signatures",
           "preservation": 100.0,
           "savings_pct": 100.0,
           "tokens": 0
         },
         {
-          "latency_us": 145,
+          "latency_us": 341,
           "mode": "aggressive",
           "preservation": 100.0,
-          "savings_pct": 2.4,
-          "tokens": 17615
+          "savings_pct": 2.53,
+          "tokens": 19160
         },
         {
-          "latency_us": 22043,
+          "latency_us": 44942,
           "mode": "entropy",
           "preservation": 100.0,
           "savings_pct": 0.0,
-          "tokens": 18049
+          "tokens": 19657
         },
         {
           "latency_us": 0,
@@ -418,80 +586,80 @@
         }
       ],
       "path": "rust/src/dashboard/static/style.css",
-      "raw_tokens": 18049
+      "raw_tokens": 19657
     },
     {
-      "ext": "rs",
+      "ext": "md",
       "modes": [
         {
-          "latency_us": 5973,
+          "latency_us": 324,
           "mode": "map",
           "preservation": 100.0,
-          "savings_pct": 94.14,
-          "tokens": 694
+          "savings_pct": 100.0,
+          "tokens": 0
         },
         {
-          "latency_us": 5739,
+          "latency_us": 308,
           "mode": "signatures",
-          "preservation": 87.8,
-          "savings_pct": 94.54,
-          "tokens": 646
+          "preservation": 100.0,
+          "savings_pct": 100.0,
+          "tokens": 0
         },
         {
-          "latency_us": 250,
+          "latency_us": 371,
           "mode": "aggressive",
           "preservation": 100.0,
-          "savings_pct": 3.61,
-          "tokens": 11412
+          "savings_pct": 10.5,
+          "tokens": 16357
         },
         {
-          "latency_us": 19294,
+          "latency_us": 61697,
           "mode": "entropy",
           "preservation": 100.0,
-          "savings_pct": 0.14,
-          "tokens": 11823
+          "savings_pct": 2.92,
+          "tokens": 17743
         },
         {
           "latency_us": 0,
           "mode": "cache_hit",
           "preservation": null,
-          "savings_pct": 99.89,
+          "savings_pct": 99.93,
           "tokens": 13
         }
       ],
-      "path": "rust/src/tools/ctx_knowledge.rs",
-      "raw_tokens": 11840
+      "path": "docs/mdai/plans/2026-05-24-mdai-macro-library-impl.mdai.md",
+      "raw_tokens": 18276
     },
     {
-      "ext": "rs",
+      "ext": "md",
       "modes": [
         {
-          "latency_us": 5389,
+          "latency_us": 240,
           "mode": "map",
-          "preservation": 84.48,
-          "savings_pct": 95.73,
-          "tokens": 570
+          "preservation": 100.0,
+          "savings_pct": 99.44,
+          "tokens": 74
         },
         {
-          "latency_us": 5302,
+          "latency_us": 192,
           "mode": "signatures",
-          "preservation": 87.93,
-          "savings_pct": 95.42,
-          "tokens": 611
+          "preservation": 100.0,
+          "savings_pct": 99.44,
+          "tokens": 74
         },
         {
-          "latency_us": 258,
+          "latency_us": 239,
           "mode": "aggressive",
           "preservation": 100.0,
-          "savings_pct": 6.65,
-          "tokens": 12459
+          "savings_pct": 9.05,
+          "tokens": 11971
         },
         {
-          "latency_us": 21030,
+          "latency_us": 39333,
           "mode": "entropy",
           "preservation": 100.0,
-          "savings_pct": 0.0,
-          "tokens": 13346
+          "savings_pct": 1.33,
+          "tokens": 12987
         },
         {
           "latency_us": 0,
@@ -501,35 +669,245 @@
           "tokens": 13
         }
       ],
-      "path": "rust/src/doctor/mod.rs",
-      "raw_tokens": 13346
+      "path": "tmp/phase-4-debug-nodes-production.md",
+      "raw_tokens": 13162
+    },
+    {
+      "ext": "rs",
+      "modes": [
+        {
+          "latency_us": 18977,
+          "mode": "map",
+          "preservation": 76.34,
+          "savings_pct": 93.88,
+          "tokens": 790
+        },
+        {
+          "latency_us": 18386,
+          "mode": "signatures",
+          "preservation": 94.62,
+          "savings_pct": 92.9,
+          "tokens": 916
+        },
+        {
+          "latency_us": 667,
+          "mode": "aggressive",
+          "preservation": 100.0,
+          "savings_pct": 6.48,
+          "tokens": 12068
+        },
+        {
+          "latency_us": 41141,
+          "mode": "entropy",
+          "preservation": 100.0,
+          "savings_pct": 0.5,
+          "tokens": 12839
+        },
+        {
+          "latency_us": 0,
+          "mode": "cache_hit",
+          "preservation": null,
+          "savings_pct": 99.9,
+          "tokens": 13
+        }
+      ],
+      "path": "rust/src/core/graph_index.rs",
+      "raw_tokens": 12904
+    },
+    {
+      "ext": "rs",
+      "modes": [
+        {
+          "latency_us": 16459,
+          "mode": "map",
+          "preservation": 80.33,
+          "savings_pct": 92.9,
+          "tokens": 912
+        },
+        {
+          "latency_us": 16140,
+          "mode": "signatures",
+          "preservation": 83.61,
+          "savings_pct": 92.88,
+          "tokens": 915
+        },
+        {
+          "latency_us": 568,
+          "mode": "aggressive",
+          "preservation": 100.0,
+          "savings_pct": 5.25,
+          "tokens": 12171
+        },
+        {
+          "latency_us": 37605,
+          "mode": "entropy",
+          "preservation": 100.0,
+          "savings_pct": 0.0,
+          "tokens": 12846
+        },
+        {
+          "latency_us": 0,
+          "mode": "cache_hit",
+          "preservation": null,
+          "savings_pct": 99.9,
+          "tokens": 13
+        }
+      ],
+      "path": "rust/src/tools/ctx_read.rs",
+      "raw_tokens": 12846
     },
     {
       "ext": "md",
       "modes": [
         {
-          "latency_us": 94,
+          "latency_us": 246,
           "mode": "map",
           "preservation": 100.0,
           "savings_pct": 100.0,
           "tokens": 0
         },
         {
-          "latency_us": 88,
+          "latency_us": 288,
           "mode": "signatures",
           "preservation": 100.0,
           "savings_pct": 100.0,
           "tokens": 0
         },
         {
-          "latency_us": 97,
+          "latency_us": 362,
+          "mode": "aggressive",
+          "preservation": 100.0,
+          "savings_pct": 12.01,
+          "tokens": 14173
+        },
+        {
+          "latency_us": 52232,
+          "mode": "entropy",
+          "preservation": 100.0,
+          "savings_pct": 1.73,
+          "tokens": 15830
+        },
+        {
+          "latency_us": 0,
+          "mode": "cache_hit",
+          "preservation": null,
+          "savings_pct": 99.92,
+          "tokens": 13
+        }
+      ],
+      "path": "docs/mdai/plans/2026-05-25-mdai-brainstorm-v0.1.1-refactor.md",
+      "raw_tokens": 16108
+    },
+    {
+      "ext": "md",
+      "modes": [
+        {
+          "latency_us": 237,
+          "mode": "map",
+          "preservation": 100.0,
+          "savings_pct": 100.0,
+          "tokens": 0
+        },
+        {
+          "latency_us": 230,
+          "mode": "signatures",
+          "preservation": 100.0,
+          "savings_pct": 100.0,
+          "tokens": 0
+        },
+        {
+          "latency_us": 293,
+          "mode": "aggressive",
+          "preservation": 100.0,
+          "savings_pct": 3.53,
+          "tokens": 13583
+        },
+        {
+          "latency_us": 42989,
+          "mode": "entropy",
+          "preservation": 100.0,
+          "savings_pct": 1.46,
+          "tokens": 13875
+        },
+        {
+          "latency_us": 0,
+          "mode": "cache_hit",
+          "preservation": null,
+          "savings_pct": 99.91,
+          "tokens": 13
+        }
+      ],
+      "path": "docs/mdai/specs/2026-05-25-mdai-v1.0-adoption-design.mdai.md",
+      "raw_tokens": 14080
+    },
+    {
+      "ext": "md",
+      "modes": [
+        {
+          "latency_us": 214,
+          "mode": "map",
+          "preservation": 100.0,
+          "savings_pct": 100.0,
+          "tokens": 0
+        },
+        {
+          "latency_us": 199,
+          "mode": "signatures",
+          "preservation": 100.0,
+          "savings_pct": 100.0,
+          "tokens": 0
+        },
+        {
+          "latency_us": 785,
+          "mode": "aggressive",
+          "preservation": 100.0,
+          "savings_pct": 5.16,
+          "tokens": 14214
+        },
+        {
+          "latency_us": 47589,
+          "mode": "entropy",
+          "preservation": 100.0,
+          "savings_pct": 1.27,
+          "tokens": 14797
+        },
+        {
+          "latency_us": 0,
+          "mode": "cache_hit",
+          "preservation": null,
+          "savings_pct": 99.91,
+          "tokens": 13
+        }
+      ],
+      "path": "docs/mdai/plans/2026-05-24-mdai-brainstorm-implementation.md",
+      "raw_tokens": 14988
+    },
+    {
+      "ext": "md",
+      "modes": [
+        {
+          "latency_us": 163,
+          "mode": "map",
+          "preservation": 100.0,
+          "savings_pct": 100.0,
+          "tokens": 0
+        },
+        {
+          "latency_us": 156,
+          "mode": "signatures",
+          "preservation": 100.0,
+          "savings_pct": 100.0,
+          "tokens": 0
+        },
+        {
+          "latency_us": 200,
           "mode": "aggressive",
           "preservation": 100.0,
           "savings_pct": 15.98,
           "tokens": 11973
         },
         {
-          "latency_us": 21903,
+          "latency_us": 40952,
           "mode": "entropy",
           "preservation": 100.0,
           "savings_pct": 2.22,
@@ -550,28 +928,28 @@
       "ext": "json",
       "modes": [
         {
-          "latency_us": 308,
+          "latency_us": 536,
           "mode": "map",
           "preservation": 100.0,
           "savings_pct": 100.0,
           "tokens": 0
         },
         {
-          "latency_us": 300,
+          "latency_us": 527,
           "mode": "signatures",
           "preservation": 100.0,
           "savings_pct": 100.0,
           "tokens": 0
         },
         {
-          "latency_us": 351,
+          "latency_us": 830,
           "mode": "aggressive",
           "preservation": 100.0,
           "savings_pct": 0.43,
           "tokens": 15139
         },
         {
-          "latency_us": 19486,
+          "latency_us": 36485,
           "mode": "entropy",
           "preservation": 100.0,
           "savings_pct": 0.0,
@@ -589,119 +967,119 @@
       "raw_tokens": 15205
     },
     {
-      "ext": "rs",
+      "ext": "json",
       "modes": [
         {
-          "latency_us": 5515,
+          "latency_us": 532,
           "mode": "map",
-          "preservation": 4.72,
-          "savings_pct": 99.56,
-          "tokens": 55
+          "preservation": 100.0,
+          "savings_pct": 100.0,
+          "tokens": 0
         },
         {
-          "latency_us": 5092,
+          "latency_us": 516,
           "mode": "signatures",
-          "preservation": 95.28,
-          "savings_pct": 92.68,
-          "tokens": 915
+          "preservation": 100.0,
+          "savings_pct": 100.0,
+          "tokens": 0
         },
         {
-          "latency_us": 170,
+          "latency_us": 858,
           "mode": "aggressive",
           "preservation": 100.0,
-          "savings_pct": 4.56,
-          "tokens": 11924
+          "savings_pct": 0.44,
+          "tokens": 15084
         },
         {
-          "latency_us": 18764,
+          "latency_us": 36704,
           "mode": "entropy",
           "preservation": 100.0,
           "savings_pct": 0.0,
-          "tokens": 12494
+          "tokens": 15150
         },
         {
           "latency_us": 0,
           "mode": "cache_hit",
           "preservation": null,
-          "savings_pct": 99.9,
+          "savings_pct": 99.91,
           "tokens": 13
         }
       ],
-      "path": "rust/src/shell/compress/tests.rs",
-      "raw_tokens": 12494
-    },
-    {
-      "ext": "md",
-      "modes": [
-        {
-          "latency_us": 122,
-          "mode": "map",
-          "preservation": 100.0,
-          "savings_pct": 100.0,
-          "tokens": 0
-        },
-        {
-          "latency_us": 114,
-          "mode": "signatures",
-          "preservation": 100.0,
-          "savings_pct": 100.0,
-          "tokens": 0
-        },
-        {
-          "latency_us": 113,
-          "mode": "aggressive",
-          "preservation": 100.0,
-          "savings_pct": 2.43,
-          "tokens": 12483
-        },
-        {
-          "latency_us": 19763,
-          "mode": "entropy",
-          "preservation": 100.0,
-          "savings_pct": 1.44,
-          "tokens": 12610
-        },
-        {
-          "latency_us": 0,
-          "mode": "cache_hit",
-          "preservation": null,
-          "savings_pct": 99.9,
-          "tokens": 13
-        }
-      ],
-      "path": "PROJECT.md",
-      "raw_tokens": 12794
+      "path": "benchmark/results/benchmark-raw.json",
+      "raw_tokens": 15150
     },
     {
       "ext": "js",
       "modes": [
         {
-          "latency_us": 5106,
+          "latency_us": 13340,
           "mode": "map",
-          "preservation": 45.45,
-          "savings_pct": 99.36,
-          "tokens": 78
+          "preservation": 52.63,
+          "savings_pct": 98.99,
+          "tokens": 126
         },
         {
-          "latency_us": 4449,
+          "latency_us": 11968,
           "mode": "signatures",
           "preservation": 100.0,
-          "savings_pct": 98.11,
-          "tokens": 229
+          "savings_pct": 97.73,
+          "tokens": 284
         },
         {
-          "latency_us": 120,
+          "latency_us": 322,
           "mode": "aggressive",
           "preservation": 100.0,
-          "savings_pct": 3.69,
-          "tokens": 11691
+          "savings_pct": 2.43,
+          "tokens": 12185
         },
         {
-          "latency_us": 18390,
+          "latency_us": 34173,
+          "mode": "entropy",
+          "preservation": 100.0,
+          "savings_pct": 0.05,
+          "tokens": 12483
+        },
+        {
+          "latency_us": 0,
+          "mode": "cache_hit",
+          "preservation": null,
+          "savings_pct": 99.9,
+          "tokens": 13
+        }
+      ],
+      "path": "rust/src/dashboard/static/components/cockpit-live.js",
+      "raw_tokens": 12489
+    },
+    {
+      "ext": "js",
+      "modes": [
+        {
+          "latency_us": 13964,
+          "mode": "map",
+          "preservation": 48.57,
+          "savings_pct": 99.3,
+          "tokens": 85
+        },
+        {
+          "latency_us": 13460,
+          "mode": "signatures",
+          "preservation": 100.0,
+          "savings_pct": 98.05,
+          "tokens": 236
+        },
+        {
+          "latency_us": 281,
+          "mode": "aggressive",
+          "preservation": 100.0,
+          "savings_pct": 3.65,
+          "tokens": 11686
+        },
+        {
+          "latency_us": 34611,
           "mode": "entropy",
           "preservation": 100.0,
           "savings_pct": 0.0,
-          "tokens": 12139
+          "tokens": 12129
         },
         {
           "latency_us": 0,
@@ -712,164 +1090,38 @@
         }
       ],
       "path": "rust/src/dashboard/static/components/cockpit-context.js",
-      "raw_tokens": 12139
+      "raw_tokens": 12129
     },
     {
       "ext": "js",
       "modes": [
         {
-          "latency_us": 4077,
+          "latency_us": 11735,
           "mode": "map",
-          "preservation": 52.63,
-          "savings_pct": 98.96,
-          "tokens": 126
+          "preservation": 26.32,
+          "savings_pct": 99.5,
+          "tokens": 48
         },
         {
-          "latency_us": 3911,
+          "latency_us": 11427,
           "mode": "signatures",
           "preservation": 100.0,
-          "savings_pct": 97.65,
-          "tokens": 284
+          "savings_pct": 97.17,
+          "tokens": 272
         },
         {
-          "latency_us": 146,
+          "latency_us": 325,
           "mode": "aggressive",
           "preservation": 100.0,
-          "savings_pct": 2.48,
-          "tokens": 11779
+          "savings_pct": 3.71,
+          "tokens": 9242
         },
         {
-          "latency_us": 17676,
+          "latency_us": 28595,
           "mode": "entropy",
           "preservation": 100.0,
-          "savings_pct": 0.05,
-          "tokens": 12073
-        },
-        {
-          "latency_us": 0,
-          "mode": "cache_hit",
-          "preservation": null,
-          "savings_pct": 99.89,
-          "tokens": 13
-        }
-      ],
-      "path": "rust/src/dashboard/static/components/cockpit-live.js",
-      "raw_tokens": 12079
-    },
-    {
-      "ext": "json",
-      "modes": [
-        {
-          "latency_us": 153,
-          "mode": "map",
-          "preservation": 100.0,
-          "savings_pct": 100.0,
-          "tokens": 0
-        },
-        {
-          "latency_us": 147,
-          "mode": "signatures",
-          "preservation": 100.0,
-          "savings_pct": 100.0,
-          "tokens": 0
-        },
-        {
-          "latency_us": 177,
-          "mode": "aggressive",
-          "preservation": 100.0,
-          "savings_pct": 0.61,
-          "tokens": 16260
-        },
-        {
-          "latency_us": 17765,
-          "mode": "entropy",
-          "preservation": 100.0,
-          "savings_pct": 0.0,
-          "tokens": 16359
-        },
-        {
-          "latency_us": 0,
-          "mode": "cache_hit",
-          "preservation": null,
-          "savings_pct": 99.92,
-          "tokens": 13
-        }
-      ],
-      "path": "package-lock.json",
-      "raw_tokens": 16359
-    },
-    {
-      "ext": "md",
-      "modes": [
-        {
-          "latency_us": 127,
-          "mode": "map",
-          "preservation": 100.0,
-          "savings_pct": 99.81,
-          "tokens": 18
-        },
-        {
-          "latency_us": 98,
-          "mode": "signatures",
-          "preservation": 100.0,
-          "savings_pct": 99.81,
-          "tokens": 18
-        },
-        {
-          "latency_us": 122,
-          "mode": "aggressive",
-          "preservation": 100.0,
-          "savings_pct": 6.66,
-          "tokens": 9041
-        },
-        {
-          "latency_us": 15099,
-          "mode": "entropy",
-          "preservation": 100.0,
-          "savings_pct": 2.26,
-          "tokens": 9467
-        },
-        {
-          "latency_us": 0,
-          "mode": "cache_hit",
-          "preservation": null,
-          "savings_pct": 99.87,
-          "tokens": 13
-        }
-      ],
-      "path": "INTERNAL_ARCHITECTURE.md",
-      "raw_tokens": 9686
-    },
-    {
-      "ext": "md",
-      "modes": [
-        {
-          "latency_us": 87,
-          "mode": "map",
-          "preservation": 100.0,
-          "savings_pct": 100.0,
-          "tokens": 0
-        },
-        {
-          "latency_us": 87,
-          "mode": "signatures",
-          "preservation": 100.0,
-          "savings_pct": 100.0,
-          "tokens": 0
-        },
-        {
-          "latency_us": 102,
-          "mode": "aggressive",
-          "preservation": 100.0,
-          "savings_pct": 4.27,
-          "tokens": 8699
-        },
-        {
-          "latency_us": 13957,
-          "mode": "entropy",
-          "preservation": 100.0,
-          "savings_pct": 0.28,
-          "tokens": 9062
+          "savings_pct": 0.81,
+          "tokens": 9520
         },
         {
           "latency_us": 0,
@@ -879,81 +1131,39 @@
           "tokens": 13
         }
       ],
-      "path": "rust/README.md",
-      "raw_tokens": 9087
-    },
-    {
-      "ext": "js",
-      "modes": [
-        {
-          "latency_us": 3397,
-          "mode": "map",
-          "preservation": 28.57,
-          "savings_pct": 99.43,
-          "tokens": 48
-        },
-        {
-          "latency_us": 3348,
-          "mode": "signatures",
-          "preservation": 100.0,
-          "savings_pct": 97.16,
-          "tokens": 238
-        },
-        {
-          "latency_us": 129,
-          "mode": "aggressive",
-          "preservation": 100.0,
-          "savings_pct": 3.9,
-          "tokens": 8068
-        },
-        {
-          "latency_us": 13000,
-          "mode": "entropy",
-          "preservation": 100.0,
-          "savings_pct": 0.55,
-          "tokens": 8349
-        },
-        {
-          "latency_us": 0,
-          "mode": "cache_hit",
-          "preservation": null,
-          "savings_pct": 99.85,
-          "tokens": 13
-        }
-      ],
       "path": "rust/src/dashboard/static/components/cockpit-overview.js",
-      "raw_tokens": 8395
+      "raw_tokens": 9598
     },
     {
       "ext": "js",
       "modes": [
         {
-          "latency_us": 3496,
+          "latency_us": 10703,
           "mode": "map",
           "preservation": 23.53,
           "savings_pct": 99.44,
           "tokens": 46
         },
         {
-          "latency_us": 3311,
+          "latency_us": 10576,
           "mode": "signatures",
           "preservation": 100.0,
-          "savings_pct": 97.17,
+          "savings_pct": 97.2,
           "tokens": 231
         },
         {
-          "latency_us": 116,
+          "latency_us": 277,
           "mode": "aggressive",
           "preservation": 100.0,
-          "savings_pct": 2.71,
-          "tokens": 7942
+          "savings_pct": 2.68,
+          "tokens": 8039
         },
         {
-          "latency_us": 12112,
+          "latency_us": 23521,
           "mode": "entropy",
-          "preservation": 100.0,
-          "savings_pct": 0.66,
-          "tokens": 8109
+          "preservation": 97.06,
+          "savings_pct": 0.87,
+          "tokens": 8188
         },
         {
           "latency_us": 0,
@@ -964,38 +1174,38 @@
         }
       ],
       "path": "rust/src/dashboard/static/components/cockpit-graph.js",
-      "raw_tokens": 8163
+      "raw_tokens": 8260
     },
     {
       "ext": "html",
       "modes": [
         {
-          "latency_us": 98,
+          "latency_us": 176,
           "mode": "map",
           "preservation": 100.0,
           "savings_pct": 100.0,
           "tokens": 0
         },
         {
-          "latency_us": 81,
+          "latency_us": 152,
           "mode": "signatures",
           "preservation": 100.0,
           "savings_pct": 100.0,
           "tokens": 0
         },
         {
-          "latency_us": 91,
+          "latency_us": 224,
           "mode": "aggressive",
           "preservation": 100.0,
-          "savings_pct": 2.38,
-          "tokens": 8450
+          "savings_pct": 2.33,
+          "tokens": 8618
         },
         {
-          "latency_us": 11003,
+          "latency_us": 21429,
           "mode": "entropy",
           "preservation": 100.0,
           "savings_pct": 0.0,
-          "tokens": 8656
+          "tokens": 8824
         },
         {
           "latency_us": 0,
@@ -1006,34 +1216,76 @@
         }
       ],
       "path": "rust/src/dashboard/static/index.html",
-      "raw_tokens": 8656
+      "raw_tokens": 8824
+    },
+    {
+      "ext": "css",
+      "modes": [
+        {
+          "latency_us": 314,
+          "mode": "map",
+          "preservation": 100.0,
+          "savings_pct": 100.0,
+          "tokens": 0
+        },
+        {
+          "latency_us": 286,
+          "mode": "signatures",
+          "preservation": 100.0,
+          "savings_pct": 100.0,
+          "tokens": 0
+        },
+        {
+          "latency_us": 398,
+          "mode": "aggressive",
+          "preservation": 100.0,
+          "savings_pct": 12.37,
+          "tokens": 7755
+        },
+        {
+          "latency_us": 28372,
+          "mode": "entropy",
+          "preservation": 100.0,
+          "savings_pct": 0.32,
+          "tokens": 8822
+        },
+        {
+          "latency_us": 0,
+          "mode": "cache_hit",
+          "preservation": null,
+          "savings_pct": 99.85,
+          "tokens": 13
+        }
+      ],
+      "path": "markdownai/docs/styles.css",
+      "raw_tokens": 8850
     },
     {
       "ext": "ts",
       "modes": [
         {
-          "latency_us": 3299,
+          "latency_us": 9523,
           "mode": "map",
           "preservation": 65.52,
           "savings_pct": 96.97,
           "tokens": 201
         },
         {
-          "latency_us": 3044,
+          "latency_us": 8924,
           "mode": "signatures",
           "preservation": 93.1,
           "savings_pct": 94.84,
           "tokens": 342
         },
         {
-          "latency_us": 89,
+          "latency_us": 201,
           "mode": "aggressive",
           "preservation": 100.0,
           "savings_pct": 6.71,
           "tokens": 6187
         },
         {
-          "latency_us": 10005,
+          "latency_us": 19052,
           "mode": "entropy",
           "preservation": 100.0,
           "savings_pct": 0.0,
@@ -1054,28 +1306,28 @@
       "ext": "js",
       "modes": [
         {
-          "latency_us": 3396,
+          "latency_us": 9788,
           "mode": "map",
           "preservation": 25.81,
           "savings_pct": 99.55,
           "tokens": 33
         },
         {
-          "latency_us": 3196,
+          "latency_us": 9416,
           "mode": "signatures",
           "preservation": 100.0,
           "savings_pct": 97.35,
           "tokens": 195
         },
         {
-          "latency_us": 116,
+          "latency_us": 252,
           "mode": "aggressive",
           "preservation": 100.0,
           "savings_pct": 2.05,
           "tokens": 7213
         },
         {
-          "latency_us": 10877,
+          "latency_us": 20867,
           "mode": "entropy",
           "preservation": 96.77,
           "savings_pct": 0.05,
@@ -1093,77 +1345,77 @@
       "raw_tokens": 7364
     },
     {
-      "ext": "json",
+      "ext": "ts",
       "modes": [
         {
-          "latency_us": 26,
+          "latency_us": 4065,
           "mode": "map",
           "preservation": 100.0,
-          "savings_pct": 100.0,
-          "tokens": 0
+          "savings_pct": 95.46,
+          "tokens": 246
         },
         {
-          "latency_us": 23,
+          "latency_us": 3851,
           "mode": "signatures",
-          "preservation": 100.0,
-          "savings_pct": 100.0,
-          "tokens": 0
+          "preservation": 84.62,
+          "savings_pct": 96.62,
+          "tokens": 183
         },
         {
-          "latency_us": 32,
+          "latency_us": 120,
           "mode": "aggressive",
           "preservation": 100.0,
-          "savings_pct": 0.28,
-          "tokens": 6322
+          "savings_pct": 21.56,
+          "tokens": 4249
         },
         {
-          "latency_us": 4343,
+          "latency_us": 15368,
           "mode": "entropy",
           "preservation": 100.0,
           "savings_pct": 0.0,
-          "tokens": 6340
+          "tokens": 5417
         },
         {
           "latency_us": 0,
           "mode": "cache_hit",
           "preservation": null,
-          "savings_pct": 99.79,
+          "savings_pct": 99.76,
           "tokens": 13
         }
       ],
-      "path": "n8n-workflows/daily-tweets.json",
-      "raw_tokens": 6340
+      "path": "markdownai/packages/core/src/commands/init.ts",
+      "raw_tokens": 5417
     },
     {
       "ext": "js",
       "modes": [
         {
-          "latency_us": 1513,
+          "latency_us": 5465,
           "mode": "map",
           "preservation": 100.0,
-          "savings_pct": 98.8,
-          "tokens": 60
+          "savings_pct": 96.26,
+          "tokens": 188
         },
         {
-          "latency_us": 1390,
+          "latency_us": 5181,
           "mode": "signatures",
           "preservation": 100.0,
-          "savings_pct": 98.8,
-          "tokens": 60
+          "savings_pct": 96.26,
+          "tokens": 188
         },
         {
-          "latency_us": 51,
+          "latency_us": 167,
           "mode": "aggressive",
           "preservation": 100.0,
-          "savings_pct": 7.42,
-          "tokens": 4639
+          "savings_pct": 3.46,
+          "tokens": 4851
         },
         {
-          "latency_us": 7621,
+          "latency_us": 13765,
           "mode": "entropy",
           "preservation": 100.0,
           "savings_pct": 0.0,
-          "tokens": 5011
+          "tokens": 5025
         },
         {
           "latency_us": 0,
@@ -1173,35 +1425,77 @@
           "tokens": 13
         }
       ],
-      "path": "n8n-workflows/tweet.js",
-      "raw_tokens": 5011
+      "path": "rust/src/dashboard/static/lib/shared.js",
+      "raw_tokens": 5025
+    },
+    {
+      "ext": "js",
+      "modes": [
+        {
+          "latency_us": 6562,
+          "mode": "map",
+          "preservation": 31.82,
+          "savings_pct": 99.37,
+          "tokens": 34
+        },
+        {
+          "latency_us": 6405,
+          "mode": "signatures",
+          "preservation": 100.0,
+          "savings_pct": 97.34,
+          "tokens": 143
+        },
+        {
+          "latency_us": 170,
+          "mode": "aggressive",
+          "preservation": 100.0,
+          "savings_pct": 2.3,
+          "tokens": 5256
+        },
+        {
+          "latency_us": 14562,
+          "mode": "entropy",
+          "preservation": 100.0,
+          "savings_pct": 0.0,
+          "tokens": 5380
+        },
+        {
+          "latency_us": 0,
+          "mode": "cache_hit",
+          "preservation": null,
+          "savings_pct": 99.76,
+          "tokens": 13
+        }
+      ],
+      "path": "rust/src/dashboard/static/components/cockpit-compression.js",
+      "raw_tokens": 5380
     },
     {
       "ext": "py",
       "modes": [
         {
-          "latency_us": 2471,
+          "latency_us": 9007,
           "mode": "map",
           "preservation": 95.0,
           "savings_pct": 97.47,
           "tokens": 118
         },
         {
-          "latency_us": 2059,
+          "latency_us": 6518,
           "mode": "signatures",
           "preservation": 85.0,
           "savings_pct": 97.79,
           "tokens": 103
         },
         {
-          "latency_us": 79,
+          "latency_us": 188,
           "mode": "aggressive",
           "preservation": 100.0,
           "savings_pct": 6.54,
           "tokens": 4357
         },
         {
-          "latency_us": 7549,
+          "latency_us": 15309,
           "mode": "entropy",
           "preservation": 100.0,
           "savings_pct": 0.0,
@@ -1219,35 +1513,77 @@
       "raw_tokens": 4662
     },
     {
-      "ext": "js",
+      "ext": "ts",
       "modes": [
         {
-          "latency_us": 1574,
+          "latency_us": 7259,
           "mode": "map",
           "preservation": 100.0,
-          "savings_pct": 96.85,
-          "tokens": 141
+          "savings_pct": 91.78,
+          "tokens": 418
         },
         {
-          "latency_us": 1473,
+          "latency_us": 6906,
           "mode": "signatures",
-          "preservation": 100.0,
-          "savings_pct": 96.85,
-          "tokens": 141
+          "preservation": 58.14,
+          "savings_pct": 93.12,
+          "tokens": 350
         },
         {
-          "latency_us": 68,
+          "latency_us": 137,
           "mode": "aggressive",
           "preservation": 100.0,
-          "savings_pct": 3.57,
-          "tokens": 4316
+          "savings_pct": 13.95,
+          "tokens": 4375
         },
         {
-          "latency_us": 6473,
+          "latency_us": 13658,
           "mode": "entropy",
           "preservation": 100.0,
           "savings_pct": 0.0,
-          "tokens": 4476
+          "tokens": 5084
+        },
+        {
+          "latency_us": 0,
+          "mode": "cache_hit",
+          "preservation": null,
+          "savings_pct": 99.74,
+          "tokens": 13
+        }
+      ],
+      "path": "markdownai/packages/engine/src/engine.ts",
+      "raw_tokens": 5084
+    },
+    {
+      "ext": "ts",
+      "modes": [
+        {
+          "latency_us": 7270,
+          "mode": "map",
+          "preservation": 100.0,
+          "savings_pct": 98.31,
+          "tokens": 77
+        },
+        {
+          "latency_us": 7195,
+          "mode": "signatures",
+          "preservation": 16.67,
+          "savings_pct": 99.43,
+          "tokens": 26
+        },
+        {
+          "latency_us": 178,
+          "mode": "aggressive",
+          "preservation": 100.0,
+          "savings_pct": 5.96,
+          "tokens": 4277
+        },
+        {
+          "latency_us": 14792,
+          "mode": "entropy",
+          "preservation": 100.0,
+          "savings_pct": 0.37,
+          "tokens": 4531
         },
         {
           "latency_us": 0,
@@ -1257,203 +1593,77 @@
           "tokens": 13
         }
       ],
-      "path": "rust/src/dashboard/static/lib/shared.js",
-      "raw_tokens": 4476
+      "path": "markdownai/packages/engine/src/__tests__/event-transports.test.ts",
+      "raw_tokens": 4548
     },
     {
       "ext": "js",
       "modes": [
         {
-          "latency_us": 1904,
+          "latency_us": 6697,
           "mode": "map",
-          "preservation": 33.33,
-          "savings_pct": 99.27,
-          "tokens": 34
+          "preservation": 45.45,
+          "savings_pct": 99.06,
+          "tokens": 48
         },
         {
-          "latency_us": 1844,
+          "latency_us": 6631,
           "mode": "signatures",
           "preservation": 100.0,
-          "savings_pct": 97.11,
-          "tokens": 134
+          "savings_pct": 97.31,
+          "tokens": 137
         },
         {
-          "latency_us": 71,
+          "latency_us": 180,
           "mode": "aggressive",
           "preservation": 100.0,
-          "savings_pct": 2.48,
-          "tokens": 4514
+          "savings_pct": 3.41,
+          "tokens": 4924
         },
         {
-          "latency_us": 6654,
+          "latency_us": 15138,
           "mode": "entropy",
           "preservation": 100.0,
           "savings_pct": 0.0,
-          "tokens": 4629
+          "tokens": 5098
         },
         {
           "latency_us": 0,
           "mode": "cache_hit",
           "preservation": null,
-          "savings_pct": 99.72,
+          "savings_pct": 99.74,
           "tokens": 13
         }
       ],
-      "path": "rust/src/dashboard/static/components/cockpit-compression.js",
-      "raw_tokens": 4629
+      "path": "rust/src/dashboard/static/components/cockpit-commander.js",
+      "raw_tokens": 5098
     },
     {
       "ext": "js",
       "modes": [
         {
-          "latency_us": 1895,
-          "mode": "map",
-          "preservation": 27.27,
-          "savings_pct": 99.1,
-          "tokens": 40
-        },
-        {
-          "latency_us": 1796,
-          "mode": "signatures",
-          "preservation": 100.0,
-          "savings_pct": 95.85,
-          "tokens": 185
-        },
-        {
-          "latency_us": 71,
-          "mode": "aggressive",
-          "preservation": 100.0,
-          "savings_pct": 3.54,
-          "tokens": 4304
-        },
-        {
-          "latency_us": 6641,
-          "mode": "entropy",
-          "preservation": 100.0,
-          "savings_pct": 1.05,
-          "tokens": 4415
-        },
-        {
-          "latency_us": 0,
-          "mode": "cache_hit",
-          "preservation": null,
-          "savings_pct": 99.71,
-          "tokens": 13
-        }
-      ],
-      "path": "rust/src/dashboard/static/components/cockpit-remaining.js",
-      "raw_tokens": 4462
-    },
-    {
-      "ext": "md",
-      "modes": [
-        {
-          "latency_us": 62,
-          "mode": "map",
-          "preservation": 100.0,
-          "savings_pct": 100.0,
-          "tokens": 0
-        },
-        {
-          "latency_us": 40,
-          "mode": "signatures",
-          "preservation": 100.0,
-          "savings_pct": 100.0,
-          "tokens": 0
-        },
-        {
-          "latency_us": 39,
-          "mode": "aggressive",
-          "preservation": 100.0,
-          "savings_pct": 2.59,
-          "tokens": 3836
-        },
-        {
-          "latency_us": 6239,
-          "mode": "entropy",
-          "preservation": 100.0,
-          "savings_pct": 2.46,
-          "tokens": 3841
-        },
-        {
-          "latency_us": 0,
-          "mode": "cache_hit",
-          "preservation": null,
-          "savings_pct": 99.67,
-          "tokens": 13
-        }
-      ],
-      "path": "lean/PAPER.md",
-      "raw_tokens": 3938
-    },
-    {
-      "ext": "md",
-      "modes": [
-        {
-          "latency_us": 54,
-          "mode": "map",
-          "preservation": 100.0,
-          "savings_pct": 100.0,
-          "tokens": 0
-        },
-        {
-          "latency_us": 49,
-          "mode": "signatures",
-          "preservation": 100.0,
-          "savings_pct": 100.0,
-          "tokens": 0
-        },
-        {
-          "latency_us": 52,
-          "mode": "aggressive",
-          "preservation": 100.0,
-          "savings_pct": 1.75,
-          "tokens": 4276
-        },
-        {
-          "latency_us": 6486,
-          "mode": "entropy",
-          "preservation": 100.0,
-          "savings_pct": 3.24,
-          "tokens": 4211
-        },
-        {
-          "latency_us": 0,
-          "mode": "cache_hit",
-          "preservation": null,
-          "savings_pct": 99.7,
-          "tokens": 13
-        }
-      ],
-      "path": "docs/contracts/http-mcp-contract-v1.md",
-      "raw_tokens": 4352
-    },
-    {
-      "ext": "js",
-      "modes": [
-        {
-          "latency_us": 1831,
+          "latency_us": 5516,
           "mode": "map",
           "preservation": 28.57,
           "savings_pct": 99.4,
           "tokens": 28
         },
         {
-          "latency_us": 1933,
+          "latency_us": 5591,
           "mode": "signatures",
           "preservation": 100.0,
           "savings_pct": 97.15,
           "tokens": 132
         },
         {
-          "latency_us": 61,
+          "latency_us": 138,
           "mode": "aggressive",
           "preservation": 100.0,
           "savings_pct": 3.32,
           "tokens": 4480
         },
         {
-          "latency_us": 6702,
+          "latency_us": 12933,
           "mode": "entropy",
           "preservation": 100.0,
           "savings_pct": 0.0,
@@ -1471,77 +1681,35 @@
       "raw_tokens": 4634
     },
     {
-      "ext": "md",
+      "ext": "ts",
       "modes": [
         {
-          "latency_us": 36,
+          "latency_us": 5896,
           "mode": "map",
           "preservation": 100.0,
-          "savings_pct": 100.0,
-          "tokens": 0
+          "savings_pct": 99.46,
+          "tokens": 19
         },
         {
-          "latency_us": 31,
+          "latency_us": 5708,
           "mode": "signatures",
-          "preservation": 100.0,
-          "savings_pct": 100.0,
-          "tokens": 0
+          "preservation": 66.67,
+          "savings_pct": 99.6,
+          "tokens": 14
         },
         {
-          "latency_us": 33,
+          "latency_us": 133,
           "mode": "aggressive",
           "preservation": 100.0,
-          "savings_pct": 1.17,
-          "tokens": 4297
+          "savings_pct": 6.09,
+          "tokens": 3300
         },
         {
-          "latency_us": 5859,
+          "latency_us": 11493,
           "mode": "entropy",
           "preservation": 100.0,
-          "savings_pct": 0.83,
-          "tokens": 4312
-        },
-        {
-          "latency_us": 0,
-          "mode": "cache_hit",
-          "preservation": null,
-          "savings_pct": 99.7,
-          "tokens": 13
-        }
-      ],
-      "path": "README.md",
-      "raw_tokens": 4348
-    },
-    {
-      "ext": "md",
-      "modes": [
-        {
-          "latency_us": 30,
-          "mode": "map",
-          "preservation": 100.0,
-          "savings_pct": 100.0,
-          "tokens": 0
-        },
-        {
-          "latency_us": 27,
-          "mode": "signatures",
-          "preservation": 100.0,
-          "savings_pct": 100.0,
-          "tokens": 0
-        },
-        {
-          "latency_us": 29,
-          "mode": "aggressive",
-          "preservation": 100.0,
-          "savings_pct": 11.24,
-          "tokens": 3095
-        },
-        {
-          "latency_us": 5405,
-          "mode": "entropy",
-          "preservation": 100.0,
-          "savings_pct": 4.62,
-          "tokens": 3326
+          "savings_pct": 0.31,
+          "tokens": 3503
         },
         {
           "latency_us": 0,
@@ -1551,84 +1719,168 @@
           "tokens": 13
         }
       ],
-      "path": "SECURITY.md",
-      "raw_tokens": 3487
+      "path": "markdownai/packages/engine/src/__tests__/trace.test.ts",
+      "raw_tokens": 3514
     },
     {
-      "ext": "md",
+      "ext": "ts",
       "modes": [
         {
-          "latency_us": 51,
+          "latency_us": 5230,
           "mode": "map",
           "preservation": 100.0,
-          "savings_pct": 98.18,
-          "tokens": 63
+          "savings_pct": 98.77,
+          "tokens": 45
         },
         {
-          "latency_us": 35,
+          "latency_us": 4543,
           "mode": "signatures",
-          "preservation": 100.0,
-          "savings_pct": 98.18,
-          "tokens": 63
+          "preservation": 40.0,
+          "savings_pct": 99.16,
+          "tokens": 31
         },
         {
-          "latency_us": 34,
+          "latency_us": 115,
           "mode": "aggressive",
           "preservation": 100.0,
-          "savings_pct": 7.26,
-          "tokens": 3205
+          "savings_pct": 5.51,
+          "tokens": 3467
         },
         {
-          "latency_us": 5459,
+          "latency_us": 10839,
           "mode": "entropy",
           "preservation": 100.0,
-          "savings_pct": 0.03,
-          "tokens": 3455
+          "savings_pct": 0.0,
+          "tokens": 3669
         },
         {
           "latency_us": 0,
           "mode": "cache_hit",
           "preservation": null,
-          "savings_pct": 99.62,
+          "savings_pct": 99.65,
           "tokens": 13
         }
       ],
-      "path": "blog/twir-lean-ctx.md",
-      "raw_tokens": 3456
+      "path": "markdownai/packages/engine/src/__tests__/event.test.ts",
+      "raw_tokens": 3669
+    },
+    {
+      "ext": "ts",
+      "modes": [
+        {
+          "latency_us": 4744,
+          "mode": "map",
+          "preservation": 100.0,
+          "savings_pct": 93.95,
+          "tokens": 232
+        },
+        {
+          "latency_us": 4635,
+          "mode": "signatures",
+          "preservation": 82.35,
+          "savings_pct": 94.86,
+          "tokens": 197
+        },
+        {
+          "latency_us": 144,
+          "mode": "aggressive",
+          "preservation": 100.0,
+          "savings_pct": 24.5,
+          "tokens": 2896
+        },
+        {
+          "latency_us": 11956,
+          "mode": "entropy",
+          "preservation": 100.0,
+          "savings_pct": 0.03,
+          "tokens": 3835
+        },
+        {
+          "latency_us": 0,
+          "mode": "cache_hit",
+          "preservation": null,
+          "savings_pct": 99.66,
+          "tokens": 13
+        }
+      ],
+      "path": "markdownai/packages/engine/src/write-ops.ts",
+      "raw_tokens": 3836
+    },
+    {
+      "ext": "ts",
+      "modes": [
+        {
+          "latency_us": 6445,
+          "mode": "map",
+          "preservation": 100.0,
+          "savings_pct": 97.46,
+          "tokens": 90
+        },
+        {
+          "latency_us": 5834,
+          "mode": "signatures",
+          "preservation": 33.33,
+          "savings_pct": 97.89,
+          "tokens": 75
+        },
+        {
+          "latency_us": 165,
+          "mode": "aggressive",
+          "preservation": 100.0,
+          "savings_pct": 3.02,
+          "tokens": 3441
+        },
+        {
+          "latency_us": 11489,
+          "mode": "entropy",
+          "preservation": 100.0,
+          "savings_pct": 0.0,
+          "tokens": 3548
+        },
+        {
+          "latency_us": 2,
+          "mode": "cache_hit",
+          "preservation": null,
+          "savings_pct": 99.63,
+          "tokens": 13
+        }
+      ],
+      "path": "markdownai/packages/engine/src/db/__tests__/executor.test.ts",
+      "raw_tokens": 3548
     },
     {
       "ext": "py",
       "modes": [
         {
-          "latency_us": 1568,
+          "latency_us": 4913,
           "mode": "map",
           "preservation": 76.67,
           "savings_pct": 94.95,
           "tokens": 143
         },
         {
-          "latency_us": 1240,
+          "latency_us": 4210,
           "mode": "signatures",
           "preservation": 73.33,
           "savings_pct": 92.3,
           "tokens": 218
         },
         {
-          "latency_us": 53,
+          "latency_us": 148,
           "mode": "aggressive",
           "preservation": 100.0,
           "savings_pct": 2.19,
           "tokens": 2771
         },
         {
-          "latency_us": 4524,
+          "latency_us": 9732,
           "mode": "entropy",
           "preservation": 100.0,
           "savings_pct": 0.04,
           "tokens": 2832
         },
         {
-          "latency_us": 0,
+          "latency_us": 1,
           "mode": "cache_hit",
           "preservation": null,
           "savings_pct": 99.54,
@@ -1639,157 +1891,157 @@
       "raw_tokens": 2833
     },
     {
-      "ext": "py",
+      "ext": "ts",
       "modes": [
         {
-          "latency_us": 1344,
+          "latency_us": 5601,
           "mode": "map",
           "preservation": 100.0,
-          "savings_pct": 95.78,
-          "tokens": 137
+          "savings_pct": 98.15,
+          "tokens": 64
         },
         {
-          "latency_us": 1135,
+          "latency_us": 5348,
           "mode": "signatures",
-          "preservation": 68.75,
-          "savings_pct": 96.52,
-          "tokens": 113
+          "preservation": 7.14,
+          "savings_pct": 99.68,
+          "tokens": 11
         },
         {
-          "latency_us": 57,
+          "latency_us": 138,
           "mode": "aggressive",
           "preservation": 100.0,
-          "savings_pct": 1.76,
-          "tokens": 3189
+          "savings_pct": 3.93,
+          "tokens": 3323
         },
         {
-          "latency_us": 4658,
+          "latency_us": 10981,
           "mode": "entropy",
           "preservation": 100.0,
-          "savings_pct": 0.09,
-          "tokens": 3243
+          "savings_pct": 0.0,
+          "tokens": 3459
         },
         {
           "latency_us": 0,
           "mode": "cache_hit",
           "preservation": null,
-          "savings_pct": 99.6,
+          "savings_pct": 99.62,
           "tokens": 13
         }
       ],
-      "path": "lab/tokenizer_bench.py",
-      "raw_tokens": 3246
+      "path": "markdownai/packages/core/src/cli.ts",
+      "raw_tokens": 3459
     },
     {
-      "ext": "py",
+      "ext": "ts",
       "modes": [
         {
-          "latency_us": 1388,
+          "latency_us": 5855,
           "mode": "map",
           "preservation": 100.0,
-          "savings_pct": 90.28,
-          "tokens": 306
+          "savings_pct": 98.56,
+          "tokens": 51
         },
         {
-          "latency_us": 1330,
+          "latency_us": 5118,
           "mode": "signatures",
-          "preservation": 68.0,
-          "savings_pct": 91.14,
-          "tokens": 279
+          "preservation": 75.0,
+          "savings_pct": 98.7,
+          "tokens": 46
         },
         {
-          "latency_us": 53,
+          "latency_us": 159,
           "mode": "aggressive",
           "preservation": 100.0,
-          "savings_pct": 0.25,
-          "tokens": 3140
+          "savings_pct": 6.42,
+          "tokens": 3309
         },
         {
-          "latency_us": 4568,
+          "latency_us": 11228,
           "mode": "entropy",
           "preservation": 100.0,
-          "savings_pct": 0.32,
-          "tokens": 3138
+          "savings_pct": 1.22,
+          "tokens": 3493
+        },
+        {
+          "latency_us": 1,
+          "mode": "cache_hit",
+          "preservation": null,
+          "savings_pct": 99.63,
+          "tokens": 13
+        }
+      ],
+      "path": "markdownai/packages/engine/src/__tests__/source-data-root.test.ts",
+      "raw_tokens": 3536
+    },
+    {
+      "ext": "js",
+      "modes": [
+        {
+          "latency_us": 5010,
+          "mode": "map",
+          "preservation": 40.0,
+          "savings_pct": 98.93,
+          "tokens": 37
+        },
+        {
+          "latency_us": 4451,
+          "mode": "signatures",
+          "preservation": 100.0,
+          "savings_pct": 96.18,
+          "tokens": 132
+        },
+        {
+          "latency_us": 131,
+          "mode": "aggressive",
+          "preservation": 100.0,
+          "savings_pct": 2.95,
+          "tokens": 3356
+        },
+        {
+          "latency_us": 9987,
+          "mode": "entropy",
+          "preservation": 100.0,
+          "savings_pct": 0.0,
+          "tokens": 3458
         },
         {
           "latency_us": 0,
           "mode": "cache_hit",
           "preservation": null,
-          "savings_pct": 99.59,
+          "savings_pct": 99.62,
           "tokens": 13
         }
       ],
-      "path": "lab/training/distill.py",
-      "raw_tokens": 3148
+      "path": "rust/src/dashboard/static/components/cockpit-memory.js",
+      "raw_tokens": 3458
     },
     {
       "ext": "py",
       "modes": [
         {
-          "latency_us": 1538,
-          "mode": "map",
-          "preservation": 100.0,
-          "savings_pct": 94.02,
-          "tokens": 169
-        },
-        {
-          "latency_us": 1413,
-          "mode": "signatures",
-          "preservation": 45.0,
-          "savings_pct": 95.43,
-          "tokens": 129
-        },
-        {
-          "latency_us": 44,
-          "mode": "aggressive",
-          "preservation": 100.0,
-          "savings_pct": 0.14,
-          "tokens": 2820
-        },
-        {
-          "latency_us": 4161,
-          "mode": "entropy",
-          "preservation": 100.0,
-          "savings_pct": 0.14,
-          "tokens": 2820
-        },
-        {
-          "latency_us": 0,
-          "mode": "cache_hit",
-          "preservation": null,
-          "savings_pct": 99.54,
-          "tokens": 13
-        }
-      ],
-      "path": "lab/runner.py",
-      "raw_tokens": 2824
-    },
-    {
-      "ext": "py",
-      "modes": [
-        {
-          "latency_us": 1378,
+          "latency_us": 4805,
           "mode": "map",
           "preservation": 95.0,
           "savings_pct": 95.52,
           "tokens": 122
         },
         {
-          "latency_us": 1330,
+          "latency_us": 4316,
           "mode": "signatures",
           "preservation": 85.0,
           "savings_pct": 96.07,
           "tokens": 107
         },
         {
-          "latency_us": 48,
+          "latency_us": 114,
           "mode": "aggressive",
           "preservation": 100.0,
           "savings_pct": 2.35,
           "tokens": 2662
         },
         {
-          "latency_us": 4010,
+          "latency_us": 8024,
           "mode": "entropy",
           "preservation": 100.0,
           "savings_pct": 0.0,
@@ -1807,414 +2059,162 @@
       "raw_tokens": 2726
     },
     {
-      "ext": "py",
+      "ext": "json",
       "modes": [
         {
-          "latency_us": 1099,
+          "latency_us": 95,
           "mode": "map",
           "preservation": 100.0,
-          "savings_pct": 90.02,
-          "tokens": 245
+          "savings_pct": 100.0,
+          "tokens": 0
         },
         {
-          "latency_us": 1027,
+          "latency_us": 86,
           "mode": "signatures",
-          "preservation": 61.9,
-          "savings_pct": 91.29,
-          "tokens": 214
+          "preservation": 100.0,
+          "savings_pct": 100.0,
+          "tokens": 0
         },
         {
-          "latency_us": 44,
+          "latency_us": 121,
           "mode": "aggressive",
           "preservation": 100.0,
-          "savings_pct": 0.69,
-          "tokens": 2439
+          "savings_pct": 1.44,
+          "tokens": 2812
         },
         {
-          "latency_us": 3728,
-          "mode": "entropy",
-          "preservation": 100.0,
-          "savings_pct": 0.04,
-          "tokens": 2455
-        },
-        {
-          "latency_us": 0,
-          "mode": "cache_hit",
-          "preservation": null,
-          "savings_pct": 99.47,
-          "tokens": 13
-        }
-      ],
-      "path": "lab/experiments/attention_maps.py",
-      "raw_tokens": 2456
-    },
-    {
-      "ext": "ts",
-      "modes": [
-        {
-          "latency_us": 1402,
-          "mode": "map",
-          "preservation": 28.57,
-          "savings_pct": 97.6,
-          "tokens": 58
-        },
-        {
-          "latency_us": 1291,
-          "mode": "signatures",
-          "preservation": 95.24,
-          "savings_pct": 87.94,
-          "tokens": 291
-        },
-        {
-          "latency_us": 54,
-          "mode": "aggressive",
-          "preservation": 100.0,
-          "savings_pct": 5.43,
-          "tokens": 2281
-        },
-        {
-          "latency_us": 3867,
+          "latency_us": 7519,
           "mode": "entropy",
           "preservation": 100.0,
           "savings_pct": 0.0,
-          "tokens": 2412
+          "tokens": 2853
         },
         {
           "latency_us": 0,
           "mode": "cache_hit",
           "preservation": null,
-          "savings_pct": 99.46,
+          "savings_pct": 99.54,
           "tokens": 13
         }
       ],
-      "path": "packages/pi-lean-ctx/extensions/mcp-bridge.ts",
-      "raw_tokens": 2412
-    },
-    {
-      "ext": "py",
-      "modes": [
-        {
-          "latency_us": 1351,
-          "mode": "map",
-          "preservation": 100.0,
-          "savings_pct": 95.82,
-          "tokens": 109
-        },
-        {
-          "latency_us": 1444,
-          "mode": "signatures",
-          "preservation": 50.0,
-          "savings_pct": 96.59,
-          "tokens": 89
-        },
-        {
-          "latency_us": 39,
-          "mode": "aggressive",
-          "preservation": 100.0,
-          "savings_pct": 4.79,
-          "tokens": 2485
-        },
-        {
-          "latency_us": 3819,
-          "mode": "entropy",
-          "preservation": 100.0,
-          "savings_pct": 0.04,
-          "tokens": 2609
-        },
-        {
-          "latency_us": 0,
-          "mode": "cache_hit",
-          "preservation": null,
-          "savings_pct": 99.5,
-          "tokens": 13
-        }
-      ],
-      "path": "lab/experiments/run_attention.py",
-      "raw_tokens": 2610
-    },
-    {
-      "ext": "py",
-      "modes": [
-        {
-          "latency_us": 993,
-          "mode": "map",
-          "preservation": 79.17,
-          "savings_pct": 92.19,
-          "tokens": 172
-        },
-        {
-          "latency_us": 972,
-          "mode": "signatures",
-          "preservation": 66.67,
-          "savings_pct": 90.46,
-          "tokens": 210
-        },
-        {
-          "latency_us": 38,
-          "mode": "aggressive",
-          "preservation": 100.0,
-          "savings_pct": 0.68,
-          "tokens": 2186
-        },
-        {
-          "latency_us": 3382,
-          "mode": "entropy",
-          "preservation": 100.0,
-          "savings_pct": 0.05,
-          "tokens": 2200
-        },
-        {
-          "latency_us": 0,
-          "mode": "cache_hit",
-          "preservation": null,
-          "savings_pct": 99.41,
-          "tokens": 13
-        }
-      ],
-      "path": "lab/training/line_classifier.py",
-      "raw_tokens": 2201
-    },
-    {
-      "ext": "ts",
-      "modes": [
-        {
-          "latency_us": 1292,
-          "mode": "map",
-          "preservation": 100.0,
-          "savings_pct": 93.18,
-          "tokens": 173
-        },
-        {
-          "latency_us": 1215,
-          "mode": "signatures",
-          "preservation": 100.0,
-          "savings_pct": 93.69,
-          "tokens": 160
-        },
-        {
-          "latency_us": 39,
-          "mode": "aggressive",
-          "preservation": 100.0,
-          "savings_pct": 4.02,
-          "tokens": 2434
-        },
-        {
-          "latency_us": 3740,
-          "mode": "entropy",
-          "preservation": 100.0,
-          "savings_pct": 2.21,
-          "tokens": 2480
-        },
-        {
-          "latency_us": 0,
-          "mode": "cache_hit",
-          "preservation": null,
-          "savings_pct": 99.49,
-          "tokens": 13
-        }
-      ],
-      "path": "src/core/signature-extractor.ts",
-      "raw_tokens": 2536
-    },
-    {
-      "ext": "ts",
-      "modes": [
-        {
-          "latency_us": 1163,
-          "mode": "map",
-          "preservation": 100.0,
-          "savings_pct": 92.48,
-          "tokens": 180
-        },
-        {
-          "latency_us": 1084,
-          "mode": "signatures",
-          "preservation": 93.33,
-          "savings_pct": 93.23,
-          "tokens": 162
-        },
-        {
-          "latency_us": 39,
-          "mode": "aggressive",
-          "preservation": 100.0,
-          "savings_pct": 17.84,
-          "tokens": 1967
-        },
-        {
-          "latency_us": 3591,
-          "mode": "entropy",
-          "preservation": 100.0,
-          "savings_pct": 0.0,
-          "tokens": 2394
-        },
-        {
-          "latency_us": 0,
-          "mode": "cache_hit",
-          "preservation": null,
-          "savings_pct": 99.46,
-          "tokens": 13
-        }
-      ],
-      "path": "src/core/entropy-compressor.ts",
-      "raw_tokens": 2394
-    },
-    {
-      "ext": "py",
-      "modes": [
-        {
-          "latency_us": 872,
-          "mode": "map",
-          "preservation": 100.0,
-          "savings_pct": 89.22,
-          "tokens": 228
-        },
-        {
-          "latency_us": 801,
-          "mode": "signatures",
-          "preservation": 73.68,
-          "savings_pct": 90.64,
-          "tokens": 198
-        },
-        {
-          "latency_us": 38,
-          "mode": "aggressive",
-          "preservation": 100.0,
-          "savings_pct": 0.33,
-          "tokens": 2109
-        },
-        {
-          "latency_us": 3068,
-          "mode": "entropy",
-          "preservation": 100.0,
-          "savings_pct": 0.19,
-          "tokens": 2112
-        },
-        {
-          "latency_us": 0,
-          "mode": "cache_hit",
-          "preservation": null,
-          "savings_pct": 99.39,
-          "tokens": 13
-        }
-      ],
-      "path": "lab/experiments/comprehension.py",
-      "raw_tokens": 2116
+      "path": "docs/specs/context-package-v2.schema.json",
+      "raw_tokens": 2853
     }
   ],
   "files_measured": 50,
   "files_scanned": 50,
   "languages": [
     {
-      "best_mode": "map",
-      "best_mode_tokens": 5016,
-      "best_savings_pct": 96.52,
-      "count": 10,
-      "ext": "rs",
-      "total_tokens": 144295
-    },
-    {
-      "best_mode": "signatures",
-      "best_mode_tokens": 81,
-      "best_savings_pct": 99.9,
+      "best_mode": "aggressive",
+      "best_mode_tokens": 150574,
+      "best_savings_pct": 8.23,
       "count": 10,
       "ext": "md",
-      "total_tokens": 80376
+      "total_tokens": 164076
     },
     {
       "best_mode": "map",
-      "best_mode_tokens": 634,
-      "best_savings_pct": 99.11,
+      "best_mode_tokens": 6401,
+      "best_savings_pct": 95.99,
       "count": 10,
-      "ext": "js",
-      "total_tokens": 71352
+      "ext": "rs",
+      "total_tokens": 159677
     },
     {
-      "best_mode": "aggressive",
-      "best_mode_tokens": 51961,
-      "best_savings_pct": 0.48,
-      "count": 4,
-      "ext": "json",
-      "total_tokens": 52209
+      "best_mode": "map",
+      "best_mode_tokens": 673,
+      "best_savings_pct": 99.08,
+      "count": 10,
+      "ext": "js",
+      "total_tokens": 73435
     },
     {
       "best_mode": "signatures",
-      "best_mode_tokens": 1660,
-      "best_savings_pct": 94.24,
+      "best_mode_tokens": 1275,
+      "best_savings_pct": 97.05,
       "count": 10,
-      "ext": "py",
-      "total_tokens": 28822
+      "ext": "ts",
+      "total_tokens": 43243
     },
     {
       "best_mode": "aggressive",
-      "best_mode_tokens": 17615,
-      "best_savings_pct": 2.4,
-      "count": 1,
+      "best_mode_tokens": 33035,
+      "best_savings_pct": 0.52,
+      "count": 3,
+      "ext": "json",
+      "total_tokens": 33208
+    },
+    {
+      "best_mode": "aggressive",
+      "best_mode_tokens": 26915,
+      "best_savings_pct": 5.58,
+      "count": 2,
       "ext": "css",
-      "total_tokens": 18049
+      "total_tokens": 28507
+    },
+    {
+      "best_mode": "aggressive",
+      "best_mode_tokens": 26533,
+      "best_savings_pct": 2.7,
+      "count": 2,
+      "ext": "html",
+      "total_tokens": 27268
     },
     {
       "best_mode": "map",
-      "best_mode_tokens": 612,
-      "best_savings_pct": 95.62,
-      "count": 4,
-      "ext": "ts",
-      "total_tokens": 13974
-    },
-    {
-      "best_mode": "aggressive",
-      "best_mode_tokens": 8450,
-      "best_savings_pct": 2.38,
-      "count": 1,
-      "ext": "html",
-      "total_tokens": 8656
+      "best_mode_tokens": 383,
+      "best_savings_pct": 96.25,
+      "count": 3,
+      "ext": "py",
+      "total_tokens": 10221
     }
   ],
   "mode_summaries": [
     {
-      "avg_latency_us": 5980,
-      "avg_preservation": 81.16,
-      "avg_savings_pct": 97.38,
+      "avg_latency_us": 18095,
+      "avg_preservation": 83.15,
+      "avg_savings_pct": 98.11,
       "mode": "map",
-      "total_compressed_tokens": 8092
+      "total_compressed_tokens": 8980
     },
     {
-      "avg_latency_us": 2250,
-      "avg_preservation": 90.47,
-      "avg_savings_pct": 96.63,
+      "avg_latency_us": 7464,
+      "avg_preservation": 87.14,
+      "avg_savings_pct": 97.67,
       "mode": "signatures",
-      "total_compressed_tokens": 11190
+      "total_compressed_tokens": 11311
     },
     {
-      "avg_latency_us": 122,
+      "avg_latency_us": 356,
       "avg_preservation": 100.0,
-      "avg_savings_pct": 3.91,
+      "avg_savings_pct": 5.86,
       "mode": "aggressive",
-      "total_compressed_tokens": 401621
+      "total_compressed_tokens": 508560
     },
     {
-      "avg_latency_us": 12343,
-      "avg_preservation": 99.89,
-      "avg_savings_pct": 0.51,
+      "avg_latency_us": 32102,
+      "avg_preservation": 99.88,
+      "avg_savings_pct": 0.5,
       "mode": "entropy",
-      "total_compressed_tokens": 415902
+      "total_compressed_tokens": 535818
     },
     {
       "avg_latency_us": 0,
       "avg_preservation": null,
-      "avg_savings_pct": 99.75,
+      "avg_savings_pct": 99.82,
       "mode": "cache_hit",
       "total_compressed_tokens": 650
     }
   ],
   "root": ".",
   "session_simulation": {
-    "ccp_cost_usd": 0.2,
-    "lean_ccp_tokens": 79924,
-    "lean_cost_usd": 0.21,
-    "lean_tokens": 84540,
-    "raw_cost_usd": 1.5,
-    "raw_tokens": 600110
+    "ccp_cost_usd": 0.21,
+    "lean_ccp_tokens": 84287,
+    "lean_cost_usd": 0.22,
+    "lean_tokens": 88592,
+    "raw_cost_usd": 1.77,
+    "raw_tokens": 709115
   },
-  "total_raw_tokens": 417733,
-  "version": "3.6.6"
+  "total_raw_tokens": 539635,
+  "version": "3.6.17"
 }
