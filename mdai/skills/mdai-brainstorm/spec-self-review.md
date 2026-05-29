@@ -59,4 +59,4 @@ cwd="<repo>"
 )
 
 Fix issues inline. No re-review loop — fix and move on.
-@end
+@define-end

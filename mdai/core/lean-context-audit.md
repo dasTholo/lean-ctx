@@ -26,4 +26,4 @@ Search `{{ spec_path }}` for each anchor below. For each:
 - [ ] `bash ` / `sh ` — lean-ctx violation; replace with `@call ctx_shell(...)`.
 
 Use `mcp__lean-ctx__ctx_search(pattern="<anchor>", path="{{ spec_path }}")` for each.
-@end
+@define-end

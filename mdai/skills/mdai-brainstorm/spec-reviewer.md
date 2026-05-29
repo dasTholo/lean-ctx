@@ -48,7 +48,7 @@ file="mdai/core/library-spec-audit.md",
 macro="library_spec_audit",
 args={"spec_path": "{{ spec_path }}"},
 cwd="<repo>")
-@endif
+@if-end
 
 ## 6. Output
 
@@ -57,4 +57,4 @@ file="mdai/skills/mdai-brainstorm/write-spec.md",
 macro="write_review_report",
 args={"spec_path": "{{ spec_path }}", "status": "...", ...},
 cwd="<repo>")
-@end
+@define-end

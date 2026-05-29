@@ -9,8 +9,9 @@ mdai-pack:
 
 @define file_check(path)
 @if file.exists "{{ path }}"
+
 - {{ path }} exists
-@else
+  @else
 - {{ path }} MISSING
-@endif
-@end
+  @if-end
+  @define-end

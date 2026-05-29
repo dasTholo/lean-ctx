@@ -8,12 +8,12 @@
 
 @phase pre-context
 
-@call mdai_bootstrap()
+@call mdai_bootstrap() /
 
-@call detect_mai_hook_version()
+@call detect_mai_hook_version() /
 
-@include ${MDAI_LIBRARY_ROOT}/core/hard-rules.md
-@include ${MDAI_LIBRARY_ROOT}/core/tool-quick-ref.md
+@include ${MDAI_LIBRARY_ROOT}/core/hard-rules.md /
+@include ${MDAI_LIBRARY_ROOT}/core/tool-quick-ref.md /
 
 ## Pre-resolved project context
 
@@ -43,14 +43,14 @@ Pattern search → `@call ctx_search(pattern, path)` (not `grep`/`rg`).
 File edit without read → `@call ctx_edit(path, old, new)`.
 Read plan phase → `@call read_phase(plan, phase_id)`.
 `@call ctx_shell` only as a last resort (git ops, shell scripts, tools without a wrapper).
-@end
+@constraint-end
 
 Constraints for the dialog phase:
 
 - Spec target: docs/mdai/specs/ (NOT docs/superpowers/specs/)
 - NO plan target — plan-write is a separate skill invocation (handoff phase)
 - Hard rules: see @include above
-  @end
+  @phase-end
 
 @phase dialog-rules
 
@@ -62,7 +62,7 @@ Applies to EVERY project regardless of perceived simplicity.
 This skill writes a SPEC ONLY. Do NOT write a plan in this skill — the plan
 is produced by a separate skill invocation after this one ends (see handoff
 phase).
-@end
+@constraint-end
 
 ## Red Flags — STOP and re-enter discipline
 
@@ -112,7 +112,7 @@ code is the failure mode.
 | "Plain Markdown is more readable than a spec with `@call`/`@tree`/`@constraint` directives" [reasoned-counter] | Main goal §1: specs actively use markdownai for live content. Static tables and tree listings go stale immediately. Directives always deliver current state. (§10.4 #9)                                                     |
 | "`mode='full'` makes sense everywhere, I can see the whole context" [reasoned-counter]                         | Lean-context defaults from `mdai/core/lean-context.md`: cross-file scan → `ctx_read_map`/`signatures`; after-search → `ctx_read_lines`. `mode='full'` only with `@note visible consumer="human"` justification. (§10.4 #9b) |
 
-@end
+@phase-end
 
 @phase dialog-process
 
@@ -155,20 +155,20 @@ Wait for response. If the user declines → text-only path, skip the include
 below and proceed to step 3. If the user accepts → persist the choice via
 `mcp__lean-ctx__ctx_session action="finding" val="[mdai-brainstorm] visual=true"`,
 then re-load this phase so the include below fires.
-@end
+@prompt-end
 
-@query mcp lean-ctx ctx_session action="status"
+@query mcp lean-ctx ctx_session action="status" /
 
 @if @result.stdout matches "\[mdai-brainstorm\] visual=true"
-@include ${MDAI_LIBRARY_ROOT}/skills/mdai-brainstorm/visual-companion-offer.md
-@endif
+@include ${MDAI_LIBRARY_ROOT}/skills/mdai-brainstorm/visual-companion-offer.md /
+@if-end
 
-@include ${MDAI_LIBRARY_ROOT}/skills/mdai-brainstorm/process-principles.md
-@end
+@include ${MDAI_LIBRARY_ROOT}/skills/mdai-brainstorm/process-principles.md /
+@phase-end
 
 @phase write-outputs
 
-@include ${MDAI_LIBRARY_ROOT}/skills/mdai-brainstorm/spec-directive-conventions.md
+@include ${MDAI_LIBRARY_ROOT}/skills/mdai-brainstorm/spec-directive-conventions.md /
 
 Apply the conventions above when finalizing design_content. Then invoke write_spec
 via call_macro:
@@ -182,7 +182,7 @@ cwd="<repo>"
 
 Optional inline-render (only when explicitly requested):
 
-@set render_target_resolved = render_target | default("none")
+@set render_target_resolved = render_target | default("none") /
 
 mcp__markdownai__call_macro(
 file="mdai/skills/mdai-brainstorm/write-spec.md",
@@ -196,11 +196,11 @@ Default output (one file staged in working tree):
 - `docs/mdai/specs/<date>-<slug>-design.mdai.md` (spec source, consumer="ai")
 
 Verification:
-@call ctx_tree(path="docs/mdai/specs/", depth=1)
+@call ctx_tree(path="docs/mdai/specs/", depth=1) /
 
 Note: commit is left to the user (per CLAUDE.md — never auto-commit).
 Note: NO plan file is written here. Plan-write is a separate skill invocation.
-@end
+@phase-end
 
 @phase handoff
 
@@ -234,4 +234,4 @@ Wait for explicit response. If user requests changes → patch inline → re-run
 spec_self_review via call_macro. Only proceed once user explicitly approves.
 
 Next: invoke writing-plans skill.
-@end
+@phase-end

@@ -13,12 +13,16 @@ Read the upstream guide for HTML-fragment patterns:
 visual-companion.md (upstream) has no map/signatures path — full-read is the only sensible variant.
 Version pinned to 5.1.0 (Spec §5.3 version pin); update when upstream bumps. Reviewer check #10 passes
 without further note.
-@end
+@note-end
 
-{{ @call ctx_read(path="~/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0/skills/brainstorming/visual-companion.md", mode="full") }}
+{{ @call ctx_read(path="~
+/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0/skills/brainstorming/visual-companion.md", mode="
+full") }}
 
 Start the companion server (persistent mockups under `.superpowers/brainstorm/`):
-@call ctx_shell(cmd="~/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0/skills/brainstorming/scripts/start-server.sh --project-dir \"$PWD\"")
+@call ctx_shell(cmd="~
+/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0/skills/brainstorming/scripts/start-server.sh
+--project-dir \"$PWD\"") /
 
 Capture `screen_dir` and `state_dir` from the server-info JSON for subsequent
 screen pushes.

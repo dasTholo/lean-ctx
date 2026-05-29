@@ -41,4 +41,4 @@ Each check verifies the spec covers a key library-pack concern. For each:
   Guidance: Hand-ported blocks must carry Drift-Tracking comment with source provenance.
 
 Use `{{ spec_path }}` in your `ctx_search` invocations.
-@end
+@define-end

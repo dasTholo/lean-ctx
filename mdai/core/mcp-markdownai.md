@@ -8,13 +8,13 @@ mdai-pack:
 @markdownai v1.0
 
 @define read_phase(plan, phase_id)
-@query mcp markdownai read_file file="{{ plan }}" phase="{{ phase_id }}"
-@end
+@query mcp markdownai read_file file="{{ plan }}" phase="{{ phase_id }}" /
+@define-end
 
 @define list_phases(plan)
-@query mcp markdownai list_phases file="{{ plan }}"
-@end
+@query mcp markdownai list_phases file="{{ plan }}" /
+@define-end
 
 @define get_constraints(plan)
-@query mcp markdownai get_constraints file="{{ plan }}"
-@end
+@query mcp markdownai get_constraints file="{{ plan }}" /
+@define-end
