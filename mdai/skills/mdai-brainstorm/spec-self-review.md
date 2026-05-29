@@ -40,12 +40,7 @@ semantically appropriate? If pure plain Markdown: justified with
 Search `{{ spec_path }}` for each anchor. Flag any hit with an adjacent
 `@note visible consumer="human"` justification, or remove it.
 
-- [ ] `mode="full"` — only allowed for the one spec-source read (§0); flag all others.
-- [ ] `raw=true` — every `ctx_shell raw=true` needs a `@note visible consumer="human"` block.
-- [ ] `fresh=true` — only valid immediately after a write/edit to the same path.
-- [ ] `Grep` / `rg ` — lean-ctx violation; replace with `@call ctx_search(...)`.
-- [ ] `cat ` / `head ` / `tail ` — lean-ctx violation; replace with `@call ctx_read(...)`.
-- [ ] `bash ` / `sh ` — lean-ctx violation; replace with `@call ctx_shell(...)`.
+@include ${MDAI_LIBRARY_ROOT}/core/_fragments/lean-context-anchors.md /
 
 ## Reviewer Dispatch (optional)
 
