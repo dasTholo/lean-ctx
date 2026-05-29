@@ -49,11 +49,11 @@ architecture/languages_top=[a-z]+' | head -1 | cut -d= -f2"
 
 # last-resort shell heuristic
 
-@if file.exists "Cargo.toml"
+@if file.exists("Cargo.toml")
 @set detected_lang = "rust" /
-@elseif file.exists "pyproject.toml"
+@elseif file.exists("pyproject.toml")
 @set detected_lang = "python" /
-@elseif file.exists "package.json"
+@elseif file.exists("package.json")
 @set detected_lang = "node" /
 @if-end
 [mdai-bootstrap] project lang detected via file heuristic: {{ detected_lang }}
@@ -66,7 +66,7 @@ architecture/languages_top=[a-z]+' | head -1 | cut -d= -f2"
 # Flags: MDAI_HAS_JETBRAINS, MDAI_HAS_SERENA.
 
 @set tools = ["jetbrains", "serena"] /
-@foreach tool in tools
+@foreach tool in {{ tools }}
 @if @result.stdout matches "{{ tool }}"
 [mdai-bootstrap] tool found: {{ tool }}
 @else
@@ -88,7 +88,7 @@ architecture/languages_top=[a-z]+' | head -1 | cut -d= -f2"
 
 @define load_tooling_packs()
 @set tooling_packs = [{name="jetbrains", flag="MDAI_HAS_JETBRAINS"}, {name="serena", flag="MDAI_HAS_SERENA"}] /
-@foreach pack in tooling_packs
+@foreach pack in {{ tooling_packs }}
 @if @env {{ pack.flag }} == "true"
 @include ${MDAI_LIBRARY_ROOT}/tooling/{{ pack.name }}.md /
 @if-end
@@ -140,8 +140,8 @@ MDAI_HAS_SERENA | default('false') }}"
 @define-end
 
 @define detect_mai_hook_version()
-@if file.exists "/home/tholo/.markdownai/hooks/preToolUse.mjs"
-@if file.containsLine "/home/tholo/.markdownai/hooks/preToolUse.mjs" "isMarkdownAIDocument"
+@if file.exists("/home/tholo/.markdownai/hooks/preToolUse.mjs")
+@if file.containsLine("/home/tholo/.markdownai/hooks/preToolUse.mjs", "isMarkdownAIDocument")
 [mdai-bootstrap] mai-hook: v1.0 (frontmatter-aware)
 @else
 [mdai-bootstrap] mai-hook: v0.x — RUN `node markdownai/packages/core/dist/cli.js init`
