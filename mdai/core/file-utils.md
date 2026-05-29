@@ -13,5 +13,5 @@ mdai-pack:
 - {{ path }} exists
   @else
 - {{ path }} MISSING
-  @if-end
-  @define-end
+@if-end
+@define-end
