@@ -87,7 +87,7 @@ architecture/languages_top=[a-z]+' | head -1 | cut -d= -f2"
 @define-end
 
 @define load_tooling_packs()
-@set tooling_packs = [{name="jetbrains", flag="MDAI_HAS_JETBRAINS"}, {name="serena", flag="MDAI_HAS_SERENA"}] /
+@set tooling_packs = {{ [{"name":"jetbrains","flag":"MDAI_HAS_JETBRAINS"},{"name":"serena","flag":"MDAI_HAS_SERENA"}] }} /
 @foreach pack in {{ tooling_packs }}
 @if @env {{ pack.flag }} == "true"
 @include ${MDAI_LIBRARY_ROOT}/tooling/{{ pack.name }}.md /
