@@ -8,7 +8,7 @@ mdai-pack:
 @markdownai v1.0
 
 @define file_check(path)
-@if file.exists "{{ path }}"
+@if file.exists({{ path }})
 
 - {{ path }} exists
   @else
