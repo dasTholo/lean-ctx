@@ -7,6 +7,8 @@ skills and generated specs. Consumed via `@include mdai/core/lean-context.md` �
 the rules table renders inline. This file is text-only (no YAML frontmatter,
 no `@define` blocks) so it can be safely `@include`'d anywhere.
 
+<!-- canonical lean-context source of truth (incl. the Grep/cat/bash anti-pattern semantics); derived operational checklist: core/_fragments/lean-context-anchors.md (Cluster 3) -->
+
 ## Defaults / Exceptions
 
 | Tool                                                | Default (always)                                                                                  | Exception (requires `@note visible consumer="human"` justification)                                                       |
@@ -31,4 +33,4 @@ and referenced in `core/tool-quick-ref.md` — this file is the rules doc only.
 - **Naming:** `snake_case` for macro names (`write_spec`, not `writeSpec`).
   `kebab-case` for filenames (`write-spec.md`, not `write_spec.md`).
 - **Markdown header italic**: never wrap header lines (first ~5 lines, especially date/metadata) with `_..._` —
-    triggers a reproducible hang in `ctx_read mode="lines:N-M"`. Use `*...*` for italic, or omit entirely.
+  triggers a reproducible hang in `ctx_read mode="lines:N-M"`. Use `*...*` for italic, or omit entirely.

@@ -18,6 +18,7 @@ Search `{{ spec_path }}` for each anchor below. For each:
 
 ## 6 Anchors
 
+<!-- drift: mode="full" rule canonical in core/lean-context.md (Defaults/Exceptions table, ctx_read rows) -->
 @include ${MDAI_LIBRARY_ROOT}/core/_fragments/lean-context-anchors.md /
 
 Use `mcp__lean-ctx__ctx_search(pattern="<anchor>", path="{{ spec_path }}")` for each.

@@ -40,6 +40,7 @@ semantically appropriate? If pure plain Markdown: justified with
 Search `{{ spec_path }}` for each anchor. Flag any hit with an adjacent
 `@note visible consumer="human"` justification, or remove it.
 
+<!-- drift: mode="full" rule canonical in core/lean-context.md (Defaults/Exceptions table, ctx_read rows) -->
 @include ${MDAI_LIBRARY_ROOT}/core/_fragments/lean-context-anchors.md /
 
 ## Reviewer Dispatch (optional)
