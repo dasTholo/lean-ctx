@@ -42,7 +42,7 @@ cwd="<repo>")
 
 ## 5. Heavy library-spec checks (conditional)
 
-@if file.containsLine "{{ spec_path }}" "target_library:"
+@if file.containsLine({{ spec_path }}, "target_library:")
 Invoke via mcp__markdownai__call_macro(
 file="mdai/core/library-spec-audit.md",
 macro="library_spec_audit",
