@@ -15,3 +15,12 @@
   after `ctx_search` / `find_symbol`. `mode="full"` is the exception (justify with `@note visible consumer="human"`).
   `ctx_shell raw=true` and `ctx_read fresh=true` are also exceptions — `fresh=true` ONLY immediately after a write/edit
   to the same path (cache auto-invalidates via mtime).
+
+## v2 Directive Syntax (markdownai 1.3.0)
+
+- **Closers:** block directives close with `@<name>-end` (`@if-end`, `@foreach-end`, `@switch-end`, `@constraint-end`, `@render-template-end`); argument-less directives self-close with a trailing ` /` (e.g. `@include … /`, `@set x = … /`).
+- **Predicate call-form:** `file.exists("Cargo.toml")`, `file.containsLine("file", "anchor")` (parens + comma). A pure interpolation arg is **unquoted**: `file.exists({{ path }})`; a string literal (even with embedded `{{ }}`) stays **quoted**: `file.exists("docs/{{ slug }}.md")`. `matches` stays **infix**: `@if @result.stdout matches "…"`.
+- **`@foreach` source must be interpolated:** `@foreach x in {{ list }}`. For an **object list** the value must be JSON wrapped in `{{ }}` so it parses and dot-access works: `@set packs = {{ [{"name":"a","flag":"F"}] }} /` then `{{ pack.name }}`. A bare `[{name=…}]` is stored as a string and split on every comma.
+- **Dates:** `@date` is a directive and is **NOT** available inside `{{ }}` interpolation (inline `{{ @date }}` renders empty). Capture it via a directive-valued `@set`: `@set d = @date format='YYYY-MM-DD' /` then use `{{ d }}`. `now_iso()` is an interpolation builtin but is CLI-only (MCP `@eval` is blocked) and returns a full timestamp.
+- **Cross-pack `@include`:** use `@include ${MDAI_LIBRARY_ROOT}/<pack>.md /` — see `core/mcp-markdownai.md` for the full resolution rule. MCP calls run with `cwd` = repo root.
+- **Re-confirmed conventions:** `@render-template from=… to=… force` + key=value body + `@render-template-end` (§6); `mode: include` fragments carry no YAML frontmatter, the parser leaks it as text (§8); tooling/lang packs are `mode: import-only`, loaded via `@include`/`@import` (§11); library wrappers are synthesized and smoke-tested via `call_macro` (§12).
