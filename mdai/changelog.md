@@ -1,5 +1,35 @@
 # mdai-macro-library — Changelog
 
+## v0.1.3 — 2026-05-29 — markdownai-v2 adoption & library fix (engine 1.3.0)
+
+- **Engine adoption:** library targets markdownai 1.3.0 (v2 directive syntax, plugin system).
+- **P0 — closed the 3 migration-tool gaps manually:** predicate call-form `name(a, b)` across `core/file-utils.md`,
+  `core/startup-check.md`, `skills/mdai-brainstorm/spec-reviewer.md`, `skills/mdai-brainstorm/write-spec.md`;
+  `@foreach x in {{ list }}` in `startup-check.md` (`detect_tooling`, `load_tooling_packs`); unquoted interpolated
+  predicate args (`file.exists({{ var }})`, `file.containsLine({{ p }}, "…")`).
+- **Object-list dot-access:** `load_tooling_packs` uses `@set tooling_packs = {{ [{"name":..,"flag":..}] }} /` (JSON in
+  `{{ }}`) so `{{ pack.name }}` / `{{ pack.flag }}` resolve; a bare `[{name=..}]` is stringified and comma-split.
+- **A — §5 date workaround replaced:** `write-spec.md` drops the broken inline `{{ @date }}` (resolves empty) for the
+  directive-valued `@set spec_date = @date format='YYYY-MM-DD' /` + `{{ spec_date }}`.
+- **B — content dedup:** 6-anchor lean-context list extracted to canonical fragment
+  `core/_fragments/lean-context-anchors.md`, consumed via `@include ${MDAI_LIBRARY_ROOT}/core/_fragments/...` by
+  `lean-context-audit.md` + `spec-self-review.md` (Cluster 1); `lean-context.md` marked canonical anti-pattern source
+  (Cluster 3); `mode="full"` drift comments added (Cluster 2).
+- **C — docs:** `spec-directive-conventions.md` migrated to v2 (incl. corrected date guidance); `hard-rules.md` gains a
+  v2 directive-syntax section; `mcp-markdownai.md` gains engine resolution notes; findings-v3 supersedes v2.
+- **Two engine bugs fixed in markdownai (branch `feat-mdai`):** `f16b4c2` propagate macro named-args into skillContext
+  for `@if file.exists({{ param }})`; `ede9793` bind `@foreach` object items into `ctx.data` for dot-access.
+
+### Known limitations v0.1.3
+
+- `@date` is NOT available inside `{{ }}` interpolation; use `@set d = @date format='YYYY-MM-DD' /` then `{{ d }}`.
+  `now_iso()` is CLI-only (MCP `@eval` blocked) and returns a full timestamp.
+- `@include` resolves repo-root-relative and expands `${MDAI_LIBRARY_ROOT}` under MCP, but is document-relative with no
+  env-expansion under `mai validate` / `render` (and `..` is parser-rejected). Unconditional `${MDAI_LIBRARY_ROOT}/...`
+  includes therefore fail `mai validate` — verify via MCP. See `core/mcp-markdownai.md`.
+- `body.mdai.md:185` `@set render_target_resolved = render_target | default("none") /` — `@set` cannot be a pipe source
+  in 1.3.0 (pre-existing; out of this scope, tracked in findings-v3).
+
 ## v0.1.0 — 2026-05-24
 
 Initial release.
