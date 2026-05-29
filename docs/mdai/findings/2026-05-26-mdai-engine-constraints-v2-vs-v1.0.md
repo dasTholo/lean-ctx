@@ -1,7 +1,8 @@
 ---
 title: mdai Engine-Constraints v2 — re-validated against markdownai v1.0.0
 date: 2026-05-26
-status: ready-for-review
+status: superseded
+superseded_by: docs/mdai/findings/2026-05-29-mdai-engine-constraints-v3-vs-1.3.0.md
 authors: claude
 supersedes: docs/mdai/findings/2026-05-25-mdai-v0.1.1-engine-constraints.md
 related_audits:
