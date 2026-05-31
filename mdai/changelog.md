@@ -3,7 +3,7 @@
 ## v0.1.4 — 2026-05-31 — hardening (v0.1.3 follow-ups)
 
 - **TG1 — Engine-Fix-Verifikation & Dependency-Doku:** zwei lokale Engine-Fixes (`f16b4c2`, `ede9793`) leben weiterhin nur auf `feat-mdai` (nicht in `origin/main`). Repro-Smokes ergänzt in findings-v3 Anhang A; Dist-Pointer in `core/mcp-markdownai.md`. Dist = `feat-mdai` (`origin/main@aac0825` + die 2 Fixes); nach Pull `npm --prefix markdownai run build`, verifizieren via Anhang A.
-- **TG2 — `@set`-Pipe-Fix (`body.mdai.md`):** `@set render_target_resolved = render_target | default("none") /` entfernt (`@set` kann keine Pipe-Source sein); Use-Site auf inline-Interpolation umgestellt.
+- **TG2 — `@set`-Pipe-Fix (`body.mdai.md`):** `@set render_target_resolved = render_target | default("none") /` entfernt (`@set` kann keine Pipe-Source sein). Der `default()`-Filter greift in der Interpolation nicht (Engine-Limit), daher `render_target` direkt an `render_spec` übergeben + Aufrufer-Konvention dokumentiert (kein `render_target` ⇒ `"none"`/kein Inline-Render).
 - **TG3 — Directive-Indentation:** alle echten `@`-Directives in `write-spec.md` und `body.mdai.md` auf Spalte 0 normalisiert (Verhalten unverändert).
 
 ## v0.1.3 — 2026-05-29 — markdownai-v2 adoption & library fix (engine 1.3.0)
@@ -34,7 +34,7 @@
   env-expansion under `mai validate` / `render` (and `..` is parser-rejected). Unconditional `${MDAI_LIBRARY_ROOT}/...`
   includes therefore fail `mai validate` — verify via MCP. See `core/mcp-markdownai.md`.
 - `body.mdai.md` `@set … | default(…) /` pipe-source error — **resolved in v0.1.4** (TG2): `@set`-Zeile entfernt,
-  Use-Site auf Inline-Interpolation umgestellt.
+  `render_target` direkt an `render_spec` übergeben (`default()` greift in der Interpolation nicht) + Aufrufer-Konvention.
 
 ## v0.1.0 — 2026-05-24
 
