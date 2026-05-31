@@ -177,6 +177,15 @@ Rebuild war nötig).
    Objekt-Elemente via `String(v)`; `executeForeach` band Items nur als String in `ctx.envFiles`. Fix: Objekte
    erhalten + an `ctx.data` binden (Dot-Access `{{ x.field }}`). +1 vitest-File (3 Tests). Ermöglicht §2-Objektlisten.
 
+### Repro-Smokes (Dist-Verifikation)
+
+Aus Repo-Root, gegen den laufenden `feat-mdai`-Dist (nach `npm --prefix markdownai run build`):
+
+- **Smoke A (`ede9793`):** Datei mit `@set xs = {{ [{"name":"a"}] }} /` + `@foreach x in {{ xs }}` / `{{ x.name }}` / `@foreach-end`, dann `npx --prefix markdownai mai render <datei>` → rendert `a` (nicht leer).
+- **Smoke B (`f16b4c2`):** `@define chk(p)` mit `@if file.exists({{ p }})` (`EXISTS`/`MISSING`), `@call chk(p="mdai/changelog.md") /`, dann `npx --prefix markdownai mai render <datei>` → rendert `EXISTS` (nicht `MISSING`).
+
+Beide grün ⇒ Dist enthält f16b4c2+ede9793.
+
 ---
 
 ## Anhang B — Migrations-Tool-Lücken (manuell geschlossen)

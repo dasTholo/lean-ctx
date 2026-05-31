@@ -23,6 +23,8 @@ mdai-pack:
 
 Verified against the live 1.3.0 engine. They matter for every agent/session authoring or running mdai packs.
 
+> **Dist-Abhängigkeit:** Library benötigt den Dist aus Branch `feat-mdai` (= `origin/main@aac0825` + 2 lokale Fixes `f16b4c2`+`ede9793`). Nach Pull `npm --prefix markdownai run build`; verifizieren via findings-v3 Anhang A (Repro-Smokes). Fixes sind bewusst nicht gepusht.
+
 ### @include path resolution differs by entrypoint
 
 - **MCP** (`call_macro` / `resolve_phase`, `cwd` = repo root): `@include` resolves relative to the **repo root**, and `${MDAI_LIBRARY_ROOT}` is expanded. Use `@include ${MDAI_LIBRARY_ROOT}/core/…/file.md /` for cross-pack includes — this is the runtime path and the library convention (`body.mdai.md`, `startup-check.md`).

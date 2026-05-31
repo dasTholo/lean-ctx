@@ -1,5 +1,11 @@
 # mdai-macro-library — Changelog
 
+## v0.1.4 — 2026-05-31 — hardening (v0.1.3 follow-ups)
+
+- **TG1 — Engine-Fix-Verifikation & Dependency-Doku:** zwei lokale Engine-Fixes (`f16b4c2`, `ede9793`) leben weiterhin nur auf `feat-mdai` (nicht in `origin/main`). Repro-Smokes ergänzt in findings-v3 Anhang A; Dist-Pointer in `core/mcp-markdownai.md`. Dist = `feat-mdai` (`origin/main@aac0825` + die 2 Fixes); nach Pull `npm --prefix markdownai run build`, verifizieren via Anhang A.
+- **TG2 — `@set`-Pipe-Fix (`body.mdai.md`):** `@set render_target_resolved = render_target | default("none") /` entfernt (`@set` kann keine Pipe-Source sein); Use-Site auf inline-Interpolation umgestellt.
+- **TG3 — Directive-Indentation:** alle echten `@`-Directives in `write-spec.md` und `body.mdai.md` auf Spalte 0 normalisiert (Verhalten unverändert).
+
 ## v0.1.3 — 2026-05-29 — markdownai-v2 adoption & library fix (engine 1.3.0)
 
 - **Engine adoption:** library targets markdownai 1.3.0 (v2 directive syntax, plugin system).
