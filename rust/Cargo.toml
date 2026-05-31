@@ -170,6 +170,7 @@ bincode = { version = "2", features = ["serde"] }
 zstd = "0.13"
 memmap2 = "0.9"
 lsp-types = "0.97"
+rushdown = "0.18"
 
 [lints.rust]
 unreachable_pub = "warn"
