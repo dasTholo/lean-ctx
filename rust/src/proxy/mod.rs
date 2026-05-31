@@ -2,6 +2,7 @@ pub mod anthropic;
 pub mod compress;
 pub mod forward;
 pub mod google;
+pub mod history_prune;
 pub mod introspect;
 pub mod metrics;
 pub mod openai;
@@ -106,6 +107,7 @@ pub async fn start_proxy_with_token(port: u16, auth_token: Option<String>) -> an
         .route("/health", get(health))
         .route("/status", get(status_handler))
         .route("/v1/messages", any(anthropic::handler))
+        .route("/v1/messages/{*rest}", any(anthropic::handler))
         .route("/v1/chat/completions", any(openai::handler))
         .route("/v1/references/{id}", get(v1_resolve_reference))
         .fallback(fallback_router)
@@ -144,11 +146,19 @@ async fn shutdown_signal() {
 
     #[cfg(unix)]
     {
-        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("failed to install SIGTERM handler");
-        tokio::select! {
-            _ = ctrl_c => {},
-            _ = sigterm.recv() => {},
+        // Fall back to Ctrl-C only if the SIGTERM handler cannot be installed,
+        // rather than panicking the proxy on startup.
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut sigterm) => {
+                tokio::select! {
+                    _ = ctrl_c => {},
+                    _ = sigterm.recv() => {},
+                }
+            }
+            Err(e) => {
+                tracing::warn!("lean-ctx proxy: SIGTERM handler unavailable ({e}); Ctrl-C only");
+                ctrl_c.await.ok();
+            }
         }
     }
 
@@ -337,6 +347,13 @@ mod auth_tests {
         assert!(is_provider_route("/v1/chat/completions"));
         assert!(is_provider_route("/v1/messages"));
         assert!(is_provider_route("/v1/completions"));
+    }
+
+    #[test]
+    fn is_provider_route_anthropic_subpaths() {
+        assert!(is_provider_route("/v1/messages/count_tokens"));
+        assert!(is_provider_route("/v1/messages/batches"));
+        assert!(is_provider_route("/v1/messages/batches/batch_123"));
     }
 
     #[test]

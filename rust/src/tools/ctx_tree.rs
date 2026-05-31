@@ -5,8 +5,14 @@ use ignore::WalkBuilder;
 use crate::core::protocol;
 use crate::core::tokens::count_tokens;
 
-/// Generates a compact directory tree listing with file counts, respecting gitignore.
-pub fn handle(path: &str, depth: usize, show_hidden: bool) -> (String, usize) {
+/// Generates a compact directory tree listing with file counts.
+/// When `respect_gitignore` is true, entries matching .gitignore patterns are excluded.
+pub fn handle(
+    path: &str,
+    depth: usize,
+    show_hidden: bool,
+    respect_gitignore: bool,
+) -> (String, usize) {
     let root = Path::new(path);
     if root.is_file() {
         let parent = root
@@ -26,13 +32,14 @@ pub fn handle(path: &str, depth: usize, show_hidden: bool) -> (String, usize) {
         );
     }
 
-    let raw_output = generate_raw_tree(root, depth, show_hidden);
-    let compact_output = generate_compact_tree(root, depth, show_hidden);
+    let raw_output = generate_raw_tree(root, depth, show_hidden, respect_gitignore);
+    let compact_output = generate_compact_tree(root, depth, show_hidden, respect_gitignore);
 
     if compact_output.trim().is_empty() {
         return (format!("{path}/ (empty directory, depth={depth})"), 0);
     }
 
+    let _mode_guard = crate::core::savings_footer::ModeGuard::new("tree");
     let raw_tokens = count_tokens(&raw_output);
     let compact_tokens = count_tokens(&compact_output);
     let savings = protocol::format_savings(raw_tokens, compact_tokens);
@@ -40,7 +47,12 @@ pub fn handle(path: &str, depth: usize, show_hidden: bool) -> (String, usize) {
     (format!("{compact_output}\n{savings}"), raw_tokens)
 }
 
-fn generate_compact_tree(root: &Path, max_depth: usize, show_hidden: bool) -> String {
+fn generate_compact_tree(
+    root: &Path,
+    max_depth: usize,
+    show_hidden: bool,
+    respect_gitignore: bool,
+) -> String {
     let mut lines = Vec::new();
 
     struct Entry {
@@ -53,9 +65,9 @@ fn generate_compact_tree(root: &Path, max_depth: usize, show_hidden: bool) -> St
 
     let walker = WalkBuilder::new(root)
         .hidden(!show_hidden)
-        .git_ignore(true)
-        .git_global(true)
-        .git_exclude(true)
+        .git_ignore(respect_gitignore)
+        .git_global(respect_gitignore)
+        .git_exclude(respect_gitignore)
         .max_depth(Some(max_depth))
         .sort_by_file_name(std::cmp::Ord::cmp)
         .build();
@@ -95,14 +107,19 @@ fn generate_compact_tree(root: &Path, max_depth: usize, show_hidden: bool) -> St
     lines.join("\n")
 }
 
-fn generate_raw_tree(root: &Path, depth: usize, show_hidden: bool) -> String {
+fn generate_raw_tree(
+    root: &Path,
+    depth: usize,
+    show_hidden: bool,
+    respect_gitignore: bool,
+) -> String {
     let mut lines = Vec::new();
 
     let walker = WalkBuilder::new(root)
         .hidden(!show_hidden)
-        .git_ignore(true)
-        .git_global(true)
-        .git_exclude(true)
+        .git_ignore(respect_gitignore)
+        .git_global(respect_gitignore)
+        .git_exclude(respect_gitignore)
         .max_depth(Some(depth))
         .sort_by_file_name(std::cmp::Ord::cmp)
         .build();
@@ -126,10 +143,38 @@ fn generate_raw_tree(root: &Path, depth: usize, show_hidden: bool) -> String {
 mod tests {
     use super::*;
 
+    /// Builds a deterministic source-tree fixture so the assertions do not
+    /// depend on the live repository size or platform path separators (the live
+    /// repo coupling previously made this test tip over its token threshold on
+    /// Windows as the codebase grew).
+    fn make_fixture() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let files = [
+            "Cargo.toml",
+            "README.md",
+            "src/main.rs",
+            "src/lib.rs",
+            "src/core/mod.rs",
+            "src/core/engine.rs",
+            "src/core/util.rs",
+            "src/tools/mod.rs",
+            "src/tools/reader.rs",
+            "tests/integration.rs",
+            "tests/smoke.rs",
+        ];
+        for rel in files {
+            let p = root.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, "// fixture\n").unwrap();
+        }
+        dir
+    }
+
     #[test]
     fn tree_savings_are_reasonable() {
-        let dir = env!("CARGO_MANIFEST_DIR");
-        let (output, original) = handle(dir, 3, false);
+        let dir = make_fixture();
+        let (output, original) = handle(&dir.path().to_string_lossy(), 3, false, true);
         let compact_tokens = count_tokens(&output);
 
         eprintln!("=== ctx_tree savings test ===");
@@ -140,11 +185,11 @@ mod tests {
             original.saturating_sub(compact_tokens)
         );
 
-        assert!(
-            original < 5000,
-            "raw tree at depth 3 should be < 5000 tokens, got {original}"
-        );
         assert!(original > 0, "raw tree should have some tokens");
+        assert!(
+            original < 2000,
+            "raw tree for the fixture should be small, got {original}"
+        );
         if original > compact_tokens {
             let ratio = (original - compact_tokens) as f64 / original as f64;
             eprintln!("  savings ratio:         {:.1}%", ratio * 100.0);

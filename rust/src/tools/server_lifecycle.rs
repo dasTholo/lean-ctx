@@ -67,25 +67,6 @@ impl LeanCtxServer {
         // Purge stale graph indices on startup to prevent serving outdated data
         crate::core::graph_index::ProjectIndex::purge_stale_indices();
 
-        // Start the RAM guardian — monitors RSS and triggers tiered eviction.
-        // At Critical pressure (>3x limit), performs emergency shutdown.
-        crate::core::memory_guard::start_guard(std::sync::Arc::new(|level| {
-            use crate::core::memory_guard::PressureLevel;
-            match level {
-                PressureLevel::Soft => {
-                    tracing::info!("[memory_guard] soft pressure — deferring new index builds");
-                }
-                PressureLevel::Medium | PressureLevel::Hard | PressureLevel::Critical => {
-                    tracing::warn!(
-                        "[memory_guard] {:?} pressure — purging jemalloc arenas",
-                        level,
-                    );
-                    crate::core::memory_guard::jemalloc_purge();
-                }
-                PressureLevel::Normal => {}
-            }
-        }));
-
         let startup = detect_startup_context(project_root, startup_cwd);
         let (session, context_os) = match session_mode {
             SessionMode::Personal => {
@@ -128,8 +109,28 @@ impl LeanCtxServer {
             }
         };
 
+        if let Some(ref root) = startup.project_root {
+            crate::core::index_orchestrator::ensure_all_background(root);
+        }
+
+        let cache = Arc::new(RwLock::new(SessionCache::new()));
+        let bm25_cache: Arc<std::sync::Mutex<Option<crate::core::bm25_cache::Bm25CacheEntry>>> =
+            Arc::new(std::sync::Mutex::new(None));
+
+        // Start the RAM guardian with real eviction via EvictionOrchestrator.
+        // Bridges memory_guard (RSS monitoring) → HomeostasisController (graduated actions).
+        let orchestrator = std::sync::Arc::new(
+            crate::core::eviction_orchestrator::EvictionOrchestrator::new(
+                cache.clone(),
+                bm25_cache.clone(),
+            ),
+        );
+        crate::core::memory_guard::start_guard(std::sync::Arc::new(move |level| {
+            orchestrator.on_pressure(level);
+        }));
+
         Self {
-            cache: Arc::new(RwLock::new(SessionCache::new())),
+            cache,
             session,
             tool_calls: Arc::new(RwLock::new(Vec::new())),
             call_count: Arc::new(AtomicUsize::new(0)),
@@ -169,10 +170,15 @@ impl LeanCtxServer {
                 crate::server::registry::build_registry(),
             )),
             rules_stale_checked: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            rules_tip_shown: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             last_seen_event_id: Arc::new(std::sync::atomic::AtomicI64::new(0)),
             startup_project_root: startup.project_root,
             startup_shell_cwd: startup.shell_cwd,
             peer: Arc::new(tokio::sync::RwLock::new(None)),
+            has_client_roots: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            roots_resolved: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            bm25_cache,
+            progress_sender: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -199,8 +205,20 @@ impl LeanCtxServer {
         *self.last_call.write().await = Instant::now();
     }
 
-    /// Aggressive cleanup on connection drop: save session, clear all caches, purge allocator.
+    /// Aggressive cleanup on connection drop: save session, consolidate knowledge, clear caches.
     pub async fn shutdown(&self) {
+        {
+            let session = self.session.read().await;
+            let has_insights = !session.findings.is_empty() || !session.decisions.is_empty();
+            let root = session.project_root.clone();
+            drop(session);
+
+            if has_insights {
+                if let Some(ref root) = root {
+                    crate::tools::startup::auto_consolidate_knowledge(root);
+                }
+            }
+        }
         {
             let mut session = self.session.write().await;
             let _ = session.save();

@@ -15,10 +15,21 @@ impl ProjectKnowledge {
     pub fn save(&self) -> Result<(), String> {
         let dir = knowledge_dir(&self.project_hash)?;
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+        }
 
         let path = dir.join("knowledge.json");
         let json = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
-        std::fs::write(&path, json).map_err(|e| e.to_string())
+        std::fs::write(&path, &json).map_err(|e| e.to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        }
+        Ok(())
     }
 
     pub fn load(project_root: &str) -> Option<Self> {

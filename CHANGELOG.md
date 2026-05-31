@@ -3,7 +3,201 @@
 All notable changes to lean-ctx are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [3.6.26] — 2026-05-30
+
+> **EPIC 6 — Perfect-First (Track A).** A focused correctness + hygiene pass so the
+> session/knowledge layer behaves perfectly across projects, the disk footprint stays
+> bounded, and cold-start UX is useful immediately.
+
+### Fixed
+- **Windows file paths corrupted in tool output** (#324): absolute Windows paths in `ctx_search`/`ctx_compose` output (and every tool using `protocol::shorten_path*`) were rendered with separators stripped (`C:\Users\…\win-build-log.txt` → `CUserszir…win-build-log.txt`) because client render layers (JSON/markdown/terminal) treated backslashes as escape sequences. All displayed paths are now normalized to forward slashes, which are valid on Windows and never escape-interpreted. `shorten_path_relative` also relativizes on slash-normalized strings (component-boundary checked) so it works regardless of the client's separator style.
+- **Project root never resolves to HOME / `/` / agent sandbox dirs** (#2361): `best_root_from_uris`, `root_from_env`, `resolve_roots_once`, and the `initialize` handler now reject broad/unsafe directories as a project root via `pathutil::is_broad_or_unsafe_root`, even when a client reports one. This was the root cause of cross-project context bleed (the "HOME mega-session").
+- **Cross-project session leakage** (#2362): `SessionState::load_latest()` no longer falls back to the global `latest.json` pointer — it is strictly project-scoped and returns `None` for an unsafe cwd. A new `load_global_latest_pointer()` covers the explicit "show my last session anywhere" UX, and `consolidate_latest()` loads the session for its explicit project root instead of the process cwd.
+- **Noise auto-findings suppressed** (#2363): findings whose files live in VCS/dependency/build/cache dirs, virtualenvs, vendored code, home dotfiles (`~/.ssh/config` …), or binary/log artifacts are dropped, and `ctx_search` no longer emits `Found `?` in N files` when no meaningful pattern could be identified. Knowledge recall now boosts exact key/category matches above incidental lexical hits.
+- **Cold-start `ctx_overview` returns a useful partial view** (#2365): instead of only "INDEXING IN PROGRESS, try again", it returns detected project markers, a depth-2 gitignore-aware tree, and persistent knowledge while the graph builds in the background.
+
+### Added
+- **`lean-ctx sessions doctor [--apply]`** (#2362): detects sessions rooted at a broad/unsafe path and non-destructively quarantines them to `sessions/quarantine/`.
+- **Archive FTS disk cap enforcement** (#2364): the archive index (`archives/index.db`) now enforces an on-disk size cap (default 500 MB, override via `LEAN_CTX_ARCHIVE_DB_MAX_MB`) by pruning the oldest entries + VACUUM. A new daemon-safe `storage_maintenance` pass also prunes accumulated quarantined BM25 indexes on startup, and `lean-ctx doctor` gains an **Archive FTS** footprint check.
+
+### Changed
+- **Self-healing rules refresh** (#2365): when an outdated rules file is detected on the first tool call of a session, lean-ctx auto-refreshes the rules on disk (off the async runtime) instead of only nudging the user to run `lean-ctx setup`.
+
+## [3.6.24] — 2026-05-30
+
+### Added
+- **Knowledge Intelligence — Revision Tracking**: `KnowledgeFact` gains a `revision_count` field. Confirmations increment it, supersedes carry it forward. Output distinguishes "Remembered (revision 1)" vs "Confirmed (revision N, confirmed Nx)" vs "Updated → revision N (previous archived)". Recall shows `rev N` for multi-revision facts. Backward-compatible via `#[serde(default)]`.
+- **Knowledge Intelligence — Cross-Key Conflict-Surfacing**: `find_cross_key_similar()` detects semantically similar facts across different keys using Jaccard similarity (threshold > 0.35). When `remember` stores a fact, similar facts from other keys are surfaced in a `SIMILAR FACTS` section with similarity percentages. New `judge` action lets agents resolve pairs as `supersedes`/`compatible`/`unrelated`. `JudgedPair` storage suppresses future noise for already-judged pairs. Recall output annotates facts with `↳ supersedes`/`↳ compatible` relationship arrows.
+- **Knowledge Intelligence — Activity-weighted Documentation Nudges**: Replaces the fixed 30-call counter with weighted activity scoring. Edits +4, shell test/build +3, shell +2, new file read +1, cache-hit +0, knowledge/session calls reset to 0. Triggers only when `weighted_score >= 20` AND `significant_tools >= 5` AND no documentation in 8 minutes. Contextual nudge text based on dominant tool type (shell-heavy, edit-heavy, or generic). Fallback 30-call counter preserved as safety net.
+- **`bunx` in default shell allowlist** (#310).
+
+### Fixed
+- **RAM Guardian measures daemon RSS instead of CLI process** (#317): `lean-ctx doctor` was showing the CLI's ~14 MB instead of the daemon's actual memory. Added `get_rss_bytes_for_pid(pid)` for Linux (`/proc/{pid}/status`) and macOS (`ps -o rss= -p {pid}`). Doctor now reads the daemon PID and reports its real RSS with `(daemon)` label.
+- **Orphan MCP processes no longer accumulate RAM** (#317): Added parent-process watchdog (checks every 5s if parent PID changed, exits cleanly when IDE closes) and startup orphan cleanup (kills `lean-ctx` processes reparented to PID 1). Prevents MCP server processes from surviving after IDE restarts.
+- **`lean-ctx restart` no longer kills active MCP servers** (#317): `find_killable_pids()` excludes MCP server processes from force-kill during restart, preventing a kill loop where the IDE immediately respawns them.
+- **Jira Cloud 410 Gone error** (#315): Migrated from deprecated `GET /rest/api/3/search` to `POST /rest/api/3/search/jql` with `nextPageToken` pagination. Server/Data Center deployments (detected via `JIRA_DEPLOYMENT=server`) continue using `GET /rest/api/2/search`.
+- **Provider discovery ignores project root** (#316): `handle_discover()` and `handle_mcp_resources()` now pass `project_root` to `init_with_project_root()` so project-local provider configs are found.
+- **Cross-source hints path normalization** (#316): `hints_for_file()` now accepts `project_root` for consistent `graph_relative_key` normalization.
+- **JSONC parser tolerates trailing commas** (#311, #312): Prevents parse failures in MCP config files with trailing commas. Also detects duplicate MCP scope registration (workspace + user) and warns.
+- **CI structural test relaxations**: Three tests (`scenario_shell_compression_with_saved_tokens_skips_terse`, `raw_shell_skips_all_postprocessing`, `ctx_handoff_create_show_list_pull_clear`) relaxed to check for component presence instead of exact multiline matches, preventing false failures from unrelated code changes.
+
+### Changed
+- **Reverted thinking-mode guard** (#313): The `is_thinking_mode_active()` defensive check in PreToolUse hooks was removed — the original Claude Code bug it worked around has been fixed upstream, and the guard could reduce token savings.
+
+### Hardening
+- **Graceful error handling**: Replaced potential panics with proper error returns and added logging for silent save failures across knowledge, session, and stats persistence.
+
+### Refactoring
+- **CLI dispatch split**: Extracted `dispatch.rs` (1800+ lines) into `analytics.rs`, `network.rs`, and other submodules.
+- **Doctor module split**: Decomposed `doctor/mod.rs` (2321 lines) into `common.rs` + `checks.rs`.
+- **Editor registry split**: Split `writers.rs` (2580 lines) into a proper module with subfiles.
+- **Server dedup**: Consolidated duplicated `has_project_marker` / `PROJECT_MARKERS` logic.
+
+## [3.6.25] — 2026-05-30
+
+### Added
+- **Jira Cloud OAuth 2.0 (3LO)** (#318): authenticate built-in and custom Jira data sources via the standard 3-legged OAuth flow instead of Basic auth + API token. New `lean-ctx provider auth jira` runs the interactive flow (loopback redirect, browser consent, accessible-resource/`cloudId` discovery), persists tokens to `~/.lean-ctx/credentials/jira-oauth.json` (`0600`), and auto-refreshes on expiry with refresh-token rotation. `lean-ctx provider list` / `provider logout` round out the surface. The CLI is secret-free: users register their own Atlassian OAuth app and supply the client id/secret via env. Basic auth continues to work unchanged; OAuth is selected automatically when a credential exists or `JIRA_AUTH=oauth` is set.
+- **Context-pressure triage in the Context Cockpit** (#249): the Context Manager moves from observation to triage. The *Files in Context* table gains sortable **Used** (re-read count), **Last** (recency), and **Evict** columns — the Evict score combines high token cost + long idle + rarely re-read so the best eviction candidate is one click away. A triage banner maps the live pressure band to a concrete next action (Healthy / Elevated → prefer `map`+`signatures` / High → compress or evict / Critical → evict or handoff pack). The ledger now tracks per-item `access_count` (backward-compatible via `#[serde(default)]`).
+- **Offline-first Context Cockpit**: Chart.js, D3 and the UI fonts are now self-hosted (no external CDN), so the dashboard renders identically offline and with large sessions; libs degrade gracefully with an inline notice if one fails to load. Added a dashboard-wide **⌘K / Ctrl+K command palette** with fuzzy search across every view, quick actions (refresh, theme toggle) and full keyboard navigation, plus an embedded favicon and clearer route labels.
+- **Friendly first run (UX P0.3)**: running bare `lean-ctx` in an interactive terminal now prints a short quickstart (one obvious next step: `lean-ctx setup`) instead of silently starting the stdio MCP server and appearing to hang. MCP clients (which pipe stdin, not a TTY) and explicit `lean-ctx mcp` are unaffected — they still get the server.
+- **`--help` leads with the essentials (UX P1)**: a `GETTING STARTED` block (`setup` / `doctor` / `gain`) now sits at the top of the help, above the full reference — newcomers see the 3 commands they need first instead of scanning 150 lines.
+- **Efficiency Epic — resident line-search index**: `ctx_search` now narrows candidate files in memory via a RAM-resident trigram index (`core/search_index.rs`) before reading them, eliminating the per-call directory walk + full-corpus read. Benchmarked **17×–1000× faster** (p50, warm) on a 2000-file corpus with byte-identical recall. Falls back to the walk path when the index is absent/building; opt-out via `LEAN_CTX_DISABLE_SEARCH_INDEX=1`.
+- **`ctx_compose` task composer**: one call returns extracted keywords, semantically ranked files, exact match locations, and the most relevant symbol's body inline — replacing the typical search→read→outline→read chain.
+- **Benchmark harness** (`rust/benches/efficiency.rs` + `benchmarks/efficiency/`): reproducible latency (p50/p95/p99) + token report comparing the walk and resident-index paths, with a recall-parity assertion.
+- **Submodular context packing** (`core/context_packing.rs`): generic greedy max-coverage selector with a provable `1 − 1/e` approximation guarantee (Nemhauser–Wolsey–Fisher). `ctx_compose` now uses it to inline the *non-redundant set* of symbol bodies with maximal keyword coverage under a token budget, instead of just the first match. Budget via `LEAN_CTX_COMPOSE_SYMBOL_TOKENS` (default 600).
+- **Search index Bloom tier** (`core/search_index.rs`): monorepos whose trigram postings would exceed the memory budget now build compact per-file Bloom filters (~3× smaller, ~12 bits/trigram) instead of falling back to a full directory walk. Bloom filters have **zero false negatives** (a superset of true matches that `ctx_search` regex-verifies), so recall is identical to the exact tier. The `MAX_FILES` ceiling rose 20k→200k. Proven by a parity fuzz test (Bloom ⊇ postings for every query) + end-to-end recall test.
+- **Hebbian co-access graph** (`core/cooccurrence.rs`): a persistent, decaying "files that fire together, wire together" association graph. Files surfaced for the same task strengthen their mutual link (LTP); every update decays all weights (the forgetting curve) and prunes below threshold. Bounded by neighbour/file caps. Becomes an associative retrieval signal over time.
+- **Spreading-activation retrieval** (`core/spreading_activation.rs`): ACT-R-style associative ranker. Activation seeds at the files a task names and spreads over the project graph (fan-out-normalised, decaying → provably convergent even on cycles), surfacing structurally-close files lexical search misses. `ctx_compose` runs it over the **union of the static import/call graph and the learned co-access graph** as a budgeted, additive `## Related (associative…)` section (`LEAN_CTX_COMPOSE_GRAPH_BUDGET_MS`, default 1500).
+- **Retrieval eval harness** (`tests/retrieval_eval.rs`): a labelled benchmark (queries + relevance judgments) measuring recall@k, MRR and R-precision. Gates the associative ranker as **regression-free** (recall ≥ lexical for every query) with a measured gain (mean recall@3 1.00 vs 0.00 lexical, R-precision 1.00 — it recovers in-cluster files without flooding unrelated ones).
+
+### Hardening
+- **`ctx_compose` semantic ranking is wall-time budgeted (H1)**: the only `O(corpus)` stage (a cold BM25 build) runs in a cache-sharing worker thread bounded by `LEAN_CTX_COMPOSE_BUDGET_MS` (default 2500). On overrun the call returns immediately with exact-match + symbol sections and a "warming" note, while the worker finishes warming the resident cache for the next call — the agent loop can no longer stall on a cold index.
+- **`ctx_compose` full-path test coverage (H2)**: new `tests/ctx_compose_scenarios.rs` exercises the semantic + exact-match + symbol pipeline on a real mini-corpus and asserts the tight-budget degradation path never stalls.
+- **Instruction token cap is priority-aware (H3)**: the compression/output-style guidance suffix is now protected from truncation; only the variable session/knowledge/gotcha blocks are shed when the 1200-token cap is exceeded. Previously a large on-disk session could silently drop the agent's output-style contract.
+
+### Changed
+- **`lean-ctx config` points to the simpler surface (UX P2)**: the full config dump now ends with a tip toward `config show` (the 5 high-level knobs) and `config set <key> <value>`, so the 100+ keys no longer feel like the only entry point. The simplified config template (`config init`) now defaults `compression_level = "lite"`, matching the new friendly default.
+- **Friendly-by-default output style (UX P0)**: the default `compression_level` is now `lite` (plain-English "concise" guidance — bullets, no filler) instead of `standard` (the symbolic dense style). New users, and anyone opening their generated rules files or inspecting the MCP instructions, now see readable directives rather than the `→ ∵ ∴` vocabulary or `CRP MODE`. The denser symbolic "power modes" stay one line away (`compression_level = "standard" | "max"`, or `LEAN_CTX_COMPRESSION`). This only shapes the model's *prose*; tool-output compression is governed separately and is unchanged — engine efficiency is unaffected.
+- **`ctx_read` auto-mode delivers task-relevant bodies**: in `map`/`signatures` mode with an active task, the body of the best-matching symbol is inlined, avoiding a follow-up full read. The `map` heuristic threshold was raised 3000→6000 tokens, and the redundant double disk read in auto-mode selection was removed (cached token counts are reused).
+- **Alpha/§MAP symbol substitution is now off by default** for agent-facing output (it traded per-call bytes for agent decode work). CLI/batch pipelines can opt back in with `LEAN_CTX_SYMBOL_MAP=1`.
+- **Resident graph-index cache** (`core/graph_cache.rs`): `try_load_graph_index` reuses a deserialized `ProjectIndex` from RAM, instead of re-reading + decompressing + parsing on every graph query.
+- **BM25 + graph caches use a `(mtime, size)` content fingerprint** instead of mtime alone: coarse (1–2 s) filesystem mtime could miss a same-second background rebuild; pairing it with the file size catches those rewrites without the cost of hashing a multi-MB index on every per-query freshness check. A rebuild is still picked up immediately within the TTL window.
+
+### Fixed
+- **CLI `--help` banner tool count no longer drifts (UX P0)**: the `N MCP tools` figure in the banner is now derived from the live registry (`server::registry::tool_count()`) instead of a hardcoded literal — it read `61` while the README and feature catalog already said `63`. A unit test pins the banner to the registry count so the three figures can never diverge again.
+- **Instruction token-cap truncation was O(lines) tokenizations** — `truncate_to_token_cap` re-counted tokens once per line while walking back from the end. On large session/knowledge blocks this is wasteful, and it timed out the coverage job's ptrace-instrumented run. Replaced with a binary search over line boundaries (O(log lines) tokenizations, identical output).
+- **CI: `dropin_install_tests` failed on shell-less runners** (regression from #309): the new "is the shell installed?" guard skips writing zsh hooks when no `zsh` binary is present, but the drop-in install tests assert the hooks are written — so they failed on the zsh-less `ubuntu-latest` runner. Added `LEAN_CTX_SHELL_HOOK_FORCE` (`1`/`true`/`all` or a comma list like `zsh,bash`) to force hook installation regardless of detection — useful in minimal containers / custom images, and the seam the tests use to stay host-independent.
+- **`ctx_edit` concurrent-edit timeout under multi-agent load** (#320): the global cache write-lock was held across the entire disk I/O of an edit, so a second agent editing a *different* file could time out waiting on the first. Edits now serialize per file via a shared `core::path_locks` registry, perform disk I/O with no global lock, and take the global cache lock only briefly to apply the resulting cache effect. Concurrent edits to different files now run in parallel; edits to the same file remain correctly serialized.
+- **Eval harness reported zero recall on Windows**: `recall_at_k`/`mean_reciprocal_rank` compared retrieved paths (OS separator, `\` on Windows) against expected fixtures (`/`) with `ends_with`, so every comparison missed and recall/MRR collapsed to 0 on Windows. Both sides are now normalized to `/` before comparison.
+- **Flaky CI on Windows**: made the `ctx_tree` token-savings test deterministic via a synthetic fixture (instead of walking the live repo, whose size + path tokenization varied by platform), and de-flaked `spawned_background_task_doesnt_block_caller` by polling for completion with a generous deadline instead of a fixed sleep.
+
+### Hardening
+- **Per-file advisory lock registry** (`core/path_locks.rs`): a process-wide `per_file_lock(path)` shared by `ctx_read` and `ctx_edit` serializes access to the *same* file without contending on a global lock, with bounded GC of unused entries. Lock-ordering documentation (`LOCK_ORDERING.md`) updated accordingly.
+
+### Refactoring
+- **`config/mod.rs` split**: extracted the enum surface (`TeeMode`, `TerseAgent`, `OutputDensity`, `ResponseVerbosity`, `CompressionLevel`, `RulesScope`) into `config/enums.rs`, trimming ~250 lines from the module.
+- **Premium `lean-ctx wrapped` artifact**: the shareable text summary is now TTY-aware with ANSI colouring, box drawing and a savings sparkline (plain text when piped / `NO_COLOR`).
+
+## [3.6.23] — 2026-05-28
+
+### Fixed
+- **`lean-ctx update` creates `.zshenv` on systems without zsh** (#309): `install_all_with_style()` unconditionally wrote shell hooks for both zsh and bash regardless of whether the shell was installed. Now checks for shell binary existence (`/bin/zsh`, `/usr/bin/zsh`, etc.) before installing hooks. Systems with only bash no longer get a spurious `.zshenv`.
+- **`lean-ctx config set` rejects valid config keys** (#308): The `config set` command only supported ~12 hardcoded keys while the config schema defines 80+. Implemented a generic schema-based setter (`config/setter.rs`) that validates any key against the ConfigSchema, parses values by type (bool, integer, float, string, enum, string[]), and performs a TOML round-trip with full serde validation. Keys like `proxy_enabled`, `profile`, `compression_level`, `memory_profile` now work as expected.
+
+### Added
+- **`lean-ctx gain`: 30-day USD savings** (#307): The dashboard now shows a "past 30 days" line with the estimated dollar savings for the last 30 days, in addition to the all-time total.
+- **`lean-ctx gain`: version in Recent Days header** (#307): The "Recent Days" section now displays the current lean-ctx version (e.g. `v3.6.23`) for easier troubleshooting in screenshots.
+- **Generic `config set` with enum validation**: Setting enum keys (e.g. `compression_level`) now shows allowed values on invalid input instead of a generic error.
+
+## [3.6.22] — 2026-05-28
+
+### Security
+- **Security Hardening V2 (8 phases)**: Comprehensive security audit and hardening across the entire codebase:
+  - **Phase 1**: Shell substitution blocking — `eval`, `exec`, `source`, backtick-at-command-position detection
+  - **Phase 2**: Role system hardening — parameterized `roles_dir_project_from()`, stricter role validation
+  - **Phase 3**: Shell file access controls — lock-timeout secret redaction
+  - **Phase 4**: PathJail bypass removal — eliminated `#[cfg(feature = "no-jail")]` escape hatches in tests
+  - **Phase 5**: Secret detection unification — consolidated redaction pipeline
+  - **Phase 6**: Dangerous flag detection — `--checkpoint-action`, `GIT_SSH=`, `PATH=` override warnings
+  - **Phase 7**: HTTP + audit hardening — request validation, audit trail improvements
+  - **Phase 8**: Unicode normalization (U+2028/U+2029 → newline), CLI warn-first validation, empty-allowlist gap fix
+
+### Fixed
+- **Critical: preToolUse hook DENY loop** (#306): Cursor and other AI agents entered infinite retry loops when lean-ctx hooks returned DENY responses. Eliminated all DENY paths — hooks now always return valid ALLOW JSON, even for disabled mode, invalid payloads, or non-shell tools. Removed `build_dual_deny_output()` entirely.
+- **Graph index disappears after upgrade** (user report): CLI `index build-full` and Dashboard used different project root hashes (CLI used raw cwd, Dashboard promoted to git root). Unified `detect_project_root()` to always promote to git root, matching Dashboard behavior. Users in subdirectories now see the same index.
+- **`index build-full` incomplete rebuild**: Previously only cleared JSON graph index + BM25. Now also clears `call_graph.json.zst`, `graph.db`, and `graph.meta.json`, then rebuilds the SQLite property graph. Timeout increased from 2min to 5min.
+- **Knowledge overflow from `finding-auto` duplicates**: Auto-consolidated findings without a file reference all received the key `finding-auto`, creating hundreds of duplicate facts. The cognition loop's contradiction resolver couldn't keep up, causing `contradict` event spam in the dashboard. Keys are now generated from the finding summary (unique per finding).
+- **`cargo build --release` truncated by lean-ctx**: Heavy build commands hit the 8MB/120s output limit. Added adaptive exec limits: build tools (`cargo build`, `npm install`, `docker build`, etc.) now get 32MB/10min instead of 8MB/2min.
+- **Disabled hook test expected empty output** (#306 follow-up): Updated `hook_rewrite_disabled_produces_no_output` test to expect ALLOW JSON output instead of empty stdout.
+
+### Added
+- **`ctx_tree` / `lean-ctx ls` gitignore toggle**: New `respect_gitignore` parameter (MCP) / `--no-gitignore` flag (CLI) to show files regardless of `.gitignore` rules. Default: gitignore respected (backward compatible). Fixes user report where all-gitignored folders appeared empty.
+- **`LEAN_CTX_SHELL_ALLOWLIST_OVERRIDE` env var**: Completely replaces the config-based allowlist for deterministic testing. Unlike `LEAN_CTX_SHELL_ALLOWLIST` (which merges), this overrides everything.
+- **37 heavy-command prefixes for adaptive exec limits**: `cargo build/test/clippy`, `npm install/ci`, `docker build`, `go build/test`, `mvn`, `gradle`, `dotnet`, `swift`, `flutter`, `pip install`, `bundle install`, `mix compile`, and more.
+
+## [3.6.21] — 2026-05-27
+
+### Fixed
+- **RAM Guardian now performs real cache eviction under memory pressure** (#300): Previously, the `memory_guard` eviction callback only called `jemalloc_purge()`, which returns already-freed pages to the OS but never evicts actual data (SessionCache, BM25 index, etc.). Now a new `EvictionOrchestrator` bridges the RSS-based memory guardian to the `HomeostasisController`, enabling 5-stage graduated eviction: trim compressed outputs → evict probationary entries → unload BM25 index → evict protected entries → emergency full cache clear.
+- **`jemalloc_purge()` error handling**: Previously swallowed errors with `let _ =`. Now logs failures via `tracing::debug` for diagnosability.
+- **`is_under_pressure()` no longer expensive in hot loops**: Was calling `MemorySnapshot::capture()` (which does `Config::load()` + syscalls) on every invocation in BM25/graph index builders. Now reads a cached `AtomicU8` flag set by the guardian thread — O(1) with zero allocations.
+
+### Added
+- **`EvictionOrchestrator`** (`core/eviction_orchestrator.rs`): New module connecting `memory_guard` (RSS monitoring) to `HomeostasisController` (graduated eviction). Holds `Arc` references to `SessionCache` and `SharedBm25Cache`, executes eviction actions with non-blocking `try_read`/`try_write` to avoid stalling the guardian thread.
+- **SessionCache eviction methods**: `trim_compressed_outputs()`, `evict_probationary()`, `evict_to_budget()`, `approximate_bytes()`, `trim_shared_blocks()` — enable fine-grained memory reclamation under pressure.
+- **BM25 cache management**: `bm25_cache::unload()` drops the cached index (rebuilt on next search), `bm25_cache::memory_usage()` reports current heap usage.
+- **Doctor pressure hints**: RAM Guardian check now shows the active pressure level and recommends `memory_profile = "low"` or increasing `max_ram_percent` when under pressure.
+
+## [3.6.20] — 2026-05-27
+
+### Fixed
+- **Critical: OnceLock reentrancy deadlock on Linux** (#301): All shell hook commands (`ls`, `cat`, etc.) and `lean-ctx update` hung after upgrading to v3.6.19. Caused by `active_profile_name()` calling `Config::load()`, which re-entered `find_project_root()`'s `OnceLock` via `SessionState::load_latest()` → `normalize_loaded_session()` → `active_profile()`. Fixed by reading the `profile` config key directly from disk (bypassing the full `Config::load()` pipeline) and removing the `active_profile()` call from session normalization.
+
+## [3.6.19] — 2026-05-26
+
+### Added
+- **Built-in `passthrough` profile**: No output modification — always full content, zero compression. Use via `LEAN_CTX_PROFILE=passthrough` or `lean-ctx config set profile passthrough`. Includes `default_mode=full`, `crp_mode=off`, `degradation.enforce=false`, `pipeline: all false`, `max_tokens_per_file=10M`, `max_context_tokens=1M`.
+- **Persistent profile selection via config.toml**: New `profile` field in config.toml provides a fallback when `LEAN_CTX_PROFILE` env var is not set. Resolution order: env var → config.toml → "coder" default. Set via `lean-ctx config set profile <name>`.
+- **Profile config schema entry**: `lean-ctx config show` now displays the `profile` key.
+
+### Fixed
+- **`LEAN_CTX_FULL_TOOLS=0` incorrectly treated as ON**: `is_ok()` only checked existence, not value. Now `=0` and `=false` are correctly treated as disabled.
+- **`mode=full` returning stubs/deltas in passthrough mode**: `handle_full_with_auto_delta` ignored `no_degrade` and passthrough profiles. Cache stubs and auto-deltas are now skipped when `no_degrade=true` or when the active profile has `default_mode=full` + `crp_mode=off`.
+- **MCP schema claimed default mode was `full`**: The `ctx_read` tool description said "default: full" but the actual default was `auto` (resolved by AutoModeResolver). Agents that omitted the `mode` argument got compressed output instead of full content. Schema now correctly states "default: auto".
+- **Silent fallback to `coder` profile**: When `LEAN_CTX_PROFILE` pointed to a non-existent profile name, lean-ctx silently fell back to `coder` without any warning. Now logs a `tracing::warn` with the missing profile name and creation instructions.
+
+## [3.6.18] — 2026-05-26
+
+### Added
+
+- **Structured read modes for non-code files** — `ctx_read` mode `map` now produces token-efficient semantic summaries for Markdown (heading outline with nesting), JSON (key structure with types and counts), YAML (key hierarchy), TOML (section headers + top-level keys), and lock files (workspace crate dependency summaries for Cargo.lock, package counts for package-lock.json/yarn.lock/go.sum). Up to 95% token savings vs. full reads on large config and documentation files (#299)
+- **Unified AutoModeResolver** — New centralized module (`auto_mode_resolver.rs`) consolidates all auto-mode selection logic that was previously scattered across `mode_predictor.rs`, `context_gate.rs`, and `intent_router.rs`. Single entry point `resolve()` produces a deterministic mode decision with full trace logging. Config/data files like `Cargo.toml`, `package.json` correctly get `full` mode while structured formats (JSON, YAML, TOML, lock files) are routed to `map` mode (#297)
+- **GraphProvider unified facade** — `GraphProvider` enum now wraps both `PropertyGraph` (SQLite, symbol-level) and `ProjectIndex` (JSON, file-level) behind a single API. New methods: `file_catalog()`, `file_info()`, `files_in_dir()`, `index_dir()`. All 12 consumer modules (`ctx_overview`, `ctx_graph`, `ctx_impact`, `ctx_symbol`, `ctx_prefetch`, `ctx_preload`, `heatmap`, `task_relevance`, `graph_export`, `dashboard`) migrated from direct `ProjectIndex` usage to `GraphProvider` (#298)
+- **Template instructions SSoT** — New `rules_canonical.rs` module provides `canonical_hybrid_instructions()` as the single source of truth for all template instruction generation. `CLAUDE.md`, `lean-ctx.mdc`, and daemon LITM injection all derive from the same canonical table, eliminating instruction drift (#296)
+- **CLI graph query commands** — Five new CLI subcommands for querying the code graph without the daemon: `lean-ctx graph related <file>`, `lean-ctx graph impact <file>`, `lean-ctx graph symbol <name>`, `lean-ctx graph context <file>`, `lean-ctx graph status`
+- **UTF-8 locale enforcement** — `apply_utf8_locale()` sets `LC_CTYPE=C.UTF-8` as fallback when no UTF-8 locale is inherited from the parent process. Applied to all 5 shell spawn paths (MCP `execute_command_with_env`, CLI `exec_direct`/`exec_inherit`/`exec_buffered`, CLI `passthrough`). Fixes Cyrillic/CJK/emoji M-notation mangling on Linux where Cursor spawns without user shell profile
+
+### Fixed
+
+- **`mode=full` silently downgraded** (#295) — Explicit `mode=full` requests were being overridden by the pressure degradation system and context gate heuristics. `full` mode is now treated as an explicit user intent that bypasses all degradation, bounce tracking, and overlay-based downgrades
+- **Shell allowlist blocking legitimate commands** (#294) — Expanded allowlist for Cursor workflows: `$()` command substitution relaxed to only block dangerous patterns (not all subshells), argument-position backticks allowed, `gh` data commands (`pr list`, `issue list`, `api`, `run list`) now compressible instead of passthrough. Prevents agent retry loops on blocked commands
+- **Bypass hint false positives** (#292) — Reduced false "you should use lean-ctx tools" warnings when agents legitimately use native Read/Grep for specific use cases. Doctor warnings for config downstream improved
+- **`ctx_prefetch` crash without graph** — `ctx_prefetch` now gracefully falls back to direct prefetching of `changed_files` when no graph is available, instead of returning "no graph available" error. Fixes failures in fresh/temporary project directories
+- **PropertyGraph race condition on Windows** — Background graph build populates symbol nodes and edges before `file_catalog` entries, causing `ctx_overview` to report "0 files". `open_best_effort` now requires `file_catalog_count > 0` on both the early-return and fallback paths before considering a PropertyGraph as populated
+- **UTF-8 locale for shell commands** — MCP server and CLI now set `LC_CTYPE=C.UTF-8` fallback for child processes, fixing Cyrillic and CJK output mangling on Linux
+
+### Changed
+
+- **Token efficiency optimizations** — Comprehensive audit-driven improvements across the engine:
+  - BM25 index cache uses `Arc<BM25Index>` instead of `clone()` — eliminates full index copies on every access
+  - Stats now adjusted after post-processing (terse, hints) to reflect actual tokens sent to models
+  - Cache hit token benchmark uses dynamic `count_tokens()` measurement instead of hardcoded constant
+  - Compression floor lowered from 50 to 30 tokens, enabling pattern compression for small outputs
+  - `INSTRUCTION_CAP` switched from byte-based (4096) to token-based (1200 tokens) for accurate truncation
+  - Graph index scan shares content cache with edge builder, eliminating redundant file I/O
+  - Deduplicated `extract_content_hint` into single shared function
+  - SessionCache eviction upgraded from segmented LRU to RRF (Reciprocal Rank Fusion) scoring combining recency, frequency, and size signals
+- **Dead code removal** — Removed unused `migrate_index_to_property_graph` and `remove_file_catalog` functions after graph consolidation
 
 ## [3.6.17] — 2026-05-25
 
@@ -160,7 +354,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
-- **Context Cortex architecture** — Cross-source intelligence engine that unifies file reads, shell output, and external data sources into a single context graph. Includes `ContentChunk` abstraction, `ProviderRegistry`, cross-source edge hints, provider bandit (Thompson sampling), and active inference prefetching
+- **Context Engine architecture** — Cross-source intelligence engine that unifies file reads, shell output, and external data sources into a single context graph. Includes `ContentChunk` abstraction, `ProviderRegistry`, cross-source edge hints, provider bandit (Thompson sampling), and active inference prefetching
 - **Config-based data source providers** — Connect any REST API to lean-ctx without code. Drop a TOML/JSON file into `~/.config/lean-ctx/providers/` and lean-ctx auto-discovers it. Supports 6 auth methods (bearer, API key, basic, header, query param, none), dot-notation response extraction, and project-local providers
 - **Built-in providers** — GitHub (issues, PRs, actions), Jira (issues, sprints, projects), PostgreSQL (tables, schema, queries) activate automatically when their env vars are set
 - **`ctx_provider` tool** — MCP tool to query any registered data source: `ctx_provider(provider="github", resource="issues", params={...})`
@@ -1730,7 +1924,7 @@ The existing file-based method (`lean-ctx init --global`) continues to work unch
 ## [3.2.0] — 2026-04-17
 
 ### Breaking
-- **License changed from MIT to Apache-2.0**. All code from this release onwards is Apache-2.0. Previous releases remain MIT-licensed. See `LICENSE-MIT` for the original license and `NOTICE` for attribution.
+- **License changed from MIT to Apache-2.0**. All code from this release onwards is Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 ### Added
 - **Context Engine + HTTP server mode**: `lean-ctx serve` exposes all 48 MCP tools via REST endpoints with rate limiting, timeouts, and graceful shutdown — enables embedding lean-ctx as a library.

@@ -38,16 +38,27 @@ pub fn allow_paths_from_env_and_config() -> Vec<PathBuf> {
         let pb = PathBuf::from(p);
         out.push(canonicalize_or_self(&pb));
     }
+    for p in &cfg.extra_roots {
+        let pb = PathBuf::from(p);
+        out.push(canonicalize_or_self(&pb));
+    }
 
     let v = std::env::var("LCTX_ALLOW_PATH")
         .or_else(|_| std::env::var("LEAN_CTX_ALLOW_PATH"))
         .unwrap_or_default();
-    if v.trim().is_empty() {
-        return out;
+    if !v.trim().is_empty() {
+        for p in std::env::split_paths(&v) {
+            out.push(canonicalize_or_self(&p));
+        }
     }
-    for p in std::env::split_paths(&v) {
-        out.push(canonicalize_or_self(&p));
+
+    let extra = std::env::var("LEAN_CTX_EXTRA_ROOTS").unwrap_or_default();
+    if !extra.trim().is_empty() {
+        for p in std::env::split_paths(&extra) {
+            out.push(canonicalize_or_self(&p));
+        }
     }
+
     out
 }
 
@@ -75,54 +86,83 @@ fn canonicalize_existing_ancestor(path: &Path) -> Option<(PathBuf, Vec<std::ffi:
 }
 
 pub fn jail_path(candidate: &Path, jail_root: &Path) -> Result<PathBuf, String> {
-    // Bypass PathJail entirely when:
-    // 1. LEAN_CTX_NO_JAIL=1 env var is set (explicit opt-out)
-    // 2. path_jail = false in config.toml
-    // 3. Running inside a container (Docker/Podman) where paths are already isolated
-    if std::env::var("LEAN_CTX_NO_JAIL").is_ok_and(|v| v == "1" || v == "true") {
-        return Ok(canonicalize_or_self(candidate));
+    if candidate.to_string_lossy().as_bytes().contains(&0) {
+        return Err("path contains null byte".to_string());
     }
-    let cfg = crate::core::config::Config::load();
-    if cfg.path_jail == Some(false) {
-        return Ok(canonicalize_or_self(candidate));
-    }
-    if crate::shell::platform::is_container() {
+
+    #[cfg(feature = "no-jail")]
+    {
+        let _ = jail_root;
         return Ok(canonicalize_or_self(candidate));
     }
 
-    let root = canonicalize_or_self(jail_root);
-    let allow = allow_paths_from_env_and_config();
+    #[allow(unreachable_code)]
+    {
+        let cfg = crate::core::config::Config::load();
+        if cfg.path_jail == Some(false) {
+            return Ok(canonicalize_or_self(candidate));
+        }
 
-    let (base, remainder) = canonicalize_existing_ancestor(candidate).ok_or_else(|| {
-        format!(
-            "path does not exist and has no existing ancestor: {}",
-            candidate.display()
-        )
-    })?;
+        let root = canonicalize_or_self(jail_root);
+        let allow = allow_paths_from_env_and_config();
 
-    let allowed = is_under_prefix(&base, &root) || allow.iter().any(|p| is_under_prefix(&base, p));
+        let (base, remainder) = canonicalize_existing_ancestor(candidate).ok_or_else(|| {
+            format!(
+                "path does not exist and has no existing ancestor: {}",
+                candidate.display()
+            )
+        })?;
 
-    #[cfg(windows)]
-    let allowed = allowed || is_under_prefix_windows(&base, &root);
+        let allowed =
+            is_under_prefix(&base, &root) || allow.iter().any(|p| is_under_prefix(&base, p));
 
-    if !allowed {
-        return Err(format!(
-            "path escapes project root: {} (root: {}). \
-             Hint: set LEAN_CTX_ALLOW_PATH={} or add it to allow_paths in ~/.lean-ctx/config.toml",
-            candidate.display(),
-            root.display(),
-            candidate.parent().unwrap_or(candidate).display()
-        ));
+        #[cfg(windows)]
+        let allowed = allowed || is_under_prefix_windows(&base, &root);
+
+        if !allowed {
+            let base_msg = format!(
+                "path escapes project root: {} (root: {})",
+                candidate.display(),
+                root.display(),
+            );
+            let hint = if crate::core::protocol::meta_visible() {
+                format!(
+                ". Hint: set LEAN_CTX_ALLOW_PATH={} or add it to allow_paths in ~/.lean-ctx/config.toml",
+                candidate.parent().unwrap_or(candidate).display()
+            )
+            } else {
+                String::new()
+            };
+            return Err(format!("{base_msg}{hint}"));
+        }
+
+        #[cfg(windows)]
+        reject_symlink_on_windows(candidate)?;
+
+        let mut out = base;
+        for part in remainder.iter().rev() {
+            out.push(part);
+        }
+
+        // Re-validate after reconstruction: if the final path exists, canonicalize
+        // and re-check to close TOCTOU window (symlink created between check and use).
+        if out.exists() {
+            let final_canon = canonicalize_or_self(&out);
+            let final_ok = is_under_prefix(&final_canon, &root)
+                || allow.iter().any(|p| is_under_prefix(&final_canon, p));
+            #[cfg(windows)]
+            let final_ok = final_ok || is_under_prefix_windows(&final_canon, &root);
+            if !final_ok {
+                return Err(format!(
+                    "post-canonicalize jail escape detected: {} resolves to {}",
+                    candidate.display(),
+                    final_canon.display()
+                ));
+            }
+        }
+
+        Ok(out)
     }
-
-    #[cfg(windows)]
-    reject_symlink_on_windows(candidate)?;
-
-    let mut out = base;
-    for part in remainder.iter().rev() {
-        out.push(part);
-    }
-    Ok(out)
 }
 
 #[cfg(windows)]
@@ -155,6 +195,7 @@ fn reject_symlink_on_windows(path: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    #[cfg(not(feature = "no-jail"))]
     #[test]
     fn rejects_path_outside_root() {
         let tmp = tempfile::tempdir().unwrap();
@@ -218,8 +259,9 @@ mod tests {
         assert!(result.is_ok(), "same dir should be accepted: {result:?}");
     }
 
+    #[cfg(not(feature = "no-jail"))]
     #[test]
-    fn error_message_contains_allow_path_hint() {
+    fn error_message_contains_escape_info() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().join("root");
         let other = tmp.path().join("other");
@@ -229,12 +271,8 @@ mod tests {
 
         let err = jail_path(&other.join("b.txt"), &root).unwrap_err();
         assert!(
-            err.contains("LEAN_CTX_ALLOW_PATH"),
-            "error should hint at LEAN_CTX_ALLOW_PATH: {err}"
-        );
-        assert!(
-            err.contains("allow_paths"),
-            "error should hint at config allow_paths: {err}"
+            err.contains("path escapes project root"),
+            "error should mention escape: {err}"
         );
     }
 
@@ -258,7 +296,7 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
+    #[cfg(all(unix, not(feature = "no-jail")))]
     #[test]
     fn rejects_symlink_escape_on_unix() {
         use std::os::unix::fs::symlink;
@@ -275,5 +313,20 @@ mod tests {
 
         let bad = jail_path(&link, &root);
         assert!(bad.is_err(), "symlink escape must be rejected: {bad:?}");
+    }
+
+    #[test]
+    fn rejects_null_byte_in_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("root");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let bad_path = PathBuf::from("file\0.txt");
+        let result = jail_path(&bad_path, &root);
+        assert!(result.is_err(), "null byte in path must be rejected");
+        assert!(
+            result.unwrap_err().contains("null byte"),
+            "error must mention null byte"
+        );
     }
 }

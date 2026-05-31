@@ -6,6 +6,7 @@ pub mod ctx_artifacts;
 pub mod ctx_benchmark;
 pub mod ctx_callgraph;
 pub mod ctx_compile;
+pub mod ctx_compose;
 pub mod ctx_compress;
 pub mod ctx_compress_memory;
 pub mod ctx_context;
@@ -31,19 +32,23 @@ pub mod ctx_knowledge;
 pub mod ctx_knowledge_relations;
 pub mod ctx_metrics;
 pub mod ctx_multi_read;
+pub mod ctx_multi_repo;
 pub mod ctx_outline;
 pub mod ctx_overview;
 pub mod ctx_pack;
 pub mod ctx_plan;
+pub mod ctx_plugins;
 pub mod ctx_prefetch;
 pub mod ctx_preload;
 pub mod ctx_proof;
 pub mod ctx_provider;
 pub mod ctx_read;
 pub mod ctx_refactor;
+pub mod ctx_repomap;
 pub mod ctx_response;
 pub mod ctx_review;
 pub mod ctx_routes;
+pub mod ctx_rules;
 pub mod ctx_search;
 pub mod ctx_semantic_search;
 pub mod ctx_session;
@@ -63,7 +68,7 @@ mod server;
 mod server_lifecycle;
 mod server_metrics;
 mod server_paths;
-mod startup;
+pub(crate) mod startup;
 
 pub use server::*;
 pub use startup::create_server;
@@ -78,6 +83,7 @@ mod resolve_path_tests {
         canonicalize_path(path)
     }
 
+    #[cfg(not(feature = "no-jail"))]
     #[tokio::test]
     async fn resolve_path_can_reroot_to_trusted_startup_root_when_session_root_is_stale() {
         std::env::set_var("LEAN_CTX_ALLOW_REROOT", "1");
@@ -113,6 +119,7 @@ mod resolve_path_tests {
         assert_eq!(session.shell_cwd.as_deref(), Some(real_root.as_str()));
     }
 
+    #[cfg(not(feature = "no-jail"))]
     #[tokio::test]
     async fn resolve_path_rejects_absolute_path_outside_trusted_startup_root() {
         let tmp = tempfile::tempdir().unwrap();
@@ -239,6 +246,7 @@ mod resolve_path_tests {
         assert_ne!(session.id, old_id);
     }
 
+    #[cfg(not(feature = "no-jail"))]
     #[tokio::test]
     async fn resolve_path_does_not_auto_update_when_current_root_is_real_project() {
         let tmp = tempfile::tempdir().unwrap();

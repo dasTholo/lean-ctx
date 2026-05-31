@@ -42,8 +42,9 @@ pub fn safe_canonicalize_bounded(path: &Path, timeout_ms: u64) -> PathBuf {
         canonical
     } else {
         io_health::record_freeze();
-        tracing::debug!(
-            "canonicalize timed out ({}ms) for {}; using original path",
+        tracing::warn!(
+            "[SECURITY] canonicalize timed out ({}ms) for {}; PathJail checks on \
+             uncanonicalized paths may be less reliable",
             effective_timeout.as_millis(),
             path.display()
         );
@@ -264,6 +265,21 @@ mod tests {
         assert_eq!(
             normalize_tool_path("/usr/local/bin/lean-ctx"),
             "/usr/local/bin/lean-ctx"
+        );
+    }
+
+    #[test]
+    fn normalize_windows_path_with_spaces_and_backslashes() {
+        // The exact "paths with spaces" scenario reported on Windows (#324):
+        // backslashes are converted to forward slashes (so client render layers
+        // never escape-mangle them) while spaces in directory names survive.
+        assert_eq!(
+            normalize_tool_path(r"C:\Users\My Name\My Project\src\main.rs"),
+            "C:/Users/My Name/My Project/src/main.rs"
+        );
+        assert_eq!(
+            normalize_tool_path(r"C:\Program Files\app\config.toml"),
+            "C:/Program Files/app/config.toml"
         );
     }
 

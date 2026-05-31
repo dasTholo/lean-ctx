@@ -45,6 +45,8 @@ impl McpTool for CtxShellTool {
             return Ok(ToolOutput::simple(msg));
         }
 
+        warn_shell_secret_paths(&command);
+
         tokio::task::block_in_place(|| {
             let session_lock = ctx
                 .session
@@ -77,9 +79,10 @@ impl McpTool for CtxShellTool {
                                 .collect()
                         })
                         .unwrap_or_default();
-                    let (output, _exit_code) = crate::server::execute::execute_command_with_env(
+                    let (raw_output, _exit_code) = crate::server::execute::execute_command_with_env(
                         &cmd_clone, &cwd_clone, &extra_env,
                     );
+                    let output = redact_shell_output_secrets(&raw_output);
                     return Ok(ToolOutput::simple(output));
                 };
                 session.update_shell_cwd(&command);
@@ -119,14 +122,17 @@ impl McpTool for CtxShellTool {
                 })
                 .unwrap_or_default();
 
-            let (output, exit_code) = crate::server::execute::execute_command_with_env(
+            let (raw_output, exit_code) = crate::server::execute::execute_command_with_env(
                 &cmd_clone, &cwd_clone, &extra_env,
             );
+
+            let output = redact_shell_output_secrets(&raw_output);
 
             let (result_out, original, saved, tee_hint) = if raw {
                 let tokens = crate::core::tokens::count_tokens(&output);
                 (output, tokens, 0, String::new())
             } else {
+                let _mode_guard = crate::core::savings_footer::ModeGuard::new("shell");
                 let result = crate::tools::ctx_shell::handle(&cmd_clone, &output, crp_mode);
                 let original = crate::core::tokens::count_tokens(&output);
                 let sent = crate::core::tokens::count_tokens(&result);
@@ -261,18 +267,113 @@ fn shell_mismatch_hint(command: &str, output: &str) -> String {
 
 fn is_dangerous_env_key(key: &str) -> bool {
     const BLOCKED: &[&str] = &[
+        // Dynamic linker injection
         "LD_PRELOAD",
         "LD_LIBRARY_PATH",
         "DYLD_INSERT_LIBRARIES",
         "DYLD_LIBRARY_PATH",
         "DYLD_FRAMEWORK_PATH",
+        // Shell re-entry / startup injection
         "BASH_ENV",
         "ENV",
         "PROMPT_COMMAND",
         "SHELL",
         "IFS",
         "CDPATH",
+        // Binary resolution hijacking
+        "PATH",
+        "GIT_EXEC_PATH",
+        "GIT_SSH",
+        "GIT_SSH_COMMAND",
+        // Identity / home directory manipulation
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "XDG_STATE_HOME",
+        "XDG_CACHE_HOME",
+        // Language runtime search path hijacking
+        "PYTHONPATH",
+        "PYTHONSTARTUP",
+        "PYTHONHOME",
+        "NODE_PATH",
+        "NODE_OPTIONS",
+        "RUBYOPT",
+        "RUBYLIB",
+        "GEM_PATH",
+        "GEM_HOME",
+        "PERL5LIB",
+        "PERL5OPT",
+        "CLASSPATH",
+        "JAVA_HOME",
+        "CARGO_HOME",
+        "RUSTUP_HOME",
+        "GOPATH",
+        "GOROOT",
     ];
     let upper = key.to_uppercase();
-    BLOCKED.contains(&upper.as_str()) || upper.starts_with("LD_") && upper.ends_with("_PATH")
+    if BLOCKED.contains(&upper.as_str()) {
+        return true;
+    }
+    if upper.starts_with("LD_") && upper.ends_with("_PATH") {
+        return true;
+    }
+    // Block all lean-ctx config overrides from env
+    if upper.starts_with("LEAN_CTX_") || upper.starts_with("LCTX_") {
+        return true;
+    }
+    false
+}
+
+/// Warn when shell reads secret-like paths via cat/head/tail/less/more.
+/// WARN-ONLY: command still executes, this is purely observational.
+fn warn_shell_secret_paths(command: &str) {
+    const READ_CMDS: &[&str] = &["cat", "head", "tail", "less", "more", "bat"];
+    let segments = crate::core::shell_allowlist::extract_all_commands_pub(command);
+    for seg in &segments {
+        let trimmed = seg.trim();
+        let tokens = crate::core::shell_allowlist::shell_tokenize(trimmed);
+        if tokens.is_empty() {
+            continue;
+        }
+        let base = tokens[0]
+            .rsplit('/')
+            .next()
+            .unwrap_or(&tokens[0])
+            .to_string();
+        if !READ_CMDS.contains(&base.as_str()) {
+            continue;
+        }
+        for tok in &tokens[1..] {
+            if tok.starts_with('-') {
+                continue;
+            }
+            let path = std::path::Path::new(tok.as_str());
+            if crate::core::io_boundary::is_secret_like(path).is_some() {
+                tracing::warn!(
+                    "[SECURITY] Shell reading secret-like path: {tok} (command: {base})"
+                );
+            }
+        }
+    }
+}
+
+/// Scans shell output for secrets and redacts them before returning to the agent.
+fn redact_shell_output_secrets(output: &str) -> String {
+    let cfg = crate::core::config::Config::load();
+    if !cfg.secret_detection.enabled {
+        return output.to_string();
+    }
+    let (redacted, matches) =
+        crate::core::secret_detection::scan_and_redact(output, &cfg.secret_detection);
+    if !matches.is_empty() {
+        let names: Vec<&str> = matches.iter().map(|m| m.pattern_name).collect();
+        tracing::warn!(
+            "[SHELL SECRET REDACTION] {} secret(s) redacted from shell output: {}",
+            matches.len(),
+            names.join(", ")
+        );
+    }
+    redacted
 }

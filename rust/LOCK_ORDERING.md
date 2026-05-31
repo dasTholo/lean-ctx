@@ -28,6 +28,29 @@ All `std::sync::Mutex` unless noted otherwise.
 | L15 | `PROVIDER_CACHE` | `core/providers/cache.rs:5` | `LazyLock<Mutex<ProviderCache>>` | Cached provider metadata |
 | L16 | `LAST_BANDIT_ARM` | `core/adaptive_thresholds.rs:337` | `Mutex<Option<(String, String, String)>>` | Last bandit arm selection for adaptive thresholds |
 | L17 | `FILE_LOCKS` | `tools/registered/ctx_read.rs` | `OnceLock<Mutex<HashMap<String, Arc<Mutex<()>>>>>` | Per-file read serialization for concurrent subagents |
+| L18 | `LAST_HASH` | `core/audit_trail.rs:52` | `Mutex<Option<String>>` | Dedup hash for audit trail entries |
+| L19 | `CACHE` (graph) | `core/graph_cache.rs:31` | `OnceLock<Mutex<HashMap<String, Entry>>>` | Property graph query result cache |
+| L20 | `RECENT` | `core/auto_findings.rs:15` | `Mutex<Vec<RecentEntry>>` | Recent auto-finding entries |
+| L21 | `LOCK` (home) | `core/home.rs:79` | `Mutex<()>` | Serialize home directory creation |
+| L22 | `CLIENTS` | `lsp/router.rs:11` | `LazyLock<Mutex<HashMap<String, LspClient>>>` | LSP client connection registry |
+| L23 | `BUDGETS` | `core/agent_budget.rs:6` | `Mutex<Option<HashMap<String, AgentBudget>>>` | Per-agent token budget tracking |
+| L24 | `SHELL_ENV_LOCK` | `shell_hook.rs:928` | `Mutex<()>` | Serialize env-var access in shell hook |
+| L25 | `TRACKER` | `core/search_delta.rs:49` | `Mutex<Option<SearchDeltaTracker>>` | Tracks search result changes between calls |
+| L26 | `SESSION_ID` | `server/bypass_hint.rs:9` | `Mutex<Option<String>>` | Current bypass hint session ID |
+| L27 | `CACHE` (git) | `core/git_cache.rs:10` | `LazyLock<Mutex<GitCache>>` | Cached git metadata (branch, status) |
+| L28 | `STORE` (refs) | `server/reference_store.rs:15` | `OnceLock<Mutex<HashMap<String, RefEntry>>>` | Function reference store for Fn-ref system |
+| L29 | `DB` | `core/archive_fts.rs:7` | `LazyLock<Mutex<Option<Connection>>>` | SQLite FTS archive connection |
+| L30 | `LOCK` (prop-graph) | `core/property_graph/mod.rs:423` | `Mutex<()>` | Serialize property graph test access |
+| L31 | `GLOBAL` (dyn-tools) | `server/dynamic_tools.rs:232` | `OnceLock<Mutex<DynamicToolState>>` | Dynamic tool registration state |
+| L32 | `APPLIED_PACKAGES` | `core/context_package/auto_load.rs:6` | `Mutex<Option<HashSet<String>>>` | Track which context packages have been applied |
+| L33 | `CACHE` (search) | `core/search_index.rs:401` | `OnceLock<Mutex<HashMap<String, CacheEntry>>>` | BM25 search index query cache |
+| L34 | `GLOBAL` (capabilities) | `core/client_capabilities.rs:188` | `OnceLock<Mutex<ClientMcpCapabilities>>` | Client MCP capability flags |
+| L35 | `LOCK` (doctor) | `doctor/workspace_scope.rs:132` | `Mutex<()>` | Serialize doctor workspace scope tests |
+| L36 | `BUILD` | `core/call_graph.rs:54` | `OnceLock<Mutex<BuildState>>` | Call graph build state |
+| L37 | `LAST_REAL` | `proxy/introspect.rs:54` | `Mutex<[Option<String>; 3]>` | Last 3 real (non-proxy) request paths |
+| L38 | `GLOBAL_TRACKER` | `core/bounce_tracker.rs:226` | `OnceLock<Mutex<BounceTracker>>` | Tracks repeated tool-call bounces |
+| L39 | `GLOBAL_REGISTRY` | `core/plugins/mod.rs:10` | `OnceLock<Mutex<PluginRegistry>>` | Loaded plugin registry |
+| L40 | `GLOBAL_MANAGER` | `core/multi_repo.rs:363` | `OnceLock<Mutex<MultiRepoManager>>` | Multi-repo workspace manager |
 
 ### Test / Environment Locks (serialise env-var mutations)
 
@@ -85,16 +108,27 @@ The `entry_for()` function in `index_orchestrator.rs` enforces this: it locks L1
 `Arc<Mutex<ProjectBuild>>`, **drops** L1, then the caller locks L2 independently. This avoids
 deadlock by ensuring L1 and L2 are never held simultaneously.
 
-### Per-file Read Lock (L17)
+### Per-file Path Lock (L17)
 
-L17 uses the same outer/inner pattern as L1/L2: the outer `Mutex<HashMap>` is held briefly to
-clone the per-path `Arc<Mutex<()>>`, then dropped before the per-file lock is acquired. The
-per-file lock is acquired inside the spawned OS thread (timeout guard), before `cache_lock.blocking_write()`.
-This serializes concurrent reads of the same path so only one thread at a time contends on the
-global cache write lock per file. Threads reading different files proceed independently.
+L17 lives in the shared `core::path_locks` registry and is used by **both** `ctx_read` and
+`ctx_edit`. It uses the same outer/inner pattern as L1/L2: the outer `Mutex<HashMap>` is held
+briefly to clone the per-path `Arc<Mutex<()>>`, then dropped before the per-file lock is acquired.
+The per-file lock is acquired before the global cache lock. This serializes concurrent operations
+on the *same* path so only one thread at a time contends on the global cache lock per file; threads
+operating on different files proceed independently.
 
 This prevents the thundering-herd scenario where N concurrent subagents all requesting the same
 file simultaneously contend on the global cache lock, each holding it during disk I/O.
+
+**Edit path (Issue #320 fix):** `ctx_edit` acquires the L17 per-file lock (bounded `try_lock()`
+loop, 30s deadline) and then performs **all** disk I/O — read preimage, replace, TOCTOU recheck,
+atomic rename — *without* holding the global cache write-lock. The global cache lock is taken only
+twice, each for a sub-millisecond instant: a brief shared `read()` to fetch the recorded read-mode
+(for auto-escalation) before the I/O, and a brief exclusive `write()` to apply the deferred
+`CacheEffect` (invalidate / store-full) after the I/O. Previously the global cache write-lock was
+held across the entire edit, so concurrent agents editing *different* files serialized on it and
+the second edit could hit the 10s write-lock timeout. Same-file edit correctness is still guaranteed
+by the TOCTOU preimage guard plus the atomic temp-file rename inside `run_io`, not by the cache lock.
 
 **Bounded waits (Issue #229 fix):** All lock acquisitions inside the spawned thread use
 `try_lock()`/`try_write()` loops with 25s deadlines (inside the 30s `recv_timeout` guard).
@@ -117,9 +151,9 @@ Override via `LEAN_CTX_WORKER_THREADS` (positive integer) for environments with 
 concurrent subagents. Example: `LEAN_CTX_WORKER_THREADS=8`. The blocking thread pool
 is always `worker_threads * 4`, clamped to `[8, 32]`.
 
-### Independent Static Locks (L3–L16)
+### Independent Static Locks (L3–L40)
 
-All other static locks (L3–L16) are **independent singletons** — they protect isolated subsystem
+All other static locks (L3–L40) are **independent singletons** — they protect isolated subsystem
 state and are never nested inside each other. Each should be acquired in isolation:
 
 - **Do not hold two static locks at the same time.** If a future change requires locking two

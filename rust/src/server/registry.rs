@@ -55,6 +55,22 @@ impl ToolRegistry {
         defs
     }
 
+    /// Returns tool definitions filtered by a tool profile.
+    /// Only includes tools whose name is enabled by the given profile.
+    pub fn profile_tool_defs(
+        &self,
+        profile: &crate::core::tool_profiles::ToolProfile,
+    ) -> Vec<Tool> {
+        let mut defs: Vec<Tool> = self
+            .tools
+            .values()
+            .filter(|t| profile.is_tool_enabled(t.name()))
+            .map(|t| t.tool_def())
+            .collect();
+        defs.sort_by(|a, b| a.name.as_ref().cmp(b.name.as_ref()));
+        defs
+    }
+
     pub fn len(&self) -> usize {
         self.tools.len()
     }
@@ -74,6 +90,13 @@ impl Default for ToolRegistry {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Number of registered MCP tools — the single source of truth for the
+/// "N MCP tools" count shown in `--help`, the README, and the feature catalog.
+/// Deriving it here means the count can never drift from the actual registry.
+pub fn tool_count() -> usize {
+    build_registry().len()
 }
 
 /// Register all trait-based tools. Called once during server startup.
@@ -97,6 +120,7 @@ pub fn build_registry() -> ToolRegistry {
     registry.register(Box::new(registered::ctx_call::CtxCallTool));
     registry.register(Box::new(registered::ctx_callgraph::CtxCallgraphTool));
     registry.register(Box::new(registered::ctx_refactor::CtxRefactorTool));
+    registry.register(Box::new(registered::ctx_repomap::CtxRepomapTool));
     registry.register(Box::new(registered::ctx_symbol::CtxSymbolTool));
     registry.register(Box::new(
         registered::ctx_discover_tools::CtxDiscoverToolsTool,
@@ -107,6 +131,8 @@ pub fn build_registry() -> ToolRegistry {
     registry.register(Box::new(registered::ctx_architecture::CtxArchitectureTool));
     registry.register(Box::new(registered::ctx_smells::CtxSmellsTool));
     registry.register(Box::new(registered::ctx_pack::CtxPackTool));
+    registry.register(Box::new(registered::ctx_plugins::CtxPluginsTool));
+    registry.register(Box::new(registered::ctx_rules::CtxRulesTool));
     registry.register(Box::new(registered::ctx_index::CtxIndexTool));
     registry.register(Box::new(registered::ctx_artifacts::CtxArtifactsTool));
     registry.register(Box::new(
@@ -114,12 +140,14 @@ pub fn build_registry() -> ToolRegistry {
     ));
     registry.register(Box::new(registered::ctx_read::CtxReadTool));
     registry.register(Box::new(registered::ctx_multi_read::CtxMultiReadTool));
+    registry.register(Box::new(registered::ctx_multi_repo::CtxMultiRepoTool));
     registry.register(Box::new(registered::ctx_smart_read::CtxSmartReadTool));
     registry.register(Box::new(registered::ctx_delta::CtxDeltaTool));
     registry.register(Box::new(registered::ctx_edit::CtxEditTool));
     registry.register(Box::new(registered::ctx_fill::CtxFillTool));
     registry.register(Box::new(registered::ctx_shell::CtxShellTool));
     registry.register(Box::new(registered::ctx_search::CtxSearchTool));
+    registry.register(Box::new(registered::ctx_compose::CtxComposeTool));
     registry.register(Box::new(registered::ctx_execute::CtxExecuteTool));
 
     // Utility tools (migrated from dispatch/utility_tools.rs)

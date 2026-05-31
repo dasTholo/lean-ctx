@@ -128,40 +128,55 @@ pub fn ensure_all_background(project_root: &str) {
     std::thread::spawn(move || {
         let state = entry_for(&root);
 
+        // Pre-warm the resident line-search index in parallel (own thread,
+        // deduped internally) so the first ctx_search hits the fast path.
+        crate::core::search_index::ensure_background(&root, true, false);
+
+        // Phase 1: Graph index — may produce a content cache from the file walk
         {
             let mut s = state
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             start_component(&mut s.graph);
         }
-        let idx = std::panic::catch_unwind(|| {
-            let idx = graph_index::load_or_build(&root);
+        let graph_result = std::panic::catch_unwind(|| {
+            let (idx, content_cache) = graph_index::scan_with_content_cache(&root);
+            // JSON index write is kept for backward compatibility with remaining
+            // direct ProjectIndex consumers. Will be removed when all consumers
+            // are migrated to GraphProvider/PropertyGraph. (OPT-14/15 Phase 6)
             let _ = idx.save();
-            idx
+            (idx, content_cache)
         });
-        if let Ok(_i) = idx {
+        let content_cache = if let Ok((_idx, cache)) = graph_result {
             let mut s = state
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             finish_ok(&mut s.graph);
+            cache
         } else {
             let mut s = state
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             finish_err(&mut s.graph, "graph index build panicked".to_string());
-        }
+            HashMap::new()
+        };
 
+        // Phase 2: BM25 index — reuses content from graph scan when available
         {
             let mut s = state
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             start_component(&mut s.bm25);
         }
-        let bm = std::panic::catch_unwind(|| {
+        let bm = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let root_pb = Path::new(&root);
-            let idx = BM25Index::load_or_build(root_pb);
+            let idx = if content_cache.is_empty() {
+                BM25Index::load_or_build(root_pb)
+            } else {
+                BM25Index::build_with_content_hint(root_pb, &content_cache)
+            };
             let _ = idx.save(root_pb);
-        });
+        }));
         if let Ok(()) = bm {
             let mut s = state
                 .lock()
@@ -182,11 +197,26 @@ pub fn ensure_all_background(project_root: &str) {
 }
 
 pub fn try_load_graph_index(project_root: &str) -> Option<ProjectIndex> {
-    ProjectIndex::load(project_root).filter(|idx| !idx.files.is_empty())
+    // Resident cache: avoids re-reading + zstd-decompressing + serde-parsing the
+    // on-disk index on every graph-touching query. Returns an in-memory clone.
+    crate::core::graph_cache::get_cached(project_root).map(|arc| (*arc).clone())
 }
 
 pub fn try_load_bm25_index(project_root: &str) -> Option<BM25Index> {
     BM25Index::load(Path::new(project_root))
+}
+
+/// Returns true if any project is currently building its indices.
+pub fn is_building() -> bool {
+    let map = registry()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    map.values().any(|entry| {
+        let s = entry
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        matches!(s.bm25.state, State::Building) || matches!(s.graph.state, State::Building)
+    })
 }
 
 #[derive(Debug, Serialize)]

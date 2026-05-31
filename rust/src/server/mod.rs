@@ -7,12 +7,16 @@ pub mod dynamic_tools;
 pub mod elicitation;
 pub(crate) mod execute;
 pub mod helpers;
+pub mod multi_path;
 pub mod notifications;
+pub mod progress;
 pub mod prompts;
 pub mod reference_store;
 pub mod registry;
 pub mod resources;
 pub mod role_guard;
+pub mod roots;
+use roots::has_project_marker;
 pub mod tool_trait;
 
 use futures::FutureExt;
@@ -67,7 +71,17 @@ impl ServerHandler for LeanCtxServer {
             }
         }
 
+        let has_roots = request.capabilities.roots.is_some();
+        self.has_client_roots
+            .store(has_roots, std::sync::atomic::Ordering::Relaxed);
+        if has_roots {
+            tracing::info!("Client supports MCP roots/list — will resolve on first tool call");
+        }
+
+        let env_root = roots::root_from_env();
         let derived_root = derive_project_root_from_cwd();
+        let effective_root = env_root.or(derived_root);
+
         let cwd_str = std::env::current_dir()
             .ok()
             .map(|p| p.to_string_lossy().to_string())
@@ -77,23 +91,35 @@ impl ServerHandler for LeanCtxServer {
             if !cwd_str.is_empty() {
                 session.shell_cwd = Some(cwd_str.clone());
             }
-            if let Some(ref root) = derived_root {
+            if let Some(ref root) = effective_root {
                 session.project_root = Some(root.clone());
                 tracing::info!("Project root set to: {root}");
             } else if let Some(ref root) = session.project_root {
+                // A previously persisted session may carry a contaminated root
+                // (e.g. HOME from an older build or a client that reported HOME
+                // as its workspace). Drop it unless it is a real, safe project
+                // dir — otherwise PROJECT MEMORY leaks across projects.
                 let root_path = std::path::Path::new(root);
                 let root_has_marker = has_project_marker(root_path);
                 let root_str = root_path.to_string_lossy();
-                let root_suspicious = root_str.contains("/.claude")
-                    || root_str.contains("/.codex")
+                let root_suspicious = crate::core::pathutil::is_broad_or_unsafe_root(root_path)
                     || root_str.contains("/var/folders/")
                     || root_str.contains("/tmp/")
-                    || root_str.contains("\\.claude")
-                    || root_str.contains("\\.codex")
                     || root_str.contains("\\AppData\\Local\\Temp")
                     || root_str.contains("\\Temp\\");
                 if root_suspicious && !root_has_marker {
+                    tracing::info!("Dropping suspicious persisted project root: {root}");
                     session.project_root = None;
+                }
+            }
+            let cfg_extra = crate::core::config::Config::load().extra_roots;
+            if !cfg_extra.is_empty() {
+                let existing: std::collections::HashSet<_> =
+                    session.extra_roots.iter().cloned().collect();
+                for r in cfg_extra {
+                    if !existing.contains(&r) {
+                        session.extra_roots.push(r);
+                    }
                 }
             }
             if self.session_mode == crate::tools::SessionMode::Shared {
@@ -108,13 +134,17 @@ impl ServerHandler for LeanCtxServer {
                         rt.metrics.record_session_persisted();
                     }
                 }
-            } else {
-                let _ = session.save();
+            } else if let Err(e) = session.save() {
+                tracing::warn!("lean-ctx: failed to persist session state: {e}");
             }
         }
 
+        if let Some(ref root) = effective_root {
+            crate::core::index_orchestrator::ensure_all_background(root);
+        }
+
         let agent_name = name.clone();
-        let agent_root = derived_root.clone().unwrap_or_default();
+        let agent_root = effective_root.clone().unwrap_or_default();
         let agent_id_handle = self.agent_id.clone();
         tokio::task::spawn_blocking(move || {
             if std::env::var("LEAN_CTX_HEADLESS").is_ok() {
@@ -135,6 +165,10 @@ impl ServerHandler for LeanCtxServer {
                 }
                 crate::hooks::refresh_installed_hooks();
                 crate::core::version_check::check_background();
+                // Enforce the on-disk budget: prune accumulated quarantined BM25
+                // indexes and cap the archive FTS DB (#2364). Silent (tracing
+                // only) so it never corrupts the MCP stdio protocol.
+                let _ = crate::core::storage_maintenance::run_quiet();
             }
             drop(maintenance);
 
@@ -153,7 +187,7 @@ impl ServerHandler for LeanCtxServer {
                     .ok();
                 let effective_role = env_role.as_deref().or(heuristic_role).unwrap_or("coder");
 
-                let _ = crate::core::roles::set_active_role(effective_role);
+                let _ = crate::core::roles::set_active_role_with_source(effective_role, true);
 
                 let mut registry = crate::core::agents::AgentRegistry::load_or_create();
                 registry.cleanup_stale(24);
@@ -241,18 +275,27 @@ impl ServerHandler for LeanCtxServer {
             crate::tool_defs::lazy_tool_defs()
         };
 
-        let disabled = crate::core::config::Config::load().disabled_tools_effective();
+        let cfg = crate::core::config::Config::load();
+        let disabled = cfg.disabled_tools_effective();
+        let tool_profile = cfg.tool_profile_effective();
         let client = self.client_name.read().await.clone();
         let is_zed = !client.is_empty() && client.to_lowercase().contains("zed");
 
+        let active_role = crate::core::roles::active_role();
         let tools: Vec<_> = all_tools
             .into_iter()
             .filter(|t| {
                 let name = t.name.as_ref();
+                if !tool_profile.is_tool_enabled(name) {
+                    return false;
+                }
                 if !disabled.is_empty() && disabled.iter().any(|d| d.as_str() == name) {
                     return false;
                 }
                 if is_zed && name == "ctx_edit" {
+                    return false;
+                }
+                if !active_role.is_tool_allowed(name) {
                     return false;
                 }
                 true
@@ -386,9 +429,22 @@ impl ServerHandler for LeanCtxServer {
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         use std::panic::AssertUnwindSafe;
+
+        let progress_token = request
+            .meta
+            .as_ref()
+            .and_then(rmcp::model::Meta::get_progress_token);
+        if let Some(ref token) = progress_token {
+            let sender =
+                crate::server::progress::ProgressSender::new(context.peer.clone(), token.clone());
+            *self
+                .progress_sender
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(sender);
+        }
 
         let tool_name_for_panic = request.name.as_ref().to_string();
         let args_fp_for_panic = request
@@ -433,6 +489,15 @@ impl ServerHandler for LeanCtxServer {
             }
         }
     }
+
+    async fn on_roots_list_changed(
+        &self,
+        _context: rmcp::service::NotificationContext<RoleServer>,
+    ) {
+        tracing::info!("Received roots/list_changed — will re-resolve on next tool call");
+        self.roots_resolved
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 impl LeanCtxServer {
@@ -441,6 +506,7 @@ impl LeanCtxServer {
         request: CallToolRequestParams,
     ) -> Result<CallToolResult, ErrorData> {
         self.check_idle_expiry().await;
+        self.resolve_roots_once().await;
         elicitation::increment_call();
 
         let original_name = request.name.as_ref().to_string();
@@ -826,8 +892,12 @@ impl LeanCtxServer {
         };
 
         let pre_compression = result_text.clone();
+        let deeply_compressed = matches!(
+            name,
+            "ctx_read" | "ctx_multi_read" | "ctx_smart_read" | "ctx_compress" | "ctx_overview"
+        );
         let skip_terse = is_raw_shell
-            || tool_saved_tokens > 0
+            || (tool_saved_tokens > 0 && deeply_compressed)
             || (name == "ctx_shell"
                 && helpers::get_str(args, "command")
                     .is_some_and(|c| crate::shell::compress::has_structural_output(&c)));
@@ -883,9 +953,31 @@ impl LeanCtxServer {
             .swap(true, std::sync::atomic::Ordering::Relaxed)
         {
             let client = self.client_name.read().await.clone();
-            if !client.is_empty() {
-                if let Some(stale_msg) = crate::rules_inject::check_rules_freshness(&client) {
-                    result_text = format!("{result_text}\n\n{stale_msg}");
+            if !client.is_empty() && crate::rules_inject::check_rules_freshness(&client).is_some() {
+                // Self-heal: auto-refresh the rules on disk instead of asking
+                // the user to run setup manually (#2365). The rewrite is
+                // idempotent and cheap; run it off the async runtime.
+                let _ = tokio::task::spawn_blocking(|| {
+                    if let Some(home) = dirs::home_dir() {
+                        let _ = crate::rules_inject::inject_all_rules(&home);
+                    }
+                })
+                .await;
+                result_text = format!(
+                    "{result_text}\n\n[RULES AUTO-UPDATED] Your lean-ctx rules were written by \
+                     an older version and have been refreshed on disk. Start a new session to \
+                     load them for full compatibility."
+                );
+            } else if !self
+                .rules_tip_shown
+                .swap(true, std::sync::atomic::Ordering::Relaxed)
+            {
+                let cfg = crate::core::config::Config::load();
+                if !cfg.setup.should_inject_rules() {
+                    result_text = format!(
+                        "{result_text}\n\n\
+                         --- tip: run 'lean-ctx setup --inject-rules' for optimal AI integration ---"
+                    );
                 }
             }
         }
@@ -1050,12 +1142,50 @@ impl LeanCtxServer {
         }
 
         if !minimal && !is_raw_shell {
-            bypass_hint::record_lctx_call();
             if let Ok(data_dir) = crate::core::data_dir::lean_ctx_data_dir() {
+                let session = self.session.read().await;
+                bypass_hint::set_session_id(&session.id);
+                drop(session);
                 if let Some(hint) = bypass_hint::check(&data_dir) {
                     result_text = format!("{result_text}\n{hint}");
                 }
             }
+            bypass_hint::record_lctx_call();
+        }
+
+        if let Some(finding) = crate::core::auto_findings::extract(name, &result_text) {
+            let mut session = self.session.write().await;
+            session.add_finding(finding.file.as_deref(), None, &finding.summary);
+            let project_root = session.project_root.clone();
+            drop(session);
+            if let Some(ref root) = project_root {
+                let f = finding.clone();
+                let r = root.clone();
+                std::thread::spawn(move || {
+                    crate::core::auto_capture::capture_finding(&r, &f);
+                });
+            }
+        }
+        if let Some(extra) = crate::core::auto_capture::extract_extra(name, &result_text) {
+            let session = self.session.read().await;
+            let project_root = session.project_root.clone();
+            drop(session);
+            if let Some(ref root) = project_root {
+                let e = extra.clone();
+                let r = root.clone();
+                std::thread::spawn(move || {
+                    crate::core::auto_capture::capture_finding(&r, &e);
+                });
+            }
+        }
+
+        {
+            let tool_name = name.to_string();
+            let summary = result_text.lines().next().unwrap_or("").to_string();
+            std::thread::spawn(move || {
+                crate::core::journal::maybe_day_separator();
+                crate::core::journal::log_tool_call(&tool_name, &summary);
+            });
         }
 
         #[allow(clippy::cast_possible_truncation)]
@@ -1064,6 +1194,23 @@ impl LeanCtxServer {
         } else {
             crate::core::tokens::count_tokens(&result_text)
         };
+
+        // OPT-4: Correct stats with post-processing token counts.
+        // dispatch/mod.rs records savings before terse/hints; adjust here
+        // so persistent stats reflect what the model actually receives.
+        if result_text.len() != pre_terse_len && tool_saved_tokens > 0 {
+            let pre_savings = tool_saved_tokens;
+            let actual_sent = output_token_count;
+            let original = actual_sent + pre_savings;
+            let actual_savings = original.saturating_sub(actual_sent);
+            if actual_savings != pre_savings {
+                let delta = pre_savings as i64 - actual_savings as i64;
+                if delta != 0 {
+                    crate::core::stats::adjust_savings(name, delta);
+                }
+            }
+        }
+
         let action = helpers::get_str(args, "action");
 
         // K-bounded staleness guard: warn if shared context has diverged.
@@ -1194,7 +1341,9 @@ impl LeanCtxServer {
                     output_token_count_u64,
                     0,
                 );
-                let _ = store.save();
+                if let Err(e) = store.save() {
+                    tracing::warn!("lean-ctx: failed to persist cost attribution: {e}");
+                }
             });
         }
 
@@ -1364,6 +1513,81 @@ impl LeanCtxServer {
 
         Ok(CallToolResult::success(vec![Content::text(result_text)]))
     }
+
+    /// Resolve project root from MCP client roots (once per session).
+    /// Called on the first tool call. If the client supports `roots/list`,
+    /// we query it and pick the best root with project markers.
+    async fn resolve_roots_once(&self) {
+        use std::sync::atomic::Ordering;
+        if !self.has_client_roots.load(Ordering::Relaxed) {
+            return;
+        }
+        if self.roots_resolved.swap(true, Ordering::Relaxed) {
+            return;
+        }
+        let peer_guard = self.peer.read().await;
+        let Some(peer) = peer_guard.as_ref() else {
+            return;
+        };
+        let list_result = match peer.list_roots().await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!("roots/list failed: {e}");
+                return;
+            }
+        };
+        drop(peer_guard);
+
+        let uris: Vec<String> = list_result.roots.iter().map(|r| r.uri.clone()).collect();
+        let validated_paths = roots::valid_dir_paths_from_uris(&uris);
+        let Some(new_root) = roots::best_root_from_uris(&uris) else {
+            return;
+        };
+        // Defense-in-depth: never adopt a broad/unsafe root (HOME, `/`, agent
+        // sandbox dirs) even if the client reports it — it would pollute the
+        // session and resolve relative paths against the wrong tree.
+        if crate::core::pathutil::is_broad_or_unsafe_root(std::path::Path::new(&new_root)) {
+            tracing::warn!("MCP roots: ignoring unsafe project root {new_root}");
+            return;
+        }
+
+        let mut session = self.session.write().await;
+        let old_root = session.project_root.clone();
+
+        let other_roots: Vec<String> = validated_paths
+            .iter()
+            .filter(|p| p.as_str() != new_root)
+            .cloned()
+            .collect();
+        if !other_roots.is_empty() {
+            session.extra_roots = other_roots;
+            tracing::info!(
+                "MCP roots: {} extra root(s) registered",
+                session.extra_roots.len()
+            );
+        }
+
+        if old_root.as_deref() == Some(&new_root) {
+            let _ = session.save();
+            return;
+        }
+        tracing::info!(
+            "MCP roots: switching project root from {:?} to {new_root}",
+            old_root
+        );
+        if let Some(existing) =
+            crate::core::session::SessionState::load_latest_for_project_root(&new_root)
+        {
+            *session = existing;
+            session.extra_roots = validated_paths
+                .iter()
+                .filter(|p| p.as_str() != new_root)
+                .cloned()
+                .collect();
+        }
+        session.project_root = Some(new_root);
+        let _ = session.save();
+    }
 }
 
 pub fn build_instructions_for_test(crp_mode: CrpMode) -> String {
@@ -1372,23 +1596,6 @@ pub fn build_instructions_for_test(crp_mode: CrpMode) -> String {
 
 pub fn build_claude_code_instructions_for_test() -> String {
     crate::instructions::claude_code_instructions()
-}
-
-const PROJECT_MARKERS: &[&str] = &[
-    ".git",
-    "Cargo.toml",
-    "package.json",
-    "go.mod",
-    "pyproject.toml",
-    "setup.py",
-    "pom.xml",
-    "build.gradle",
-    "Makefile",
-    ".lean-ctx.toml",
-];
-
-fn has_project_marker(dir: &std::path::Path) -> bool {
-    PROJECT_MARKERS.iter().any(|m| dir.join(m).exists())
 }
 
 fn is_home_or_agent_dir(dir: &std::path::Path) -> bool {
@@ -1604,7 +1811,7 @@ mod tests {
         let registry = crate::server::registry::build_registry();
         assert_eq!(
             registry.len(),
-            62,
+            67,
             "Registry tool count drift! Update this test AND all docs when adding/removing tools."
         );
     }

@@ -68,7 +68,7 @@ pub fn cleanup_stale_proxy_env(home: &Path) -> usize {
     let settings_dir = crate::core::editor_registry::claude_state_dir(home);
     let settings_path = settings_dir.join("settings.json");
     if let Ok(content) = std::fs::read_to_string(&settings_path) {
-        if let Ok(mut doc) = serde_json::from_str::<serde_json::Value>(&content) {
+        if let Ok(mut doc) = crate::core::jsonc::parse_jsonc(&content) {
             if let Some(base_url) = doc
                 .get("env")
                 .and_then(|e| e.get("ANTHROPIC_BASE_URL"))
@@ -148,7 +148,7 @@ pub fn has_stale_proxy_url(home: &Path) -> bool {
     let Ok(content) = std::fs::read_to_string(&settings_path) else {
         return false;
     };
-    let Ok(doc) = serde_json::from_str::<serde_json::Value>(&content) else {
+    let Ok(doc) = crate::core::jsonc::parse_jsonc(&content) else {
         return false;
     };
 
@@ -211,6 +211,8 @@ fn install_shell_exports(home: &Path, port: u16, quiet: bool) {
 
     let posix_block = format!(
         r#"{PROXY_ENV_START}
+export ANTHROPIC_BASE_URL="{base}"
+export OPENAI_BASE_URL="{base}"
 export GEMINI_API_BASE_URL="{base}"
 {PROXY_ENV_END}"#
     );
@@ -236,6 +238,8 @@ export GEMINI_API_BASE_URL="{base}"
     if fish_config.exists() {
         let fish_block = format!(
             r#"{PROXY_ENV_START}
+set -gx ANTHROPIC_BASE_URL "{base}"
+set -gx OPENAI_BASE_URL "{base}"
 set -gx GEMINI_API_BASE_URL "{base}"
 {PROXY_ENV_END}"#
         );
@@ -255,6 +259,8 @@ set -gx GEMINI_API_BASE_URL "{base}"
         if ps.exists() {
             let ps_block = format!(
                 r#"{PROXY_ENV_START}
+$env:ANTHROPIC_BASE_URL = "{base}"
+$env:OPENAI_BASE_URL = "{base}"
 $env:GEMINI_API_BASE_URL = "{base}"
 {PROXY_ENV_END}"#
             );
@@ -279,7 +285,7 @@ fn uninstall_claude_env(home: &Path, quiet: bool) {
         Ok(s) if !s.trim().is_empty() => s,
         _ => return,
     };
-    let mut doc: serde_json::Value = match serde_json::from_str(&existing) {
+    let mut doc: serde_json::Value = match crate::core::jsonc::parse_jsonc(&existing) {
         Ok(v) => v,
         Err(_) => return,
     };
@@ -366,7 +372,7 @@ fn install_claude_env_inner(home: &Path, port: u16, quiet: bool, force: bool) {
     let mut doc: serde_json::Value = if existing.trim().is_empty() {
         serde_json::json!({})
     } else {
-        match serde_json::from_str(&existing) {
+        match crate::core::jsonc::parse_jsonc(&existing) {
             Ok(v) => v,
             Err(_) => return,
         }
@@ -572,5 +578,59 @@ mod tests {
     #[test]
     fn is_proxy_reachable_returns_false_on_unused_port() {
         assert!(!is_proxy_reachable(19999));
+    }
+
+    #[test]
+    fn posix_block_contains_all_provider_env_vars() {
+        let base = "http://127.0.0.1:4444";
+        let block = format!(
+            r#"{PROXY_ENV_START}
+export ANTHROPIC_BASE_URL="{base}"
+export OPENAI_BASE_URL="{base}"
+export GEMINI_API_BASE_URL="{base}"
+{PROXY_ENV_END}"#
+        );
+        assert!(
+            block.contains("ANTHROPIC_BASE_URL"),
+            "shell exports must include ANTHROPIC_BASE_URL"
+        );
+        assert!(
+            block.contains("OPENAI_BASE_URL"),
+            "shell exports must include OPENAI_BASE_URL"
+        );
+        assert!(
+            block.contains("GEMINI_API_BASE_URL"),
+            "shell exports must include GEMINI_API_BASE_URL"
+        );
+    }
+
+    #[test]
+    fn fish_block_contains_all_provider_env_vars() {
+        let base = "http://127.0.0.1:4444";
+        let block = format!(
+            r#"{PROXY_ENV_START}
+set -gx ANTHROPIC_BASE_URL "{base}"
+set -gx OPENAI_BASE_URL "{base}"
+set -gx GEMINI_API_BASE_URL "{base}"
+{PROXY_ENV_END}"#
+        );
+        assert!(block.contains("ANTHROPIC_BASE_URL"));
+        assert!(block.contains("OPENAI_BASE_URL"));
+        assert!(block.contains("GEMINI_API_BASE_URL"));
+    }
+
+    #[test]
+    fn powershell_block_contains_all_provider_env_vars() {
+        let base = "http://127.0.0.1:4444";
+        let block = format!(
+            r#"{PROXY_ENV_START}
+$env:ANTHROPIC_BASE_URL = "{base}"
+$env:OPENAI_BASE_URL = "{base}"
+$env:GEMINI_API_BASE_URL = "{base}"
+{PROXY_ENV_END}"#
+        );
+        assert!(block.contains("ANTHROPIC_BASE_URL"));
+        assert!(block.contains("OPENAI_BASE_URL"));
+        assert!(block.contains("GEMINI_API_BASE_URL"));
     }
 }

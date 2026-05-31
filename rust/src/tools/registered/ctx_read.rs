@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -18,23 +17,11 @@ use crate::tool_defs::tool_def;
 /// they all contend on the global cache write lock while doing redundant I/O.
 /// This lock ensures only one thread reads a given file from disk; the others
 /// wait cheaply on the per-file mutex, then hit the warm cache.
+///
+/// Backed by the shared `core::path_locks` registry so reads and edits of the
+/// same path coordinate through a single mutex (see issue #320).
 fn per_file_lock(path: &str) -> Arc<Mutex<()>> {
-    static FILE_LOCKS: std::sync::OnceLock<Mutex<HashMap<String, Arc<Mutex<()>>>>> =
-        std::sync::OnceLock::new();
-    let map = FILE_LOCKS.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut map = map.lock().unwrap_or_else(|poisoned| {
-        tracing::warn!("per_file_lock map poisoned; recovering");
-        poisoned.into_inner()
-    });
-
-    const MAX_ENTRIES: usize = 500;
-    if map.len() > MAX_ENTRIES {
-        map.retain(|_, v| Arc::strong_count(v) > 1);
-    }
-
-    map.entry(path.to_string())
-        .or_insert_with(|| Arc::new(Mutex::new(())))
-        .clone()
+    crate::core::path_locks::per_file_lock(path)
 }
 
 pub struct CtxReadTool;
@@ -55,7 +42,7 @@ Modes: full|map|signatures|diff|aggressive|entropy|task|reference|lines:N-M. fre
                     "path": { "type": "string", "description": "Absolute file path to read" },
                     "mode": {
                         "type": "string",
-                        "description": "Compression mode (default: full). Use 'map' for context-only files. For line ranges: 'lines:N-M' (e.g. 'lines:400-500')."
+                        "description": "Compression mode (default: auto — resolved per file type/size). Explicit 'full' for guaranteed complete content. Use 'map' for context-only files. For line ranges: 'lines:N-M' (e.g. 'lines:400-500')."
                     },
                     "start_line": {
                         "type": "integer",
@@ -405,6 +392,11 @@ impl CtxReadTool {
             ));
             if let Ok(mut session) = session_guard {
                 session.touch_file(path, file_ref.as_deref(), &resolved_mode, original);
+                // Auto-generate file summary from output content
+                let file_summary = extract_file_summary(&output, path);
+                if !file_summary.is_empty() {
+                    session.set_file_summary(path, &file_summary);
+                }
                 if is_cache_hit {
                     session.record_cache_hit();
                 }
@@ -419,6 +411,10 @@ impl CtxReadTool {
                     if inferred.confidence >= 0.4 {
                         session.active_structured_intent = Some(inferred);
                     }
+                }
+                // Auto-infer task every 5th file read if not explicitly set
+                if session.task.is_none() && session.stats.files_read % 5 == 0 {
+                    session.auto_infer_task();
                 }
                 let root_missing = session
                     .project_root
@@ -500,7 +496,11 @@ impl CtxReadTool {
         // related issues/PRs/schemas without a separate tool call.
         let hints_suffix = {
             if let Some(index) = crate::core::graph_index::ProjectIndex::load(&ctx.project_root) {
-                let hints = crate::core::cross_source_hints::hints_for_file(path, &index.edges);
+                let hints = crate::core::cross_source_hints::hints_for_file(
+                    path,
+                    &index.edges,
+                    &ctx.project_root,
+                );
                 if hints.is_empty() {
                     String::new()
                 } else {
@@ -582,6 +582,23 @@ fn auto_degrade_read_mode(mode: &str) -> (String, Option<String>) {
         None
     };
     (new_mode, warning)
+}
+
+fn extract_file_summary(output: &str, path: &str) -> String {
+    let hint = crate::core::auto_findings::extract_content_hint(output);
+    if !hint.is_empty() {
+        return hint;
+    }
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    let line_count = output.lines().count();
+    if line_count > 5 {
+        format!("{ext} file, {line_count} lines")
+    } else {
+        String::new()
+    }
 }
 
 #[cfg(test)]

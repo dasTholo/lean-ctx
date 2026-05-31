@@ -64,7 +64,7 @@ pub enum ChunkKind {
     Class,
     Method,
     Other,
-    // -- External source kinds (Context Cortex) --
+    // -- External source kinds (Context Engine) --
     Issue,
     PullRequest,
     WikiPage,
@@ -193,6 +193,16 @@ impl BM25Index {
     }
 
     pub fn build_from_directory(root: &Path) -> Self {
+        Self::build_from_directory_inner(root, &HashMap::new())
+    }
+
+    /// Like `build_from_directory` but reuses file content from a prior scan
+    /// (e.g. the graph index walk) to avoid redundant disk reads.
+    pub fn build_with_content_hint(root: &Path, content_hint: &HashMap<String, String>) -> Self {
+        Self::build_from_directory_inner(root, content_hint)
+    }
+
+    fn build_from_directory_inner(root: &Path, content_hint: &HashMap<String, String>) -> Self {
         let root_str = root.to_string_lossy();
         if !super::graph_index::is_safe_scan_root_public(&root_str) {
             tracing::warn!("[bm25: scan aborted for unsafe root {root_str}]");
@@ -201,6 +211,7 @@ impl BM25Index {
         let mut index = Self::new();
         let files = list_code_files(root);
         const MAX_FILE_SIZE_BYTES: u64 = 2 * 1024 * 1024;
+        let mut cache_hits = 0usize;
 
         for (i, rel) in files.iter().enumerate() {
             if i.is_multiple_of(500) && crate::core::memory_guard::is_under_pressure() {
@@ -222,19 +233,35 @@ impl BM25Index {
             if state.size_bytes > MAX_FILE_SIZE_BYTES {
                 continue;
             }
-            if let Ok(content) = std::fs::read_to_string(&abs) {
-                let mut chunks = extract_chunks(rel, &content);
-                chunks.sort_by(|a, b| {
-                    a.start_line
-                        .cmp(&b.start_line)
-                        .then_with(|| a.end_line.cmp(&b.end_line))
-                        .then_with(|| a.symbol_name.cmp(&b.symbol_name))
-                });
-                for chunk in chunks {
-                    index.add_chunk(chunk);
+
+            let content = if let Some(cached) = content_hint.get(rel) {
+                cache_hits += 1;
+                std::borrow::Cow::Borrowed(cached.as_str())
+            } else {
+                match std::fs::read_to_string(&abs) {
+                    Ok(c) => std::borrow::Cow::Owned(c),
+                    Err(_) => continue,
                 }
-                index.files.insert(rel.clone(), state);
+            };
+
+            let mut chunks = extract_chunks(rel, &content);
+            chunks.sort_by(|a, b| {
+                a.start_line
+                    .cmp(&b.start_line)
+                    .then_with(|| a.end_line.cmp(&b.end_line))
+                    .then_with(|| a.symbol_name.cmp(&b.symbol_name))
+            });
+            for chunk in chunks {
+                index.add_chunk(chunk);
             }
+            index.files.insert(rel.clone(), state);
+        }
+
+        if cache_hits > 0 {
+            tracing::info!(
+                "[bm25: reused {cache_hits}/{} file contents from graph scan cache]",
+                files.len()
+            );
         }
 
         index.finalize();
@@ -543,11 +570,26 @@ impl BM25Index {
     }
 
     pub fn load_or_build(root: &Path) -> Self {
+        Self::load_or_build_inner(root, false)
+    }
+
+    /// Like `load_or_build` but uses a fast sentinel-sampling staleness check
+    /// that skips the expensive full directory walk for new-file detection.
+    pub fn load_or_build_fast(root: &Path) -> Self {
+        Self::load_or_build_inner(root, true)
+    }
+
+    fn load_or_build_inner(root: &Path, fast_stale: bool) -> Self {
         if !is_safe_bm25_root(root) {
             return Self::default();
         }
         if let Some(idx) = Self::load(root) {
-            if !bm25_index_looks_stale(&idx, root) {
+            let stale = if fast_stale {
+                bm25_index_looks_stale_fast(&idx, root)
+            } else {
+                bm25_index_looks_stale(&idx, root)
+            };
+            if !stale {
                 return idx;
             }
             tracing::debug!(
@@ -613,12 +655,21 @@ fn is_safe_bm25_root(root: &Path) -> bool {
 }
 
 fn bm25_index_looks_stale(index: &BM25Index, root: &Path) -> bool {
+    bm25_index_looks_stale_inner(index, root, false)
+}
+
+/// Fast staleness check: samples a subset of tracked files and skips the
+/// expensive `list_code_files()` walk for new-file detection.
+pub fn bm25_index_looks_stale_fast(index: &BM25Index, root: &Path) -> bool {
+    bm25_index_looks_stale_inner(index, root, true)
+}
+
+fn bm25_index_looks_stale_inner(index: &BM25Index, root: &Path, fast: bool) -> bool {
     if index.chunks.is_empty() {
         return false;
     }
 
     if index.files.is_empty() {
-        // Legacy index (pre file-state tracking): only detect missing files.
         let mut seen = std::collections::HashSet::<&str>::new();
         for chunk in &index.chunks {
             let rel = chunk.file_path.trim_start_matches(['/', '\\']);
@@ -635,7 +686,31 @@ fn bm25_index_looks_stale(index: &BM25Index, root: &Path) -> bool {
         return false;
     }
 
-    // Missing or modified tracked files.
+    if fast {
+        let sample_size = index.files.len().min(SENTINEL_SAMPLE_SIZE);
+        let step = if index.files.len() > sample_size {
+            index.files.len() / sample_size
+        } else {
+            1
+        };
+        for (i, (rel, old_state)) in index.files.iter().enumerate() {
+            if i % step != 0 {
+                continue;
+            }
+            let abs = root.join(rel);
+            if !abs.exists() {
+                return true;
+            }
+            let Some(cur) = IndexedFileState::from_path(&abs) else {
+                return true;
+            };
+            if &cur != old_state {
+                return true;
+            }
+        }
+        return false;
+    }
+
     for (rel, old_state) in &index.files {
         let abs = root.join(rel);
         if !abs.exists() {
@@ -649,7 +724,6 @@ fn bm25_index_looks_stale(index: &BM25Index, root: &Path) -> bool {
         }
     }
 
-    // New files (present on disk but not in index).
     for rel in list_code_files(root) {
         if !index.files.contains_key(&rel) {
             return true;
@@ -658,6 +732,8 @@ fn bm25_index_looks_stale(index: &BM25Index, root: &Path) -> bool {
 
     false
 }
+
+const SENTINEL_SAMPLE_SIZE: usize = 10;
 
 fn bounded_zstd_decode(compressed: &[u8], max_bytes: u64) -> Option<Vec<u8>> {
     use std::io::Read;

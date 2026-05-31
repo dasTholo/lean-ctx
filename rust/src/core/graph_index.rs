@@ -1,3 +1,9 @@
+// DEPRECATED: This module is being replaced by PropertyGraph (core/property_graph/).
+// New code should use GraphProvider (core/graph_provider.rs) instead of accessing
+// ProjectIndex directly. Remaining direct consumers: call_graph, graph_enricher,
+// ctx_callgraph, ctx_graph_diagram, ctx_routes, autonomy, dashboard/callgraph.
+// See OPT-14/15 plan for the full migration path.
+
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -126,7 +132,7 @@ fn is_safe_scan_root(path: &str) -> bool {
     true
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectIndex {
     pub version: u32,
     pub project_root: String,
@@ -262,7 +268,7 @@ impl ProjectIndex {
             return;
         };
         let cfg = crate::core::config::Config::load();
-        let max_age_secs = cfg.archive.max_age_hours * 3600;
+        let max_age_secs = cfg.archive_max_age_hours_effective() * 3600;
 
         for entry in entries.filter_map(Result::ok) {
             let path = entry.path();
@@ -423,12 +429,13 @@ fn index_looks_stale(index: &ProjectIndex, root_abs: &str) -> bool {
         chrono::NaiveDateTime::parse_from_str(&index.last_scan, "%Y-%m-%d %H:%M:%S")
     {
         let cfg = crate::core::config::Config::load();
-        let max_age = chrono::Duration::hours(cfg.archive.max_age_hours as i64);
+        let effective_hours = cfg.archive_max_age_hours_effective();
+        let max_age = chrono::Duration::hours(effective_hours as i64);
         let now = chrono::Local::now().naive_local();
         if now.signed_duration_since(scan_time) > max_age {
             tracing::info!(
                 "[graph_index: index is older than {}h — marking stale]",
-                cfg.archive.max_age_hours
+                effective_hours
             );
             return true;
         }
@@ -479,16 +486,24 @@ fn index_looks_stale(index: &ProjectIndex, root_abs: &str) -> bool {
 }
 
 pub fn scan(project_root: &str) -> ProjectIndex {
+    scan_inner(project_root).0
+}
+
+pub fn scan_with_content_cache(project_root: &str) -> (ProjectIndex, HashMap<String, String>) {
+    scan_inner(project_root)
+}
+
+fn scan_inner(project_root: &str) -> (ProjectIndex, HashMap<String, String>) {
     if std::env::var("LEAN_CTX_NO_INDEX").is_ok() {
         tracing::info!("[graph_index: LEAN_CTX_NO_INDEX set — skipping scan]");
-        return ProjectIndex::new(project_root);
+        return (ProjectIndex::new(project_root), HashMap::new());
     }
 
     let project_root = normalize_project_root(project_root);
 
     if !is_safe_scan_root(&project_root) {
         tracing::warn!("[graph_index: scan aborted for unsafe root {project_root}]");
-        return ProjectIndex::new(&project_root);
+        return (ProjectIndex::new(&project_root), HashMap::new());
     }
 
     let lock_name = format!(
@@ -504,8 +519,10 @@ pub fn scan(project_root: &str) -> ProjectIndex {
         tracing::info!(
             "[graph_index: another process is scanning {project_root} — returning cached or empty]"
         );
-        return ProjectIndex::load(&project_root)
-            .unwrap_or_else(|| ProjectIndex::new(&project_root));
+        return (
+            ProjectIndex::load(&project_root).unwrap_or_else(|| ProjectIndex::new(&project_root)),
+            HashMap::new(),
+        );
     }
 
     let existing = ProjectIndex::load(&project_root);
@@ -547,6 +564,7 @@ pub fn scan(project_root: &str) -> ProjectIndex {
     let mut scanned = 0usize;
     let mut reused = 0usize;
     let mut entries_visited = 0usize;
+    let mut content_cache: HashMap<String, String> = HashMap::new();
     let max_files = if cfg.graph_index_max_files == 0 {
         usize::MAX // unlimited
     } else {
@@ -599,16 +617,18 @@ pub fn scan(project_root: &str) -> ProjectIndex {
         if !entry.file_type().is_some_and(|ft| ft.is_file()) {
             continue;
         }
+
+        if entry.path_is_symlink() {
+            continue;
+        }
         let file_path = normalize_absolute_path(&entry.path().to_string_lossy());
 
-        // Prevent indexing files that escaped the project root (symlinks, mount points)
-        if !file_path.starts_with(&project_root) {
+        if !std::path::Path::new(&file_path).starts_with(std::path::Path::new(&project_root)) {
             continue;
         }
 
-        // Skip special files (devices, FIFOs, sockets) that can stream infinite data
-        if let Ok(meta) = std::fs::metadata(&file_path) {
-            if !meta.is_file() {
+        if let Ok(meta) = std::fs::symlink_metadata(&file_path) {
+            if meta.file_type().is_symlink() || !meta.is_file() {
                 continue;
             }
             if meta.len() > MAX_FILE_SIZE_BYTES {
@@ -657,6 +677,7 @@ pub fn scan(project_root: &str) -> ProjectIndex {
                     for (key, sym) in old_syms {
                         index.symbols.insert(key.clone(), sym.clone());
                     }
+                    content_cache.insert(rel_path, content);
                     reused += 1;
                     continue;
                 }
@@ -706,10 +727,11 @@ pub fn scan(project_root: &str) -> ProjectIndex {
             );
         }
 
+        content_cache.insert(rel_path, content);
         scanned += 1;
     }
 
-    build_edges(&mut index);
+    build_edges_cached(&mut index, &content_cache);
 
     if let Err(e) = index.save() {
         tracing::warn!("could not save graph index: {e}");
@@ -724,12 +746,12 @@ pub fn scan(project_root: &str) -> ProjectIndex {
         index.edge_count()
     );
 
-    index
+    (index, content_cache)
 }
 
-fn build_edges(index: &mut ProjectIndex) {
-    build_edges_with_cache(index, &HashMap::new());
-    build_implicit_edges(index);
+fn build_edges_cached(index: &mut ProjectIndex, content_cache: &HashMap<String, String>) {
+    build_edges_with_cache(index, content_cache);
+    build_implicit_edges_with_cache(index, content_cache);
     build_cochange_edges(index);
     build_sibling_edges(index);
 }
@@ -833,7 +855,10 @@ fn build_edges_with_cache(index: &mut ProjectIndex, content_cache: &HashMap<Stri
 // Layer 2: Implicit Language Edges (weight 0.8)
 // ---------------------------------------------------------------------------
 
-fn build_implicit_edges(index: &mut ProjectIndex) {
+fn build_implicit_edges_with_cache(
+    index: &mut ProjectIndex,
+    content_cache: &HashMap<String, String>,
+) {
     let file_paths: Vec<String> = index.files.keys().cloned().collect();
     let file_set: std::collections::HashSet<&str> = file_paths.iter().map(String::as_str).collect();
 
@@ -846,11 +871,19 @@ fn build_implicit_edges(index: &mut ProjectIndex) {
             .unwrap_or("");
 
         match ext {
-            "rs" => collect_rust_mod_edges(file, &file_set, index, &mut new_edges),
+            "rs" => {
+                collect_rust_mod_edges_cached(
+                    file,
+                    &file_set,
+                    index,
+                    &mut new_edges,
+                    content_cache,
+                );
+            }
             "go" => collect_go_package_edges(file, &file_paths, &mut new_edges),
             "py" => collect_python_init_edges(file, &file_paths, &mut new_edges),
             "ts" | "js" | "tsx" | "jsx" => {
-                collect_barrel_edges(file, &file_set, index, &mut new_edges);
+                collect_barrel_edges_cached(file, &file_set, index, &mut new_edges, content_cache);
             }
             _ => {}
         }
@@ -859,19 +892,25 @@ fn build_implicit_edges(index: &mut ProjectIndex) {
     index.edges.extend(new_edges);
 }
 
-fn collect_rust_mod_edges(
+fn collect_rust_mod_edges_cached(
     file: &str,
     file_set: &std::collections::HashSet<&str>,
     index: &ProjectIndex,
     edges: &mut Vec<IndexEdge>,
+    content_cache: &HashMap<String, String>,
 ) {
     if !index.files.contains_key(file) {
         return;
     }
 
-    let full_path = Path::new(&index.project_root).join(file);
-    let Ok(content) = std::fs::read_to_string(&full_path) else {
-        return;
+    let content = if let Some(cached) = content_cache.get(file) {
+        std::borrow::Cow::Borrowed(cached.as_str())
+    } else {
+        let full_path = Path::new(&index.project_root).join(file);
+        match std::fs::read_to_string(&full_path) {
+            Ok(c) => std::borrow::Cow::Owned(c),
+            Err(_) => return,
+        }
     };
 
     let dir = Path::new(file)
@@ -990,11 +1029,12 @@ fn collect_python_init_edges(file: &str, file_paths: &[String], edges: &mut Vec<
     }
 }
 
-fn collect_barrel_edges(
+fn collect_barrel_edges_cached(
     file: &str,
     file_set: &std::collections::HashSet<&str>,
     index: &ProjectIndex,
     edges: &mut Vec<IndexEdge>,
+    content_cache: &HashMap<String, String>,
 ) {
     let basename = Path::new(file)
         .file_stem()
@@ -1004,9 +1044,14 @@ fn collect_barrel_edges(
         return;
     }
 
-    let full_path = Path::new(&index.project_root).join(file);
-    let Ok(content) = std::fs::read_to_string(&full_path) else {
-        return;
+    let content = if let Some(cached) = content_cache.get(file) {
+        std::borrow::Cow::Borrowed(cached.as_str())
+    } else {
+        let full_path = Path::new(&index.project_root).join(file);
+        match std::fs::read_to_string(&full_path) {
+            Ok(c) => std::borrow::Cow::Owned(c),
+            Err(_) => return,
+        }
     };
 
     let dir = Path::new(file)

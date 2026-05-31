@@ -10,8 +10,9 @@ use crate::core::symbol_map::{self, SymbolMap};
 use crate::core::tokens::count_tokens;
 use crate::tools::CrpMode;
 
-const MAX_FILE_SIZE: u64 = 512_000;
-const MAX_WALK_DEPTH: usize = 20;
+pub(crate) const MAX_FILE_SIZE: u64 = 512_000;
+pub(crate) const MAX_WALK_DEPTH: usize = 20;
+const MAX_MATCH_LINE_WIDTH: usize = 150;
 
 /// Searches files for a regex pattern with compressed output and monorepo scope hints.
 pub fn handle(
@@ -23,6 +24,7 @@ pub fn handle(
     respect_gitignore: bool,
     allow_secret_paths: bool,
 ) -> (String, usize) {
+    let ext_filter = ext_filter.map(|e| e.strip_prefix('.').unwrap_or(e));
     const MAX_PATTERN_LEN: usize = 1024;
     const MAX_REGEX_SIZE: usize = 1 << 20; // 1 MiB DFA limit
 
@@ -50,14 +52,6 @@ pub fn handle(
         return (format!("ERROR: {dir} does not exist"), 0);
     }
 
-    let walker = WalkBuilder::new(root)
-        .hidden(true)
-        .max_depth(Some(MAX_WALK_DEPTH))
-        .git_ignore(respect_gitignore)
-        .git_global(respect_gitignore)
-        .git_exclude(respect_gitignore)
-        .build();
-
     let mut files: Vec<PathBuf> = Vec::new();
     let mut matches = Vec::new();
     let mut raw_tokens_accum: usize = 0;
@@ -66,41 +60,66 @@ pub fn handle(
     let mut files_skipped_encoding = 0u32;
     let mut files_skipped_boundary = 0u32;
 
-    for entry in walker.filter_map(std::result::Result::ok) {
-        if entry.file_type().is_none_or(|ft| ft.is_dir()) {
-            continue;
-        }
+    // Fast path: a warm resident trigram index narrows the candidate files in
+    // memory, eliminating the per-call directory walk + full-corpus read. The
+    // index covers the exact same file universe as the walk below, and matches
+    // are still verified line-by-line with the same regex — so results are
+    // identical. Missing/stale index → returns None and triggers a background
+    // (re)build; this call uses the walk fallback.
+    let used_index = if let Some(idx) =
+        crate::core::search_index::get_fresh(dir, respect_gitignore, allow_secret_paths)
+    {
+        files = idx.candidate_paths(pattern, ext_filter).into_paths();
+        true
+    } else {
+        false
+    };
 
-        if entry.file_type().is_some_and(|ft| ft.is_symlink()) {
-            continue;
-        }
+    if !used_index {
+        let walker = WalkBuilder::new(root)
+            .hidden(true)
+            .max_depth(Some(MAX_WALK_DEPTH))
+            .git_ignore(respect_gitignore)
+            .git_global(respect_gitignore)
+            .git_exclude(respect_gitignore)
+            .build();
 
-        let path = entry.path();
-
-        if is_binary_ext(path) || is_generated_file(path) {
-            continue;
-        }
-
-        if !allow_secret_paths && crate::core::io_boundary::is_secret_like(path).is_some() {
-            files_skipped_boundary += 1;
-            continue;
-        }
-
-        if let Some(ext) = ext_filter {
-            let file_ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-            if file_ext != ext {
+        for entry in walker.filter_map(std::result::Result::ok) {
+            if entry.file_type().is_none_or(|ft| ft.is_dir()) {
                 continue;
             }
-        }
 
-        if let Ok(meta) = std::fs::metadata(path) {
-            if meta.len() > MAX_FILE_SIZE {
-                files_skipped_size += 1;
+            if entry.file_type().is_some_and(|ft| ft.is_symlink()) {
                 continue;
             }
-        }
 
-        files.push(path.to_path_buf());
+            let path = entry.path();
+
+            if is_binary_ext(path) || is_generated_file(path) {
+                continue;
+            }
+
+            if !allow_secret_paths && crate::core::io_boundary::is_secret_like(path).is_some() {
+                files_skipped_boundary += 1;
+                continue;
+            }
+
+            if let Some(ext) = ext_filter {
+                let file_ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                if file_ext != ext {
+                    continue;
+                }
+            }
+
+            if let Ok(meta) = std::fs::metadata(path) {
+                if meta.len() > MAX_FILE_SIZE {
+                    files_skipped_size += 1;
+                    continue;
+                }
+            }
+
+            files.push(path.to_path_buf());
+        }
     }
 
     // Deterministic search: stable file ordering makes max_results truncation reproducible.
@@ -125,11 +144,15 @@ pub fn handle(
                     protocol::shorten_path_relative(&path.to_string_lossy(), &root_str);
                 // Count raw tokens incrementally (avoids separate Vec + join)
                 raw_tokens_accum += count_tokens(line.trim()) + 2;
-                let shown = if redact {
+                let mut shown = if redact {
                     crate::core::redaction::redact_text(line.trim())
                 } else {
                     line.trim().to_string()
                 };
+                if shown.len() > MAX_MATCH_LINE_WIDTH {
+                    shown.truncate(shown.floor_char_boundary(MAX_MATCH_LINE_WIDTH));
+                    shown.push_str("...");
+                }
                 matches.push(format!("{short_path}:{} {}", i + 1, shown));
                 if matches.len() >= max_results {
                     break;
@@ -174,9 +197,18 @@ pub fn handle(
 
     let mut result = format!("{} matches in {} files", matches.len(), files_searched);
     if matched_files.len() > 1 {
-        result.push_str(" [");
-        result.push_str(&matched_files.join(", "));
-        result.push(']');
+        if matched_files.len() <= 10 {
+            result.push_str(" [");
+            result.push_str(&matched_files.join(", "));
+            result.push(']');
+        } else {
+            let shown: Vec<&str> = matched_files.iter().take(8).copied().collect();
+            result.push_str(&format!(
+                " [{}, +{} more]",
+                shown.join(", "),
+                matched_files.len() - 8
+            ));
+        }
     }
     result.push_str(":\n");
     result.push_str(&matches.join("\n"));
@@ -195,9 +227,26 @@ pub fn handle(
         ));
     }
 
-    let scope_hint = monorepo_scope_hint(&matches, dir);
+    let scope_hint = {
+        static SHOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if SHOWN.load(std::sync::atomic::Ordering::Relaxed) {
+            None
+        } else {
+            let hint = monorepo_scope_hint(&matches, dir);
+            if hint.is_some() {
+                SHOWN.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            hint
+        }
+    };
 
-    {
+    if let Some(delta) = crate::core::search_delta::compute_delta(pattern, &matches) {
+        let native_estimate = (raw_tokens_accum as f64 * 2.5).ceil() as usize;
+        let original = native_estimate.max(raw_tokens_accum);
+        return (delta, original);
+    }
+
+    if symbol_map::substitution_enabled() {
         let file_ext = ext_filter.unwrap_or("rs");
         let mut sym = SymbolMap::new();
         let idents = symbol_map::extract_identifiers(&result, file_ext);
@@ -220,19 +269,13 @@ pub fn handle(
         result.push_str(&hint);
     }
 
-    let sent = count_tokens(&result);
-
-    // The "original" cost is what a native grep with context lines would produce.
-    // rg defaults to showing full paths + 2 context lines per match. We estimate
-    // the native cost as ~3x the raw match output (context + separators + headers).
     let native_estimate = (raw_tokens_accum as f64 * 2.5).ceil() as usize;
     let original = native_estimate.max(raw_tokens_accum);
-    let savings = protocol::format_savings(original, sent);
 
-    (format!("{result}\n{savings}"), original)
+    (result, original)
 }
 
-fn is_binary_ext(path: &Path) -> bool {
+pub(crate) fn is_binary_ext(path: &Path) -> bool {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
     matches!(
         ext,
@@ -281,7 +324,7 @@ fn is_binary_ext(path: &Path) -> bool {
     )
 }
 
-fn is_generated_file(path: &Path) -> bool {
+pub(crate) fn is_generated_file(path: &Path) -> bool {
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
     name.ends_with(".min.js")
         || name.ends_with(".min.css")
@@ -382,6 +425,42 @@ mod tests {
             match_lines[1].contains("b.txt:"),
             "second match should come from b.txt, got: {}",
             match_lines[1]
+        );
+    }
+
+    #[test]
+    fn symbol_substitution_is_off_by_default() {
+        let _lock = crate::core::data_dir::test_env_lock();
+        std::env::remove_var("LEAN_CTX_SYMBOL_MAP");
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("a.rs");
+        std::fs::write(
+            &f,
+            "fn longIdentifierAlpha() {}\nfn longIdentifierBeta() {}\nfn longIdentifierGamma() {}\n",
+        )
+        .unwrap();
+
+        let (out, _orig) = handle(
+            "longIdentifier",
+            dir.path().to_string_lossy().as_ref(),
+            Some("rs"),
+            10,
+            CrpMode::Off,
+            true,
+            true,
+        );
+
+        assert!(
+            !out.contains("§MAP"),
+            "default agent-facing output must not carry a §MAP table: {out}"
+        );
+        assert!(
+            !out.contains('α'),
+            "default agent-facing output must not carry α-symbols: {out}"
+        );
+        assert!(
+            out.contains("longIdentifierAlpha"),
+            "identifiers should appear raw by default: {out}"
         );
     }
 

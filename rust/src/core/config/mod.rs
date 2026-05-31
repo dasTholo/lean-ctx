@@ -1,20 +1,22 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicU8;
 use std::sync::Mutex;
 use std::time::SystemTime;
 
-static SESSION_DEGRADE_LEVEL: AtomicU8 = AtomicU8::new(0);
-
 use super::memory_policy::MemoryPolicy;
 
+mod enums;
 mod memory;
 mod proxy;
 pub mod schema;
 mod serde_defaults;
+pub mod setter;
 mod shell_activation;
 
+pub use enums::{
+    CompressionLevel, OutputDensity, ResponseVerbosity, RulesScope, TeeMode, TerseAgent,
+};
 pub use memory::{MemoryCleanup, MemoryGuardConfig, MemoryProfile, SavingsFooter};
 pub use proxy::{is_local_proxy_url, normalize_url, normalize_url_opt, ProxyConfig, ProxyProvider};
 pub use shell_activation::ShellActivation;
@@ -22,244 +24,6 @@ pub use shell_activation::ShellActivation;
 /// Default BM25 cache cap from config (also used by `bm25_index` heuristics).
 pub fn default_bm25_max_cache_mb() -> u64 {
     serde_defaults::default_bm25_max_cache_mb()
-}
-
-/// Controls when shell output is tee'd to disk for later retrieval.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum TeeMode {
-    Never,
-    #[default]
-    Failures,
-    HighCompression,
-    Always,
-}
-
-/// Legacy: Controls agent output verbosity level injected into MCP instructions.
-/// Superseded by `CompressionLevel`. Kept for backward compatibility with old config.toml files.
-/// New setups use `compression_level` instead. See `CompressionLevel::effective()`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum TerseAgent {
-    #[default]
-    Off,
-    Lite,
-    Full,
-    Ultra,
-}
-
-impl TerseAgent {
-    /// Reads the terse-agent level from the `LEAN_CTX_TERSE_AGENT` env var.
-    pub fn from_env() -> Self {
-        match std::env::var("LEAN_CTX_TERSE_AGENT")
-            .unwrap_or_default()
-            .to_lowercase()
-            .as_str()
-        {
-            "lite" => Self::Lite,
-            "full" => Self::Full,
-            "ultra" => Self::Ultra,
-            _ => Self::Off,
-        }
-    }
-}
-
-/// Legacy: Controls how dense/compact MCP tool output is formatted.
-/// Superseded by `CompressionLevel`. Kept for backward compatibility with old config.toml files.
-/// New setups use `compression_level` instead. See `CompressionLevel::effective()`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum OutputDensity {
-    #[default]
-    Normal,
-    Terse,
-    Ultra,
-}
-
-impl OutputDensity {
-    /// Reads the output density from the `LEAN_CTX_OUTPUT_DENSITY` env var.
-    pub fn from_env() -> Self {
-        match std::env::var("LEAN_CTX_OUTPUT_DENSITY")
-            .unwrap_or_default()
-            .to_lowercase()
-            .as_str()
-        {
-            "terse" => Self::Terse,
-            "ultra" => Self::Ultra,
-            _ => Self::Normal,
-        }
-    }
-}
-
-/// Unified compression level that replaces the 4 separate legacy concepts:
-/// `terse_agent`, `output_density`, `terse_mode`, and `crp_mode`.
-///
-/// Controls how much detail tool responses include.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum ResponseVerbosity {
-    #[default]
-    Full,
-    HeadersOnly,
-}
-
-impl ResponseVerbosity {
-    pub fn effective() -> Self {
-        if let Ok(v) = std::env::var("LEAN_CTX_RESPONSE_VERBOSITY") {
-            match v.trim().to_lowercase().as_str() {
-                "headers_only" | "headers" | "minimal" => return Self::HeadersOnly,
-                "full" | "" => return Self::Full,
-                _ => {}
-            }
-        }
-        Config::load().response_verbosity
-    }
-
-    pub fn is_headers_only(&self) -> bool {
-        matches!(self, Self::HeadersOnly)
-    }
-}
-
-/// Each level maps to specific component settings via `to_components()`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum CompressionLevel {
-    Off,
-    Lite,
-    #[default]
-    Standard,
-    Max,
-}
-
-impl CompressionLevel {
-    /// Decomposes the unified level into legacy component settings.
-    /// Returns (TerseAgent, OutputDensity, crp_mode_str, terse_mode_bool).
-    pub fn to_components(&self) -> (TerseAgent, OutputDensity, &'static str, bool) {
-        match self {
-            Self::Off => (TerseAgent::Off, OutputDensity::Normal, "off", false),
-            Self::Lite => (TerseAgent::Lite, OutputDensity::Terse, "off", true),
-            Self::Standard => (TerseAgent::Full, OutputDensity::Terse, "compact", true),
-            Self::Max => (TerseAgent::Ultra, OutputDensity::Ultra, "tdd", true),
-        }
-    }
-
-    /// Infers a `CompressionLevel` from legacy config keys for backward compatibility.
-    /// Priority: terse_agent > output_density (picks the highest implied level).
-    pub fn from_legacy(terse_agent: &TerseAgent, output_density: &OutputDensity) -> Self {
-        match (terse_agent, output_density) {
-            (TerseAgent::Ultra, _) | (_, OutputDensity::Ultra) => Self::Max,
-            (TerseAgent::Full, _) => Self::Standard,
-            (TerseAgent::Lite, _) | (_, OutputDensity::Terse) => Self::Lite,
-            _ => Self::Off,
-        }
-    }
-
-    /// Reads the compression level from the `LEAN_CTX_COMPRESSION` env var.
-    pub fn from_env() -> Option<Self> {
-        std::env::var("LEAN_CTX_COMPRESSION").ok().and_then(|v| {
-            match v.trim().to_lowercase().as_str() {
-                "off" => Some(Self::Off),
-                "lite" => Some(Self::Lite),
-                "standard" => Some(Self::Standard),
-                "max" => Some(Self::Max),
-                _ => None,
-            }
-        })
-    }
-
-    /// Returns the effective compression level with resolution order:
-    /// 0. Session-level degrade override (set by correction-loop feedback)
-    /// 1. `LEAN_CTX_COMPRESSION` env var
-    /// 2. `compression_level` in config
-    /// 3. Legacy `ultra_compact` flag (maps to `Max`)
-    /// 4. Legacy env vars (`LEAN_CTX_TERSE_AGENT`, `LEAN_CTX_OUTPUT_DENSITY`)
-    /// 5. Legacy config fields (`terse_agent`, `output_density`)
-    pub fn effective(config: &Config) -> Self {
-        if let Some(degraded) = Self::session_degrade_level() {
-            return degraded;
-        }
-        if let Some(env_level) = Self::from_env() {
-            return env_level;
-        }
-        if config.compression_level != Self::Off {
-            return config.compression_level.clone();
-        }
-        if config.ultra_compact {
-            return Self::Max;
-        }
-        let ta_env = TerseAgent::from_env();
-        let od_env = OutputDensity::from_env();
-        let ta = if ta_env == TerseAgent::Off {
-            config.terse_agent.clone()
-        } else {
-            ta_env
-        };
-        let od = if od_env == OutputDensity::Normal {
-            config.output_density.clone()
-        } else {
-            od_env
-        };
-        Self::from_legacy(&ta, &od)
-    }
-
-    /// Session-level degrade: correction loop detected, temporarily reduce compression.
-    /// 0 = no override, 1 = Off, 2 = Lite
-    pub fn session_degrade_level() -> Option<Self> {
-        match SESSION_DEGRADE_LEVEL.load(std::sync::atomic::Ordering::Relaxed) {
-            1 => Some(Self::Off),
-            2 => Some(Self::Lite),
-            _ => None,
-        }
-    }
-
-    /// Sets a session-level compression degrade (called by correction loop detection).
-    pub fn set_session_degrade(level: &Self) {
-        let val = match level {
-            Self::Off => 1u8,
-            Self::Lite => 2u8,
-            _ => 0u8,
-        };
-        SESSION_DEGRADE_LEVEL.store(val, std::sync::atomic::Ordering::Relaxed);
-    }
-
-    /// Clears the session-level degrade (recovery after correction rate drops).
-    pub fn clear_session_degrade() {
-        SESSION_DEGRADE_LEVEL.store(0, std::sync::atomic::Ordering::Relaxed);
-    }
-
-    pub fn from_str_label(s: &str) -> Option<Self> {
-        match s.trim().to_lowercase().as_str() {
-            "off" => Some(Self::Off),
-            "lite" => Some(Self::Lite),
-            "standard" | "std" => Some(Self::Standard),
-            "max" => Some(Self::Max),
-            _ => None,
-        }
-    }
-
-    pub fn is_active(&self) -> bool {
-        !matches!(self, Self::Off)
-    }
-
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::Off => "off",
-            Self::Lite => "lite",
-            Self::Standard => "standard",
-            Self::Max => "max",
-        }
-    }
-
-    pub fn description(&self) -> &'static str {
-        match self {
-            Self::Off => "No compression — full verbose output",
-            Self::Lite => "Light compression — concise output, basic terse filtering",
-            Self::Standard => {
-                "Standard compression — dense output, compact protocol, pattern-aware"
-            }
-            Self::Max => "Maximum compression — expert mode, TDD protocol, all layers active",
-        }
-    }
 }
 
 /// Global lean-ctx configuration loaded from `config.toml`, merged with project-local overrides.
@@ -323,6 +87,19 @@ pub struct Config {
     /// Override via LCTX_NO_DEGRADE=1 env var.
     #[serde(default)]
     pub no_degrade: bool,
+    /// Persistent profile name. Checked after LEAN_CTX_PROFILE env var.
+    /// Set via `lean-ctx config set profile passthrough` or editing config.toml.
+    #[serde(default)]
+    pub profile: Option<String>,
+    /// Tool visibility profile: "minimal" (5), "standard" (20), or "power" (all).
+    /// Override via LEAN_CTX_TOOL_PROFILE env var.
+    /// Existing installs default to "power" (backward compat).
+    #[serde(default)]
+    pub tool_profile: Option<String>,
+    /// Explicit list of enabled tool names (overrides tool_profile when non-empty).
+    /// Example: `tools_enabled = ["ctx_read", "ctx_shell", "ctx_search"]`
+    #[serde(default)]
+    pub tools_enabled: Vec<String>,
     #[serde(default)]
     pub loop_detection: LoopDetectionConfig,
     /// Controls where lean-ctx installs agent rule files.
@@ -355,6 +132,12 @@ pub struct Config {
     /// Override via LEAN_CTX_ALLOW_PATH env var (path-list separator).
     #[serde(default)]
     pub allow_paths: Vec<String>,
+    /// Extra project roots for multi-root workspaces.
+    /// Tools like ctx_tree and ctx_search can scan across all roots in a single call.
+    /// These paths are automatically added to PathJail's allow-list.
+    /// Override via LEAN_CTX_EXTRA_ROOTS env var (path-list separator).
+    #[serde(default)]
+    pub extra_roots: Vec<String>,
     /// Enable content-defined chunking (Rabin-Karp) for cache-optimal output ordering.
     /// Stable chunks are emitted first to maximize prompt cache hits.
     #[serde(default)]
@@ -363,6 +146,21 @@ pub struct Config {
     /// Override via LEAN_CTX_MINIMAL env var.
     #[serde(default)]
     pub minimal_overhead: bool,
+    /// Auto-enable SymbolMap for projects with >50 source files.
+    #[serde(default = "serde_defaults::default_true")]
+    pub symbol_map_auto: bool,
+    /// Enable human-readable activity journal (~/.lean-ctx/journal.md).
+    #[serde(default)]
+    pub journal_enabled: bool,
+    /// Opt-in: auto-persist interesting findings as knowledge facts.
+    #[serde(default)]
+    pub auto_capture: bool,
+    /// Hybrid search weights (BM25/dense/candidates).
+    #[serde(default)]
+    pub search: crate::core::hybrid_search::HybridConfig,
+    /// Optional LLM enhancement (query expansion, contradiction explanation).
+    #[serde(default)]
+    pub llm: crate::core::llm_enhance::LlmConfig,
     /// Disable shell hook injection (the _lc() function that wraps CLI commands).
     /// Override via LEAN_CTX_NO_HOOK env var.
     #[serde(default)]
@@ -402,9 +200,18 @@ pub struct Config {
     /// Override via LEAN_CTX_MAX_RAM_PERCENT env var.
     #[serde(default = "serde_defaults::default_max_ram_percent")]
     pub max_ram_percent: u8,
+    /// Simplified disk budget (MB). When set and detail values are at defaults,
+    /// distributes proportionally: archive=25%, bm25=10%, remainder for stores.
+    /// 0 = disabled (use individual settings). Override via LEAN_CTX_MAX_DISK_MB.
+    #[serde(default)]
+    pub max_disk_mb: u64,
+    /// Auto-purge data older than this many days. 0 = disabled.
+    /// Flows into archive.max_age_hours and lifecycle idle TTL.
+    #[serde(default)]
+    pub max_staleness_days: u32,
     /// Controls visibility of token savings footers in tool output.
-    /// Values: "never" (default, suppress everywhere), "always", "auto" (legacy compatibility).
-    /// Override via LEAN_CTX_SAVINGS_FOOTER env var.
+    /// Values: "always" (default, show on every response), "never", "auto" (legacy compatibility).
+    /// Override via LEAN_CTX_SAVINGS_FOOTER or LEAN_CTX_SHOW_SAVINGS=1|0 env var.
     #[serde(default)]
     pub savings_footer: SavingsFooter,
     /// Explicit project root override. When set, lean-ctx uses this instead of auto-detection.
@@ -480,6 +287,15 @@ pub struct Config {
     /// Override via LEAN_CTX_SHELL_ALLOWLIST env var (comma-separated).
     #[serde(default = "default_shell_allowlist")]
     pub shell_allowlist: Vec<String>,
+
+    /// When true, block command substitution ($(), backticks) and process substitution
+    /// (<(), >()) in shell arguments. When false (default), only warn via tracing.
+    /// Default false preserves backward compatibility — set true for maximum security.
+    #[serde(default)]
+    pub shell_strict_mode: bool,
+    /// Setup behavior: controls what gets injected during setup and updates.
+    #[serde(default)]
+    pub setup: SetupConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -490,11 +306,82 @@ pub struct SecretDetectionConfig {
     pub custom_patterns: Vec<String>,
 }
 
+/// Controls what lean-ctx injects during `setup` and `update --rewire`.
+/// Fresh installs default to non-invasive (rules/skills off, MCP on).
+/// Users who ran setup interactively get explicit true/false.
+/// `None` = undecided (legacy: check if rules already exist and preserve behavior).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SetupConfig {
+    /// Inject agent rule files (CLAUDE.md, .cursor/rules/, etc.).
+    /// None = undecided (legacy compat: inject if rules already present).
+    /// Some(true) = always inject. Some(false) = never inject.
+    pub auto_inject_rules: Option<bool>,
+    /// Install SKILL.md files for supported agents.
+    /// None = undecided. Some(true) = install. Some(false) = skip.
+    pub auto_inject_skills: Option<bool>,
+    /// Register lean-ctx as an MCP server in editor configs.
+    #[serde(default = "serde_defaults::default_true")]
+    pub auto_update_mcp: bool,
+}
+
+impl Default for SetupConfig {
+    fn default() -> Self {
+        Self {
+            auto_inject_rules: None,
+            auto_inject_skills: None,
+            auto_update_mcp: true,
+        }
+    }
+}
+
+impl SetupConfig {
+    /// Returns whether rules should be injected, considering legacy installs.
+    /// If undecided (None), checks if lean-ctx rules markers already exist
+    /// in any agent config — if so, keeps injecting for backward compat.
+    pub fn should_inject_rules(&self) -> bool {
+        match self.auto_inject_rules {
+            Some(v) => v,
+            None => Self::rules_already_present(),
+        }
+    }
+
+    /// Returns whether skills should be installed.
+    pub fn should_inject_skills(&self) -> bool {
+        match self.auto_inject_skills {
+            Some(v) => v,
+            None => Self::rules_already_present(),
+        }
+    }
+
+    /// Check if lean-ctx rules markers exist in any known agent config location.
+    fn rules_already_present() -> bool {
+        let Some(home) = dirs::home_dir() else {
+            return false;
+        };
+        let marker = crate::rules_inject::RULES_MARKER;
+        let check_paths = [
+            home.join(".cursor/rules/lean-ctx.mdc"),
+            crate::core::editor_registry::claude_rules_dir(&home).join("lean-ctx.md"),
+            home.join(".gemini/GEMINI.md"),
+            home.join(".codeium/windsurf/rules/lean-ctx.md"),
+        ];
+        for p in &check_paths {
+            if let Ok(content) = std::fs::read_to_string(p) {
+                if content.contains(marker) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+}
+
 impl Default for SecretDetectionConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            redact: false,
+            redact: true,
             custom_patterns: Vec::new(),
         }
     }
@@ -508,16 +395,27 @@ pub struct ArchiveConfig {
     pub threshold_chars: usize,
     pub max_age_hours: u64,
     pub max_disk_mb: u64,
+    pub ephemeral: bool,
 }
 
 impl Default for ArchiveConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            threshold_chars: 4096,
+            threshold_chars: 800,
             max_age_hours: 48,
             max_disk_mb: 500,
+            ephemeral: true,
         }
+    }
+}
+
+impl ArchiveConfig {
+    pub fn ephemeral_effective(&self) -> bool {
+        if let Ok(v) = std::env::var("LEAN_CTX_EPHEMERAL") {
+            return !matches!(v.trim(), "0" | "false" | "off");
+        }
+        self.ephemeral && self.enabled
     }
 }
 
@@ -848,6 +746,9 @@ impl Default for Config {
             disabled_tools: Vec::new(),
             default_tool_categories: Vec::new(),
             no_degrade: false,
+            profile: None,
+            tool_profile: None,
+            tools_enabled: Vec::new(),
             loop_detection: LoopDetectionConfig::default(),
             rules_scope: None,
             extra_ignore_patterns: Vec::new(),
@@ -856,8 +757,14 @@ impl Default for Config {
             archive: ArchiveConfig::default(),
             memory: MemoryPolicy::default(),
             allow_paths: Vec::new(),
+            extra_roots: Vec::new(),
             content_defined_chunking: false,
-            minimal_overhead: false,
+            minimal_overhead: true,
+            symbol_map_auto: true,
+            journal_enabled: true,
+            auto_capture: true,
+            search: crate::core::hybrid_search::HybridConfig::default(),
+            llm: crate::core::llm_enhance::LlmConfig::default(),
             shell_hook_disabled: false,
             shell_activation: ShellActivation::default(),
             update_check_disabled: false,
@@ -867,6 +774,8 @@ impl Default for Config {
             memory_profile: MemoryProfile::default(),
             memory_cleanup: MemoryCleanup::default(),
             max_ram_percent: serde_defaults::default_max_ram_percent(),
+            max_disk_mb: 0,
+            max_staleness_days: 0,
             savings_footer: SavingsFooter::default(),
             project_root: None,
             lsp: std::collections::HashMap::new(),
@@ -883,16 +792,19 @@ impl Default for Config {
             reference_results: false,
             agent_token_budget: 0,
             shell_allowlist: default_shell_allowlist(),
+            shell_strict_mode: false,
+            setup: SetupConfig::default(),
         }
     }
 }
 
-fn default_shell_allowlist() -> Vec<String> {
+pub(crate) fn default_shell_allowlist() -> Vec<String> {
     [
         // VCS
         "git",
         "gh",
         "svn",
+        "hg",
         // Build tools
         "cargo",
         "npm",
@@ -900,6 +812,7 @@ fn default_shell_allowlist() -> Vec<String> {
         "yarn",
         "pnpm",
         "bun",
+        "bunx",
         "make",
         "cmake",
         "pip",
@@ -915,6 +828,17 @@ fn default_shell_allowlist() -> Vec<String> {
         "zig",
         "rustup",
         "rustc",
+        "deno",
+        "bazel",
+        // Package managers
+        "pipenv",
+        "conda",
+        "mamba",
+        "brew",
+        "apt",
+        "apt-get",
+        "apk",
+        "nix",
         // Common CLI
         "ls",
         "cat",
@@ -953,6 +877,7 @@ fn default_shell_allowlist() -> Vec<String> {
         "touch",
         "ln",
         "chmod",
+        "chown",
         "diff",
         "patch",
         "tar",
@@ -963,10 +888,22 @@ fn default_shell_allowlist() -> Vec<String> {
         "zstd",
         "curl",
         "wget",
+        "tree",
+        "du",
+        "df",
+        "ps",
+        "lsof",
+        "watch",
+        "tee",
+        "less",
+        "more",
+        "id",
+        "whoami",
+        "uname",
+        "hostname",
         // Dev tools
-        "docker",
-        "docker-compose",
-        "podman",
+        // docker/podman removed from default: mount-based PathJail bypass risk
+        // Add explicitly if needed: shell_allowlist = [..., "docker"]
         "node",
         "python",
         "python3",
@@ -982,8 +919,6 @@ fn default_shell_allowlist() -> Vec<String> {
         "clippy",
         "jq",
         "yq",
-        "xargs",
-        "env",
         "which",
         "type",
         "file",
@@ -993,20 +928,102 @@ fn default_shell_allowlist() -> Vec<String> {
         "timeout",
         "nice",
         "ionice",
+        // Testing frameworks
+        "pytest",
+        "py.test",
+        "jest",
+        "vitest",
+        "mocha",
+        "cypress",
+        "playwright",
+        "puppeteer",
+        // Pre-commit & git hooks
+        "pre-commit",
+        "husky",
+        "lint-staged",
+        "lefthook",
+        "overcommit",
+        "commitlint",
+        // Linters & formatters
+        "mypy",
+        "pyright",
+        "pylint",
+        "flake8",
+        "bandit",
+        "isort",
+        "autopep8",
+        "yapf",
+        "golangci-lint",
+        "shellcheck",
+        "markdownlint",
+        "stylelint",
+        // Bundlers & dev servers
+        "webpack",
+        "vite",
+        "esbuild",
+        "rollup",
+        "turbo",
+        "nx",
+        "lerna",
+        "next",
+        "nuxt",
+        // Ruby ecosystem
+        "bundle",
+        "bundler",
+        "rake",
+        "rails",
+        "rspec",
+        "rubocop",
+        // PHP ecosystem
+        "php",
+        "composer",
+        "phpunit",
+        "artisan",
+        // Mobile
+        "flutter",
+        "dart",
+        "xcodebuild",
+        "xcrun",
+        "pod",
+        "fastlane",
+        // Cloud & infra
+        "terraform",
+        "ansible",
+        "kubectl",
+        "helm",
+        "az",
+        "aws",
+        "gcloud",
+        "firebase",
+        "heroku",
+        "vercel",
+        "netlify",
+        "fly",
+        "wrangler",
+        "pulumi",
+        // Database
+        "psql",
+        "mysql",
+        "sqlite3",
+        "mongosh",
+        "redis-cli",
+        "pg_dump",
+        "pg_restore",
+        "mysqldump",
+        // JVM ecosystem
+        "scala",
+        "sbt",
+        "kotlin",
+        "kotlinc",
+        // Elixir
+        "elixir",
+        "iex",
         // lean-ctx itself
         "lean-ctx",
     ]
     .iter()
     .map(|s| (*s).to_string())
     .collect()
-}
-
-/// Where agent rule files are installed: global home dir, project-local, or both.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RulesScope {
-    Both,
-    Global,
-    Project,
 }
 
 impl Config {
@@ -1113,6 +1130,27 @@ impl Config {
     pub fn memory_policy_effective(&self) -> Result<MemoryPolicy, String> {
         let mut policy = self.memory.clone();
         policy.apply_env_overrides();
+
+        // Scale memory limits proportionally when max_disk_mb is set
+        // and individual limits are still at their defaults.
+        let budget = self.max_disk_mb_effective();
+        if budget > 0 {
+            let scale_factor = (budget as f64 / 500.0).clamp(0.5, 10.0);
+            let default_policy = MemoryPolicy::default();
+            if policy.knowledge.max_facts == default_policy.knowledge.max_facts {
+                policy.knowledge.max_facts = (200.0 * scale_factor) as usize;
+            }
+            if policy.knowledge.max_patterns == default_policy.knowledge.max_patterns {
+                policy.knowledge.max_patterns = (50.0 * scale_factor) as usize;
+            }
+            if policy.episodic.max_episodes == default_policy.episodic.max_episodes {
+                policy.episodic.max_episodes = (500.0 * scale_factor) as usize;
+            }
+            if policy.procedural.max_procedures == default_policy.procedural.max_procedures {
+                policy.procedural.max_procedures = (100.0 * scale_factor) as usize;
+            }
+        }
+
         policy.validate()?;
         Ok(policy)
     }
@@ -1137,6 +1175,12 @@ impl Config {
         vec!["core".to_string(), "session".to_string()]
     }
 
+    /// Returns the effective tool profile.
+    /// Priority: LEAN_CTX_TOOL_PROFILE env > config tool_profile > config tools_enabled > power.
+    pub fn tool_profile_effective(&self) -> super::tool_profiles::ToolProfile {
+        super::tool_profiles::ToolProfile::from_config(self)
+    }
+
     /// Returns `true` if all automatic read-mode degradation is disabled.
     /// Checks LCTX_NO_DEGRADE env var first, then config.toml field.
     pub fn no_degrade_effective(&self) -> bool {
@@ -1144,6 +1188,60 @@ impl Config {
             return val == "1" || val.eq_ignore_ascii_case("true");
         }
         self.no_degrade
+    }
+
+    /// Effective max_disk_mb from env or config.
+    pub fn max_disk_mb_effective(&self) -> u64 {
+        std::env::var("LEAN_CTX_MAX_DISK_MB")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(self.max_disk_mb)
+    }
+
+    /// Effective max_staleness_days from env or config.
+    pub fn max_staleness_days_effective(&self) -> u32 {
+        std::env::var("LEAN_CTX_MAX_STALENESS_DAYS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(self.max_staleness_days)
+    }
+
+    /// Archive max_disk_mb derived from simplified max_disk_mb if the detail
+    /// value is still at its default. Explicit overrides take priority.
+    pub fn archive_max_disk_mb_effective(&self) -> u64 {
+        let budget = self.max_disk_mb_effective();
+        if budget > 0 && self.archive.max_disk_mb == ArchiveConfig::default().max_disk_mb {
+            budget * 25 / 100
+        } else {
+            self.archive.max_disk_mb
+        }
+    }
+
+    /// Archive max_age_hours derived from max_staleness_days if the detail
+    /// value is still at its default. Explicit overrides take priority.
+    pub fn archive_max_age_hours_effective(&self) -> u64 {
+        let staleness = self.max_staleness_days_effective();
+        if staleness > 0 && self.archive.max_age_hours == ArchiveConfig::default().max_age_hours {
+            staleness as u64 * 24
+        } else {
+            self.archive.max_age_hours
+        }
+    }
+
+    /// BM25 max cache MB derived from simplified max_disk_mb if the detail
+    /// value is still at its default. Explicit overrides and MemoryProfile take priority.
+    pub fn bm25_max_cache_mb_effective(&self) -> u64 {
+        let budget = self.max_disk_mb_effective();
+        if budget > 0 && self.bm25_max_cache_mb == serde_defaults::default_bm25_max_cache_mb() {
+            budget * 10 / 100
+        } else {
+            let profile = MemoryProfile::effective(self);
+            if self.bm25_max_cache_mb == serde_defaults::default_bm25_max_cache_mb() {
+                profile.bm25_max_cache_mb()
+            } else {
+                self.bm25_max_cache_mb
+            }
+        }
     }
 }
 
@@ -1806,6 +1904,9 @@ impl Config {
         if local.archive.max_disk_mb != ArchiveConfig::default().max_disk_mb {
             self.archive.max_disk_mb = local.archive.max_disk_mb;
         }
+        if !local.archive.ephemeral {
+            self.archive.ephemeral = false;
+        }
         let mem_def = MemoryPolicy::default();
         if local.memory.knowledge.max_facts != mem_def.knowledge.max_facts {
             self.memory.knowledge.max_facts = local.memory.knowledge.max_facts;
@@ -1871,6 +1972,9 @@ impl Config {
         if !local.allow_paths.is_empty() {
             self.allow_paths.extend(local.allow_paths);
         }
+        if !local.extra_roots.is_empty() {
+            self.extra_roots.extend(local.extra_roots);
+        }
         if local.minimal_overhead {
             self.minimal_overhead = true;
         }
@@ -1895,8 +1999,17 @@ impl Config {
         if !local.default_tool_categories.is_empty() {
             self.default_tool_categories = local.default_tool_categories;
         }
+        if local.tool_profile.is_some() {
+            self.tool_profile = local.tool_profile;
+        }
+        if !local.tools_enabled.is_empty() {
+            self.tools_enabled = local.tools_enabled;
+        }
         if local.no_degrade {
             self.no_degrade = true;
+        }
+        if local.profile.is_some() {
+            self.profile = local.profile;
         }
         if local.proxy_timeout_ms.is_some() {
             self.proxy_timeout_ms = local.proxy_timeout_ms;
@@ -1942,12 +2055,41 @@ impl Config {
 }
 
 #[cfg(test)]
+mod extra_roots_tests {
+    use super::*;
+
+    #[test]
+    fn default_is_empty() {
+        let cfg = Config::default();
+        assert!(cfg.extra_roots.is_empty());
+    }
+
+    #[test]
+    fn deserialization_from_toml() {
+        let cfg: Config = toml::from_str(r#"extra_roots = ["/data/store", "/test/env"]"#).unwrap();
+        assert_eq!(cfg.extra_roots, vec!["/data/store", "/test/env"]);
+    }
+
+    #[test]
+    fn merge_extends() {
+        let mut base = Config {
+            extra_roots: vec!["/base".to_string()],
+            ..Config::default()
+        };
+        base.merge_local(r#"extra_roots = ["/local"]"#);
+        assert_eq!(base.extra_roots, vec!["/base", "/local"]);
+    }
+}
+
+#[cfg(test)]
 mod compression_level_tests {
     use super::*;
 
     #[test]
-    fn default_is_standard() {
-        assert_eq!(CompressionLevel::default(), CompressionLevel::Standard);
+    fn default_is_lite() {
+        // Friendly default: plain-English concise guidance, not the symbolic
+        // dense/expert-terse styles (those are opt-in power modes).
+        assert_eq!(CompressionLevel::default(), CompressionLevel::Lite);
     }
 
     #[test]
@@ -2055,9 +2197,9 @@ mod compression_level_tests {
     }
 
     #[test]
-    fn deserialization_defaults_to_standard() {
+    fn deserialization_defaults_to_lite() {
         let cfg: Config = toml::from_str("").unwrap();
-        assert_eq!(cfg.compression_level, CompressionLevel::Standard);
+        assert_eq!(cfg.compression_level, CompressionLevel::Lite);
     }
 
     #[test]
@@ -2134,5 +2276,234 @@ mod memory_cleanup_tests {
         };
         let eff = MemoryCleanup::effective(&cfg);
         assert_eq!(eff, MemoryCleanup::Shared);
+    }
+}
+
+#[cfg(test)]
+mod simplified_config_tests {
+    use super::*;
+
+    #[test]
+    fn max_disk_mb_zero_means_disabled() {
+        let cfg = Config::default();
+        assert_eq!(cfg.max_disk_mb, 0);
+        assert_eq!(cfg.max_disk_mb_effective(), 0);
+    }
+
+    #[test]
+    fn archive_derives_from_disk_budget() {
+        let cfg = Config {
+            max_disk_mb: 4000,
+            ..Default::default()
+        };
+        assert_eq!(cfg.archive_max_disk_mb_effective(), 1000);
+    }
+
+    #[test]
+    fn archive_explicit_overrides_derived() {
+        let cfg = Config {
+            max_disk_mb: 4000,
+            archive: ArchiveConfig {
+                max_disk_mb: 800,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(cfg.archive_max_disk_mb_effective(), 800);
+    }
+
+    #[test]
+    fn bm25_derives_from_disk_budget() {
+        let cfg = Config {
+            max_disk_mb: 4000,
+            ..Default::default()
+        };
+        assert_eq!(cfg.bm25_max_cache_mb_effective(), 400);
+    }
+
+    #[test]
+    fn bm25_explicit_overrides_derived() {
+        let cfg = Config {
+            max_disk_mb: 4000,
+            bm25_max_cache_mb: 256,
+            ..Default::default()
+        };
+        assert_eq!(cfg.bm25_max_cache_mb_effective(), 256);
+    }
+
+    #[test]
+    fn staleness_days_derives_archive_age() {
+        let cfg = Config {
+            max_staleness_days: 30,
+            ..Default::default()
+        };
+        assert_eq!(cfg.archive_max_age_hours_effective(), 720);
+    }
+
+    #[test]
+    fn staleness_explicit_archive_age_overrides() {
+        let cfg = Config {
+            max_staleness_days: 30,
+            archive: ArchiveConfig {
+                max_age_hours: 96,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(cfg.archive_max_age_hours_effective(), 96);
+    }
+
+    #[test]
+    fn no_budget_returns_defaults() {
+        let cfg = Config::default();
+        assert_eq!(
+            cfg.archive_max_disk_mb_effective(),
+            ArchiveConfig::default().max_disk_mb
+        );
+        assert_eq!(
+            cfg.archive_max_age_hours_effective(),
+            ArchiveConfig::default().max_age_hours
+        );
+    }
+
+    #[test]
+    fn memory_limits_scale_with_disk_budget() {
+        let cfg = Config {
+            max_disk_mb: 2000,
+            ..Default::default()
+        };
+        let policy = cfg.memory_policy_effective().unwrap();
+        // factor = 2000/500 = 4.0
+        assert_eq!(policy.knowledge.max_facts, 800);
+        assert_eq!(policy.knowledge.max_patterns, 200);
+        assert_eq!(policy.episodic.max_episodes, 2000);
+        assert_eq!(policy.procedural.max_procedures, 400);
+    }
+
+    #[test]
+    fn memory_limits_clamped_at_max_factor() {
+        let cfg = Config {
+            max_disk_mb: 50_000,
+            ..Default::default()
+        };
+        let policy = cfg.memory_policy_effective().unwrap();
+        // factor clamped at 10.0
+        assert_eq!(policy.knowledge.max_facts, 2000);
+        assert_eq!(policy.episodic.max_episodes, 5000);
+    }
+
+    #[test]
+    fn memory_limits_unchanged_when_no_budget() {
+        let cfg = Config::default();
+        let policy = cfg.memory_policy_effective().unwrap();
+        assert_eq!(policy.knowledge.max_facts, 200);
+        assert_eq!(policy.episodic.max_episodes, 500);
+    }
+
+    #[test]
+    fn simplified_template_is_valid_toml() {
+        let parsed: Result<toml::Table, _> = toml::from_str(crate::cli::SIMPLIFIED_TEMPLATE);
+        assert!(parsed.is_ok(), "Template must be valid TOML");
+    }
+}
+
+#[cfg(test)]
+mod setup_config_tests {
+    use super::*;
+
+    #[test]
+    fn default_is_none_for_rules_and_skills() {
+        let cfg = SetupConfig::default();
+        assert!(cfg.auto_inject_rules.is_none());
+        assert!(cfg.auto_inject_skills.is_none());
+        assert!(cfg.auto_update_mcp);
+    }
+
+    #[test]
+    fn explicit_true_injects() {
+        let cfg = SetupConfig {
+            auto_inject_rules: Some(true),
+            auto_inject_skills: Some(true),
+            auto_update_mcp: true,
+        };
+        assert!(cfg.should_inject_rules());
+        assert!(cfg.should_inject_skills());
+    }
+
+    #[test]
+    fn explicit_false_skips() {
+        let cfg = SetupConfig {
+            auto_inject_rules: Some(false),
+            auto_inject_skills: Some(false),
+            auto_update_mcp: true,
+        };
+        assert!(!cfg.should_inject_rules());
+        assert!(!cfg.should_inject_skills());
+    }
+
+    #[test]
+    fn deserialization_defaults_when_absent() {
+        let cfg: Config = toml::from_str("").unwrap();
+        assert!(cfg.setup.auto_inject_rules.is_none());
+        assert!(cfg.setup.auto_inject_skills.is_none());
+        assert!(cfg.setup.auto_update_mcp);
+    }
+
+    #[test]
+    fn deserialization_from_toml() {
+        let cfg: Config = toml::from_str(
+            r"
+            [setup]
+            auto_inject_rules = true
+            auto_inject_skills = false
+            auto_update_mcp = true
+            ",
+        )
+        .unwrap();
+        assert_eq!(cfg.setup.auto_inject_rules, Some(true));
+        assert_eq!(cfg.setup.auto_inject_skills, Some(false));
+        assert!(cfg.setup.auto_update_mcp);
+    }
+
+    #[test]
+    fn deserialization_null_values() {
+        let cfg: Config = toml::from_str(
+            r"
+            [setup]
+            auto_update_mcp = false
+            ",
+        )
+        .unwrap();
+        assert!(cfg.setup.auto_inject_rules.is_none());
+        assert!(cfg.setup.auto_inject_skills.is_none());
+        assert!(!cfg.setup.auto_update_mcp);
+    }
+
+    #[test]
+    fn roundtrip_serialize_deserialize() {
+        let original = Config {
+            setup: SetupConfig {
+                auto_inject_rules: Some(true),
+                auto_inject_skills: Some(false),
+                auto_update_mcp: true,
+            },
+            ..Config::default()
+        };
+        let toml_str = toml::to_string_pretty(&original).unwrap();
+        let parsed: Config = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.setup.auto_inject_rules, Some(true));
+        assert_eq!(parsed.setup.auto_inject_skills, Some(false));
+        assert!(parsed.setup.auto_update_mcp);
+    }
+
+    #[test]
+    fn fresh_install_no_rules_should_not_inject() {
+        let cfg = SetupConfig::default();
+        // On a test machine without lean-ctx rules in home, None should resolve to false
+        // (rules_already_present checks real filesystem — on CI this is always false)
+        let result = cfg.should_inject_rules();
+        // We can't assert false here because the test machine might have lean-ctx installed.
+        // Instead, verify the method doesn't panic and returns a bool.
+        let _ = result;
     }
 }

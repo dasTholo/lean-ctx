@@ -3,10 +3,13 @@
 // ---------------------------------------------------------------------------
 pub mod adaptive_chunking;
 pub mod attention_context;
+pub mod auto_capture;
+pub mod auto_findings;
 pub mod codebook;
 pub mod compression_safety;
 pub mod compressor;
 pub mod entropy;
+pub mod eval_harness;
 pub mod information_bottleneck;
 pub mod output_sanitizer;
 pub mod pop_pruning;
@@ -18,6 +21,7 @@ pub mod progressive_compression;
 pub mod rabin_karp;
 pub mod rules_canonical;
 pub mod structural_tokenizer;
+pub mod structured_read;
 
 /// Convenience re-export: all compression-related modules.
 pub mod compression {
@@ -72,6 +76,7 @@ pub mod graph_index;
 pub mod graph_provider;
 pub mod pagerank;
 pub mod property_graph;
+pub mod repomap;
 
 /// Convenience re-export: all graph-related modules.
 pub mod graph {
@@ -153,8 +158,11 @@ pub mod knowledge_domain {
 // ---------------------------------------------------------------------------
 // Domain: Search & Retrieval
 // ---------------------------------------------------------------------------
+pub mod bm25_cache;
 pub mod bm25_index;
 pub mod content_chunk;
+pub mod context_packing;
+pub mod cooccurrence;
 pub mod dense_backend;
 pub mod embedding_index;
 pub mod embeddings;
@@ -165,6 +173,7 @@ pub mod search_reranking;
 pub mod semantic_cache;
 pub mod semantic_chunks;
 pub mod splade_retrieval;
+pub mod spreading_activation;
 
 /// Convenience re-export: all search-related modules.
 pub mod search {
@@ -239,6 +248,7 @@ pub mod autonomy_drivers;
 pub mod adaptive;
 pub mod adaptive_mode_policy;
 pub mod adaptive_thresholds;
+pub mod auto_mode_resolver;
 pub mod bandit;
 pub mod mode_predictor;
 pub mod model_registry;
@@ -249,6 +259,7 @@ pub mod task_relevance;
 // ---------------------------------------------------------------------------
 pub mod anomaly;
 pub mod benchmark;
+pub mod benchmark_compare;
 pub mod cognitive_load;
 pub mod contracts;
 pub mod cyclomatic;
@@ -282,9 +293,11 @@ pub mod client_constraints;
 pub mod config;
 pub mod consolidation;
 pub mod consolidation_engine;
+pub mod contextops;
 pub mod data_dir;
 pub mod error;
 pub mod events;
+pub mod eviction_orchestrator;
 pub mod evidence_ledger;
 pub mod feedback;
 pub mod filters;
@@ -299,6 +312,7 @@ pub mod hnsw;
 pub mod home;
 pub mod homeostasis;
 
+pub mod graph_cache;
 pub mod import_resolver;
 pub mod index_namespace;
 pub mod index_orchestrator;
@@ -309,16 +323,21 @@ pub mod intent_protocol;
 pub mod intent_router;
 pub mod io_boundary;
 pub mod io_health;
+pub mod journal;
 pub mod jsonc;
 pub mod language_capabilities;
 pub mod limits;
+pub mod llm_enhance;
 pub mod llm_feedback;
 pub mod logging;
 pub mod mcp_manifest;
 pub mod mdl_selector;
+pub mod multi_repo;
 pub mod owasp_alignment;
+pub mod path_locks;
 pub mod pathutil;
 pub mod pipeline;
+pub mod plugins;
 pub mod portable_binary;
 pub mod profiles;
 pub mod project_hash;
@@ -335,6 +354,9 @@ pub mod sandbox;
 pub mod sandbox_landlock;
 pub mod sandbox_seatbelt;
 pub mod sanitize;
+pub mod savings_footer;
+pub mod search_delta;
+pub mod search_index;
 pub mod secret_detection;
 pub mod session_token;
 pub mod shell_allowlist;
@@ -350,9 +372,12 @@ pub mod theme;
 pub mod tokenizer_translation_driver;
 pub mod tokens;
 pub mod tool_lifecycle;
+pub mod tool_profiles;
+pub mod transcript_compact;
 pub mod update_scheduler;
 pub mod updater;
 pub mod version_check;
+pub mod visualizer;
 pub mod workflow;
 pub mod workspace_config;
 pub mod wrapped;
@@ -374,3 +399,4 @@ pub mod pathjail;
 pub mod signatures;
 #[cfg(feature = "tree-sitter")]
 pub mod signatures_ts;
+pub mod storage_maintenance;

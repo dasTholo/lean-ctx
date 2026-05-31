@@ -188,6 +188,30 @@ impl ConfigSchema {
             ),
         );
         root.insert(
+            "profile".into(),
+            key(
+                "string",
+                serde_json::json!(cfg.profile.as_deref().unwrap_or("")),
+                "Persistent profile name. Checked after LEAN_CTX_PROFILE env var. Set via: lean-ctx config set profile passthrough",
+            ),
+        );
+        root.insert(
+            "tool_profile".into(),
+            key_enum(
+                &["minimal", "standard", "power"],
+                cfg.tool_profile.as_deref().unwrap_or(""),
+                "Tool visibility profile: minimal (5 tools), standard (20), power (all). Override via LEAN_CTX_TOOL_PROFILE",
+            ),
+        );
+        root.insert(
+            "tools_enabled".into(),
+            key(
+                "string[]",
+                serde_json::json!(cfg.tools_enabled),
+                "Explicit list of enabled tool names (overrides tool_profile when non-empty)",
+            ),
+        );
+        root.insert(
             "rules_scope".into(),
             key_enum(
                 &["both", "global", "project"],
@@ -216,8 +240,8 @@ impl ConfigSchema {
             "compression_level".into(),
             key_enum_with_env(
                 &["off", "lite", "standard", "max"],
-                "off",
-                "Unified compression level for all output",
+                "lite",
+                "Unified output-style level for the model's prose (not tool-output compression). lite=plain concise (default), standard/max=denser symbolic 'power modes'",
                 "LEAN_CTX_COMPRESSION",
             ),
         );
@@ -228,6 +252,15 @@ impl ConfigSchema {
                 serde_json::json!(cfg.allow_paths),
                 "Additional paths allowed by PathJail (absolute)",
                 "LEAN_CTX_ALLOW_PATH",
+            ),
+        );
+        root.insert(
+            "extra_roots".into(),
+            key_with_env(
+                "string[]",
+                serde_json::json!(cfg.extra_roots),
+                "Extra project roots for multi-root workspaces (auto-added to PathJail allow-list)",
+                "LEAN_CTX_EXTRA_ROOTS",
             ),
         );
         root.insert(
@@ -242,9 +275,42 @@ impl ConfigSchema {
             "minimal_overhead".into(),
             key_with_env(
                 "bool",
-                serde_json::json!(false),
+                serde_json::json!(true),
                 "Skip session/knowledge/gotcha blocks in MCP instructions",
                 "LEAN_CTX_MINIMAL",
+            ),
+        );
+        root.insert(
+            "symbol_map_auto".into(),
+            key(
+                "bool",
+                serde_json::json!(true),
+                "Auto-enable SymbolMap for projects with >50 source files",
+            ),
+        );
+        root.insert(
+            "journal_enabled".into(),
+            key(
+                "bool",
+                serde_json::json!(true),
+                "Write human-readable activity journal to ~/.lean-ctx/journal.md",
+            ),
+        );
+        root.insert(
+            "auto_capture".into(),
+            key(
+                "bool",
+                serde_json::json!(true),
+                "Automatic knowledge capture from tool findings",
+            ),
+        );
+        root.insert(
+            "cache_policy".into(),
+            key_with_env(
+                "enum(aggressive|safe|off)",
+                serde_json::json!("aggressive"),
+                "Cache policy for ctx_read: aggressive (13-tok stubs), safe (map on hit), off (always disk)",
+                "LEAN_CTX_CACHE_POLICY",
             ),
         );
         root.insert(
@@ -295,8 +361,8 @@ impl ConfigSchema {
             "memory_profile".into(),
             key_enum_with_env(
                 &["low", "balanced", "performance"],
-                "balanced",
-                "Controls RAM vs feature trade-off",
+                "performance",
+                "Controls RAM vs feature trade-off (performance = max quality)",
                 "LEAN_CTX_MEMORY_PROFILE",
             ),
         );
@@ -313,8 +379,8 @@ impl ConfigSchema {
             "savings_footer".into(),
             key_enum_with_env(
                 &["auto", "always", "never"],
-                "never",
-                "Controls visibility of token savings footers: never (default, suppress everywhere), always, auto (context-dependent)",
+                "always",
+                "Controls visibility of token savings footers: always (default, show on every response), never, auto (context-dependent). Also: LEAN_CTX_SHOW_SAVINGS=1|0",
                 "LEAN_CTX_SAVINGS_FOOTER",
             ),
         );
@@ -325,6 +391,24 @@ impl ConfigSchema {
                 serde_json::json!(cfg.max_ram_percent),
                 "Maximum percentage of system RAM that lean-ctx may use (1-50, default 5)",
                 "LEAN_CTX_MAX_RAM_PERCENT",
+            ),
+        );
+        root.insert(
+            "max_disk_mb".into(),
+            key_with_env(
+                "u64",
+                serde_json::json!(cfg.max_disk_mb),
+                "Simplified disk budget in MB (0 = disabled). Distributes: archive ~25%, BM25 ~10%",
+                "LEAN_CTX_MAX_DISK_MB",
+            ),
+        );
+        root.insert(
+            "max_staleness_days".into(),
+            key_with_env(
+                "u32",
+                serde_json::json!(cfg.max_staleness_days),
+                "Auto-purge data older than N days (0 = disabled). Flows into archive.max_age_hours",
+                "LEAN_CTX_MAX_STALENESS_DAYS",
             ),
         );
         root.insert(
@@ -411,6 +495,14 @@ impl ConfigSchema {
                 serde_json::json!([]),
                 "Optional shell command allowlist. When non-empty, only listed binaries are permitted",
                 "LEAN_CTX_SHELL_ALLOWLIST",
+            ),
+        );
+        root.insert(
+            "shell_strict_mode".into(),
+            key(
+                "bool",
+                serde_json::json!(false),
+                "Block $(), backticks, <() in shell arguments. Default false = warn only.",
             ),
         );
 
@@ -505,9 +597,59 @@ impl ConfigSchema {
                 "Maximum total disk usage for the archive",
             ),
         );
+        archive.insert(
+            "ephemeral".into(),
+            key("bool", serde_json::json!(cfg.archive.ephemeral), "Replace large results with summary+ref (ctx_expand to retrieve). Env: LEAN_CTX_EPHEMERAL"),
+        );
         sections.insert("archive".into(), SectionSchema {
             description: "Settings for the zero-loss compression archive (large tool outputs saved to disk)".into(),
             keys: archive,
+        });
+
+        let mut search = BTreeMap::new();
+        search.insert(
+            "bm25_weight".into(),
+            key(
+                "f64",
+                serde_json::json!(cfg.search.bm25_weight),
+                "BM25 lexical search weight in RRF fusion",
+            ),
+        );
+        search.insert(
+            "dense_weight".into(),
+            key(
+                "f64",
+                serde_json::json!(cfg.search.dense_weight),
+                "Dense vector search weight in RRF fusion",
+            ),
+        );
+        search.insert(
+            "bm25_candidates".into(),
+            key(
+                "usize",
+                serde_json::json!(cfg.search.bm25_candidates),
+                "Number of BM25 candidates to retrieve before fusion",
+            ),
+        );
+        search.insert(
+            "dense_candidates".into(),
+            key(
+                "usize",
+                serde_json::json!(cfg.search.dense_candidates),
+                "Number of dense candidates to retrieve before fusion",
+            ),
+        );
+        search.insert(
+            "splade_weight".into(),
+            key(
+                "f64",
+                serde_json::json!(cfg.search.splade_weight),
+                "SPLADE expansion weight (0.0 to disable)",
+            ),
+        );
+        sections.insert("search".into(), SectionSchema {
+            description: "Hybrid search weights for ctx_semantic_search (BM25 + dense vector + SPLADE + graph proximity)".into(),
+            keys: search,
         });
 
         let mut autonomy = BTreeMap::new();
@@ -1180,9 +1322,100 @@ impl ConfigSchema {
             );
         }
 
+        let mut setup_keys = BTreeMap::new();
+        setup_keys.insert(
+            "auto_inject_rules".into(),
+            key(
+                "bool?",
+                serde_json::json!(null),
+                "Inject agent rule files during setup/update. null=auto (inject if already present), true=always, false=never",
+            ),
+        );
+        setup_keys.insert(
+            "auto_inject_skills".into(),
+            key(
+                "bool?",
+                serde_json::json!(null),
+                "Install SKILL.md files during setup/update. null=auto (install if rules present), true=always, false=never",
+            ),
+        );
+        setup_keys.insert(
+            "auto_update_mcp".into(),
+            key(
+                "bool",
+                serde_json::json!(true),
+                "Register lean-ctx MCP server in editor configs during setup/update",
+            ),
+        );
+        sections.insert(
+            "setup".into(),
+            SectionSchema {
+                description: "Controls what lean-ctx injects during setup and updates. Fresh installs default to non-invasive (rules/skills off, MCP on).".into(),
+                keys: setup_keys,
+            },
+        );
+
+        let mut llm_keys = BTreeMap::new();
+        llm_keys.insert(
+            "enabled".into(),
+            key(
+                "bool",
+                serde_json::json!(false),
+                "Enable optional LLM enhancements (query expansion, contradiction explanation)",
+            ),
+        );
+        llm_keys.insert(
+            "backend".into(),
+            key_enum(
+                &["ollama", "openrouter", "anthropic"],
+                "ollama",
+                "LLM backend provider",
+            ),
+        );
+        llm_keys.insert(
+            "model".into(),
+            key(
+                "string",
+                serde_json::json!("llama3.2"),
+                "Model name for the selected backend",
+            ),
+        );
+        llm_keys.insert(
+            "api_key".into(),
+            key(
+                "string",
+                serde_json::json!(""),
+                "API key for OpenRouter or Anthropic backends",
+            ),
+        );
+        llm_keys.insert(
+            "timeout_secs".into(),
+            key(
+                "u64",
+                serde_json::json!(10),
+                "HTTP timeout for LLM requests",
+            ),
+        );
+        sections.insert("llm".into(), SectionSchema {
+            description: "Optional LLM enhancement settings (query expansion, contradiction explanation). Deterministic fallback when disabled or unreachable.".into(),
+            keys: llm_keys,
+        });
+
         ConfigSchema {
             version: 1,
             sections,
+        }
+    }
+
+    /// Looks up a key schema by its dot-separated TOML path.
+    /// Returns `None` if the key is not part of the schema.
+    pub fn lookup(&self, key: &str) -> Option<&KeySchema> {
+        if let Some(dot_pos) = key.find('.') {
+            let section = &key[..dot_pos];
+            let field = &key[dot_pos + 1..];
+            self.sections.get(section)?.keys.get(field)
+        } else {
+            self.sections.get("root")?.keys.get(key)
         }
     }
 

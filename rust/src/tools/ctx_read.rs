@@ -28,11 +28,22 @@ fn is_cacheable_mode(mode: &str) -> bool {
     CACHEABLE_MODES.contains(&mode)
 }
 
-fn compressed_cache_key(mode: &str, crp_mode: CrpMode) -> String {
-    if crp_mode.is_tdd() {
+fn compressed_cache_key(mode: &str, crp_mode: CrpMode, task: Option<&str>) -> String {
+    let base = if crp_mode.is_tdd() {
         format!("{mode}:tdd")
     } else {
         mode.to_string()
+    };
+    // map/signatures output now embeds a task-relevant body, so task-aware and
+    // task-free variants must cache under distinct keys.
+    match task.map(str::trim).filter(|t| !t.is_empty()) {
+        Some(t) => {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            t.hash(&mut h);
+            format!("{base}:t{:x}", h.finish())
+        }
+        None => base,
     }
 }
 
@@ -363,12 +374,13 @@ fn handle_with_options_inner(
         cache_snapshot
     {
         if mode == "full" {
-            // Fast mtime check: if file unchanged on disk AND full content was previously
-            // delivered, return a minimal stub. After host compaction, delivery flags are
-            // reset so the agent gets full content again automatically.
-            // "safe" policy never returns stubs — always delivers content.
+            let no_deg = crate::core::config::Config::load().no_degrade_effective();
+            let prof = crate::core::profiles::active_profile();
+            let force_full = no_deg
+                || (prof.read.default_mode_effective() == "full"
+                    && prof.compression.crp_mode_effective() == "off");
             let policy_allows_stub =
-                crate::server::compaction_sync::effective_cache_policy() != "safe";
+                crate::server::compaction_sync::effective_cache_policy() != "safe" && !force_full;
             if policy_allows_stub
                 && !crate::core::cache::is_cache_entry_stale(path, cached_mtime)
                 && cache.is_full_delivered(path)
@@ -376,24 +388,22 @@ fn handle_with_options_inner(
                 cache.record_cache_hit(path);
                 let out = if crate::core::protocol::meta_visible() {
                     format!(
-                        "{file_ref}={short} [unchanged, {line_count}L, use cached context]\nFile unchanged on disk (same hash). If you haven't seen this content, use fresh=true to force re-read.",
+                        "{file_ref}={short} [unchanged {line_count}L]\nUnchanged on disk. Use fresh=true to force re-read.",
                         )
                 } else {
                     let proof = content_opt
                         .as_deref()
                         .and_then(|c| cache_hit_proof_line(c, read_count));
                     let reads_note = if read_count > 3 {
-                        format!(" (read {}x, unchanged)", read_count + 1)
+                        format!(" (read {}x)", read_count + 1)
                     } else {
                         String::new()
                     };
                     match proof {
                         Some(p) => format!(
-                            "{file_ref}={short} [unchanged, {line_count}L, use cached context{reads_note} | first: \"{p}\"]"
+                            "{file_ref}={short} [unchanged {line_count}L{reads_note} | \"{p}\"]"
                         ),
-                        None => format!(
-                            "{file_ref}={short} [unchanged, {line_count}L, use cached context{reads_note}]"
-                        ),
+                        None => format!("{file_ref}={short} [unchanged {line_count}L{reads_note}]"),
                     }
                 };
                 let out = crate::core::redaction::redact_text_if_enabled(&out);
@@ -423,7 +433,7 @@ fn handle_with_options_inner(
         };
 
         if is_cacheable_mode(&resolved_mode) {
-            let cache_key = compressed_cache_key(&resolved_mode, crp_mode);
+            let cache_key = compressed_cache_key(&resolved_mode, crp_mode, task);
             let compressed_hit = cache.get_compressed(path, &cache_key).cloned();
             if let Some(cached_output) = compressed_hit {
                 cache.record_cache_hit(path);
@@ -450,7 +460,7 @@ fn handle_with_options_inner(
                 task,
             );
             if is_cacheable_mode(&resolved_mode) {
-                let cache_key = compressed_cache_key(&resolved_mode, crp_mode);
+                let cache_key = compressed_cache_key(&resolved_mode, crp_mode, task);
                 cache.set_compressed(path, &cache_key, out.clone());
             }
             let out = crate::core::redaction::redact_text_if_enabled(&out);
@@ -545,7 +555,7 @@ fn handle_with_options_inner(
         output.push_str(&format!("\n{hint}"));
     }
     if is_cacheable_mode(&resolved_mode) {
-        let cache_key = compressed_cache_key(&resolved_mode, crp_mode);
+        let cache_key = compressed_cache_key(&resolved_mode, crp_mode, task);
         cache.set_compressed(path, &cache_key, output.clone());
     }
     let output = crate::core::redaction::redact_text_if_enabled(&output);
@@ -579,75 +589,15 @@ pub fn is_instruction_file(path: &str) -> bool {
         || lower.contains("/agents.md")
 }
 
+/// Delegates to the unified `auto_mode_resolver::resolve()`.
 fn resolve_auto_mode(file_path: &str, original_tokens: usize, task: Option<&str>) -> String {
-    if is_instruction_file(file_path) {
-        return "full".to_string();
-    }
-
-    if let Ok(bt) = crate::core::bounce_tracker::global().lock() {
-        if bt.should_force_full(file_path) {
-            return "full".to_string();
-        }
-    }
-
-    let intent_query = task.unwrap_or("read");
-    let route = crate::core::intent_router::route_v1(intent_query);
-    let intent_mode = &route.decision.effective_read_mode;
-    if intent_mode != "auto" && intent_mode != "reference" {
-        return intent_mode.clone();
-    }
-
-    // Priority 2: FileSignature-based predictor
-    let sig = crate::core::mode_predictor::FileSignature::from_path(file_path, original_tokens);
-    let predictor = crate::core::mode_predictor::ModePredictor::new();
-    let mut predicted = predictor
-        .predict_best_mode(&sig)
-        .unwrap_or_else(|| "full".to_string());
-    if predicted == "auto" {
-        predicted = "full".to_string();
-    }
-
-    // Priority 3: Bandit exploration when budget is tight
-    // SAFETY: Bandit NEVER overrides "full" — full is sacred (byte-accurate content needed for edits)
-    if predicted != "full" {
-        if let Some(project_root) =
-            crate::core::session::SessionState::load_latest().and_then(|s| s.project_root)
-        {
-            let ext = std::path::Path::new(file_path)
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("");
-            let bucket = match original_tokens {
-                0..=2000 => "sm",
-                2001..=10000 => "md",
-                10001..=50000 => "lg",
-                _ => "xl",
-            };
-            let bandit_key = format!("{ext}_{bucket}");
-            let mut store = crate::core::bandit::BanditStore::load(&project_root);
-            let bandit = store.get_or_create(&bandit_key);
-            let arm = bandit.select_arm();
-            if arm.budget_ratio < 0.25 && original_tokens > 2000 {
-                predicted = "aggressive".to_string();
-            }
-        }
-    }
-
-    // Priority 4: Adaptive mode policy
-    let policy = crate::core::adaptive_mode_policy::AdaptiveModePolicyStore::load();
-    let chosen = policy.choose_auto_mode(task, &predicted);
-
-    if original_tokens > 2000 {
-        if predicted == "map" || predicted == "signatures" {
-            if chosen != "map" && chosen != "signatures" {
-                return predicted;
-            }
-        } else if chosen == "full" && predicted != "full" {
-            return predicted;
-        }
-    }
-
-    chosen
+    let ctx = crate::core::auto_mode_resolver::AutoModeContext {
+        path: file_path,
+        token_count: original_tokens,
+        task,
+        cache: None,
+    };
+    crate::core::auto_mode_resolver::resolve(&ctx).mode
 }
 
 fn find_similar_and_update_semantic_index(path: &str, content: &str) -> Option<String> {
@@ -675,7 +625,9 @@ fn find_similar_and_update_semantic_index(path: &str, content: &str) -> Option<S
         .collect();
 
     index.add_file(path, content, &session_id);
-    let _ = index.save(&project_root);
+    if let Err(e) = index.save(&project_root) {
+        tracing::warn!("lean-ctx: failed to persist semantic index: {e}");
+    }
 
     if relevant.is_empty() {
         return None;
@@ -713,6 +665,7 @@ fn handle_full_with_auto_delta(
     ext: &str,
     task: Option<&str>,
 ) -> (String, usize) {
+    let _mode_guard = crate::core::savings_footer::ModeGuard::new("full");
     let Ok(disk_content) = read_file_lossy(path) else {
         cache.record_cache_hit(path);
         if let Some(existing) = cache.get(path) {
@@ -745,6 +698,12 @@ fn handle_full_with_auto_delta(
         return (out, sent);
     };
 
+    let no_deg = crate::core::config::Config::load().no_degrade_effective();
+    let prof = crate::core::profiles::active_profile();
+    let force_full = no_deg
+        || (prof.read.default_mode_effective() == "full"
+            && prof.compression.crp_mode_effective() == "off");
+
     let old_content = cache
         .get(path)
         .and_then(crate::core::cache::CacheEntry::content)
@@ -752,27 +711,28 @@ fn handle_full_with_auto_delta(
     let store_result = cache.store(path, &disk_content);
 
     if store_result.was_hit {
-        let policy_allows_stub = crate::server::compaction_sync::effective_cache_policy() != "safe";
+        let policy_allows_stub =
+            crate::server::compaction_sync::effective_cache_policy() != "safe" && !force_full;
         if policy_allows_stub && store_result.full_content_delivered {
             let out = if crate::core::protocol::meta_visible() {
                 format!(
-                    "{file_ref}={short} [unchanged, {}L, use cached context]\nFile unchanged on disk (same hash). If you haven't seen this content, use fresh=true to force re-read.",
+                    "{file_ref}={short} [unchanged {}L]\nUnchanged on disk. Use fresh=true to force re-read.",
                     store_result.line_count
                 )
             } else {
                 let proof = cache_hit_proof_line(&disk_content, store_result.read_count);
                 let reads_note = if store_result.read_count > 3 {
-                    format!(" (read {}x, unchanged)", store_result.read_count)
+                    format!(" (read {}x)", store_result.read_count)
                 } else {
                     String::new()
                 };
                 match proof {
                     Some(p) => format!(
-                        "{file_ref}={short} [unchanged, {}L, use cached context{reads_note} | first: \"{p}\"]",
+                        "{file_ref}={short} [unchanged {}L{reads_note} | \"{p}\"]",
                         store_result.line_count
                     ),
                     None => format!(
-                        "{file_ref}={short} [unchanged, {}L, use cached context{reads_note}]",
+                        "{file_ref}={short} [unchanged {}L{reads_note}]",
                         store_result.line_count
                     ),
                 }
@@ -796,7 +756,10 @@ fn handle_full_with_auto_delta(
     let diff_tokens = count_tokens(&diff);
     let full_tokens = store_result.original_tokens;
 
-    if full_tokens > 0 && (diff_tokens as f64) < (full_tokens as f64 * AUTO_DELTA_THRESHOLD) {
+    if !force_full
+        && full_tokens > 0
+        && (diff_tokens as f64) < (full_tokens as f64 * AUTO_DELTA_THRESHOLD)
+    {
         let savings = protocol::format_savings(full_tokens, diff_tokens);
         let head = if crate::core::protocol::meta_visible() && !file_ref.is_empty() {
             format!("{file_ref}={short}")
@@ -830,6 +793,7 @@ fn format_full_output(
     line_count: usize,
     _task: Option<&str>,
 ) -> (String, usize) {
+    let _mode_guard = crate::core::savings_footer::ModeGuard::new("full");
     let tokens = original_tokens;
     let metadata = build_header(file_ref, short, ext, content, line_count, true);
 
@@ -889,6 +853,7 @@ fn process_mode(
     file_path: &str,
     task: Option<&str>,
 ) -> (String, usize) {
+    let _mode_guard = crate::core::savings_footer::ModeGuard::new(mode);
     let line_count = content.lines().count();
 
     match mode {
@@ -941,6 +906,10 @@ fn process_mode(
                     output.push_str(&sig.to_compact());
                 }
             }
+            if let Some(body) = task_relevant_body(content, file_path, ext, task) {
+                output.push('\n');
+                output.push_str(&body);
+            }
             let sent = count_tokens(&output);
             (
                 append_compressed_hint(
@@ -963,6 +932,32 @@ fn process_mode(
                     let output = protocol::append_savings(&output, original_tokens, sent);
                     return (append_compressed_hint(&output, file_path), sent);
                 }
+            }
+
+            let structured = match ext {
+                "md" | "mdx" | "rst" => {
+                    crate::core::structured_read::extract_markdown_outline(content)
+                }
+                "json" => crate::core::structured_read::extract_json_structure(content),
+                "yaml" | "yml" => crate::core::structured_read::extract_yaml_structure(content),
+                "toml" => crate::core::structured_read::extract_toml_structure(content),
+                _ if file_path.to_lowercase().ends_with(".lock")
+                    || file_path.to_lowercase().ends_with("go.sum") =>
+                {
+                    crate::core::structured_read::extract_lock_summary(content, file_path)
+                }
+                _ => String::new(),
+            };
+
+            if !structured.is_empty() {
+                let mut output = if crate::core::protocol::meta_visible() && !file_ref.is_empty() {
+                    format!("{file_ref}={short} {line_count}L\n{structured}")
+                } else {
+                    format!("{short} {line_count}L\n{structured}")
+                };
+                let sent = count_tokens(&output);
+                output = protocol::append_savings(&output, original_tokens, sent);
+                return (append_compressed_hint(&output, file_path), sent);
             }
 
             let sigs = signatures::extract_signatures(content, ext);
@@ -1001,6 +996,11 @@ fn process_mode(
                 }
             }
 
+            if let Some(body) = task_relevant_body(content, file_path, ext, task) {
+                output.push('\n');
+                output.push_str(&body);
+            }
+
             let sent = count_tokens(&output);
             (
                 append_compressed_hint(
@@ -1034,7 +1034,7 @@ fn process_mode(
                 sym.register(ident);
             }
 
-            if sym.len() >= 3 {
+            if symbol_map::substitution_enabled() && sym.len() >= 3 {
                 let sym_table = sym.format_table();
                 let sym_applied = sym.apply(&compressed);
                 let orig_tok = count_tokens(&compressed);
@@ -1171,6 +1171,78 @@ fn process_mode(
     }
 }
 
+/// When a task is active, find the symbol whose name best matches a task
+/// keyword and return its body as numbered source lines (capped).
+///
+/// `map`/`signatures` stay compact but include the one symbol body the agent is
+/// most likely about to read, avoiding a follow-up full read. Uses the
+/// tree-sitter chunk extractor (which carries spans + body across languages); a
+/// no-op when tree-sitter is unavailable.
+fn task_relevant_body(
+    content: &str,
+    file_path: &str,
+    ext: &str,
+    task: Option<&str>,
+) -> Option<String> {
+    const MAX_BODY_LINES: usize = 80;
+
+    let task = task.map(str::trim).filter(|t| !t.is_empty())?;
+    let (_files, keywords) = crate::core::task_relevance::parse_task_hints(task);
+    if keywords.is_empty() {
+        return None;
+    }
+    let kw_lower: Vec<String> = keywords.iter().map(|k| k.to_lowercase()).collect();
+
+    let chunks = crate::core::chunks_ts::extract_chunks_ts(file_path, content, ext)?;
+
+    // Score: exact name match (2) beats substring overlap (1).
+    let mut best_idx: Option<usize> = None;
+    let mut best_score = 0u8;
+    for (i, ch) in chunks.iter().enumerate() {
+        if ch.symbol_name.is_empty() {
+            continue;
+        }
+        let name_l = ch.symbol_name.to_lowercase();
+        let substr = kw_lower
+            .iter()
+            .any(|k| k.len() >= 3 && (name_l.contains(k.as_str()) || k.contains(name_l.as_str())));
+        let score = if kw_lower.contains(&name_l) {
+            2
+        } else {
+            u8::from(substr)
+        };
+        if score > best_score {
+            best_score = score;
+            best_idx = Some(i);
+        }
+    }
+
+    let ch = &chunks[best_idx?];
+    let body_lines: Vec<&str> = ch.content.lines().collect();
+    let total = body_lines.len();
+    let shown = total.min(MAX_BODY_LINES);
+    let body: String = body_lines[..shown]
+        .iter()
+        .enumerate()
+        .map(|(i, l)| format!("{:>4}|{l}", ch.start_line + i))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let truncated = if shown < total {
+        format!(
+            "\n  … +{} lines — ctx_read(mode=\"lines:{}-{}\")",
+            total - shown,
+            ch.start_line + shown,
+            ch.end_line
+        )
+    } else {
+        String::new()
+    };
+    Some(format!(
+        "  ▸ body {} L{}-{}:\n{body}{truncated}",
+        ch.symbol_name, ch.start_line, ch.end_line
+    ))
+}
+
 fn extract_line_range(content: &str, range_str: &str) -> String {
     let lines: Vec<&str> = content.lines().collect();
     let total = lines.len();
@@ -1201,6 +1273,7 @@ fn extract_line_range(content: &str, range_str: &str) -> String {
 }
 
 fn handle_diff(cache: &mut SessionCache, path: &str, file_ref: &str) -> (String, usize) {
+    let _mode_guard = crate::core::savings_footer::ModeGuard::new("diff");
     let short = protocol::shorten_path(path);
     let old_content = cache
         .get(path)
@@ -1523,6 +1596,52 @@ mod tests {
         }
         code.push("}".to_string());
         code.join("\n")
+    }
+
+    #[test]
+    fn map_mode_inlines_task_relevant_body() {
+        let content = "pub fn alpha() {\n    let a = 1;\n}\n\npub fn validate_token(t: &str) -> bool {\n    let ok = check(t);\n    ok\n}\n";
+        let tokens = count_tokens(content);
+        let (with_task, _) = process_mode(
+            content,
+            "map",
+            "F1",
+            "test.rs",
+            "rs",
+            tokens,
+            CrpMode::Off,
+            "test.rs",
+            Some("fix bug in validate_token"),
+        );
+        assert!(
+            with_task.contains("▸ body") && with_task.contains("validate_token"),
+            "map with task should inline the matching body: {with_task}"
+        );
+        let (no_task, _) = process_mode(
+            content,
+            "map",
+            "F1",
+            "test.rs",
+            "rs",
+            tokens,
+            CrpMode::Off,
+            "test.rs",
+            None,
+        );
+        assert!(
+            !no_task.contains("▸ body"),
+            "map without a task must not inline a body: {no_task}"
+        );
+    }
+
+    #[test]
+    fn compressed_cache_key_distinguishes_task() {
+        let no_task = compressed_cache_key("map", CrpMode::Off, None);
+        let with_task = compressed_cache_key("map", CrpMode::Off, Some("fix login"));
+        let other_task = compressed_cache_key("map", CrpMode::Off, Some("refactor db"));
+        assert_eq!(no_task, "map");
+        assert_ne!(with_task, no_task);
+        assert_ne!(with_task, other_task);
     }
 
     #[test]

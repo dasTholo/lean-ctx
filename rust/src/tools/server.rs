@@ -80,10 +80,15 @@ pub struct LeanCtxServer {
     pub context_ir: Option<Arc<RwLock<crate::core::context_ir::ContextIrV1>>>,
     pub registry: Option<Arc<crate::server::registry::ToolRegistry>>,
     pub(crate) rules_stale_checked: Arc<std::sync::atomic::AtomicBool>,
+    pub(crate) rules_tip_shown: Arc<std::sync::atomic::AtomicBool>,
     pub(crate) last_seen_event_id: Arc<std::sync::atomic::AtomicI64>,
     pub(crate) startup_project_root: Option<String>,
     pub(crate) startup_shell_cwd: Option<String>,
     pub(crate) peer: Arc<RwLock<Option<Peer<RoleServer>>>>,
+    pub(crate) has_client_roots: Arc<std::sync::atomic::AtomicBool>,
+    pub(crate) roots_resolved: Arc<std::sync::atomic::AtomicBool>,
+    pub(crate) bm25_cache: Arc<std::sync::Mutex<Option<crate::core::bm25_cache::Bm25CacheEntry>>>,
+    pub(crate) progress_sender: crate::server::progress::SharedProgressSender,
 }
 
 pub use crate::core::protocol::ToolCallRecord;

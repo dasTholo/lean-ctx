@@ -4,12 +4,13 @@
 //! when memory usage exceeds configurable thresholds (default: 5% of system RAM).
 //! At critical levels (>3x limit), performs emergency shutdown to prevent OS OOM kill.
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 
 static PEAK_RSS: AtomicU64 = AtomicU64::new(0);
 static GUARD_RUNNING: AtomicBool = AtomicBool::new(false);
 static ABORT_REQUESTED: AtomicBool = AtomicBool::new(false);
+static CURRENT_PRESSURE: AtomicU8 = AtomicU8::new(0);
 
 /// Current process RSS in bytes, or `None` if unavailable.
 pub fn get_rss_bytes() -> Option<u64> {
@@ -23,6 +24,23 @@ pub fn get_rss_bytes() -> Option<u64> {
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
+        None
+    }
+}
+
+/// RSS of an arbitrary process by PID, or `None` if unavailable/dead.
+pub fn get_rss_bytes_for_pid(pid: u32) -> Option<u64> {
+    #[cfg(target_os = "linux")]
+    {
+        linux_rss_for_pid(pid)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        macos_rss_for_pid(pid)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = pid;
         None
     }
 }
@@ -69,17 +87,41 @@ pub struct MemorySnapshot {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
+#[repr(u8)]
 pub enum PressureLevel {
-    Normal,
-    Soft,
-    Medium,
-    Hard,
-    Critical,
+    Normal = 0,
+    Soft = 1,
+    Medium = 2,
+    Hard = 3,
+    Critical = 4,
+}
+
+impl PressureLevel {
+    fn from_u8(v: u8) -> Self {
+        match v {
+            1 => Self::Soft,
+            2 => Self::Medium,
+            3 => Self::Hard,
+            4 => Self::Critical,
+            _ => Self::Normal,
+        }
+    }
 }
 
 impl MemorySnapshot {
+    /// Capture memory snapshot of the **current** process.
     pub fn capture() -> Option<Self> {
-        let rss = get_rss_bytes()?;
+        Self::capture_impl(get_rss_bytes()?)
+    }
+
+    /// Capture memory snapshot for the **daemon** process (by PID).
+    /// Falls back to the current process if the PID is dead or unreadable.
+    pub fn capture_for_pid(pid: u32) -> Option<Self> {
+        let rss = get_rss_bytes_for_pid(pid).or_else(get_rss_bytes)?;
+        Self::capture_impl(rss)
+    }
+
+    fn capture_impl(rss: u64) -> Option<Self> {
         let sys = get_system_ram_bytes()?;
         let limit = rss_limit_bytes()?;
         let pct = if sys > 0 {
@@ -118,13 +160,17 @@ impl MemorySnapshot {
 }
 
 /// Force-purge all jemalloc arenas to return memory to the OS.
+/// Uses `MALLCTL_ARENAS_ALL` (value 4096) which is the jemalloc sentinel
+/// for "all arenas". Logs errors instead of silently swallowing them.
 pub fn jemalloc_purge() {
     #[cfg(all(feature = "jemalloc", not(windows)))]
     {
         use tikv_jemalloc_ctl::raw;
         let purge_mib = b"arena.4096.purge\0";
         unsafe {
-            let _ = raw::write(purge_mib, 0u64);
+            if let Err(e) = raw::write(purge_mib, 0u64) {
+                tracing::debug!("[memory_guard] jemalloc purge failed: {e}");
+            }
         }
     }
 }
@@ -135,12 +181,14 @@ pub fn abort_requested() -> bool {
 }
 
 /// Quick, non-allocating memory pressure check for hot loops (scanners, indexers).
-/// Returns `true` if memory is at or above Soft pressure and work should be paused/stopped.
+/// Reads the cached atomic flag set by the guardian thread — O(1), no syscalls.
 pub fn is_under_pressure() -> bool {
-    let Some(snap) = MemorySnapshot::capture() else {
-        return false;
-    };
-    snap.pressure_level >= PressureLevel::Soft
+    current_pressure() >= PressureLevel::Soft
+}
+
+/// Returns the current pressure level as last observed by the guardian thread.
+pub fn current_pressure() -> PressureLevel {
+    PressureLevel::from_u8(CURRENT_PRESSURE.load(Ordering::Relaxed))
 }
 
 /// Start the background memory guardian task (idempotent).
@@ -159,6 +207,8 @@ pub fn start_guard(eviction_callback: Arc<dyn Fn(PressureLevel) + Send + Sync>) 
                 let Some(snap) = MemorySnapshot::capture() else {
                     continue;
                 };
+
+                CURRENT_PRESSURE.store(snap.pressure_level as u8, Ordering::Relaxed);
 
                 if snap.pressure_level == PressureLevel::Critical {
                     tracing::error!(
@@ -235,7 +285,13 @@ pub fn force_purge() {
 
 #[cfg(target_os = "linux")]
 fn linux_rss() -> Option<u64> {
-    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    linux_rss_for_pid(std::process::id())
+}
+
+#[cfg(target_os = "linux")]
+fn linux_rss_for_pid(pid: u32) -> Option<u64> {
+    let path = format!("/proc/{pid}/status");
+    let status = std::fs::read_to_string(path).ok()?;
     for line in status.lines() {
         if let Some(val) = line.strip_prefix("VmRSS:") {
             let kb: u64 = val.trim().trim_end_matches(" kB").trim().parse().ok()?;
@@ -277,6 +333,22 @@ fn macos_rss() -> Option<u64> {
     } else {
         None
     }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_rss_for_pid(pid: u32) -> Option<u64> {
+    // Use `ps -o rss= -p <pid>` as a portable fallback.
+    // `task_for_pid` requires root/entitlements, `proc_pid_rusage` is private API.
+    let output = std::process::Command::new("ps")
+        .args(["-o", "rss=", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let kb: u64 = text.trim().parse().ok()?;
+    Some(kb * 1024)
 }
 
 #[cfg(target_os = "macos")]
@@ -342,5 +414,50 @@ mod tests {
         PEAK_RSS.fetch_max(100, Ordering::Relaxed);
         PEAK_RSS.fetch_max(50, Ordering::Relaxed);
         assert_eq!(PEAK_RSS.load(Ordering::Relaxed), 100);
+    }
+
+    #[test]
+    fn pressure_level_roundtrip() {
+        for level in [
+            PressureLevel::Normal,
+            PressureLevel::Soft,
+            PressureLevel::Medium,
+            PressureLevel::Hard,
+            PressureLevel::Critical,
+        ] {
+            assert_eq!(PressureLevel::from_u8(level as u8), level);
+        }
+    }
+
+    #[test]
+    fn atomic_pressure_defaults_to_normal() {
+        assert_eq!(current_pressure(), PressureLevel::Normal);
+    }
+
+    #[test]
+    fn rss_for_own_pid_matches_self() {
+        if cfg!(any(target_os = "linux", target_os = "macos")) {
+            let self_rss = get_rss_bytes().unwrap();
+            let pid_rss = get_rss_bytes_for_pid(std::process::id()).unwrap();
+            let ratio = self_rss as f64 / pid_rss as f64;
+            assert!(
+                (0.5..2.0).contains(&ratio),
+                "self RSS ({self_rss}) and pid-based RSS ({pid_rss}) should be within 2x"
+            );
+        }
+    }
+
+    #[test]
+    fn rss_for_dead_pid_returns_none() {
+        let dead_pid = 999_999_999u32;
+        assert!(get_rss_bytes_for_pid(dead_pid).is_none());
+    }
+
+    #[test]
+    fn capture_for_pid_falls_back_on_dead_pid() {
+        if cfg!(any(target_os = "linux", target_os = "macos")) {
+            let snap = MemorySnapshot::capture_for_pid(999_999_999);
+            assert!(snap.is_some(), "should fall back to self RSS");
+        }
     }
 }

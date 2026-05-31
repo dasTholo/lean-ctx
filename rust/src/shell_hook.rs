@@ -26,6 +26,59 @@ const AGENT_ALIASES: &[(&str, &str)] = &[
     ("gemini", "gemini"),
 ];
 
+/// The `source <rc>` command for a given login-shell path, or `None` when the
+/// shell is unknown/unsupported (callers should fall back to "restart your
+/// shell"). Kept pure so it is deterministic to unit-test without mutating the
+/// process environment.
+fn source_command_for_shell(shell: &str) -> Option<&'static str> {
+    if shell.contains("zsh") {
+        Some("source ~/.zshrc")
+    } else if shell.contains("fish") {
+        Some("source ~/.config/fish/config.fish")
+    } else if shell.contains("bash") {
+        Some("source ~/.bashrc")
+    } else {
+        None
+    }
+}
+
+/// The `source <rc>` command for the user's current login shell (`$SHELL`), or
+/// `None` when it cannot be determined. Single source of truth so post-`setup`
+/// and post-`update` hints stay in sync and never advise sourcing a shell the
+/// user does not have (e.g. `~/.zshrc` on a bash-only system — see #321).
+pub fn shell_source_command() -> Option<&'static str> {
+    source_command_for_shell(&std::env::var("SHELL").unwrap_or_default())
+}
+
+/// The rc file path for a given login-shell path (pure, testable).
+fn rc_file_for_shell(shell: &str) -> &'static str {
+    if shell.contains("zsh") {
+        "~/.zshrc"
+    } else if shell.contains("fish") {
+        "~/.config/fish/config.fish"
+    } else if shell.contains("bash") {
+        "~/.bashrc"
+    } else {
+        "your shell config"
+    }
+}
+
+/// The rc file path for the user's current login shell (`$SHELL`), or a
+/// generic fallback when it cannot be determined. Used in help text and
+/// troubleshooting hints so they never hardcode a single shell's rc file.
+pub fn shell_rc_file() -> &'static str {
+    rc_file_for_shell(&std::env::var("SHELL").unwrap_or_default())
+}
+
+/// Human-facing one-liner telling the user how to load the refreshed aliases,
+/// tailored to their login shell. Used after `lean-ctx update`.
+pub fn reload_aliases_hint() -> String {
+    match shell_source_command() {
+        Some(cmd) => format!("Run '{cmd}' (or restart terminal) for updated shell aliases."),
+        None => "Restart your terminal to load updated shell aliases.".to_string(),
+    }
+}
+
 /// Installation style for the shell hook + agent aliases.
 ///
 /// `Auto` (default) inspects each rc file to decide: if the file references
@@ -285,9 +338,62 @@ pub fn install_all_with_style(quiet: bool, style: Style) {
     };
 
     let stamp = BackupStamp::now();
-    install_zshenv(&home, quiet, style, &stamp);
-    install_bashenv(&home, quiet, style, &stamp);
+    if shell_available("zsh") {
+        install_zshenv(&home, quiet, style, &stamp);
+    }
+    if shell_available("bash") {
+        install_bashenv(&home, quiet, style, &stamp);
+    }
     install_aliases(&home, quiet, style, &stamp);
+}
+
+/// Returns `true` if the given shell binary is installed on the system.
+/// Checks common installation paths without spawning a subprocess.
+///
+/// `LEAN_CTX_SHELL_HOOK_FORCE` overrides detection for environments where the
+/// shell lives in a non-standard path or is provisioned after install (minimal
+/// containers, custom images): set it to `1`/`true`/`all` to force every shell,
+/// or to a comma-separated list (e.g. `zsh,bash`) to force specific ones.
+#[cfg(unix)]
+fn shell_available(shell: &str) -> bool {
+    if let Ok(forced) = std::env::var("LEAN_CTX_SHELL_HOOK_FORCE") {
+        let forced = forced.trim();
+        if forced == "1"
+            || forced.eq_ignore_ascii_case("true")
+            || forced.eq_ignore_ascii_case("all")
+        {
+            return true;
+        }
+        if forced
+            .split(',')
+            .any(|s| s.trim().eq_ignore_ascii_case(shell))
+        {
+            return true;
+        }
+    }
+
+    let candidates: &[&str] = match shell {
+        "zsh" => &[
+            "/bin/zsh",
+            "/usr/bin/zsh",
+            "/usr/local/bin/zsh",
+            "/opt/homebrew/bin/zsh",
+        ],
+        "bash" => &[
+            "/bin/bash",
+            "/usr/bin/bash",
+            "/usr/local/bin/bash",
+            "/opt/homebrew/bin/bash",
+        ],
+        _ => return false,
+    };
+    candidates.iter().any(|p| Path::new(p).exists())
+}
+
+#[cfg(not(unix))]
+fn shell_available(_shell: &str) -> bool {
+    // On non-Unix platforms (Windows), shell hooks are not applicable.
+    false
 }
 
 pub fn uninstall_all(quiet: bool) {
@@ -416,6 +522,39 @@ mod tests {
         assert!(check.contains("LEAN_CTX_AGENT"));
         assert!(check.contains("CLAUDECODE"));
         assert!(check.contains("||"));
+    }
+
+    #[test]
+    fn source_command_matches_login_shell() {
+        // Bash-only users must never be told to source ~/.zshrc (#321).
+        assert_eq!(
+            source_command_for_shell("/usr/bin/bash"),
+            Some("source ~/.bashrc")
+        );
+        assert_eq!(
+            source_command_for_shell("/bin/zsh"),
+            Some("source ~/.zshrc")
+        );
+        assert_eq!(
+            source_command_for_shell("/usr/local/bin/fish"),
+            Some("source ~/.config/fish/config.fish")
+        );
+        // Unknown / unset shell → no rc suggestion (caller falls back).
+        assert_eq!(source_command_for_shell(""), None);
+        assert_eq!(source_command_for_shell("/bin/false"), None);
+    }
+
+    #[test]
+    fn rc_file_matches_login_shell() {
+        // #321: hints must name the right rc file for the user's shell.
+        assert_eq!(rc_file_for_shell("/usr/bin/bash"), "~/.bashrc");
+        assert_eq!(rc_file_for_shell("/bin/zsh"), "~/.zshrc");
+        assert_eq!(
+            rc_file_for_shell("/usr/local/bin/fish"),
+            "~/.config/fish/config.fish"
+        );
+        assert_eq!(rc_file_for_shell(""), "your shell config");
+        assert_eq!(rc_file_for_shell("/bin/false"), "your shell config");
     }
 
     #[test]
@@ -865,5 +1004,65 @@ mod tests {
         let dropin = tmp.path().join(".zshenv.d").join(DROPIN_ZSH);
         let body = std::fs::read_to_string(&dropin).unwrap();
         assert!(body.contains("_lc()"), "drop-in must also contain stubs");
+    }
+
+    // --- #309: shell_available guards ---
+
+    /// Serialises the env-sensitive `shell_available` tests so one setting
+    /// `LEAN_CTX_SHELL_HOOK_FORCE` can't race the filesystem-match assertions.
+    #[cfg(unix)]
+    static SHELL_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[cfg(unix)]
+    #[test]
+    fn shell_available_rejects_unknown_shell() {
+        let _g = SHELL_ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        std::env::remove_var("LEAN_CTX_SHELL_HOOK_FORCE");
+        assert!(!shell_available("fish"));
+        assert!(!shell_available("nushell"));
+        assert!(!shell_available(""));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shell_available_finds_installed_shells() {
+        let _g = SHELL_ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        std::env::remove_var("LEAN_CTX_SHELL_HOOK_FORCE");
+        // On any Unix CI/dev machine at least one of bash/zsh should exist.
+        let has_bash = Path::new("/bin/bash").exists() || Path::new("/usr/bin/bash").exists();
+        let has_zsh = Path::new("/bin/zsh").exists() || Path::new("/usr/bin/zsh").exists();
+        assert!(
+            shell_available("bash") == has_bash,
+            "shell_available(bash) should match filesystem"
+        );
+        assert!(
+            shell_available("zsh") == has_zsh,
+            "shell_available(zsh) should match filesystem"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shell_hook_force_overrides_detection() {
+        let _g = SHELL_ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        // `all` forces every shell, even ones not on disk.
+        std::env::set_var("LEAN_CTX_SHELL_HOOK_FORCE", "all");
+        assert!(shell_available("zsh"));
+        assert!(shell_available("bash"));
+
+        // A comma list forces only the named shells.
+        std::env::set_var("LEAN_CTX_SHELL_HOOK_FORCE", "zsh");
+        assert!(shell_available("zsh"));
+        // `bash` falls back to filesystem detection here; assert only the
+        // forced-on guarantee to stay host-independent.
+
+        std::env::remove_var("LEAN_CTX_SHELL_HOOK_FORCE");
     }
 }

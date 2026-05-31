@@ -15,13 +15,19 @@ impl McpTool for CtxTreeTool {
     fn tool_def(&self) -> Tool {
         tool_def(
             "ctx_tree",
-            "Directory listing with file counts.",
+            "Directory listing with file counts. Supports multi-root via `paths` array.",
             json!({
                 "type": "object",
                 "properties": {
                     "path": { "type": "string", "description": "Directory path (default: .)" },
+                    "paths": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Multiple directories to list (alternative to path)"
+                    },
                     "depth": { "type": "integer", "description": "Max depth (default: 3)" },
-                    "show_hidden": { "type": "boolean", "description": "Show hidden files" }
+                    "show_hidden": { "type": "boolean", "description": "Show hidden files" },
+                    "respect_gitignore": { "type": "boolean", "description": "Filter out .gitignore'd files (default: true). Set false to show all files." }
                 }
             }),
         )
@@ -32,44 +38,92 @@ impl McpTool for CtxTreeTool {
         args: &Map<String, Value>,
         ctx: &ToolContext,
     ) -> Result<ToolOutput, ErrorData> {
-        let path = if let Some(p) = ctx.resolved_path("path") {
-            p.to_string()
-        } else if let Some(err) = ctx.path_error("path") {
-            return Err(ErrorData::invalid_params(format!("path: {err}"), None));
-        } else {
-            ".".to_string()
-        };
+        let resolved = crate::server::multi_path::resolve_tool_paths(args, ctx);
         let depth = (get_int(args, "depth").unwrap_or(3) as usize).min(10);
         let show_hidden = get_bool(args, "show_hidden").unwrap_or(false);
+        let respect_gitignore = get_bool(args, "respect_gitignore").unwrap_or(true);
 
-        let path_clone = path.clone();
-        let Ok((result, original)) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            crate::tools::ctx_tree::handle(&path_clone, depth, show_hidden)
-        })) else {
-            return Err(ErrorData::internal_error(
-                format!(
-                    "ctx_tree panicked while processing '{path}'. This is a bug — please report it."
-                ),
-                None,
-            ));
-        };
-
-        if result.starts_with("ERROR:") {
-            return Err(ErrorData::invalid_params(result, None));
+        if !resolved.is_multi {
+            return handle_single(&resolved.roots[0], depth, show_hidden, respect_gitignore);
         }
 
-        let sent = crate::core::tokens::count_tokens(&result);
-        let saved = original.saturating_sub(sent);
+        let mut combined = String::new();
+        let mut total_original: usize = 0;
+        let mut total_sent: usize = 0;
 
-        let final_out = crate::core::protocol::append_savings(&result, original, sent);
+        for root in &resolved.roots {
+            let root_clone = root.clone();
+            let Ok((result, original)) =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    crate::tools::ctx_tree::handle(
+                        &root_clone,
+                        depth,
+                        show_hidden,
+                        respect_gitignore,
+                    )
+                }))
+            else {
+                combined.push_str(&format!("── {root} ──\nERROR: internal panic\n\n"));
+                continue;
+            };
+
+            if result.starts_with("ERROR:") {
+                combined.push_str(&format!("── {root} ──\n{result}\n\n"));
+                continue;
+            }
+
+            combined.push_str(&format!("── {root} ──\n{result}\n\n"));
+            total_original += original;
+            total_sent += crate::core::tokens::count_tokens(&result);
+        }
+
+        let final_out =
+            crate::core::protocol::append_savings(&combined, total_original, total_sent);
+        let saved = total_original.saturating_sub(total_sent);
 
         Ok(ToolOutput {
             text: final_out,
-            original_tokens: original,
+            original_tokens: total_original,
             saved_tokens: saved,
             mode: None,
-            path: Some(path),
+            path: None,
             changed: false,
         })
     }
+}
+
+fn handle_single(
+    path: &str,
+    depth: usize,
+    show_hidden: bool,
+    respect_gitignore: bool,
+) -> Result<ToolOutput, ErrorData> {
+    let path_clone = path.to_string();
+    let Ok((result, original)) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        crate::tools::ctx_tree::handle(&path_clone, depth, show_hidden, respect_gitignore)
+    })) else {
+        return Err(ErrorData::internal_error(
+            format!(
+                "ctx_tree panicked while processing '{path}'. This is a bug — please report it."
+            ),
+            None,
+        ));
+    };
+
+    if result.starts_with("ERROR:") {
+        return Err(ErrorData::invalid_params(result, None));
+    }
+
+    let sent = crate::core::tokens::count_tokens(&result);
+    let saved = original.saturating_sub(sent);
+    let final_out = crate::core::protocol::append_savings(&result, original, sent);
+
+    Ok(ToolOutput {
+        text: final_out,
+        original_tokens: original,
+        saved_tokens: saved,
+        mode: None,
+        path: Some(path.to_string()),
+        changed: false,
+    })
 }

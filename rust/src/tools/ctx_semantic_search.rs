@@ -49,7 +49,14 @@ pub fn handle(
         return workspace_search(query, root, top_k, compact, &filter, &mode);
     }
 
-    let index = load_or_refresh_bm25(root);
+    let index = match load_or_refresh_bm25(root) {
+        Bm25LoadResult::Ready(idx) => idx,
+        Bm25LoadResult::Building => {
+            return "BM25 index is being built in the background. \
+                    Run ctx_semantic_search again in ~30s, or use action=reindex to wait for completion."
+                .to_string();
+        }
+    };
     if index.doc_count == 0 {
         return "No code files found to index.".to_string();
     }
@@ -225,8 +232,76 @@ fn truncate_query(q: &str, max: usize) -> &str {
     }
 }
 
-fn load_or_refresh_bm25(root: &Path) -> BM25Index {
-    BM25Index::load_or_build(root)
+std::thread_local! {
+    static BM25_SHARED_CACHE: std::cell::RefCell<Option<crate::core::bm25_cache::SharedBm25Cache>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Set the shared BM25 cache for the current thread (called from the registered handler).
+pub fn set_thread_cache(cache: crate::core::bm25_cache::SharedBm25Cache) {
+    BM25_SHARED_CACHE.with(|c| {
+        *c.borrow_mut() = Some(cache);
+    });
+}
+
+/// Clone the current thread's shared BM25 cache, if any. Lets composer tools
+/// propagate the resident cache into a budgeted worker thread so a slow cold
+/// build warms the *same* cache instead of being wasted work.
+pub fn get_thread_cache() -> Option<crate::core::bm25_cache::SharedBm25Cache> {
+    BM25_SHARED_CACHE.with(|c| c.borrow().clone())
+}
+
+/// Result of BM25 index loading — may indicate background build in progress.
+pub(crate) enum Bm25LoadResult {
+    Ready(std::sync::Arc<BM25Index>),
+    Building,
+}
+
+fn load_or_refresh_bm25(root: &Path) -> Bm25LoadResult {
+    let cached = BM25_SHARED_CACHE.with(|c| {
+        let borrow = c.borrow();
+        borrow
+            .as_ref()
+            .and_then(|cache| crate::core::bm25_cache::get_or_background(cache, root))
+    });
+    if let Some(idx) = cached {
+        return Bm25LoadResult::Ready(idx);
+    }
+
+    let root_str = root.to_string_lossy().to_string();
+
+    if let Some(idx) = crate::core::index_orchestrator::try_load_bm25_index(&root_str) {
+        let idx = std::sync::Arc::new(idx);
+        store_in_thread_cache(root, &idx);
+        return Bm25LoadResult::Ready(idx);
+    }
+
+    if crate::core::index_orchestrator::is_building() {
+        return Bm25LoadResult::Building;
+    }
+
+    crate::core::index_orchestrator::ensure_all_background(&root_str);
+
+    let idx = std::sync::Arc::new(BM25Index::load_or_build(root));
+    store_in_thread_cache(root, &idx);
+    Bm25LoadResult::Ready(idx)
+}
+
+fn store_in_thread_cache(root: &Path, idx: &std::sync::Arc<BM25Index>) {
+    BM25_SHARED_CACHE.with(|c| {
+        let borrow = c.borrow();
+        if let Some(cache) = borrow.as_ref() {
+            let mut guard = cache
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            *guard = Some(crate::core::bm25_cache::Bm25CacheEntry {
+                root: root.to_path_buf(),
+                index: std::sync::Arc::clone(idx),
+                loaded_at: std::time::Instant::now(),
+                fingerprint: crate::core::bm25_cache::index_fingerprint(root),
+            });
+        }
+    });
 }
 
 fn filtered_candidate_k(top_k: usize, filtered: bool) -> usize {
@@ -644,7 +719,7 @@ fn hybrid_results_for_root(
         ensure_embeddings(root, index, engine, &mut embed_idx)?;
 
     let backend = crate::core::dense_backend::DenseBackendKind::try_from_env()?;
-    let cfg = HybridConfig::default();
+    let cfg = HybridConfig::from_config();
     let filter_fn = |p: &str| filter.matches(p);
     let filter_pred: Option<&dyn Fn(&str) -> bool> = filter
         .is_active()
@@ -665,8 +740,44 @@ fn hybrid_results_for_root(
         filter_pred,
         graph_ranks_ref,
     )?;
+
+    if cfg.splade_weight > 0.0 {
+        let splade = crate::core::splade_retrieval::hybrid_retrieve(query, index, candidate_k);
+        if !splade.is_empty() {
+            boost_with_splade(&mut results, &splade, cfg.splade_weight);
+        }
+    }
+
     results.truncate(top_k);
     Ok((results, coverage))
+}
+
+/// Boost existing hybrid results with SPLADE expansion scores.
+fn boost_with_splade(
+    results: &mut [HybridResult],
+    splade: &[crate::core::splade_retrieval::SpladeResult],
+    weight: f64,
+) {
+    use std::collections::HashMap;
+    let rrf_k = 60.0_f64;
+
+    let boosts: HashMap<&str, f64> = splade
+        .iter()
+        .enumerate()
+        .map(|(rank, sr)| (sr.file_path.as_str(), weight / (rrf_k + rank as f64 + 1.0)))
+        .collect();
+
+    for r in results.iter_mut() {
+        if let Some(&boost) = boosts.get(r.file_path.as_str()) {
+            r.rrf_score += boost;
+        }
+    }
+
+    results.sort_by(|a, b| {
+        b.rrf_score
+            .partial_cmp(&a.rrf_score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 }
 
 fn label_for_root(root: &Path) -> String {
@@ -740,7 +851,7 @@ fn hybrid_search_mode(
             Err(e) => return format!("ERR: {e}"),
         };
 
-        let cfg = HybridConfig::default();
+        let cfg = HybridConfig::from_config();
         let filter_fn = |p: &str| filter.matches(p);
         let filter_pred: Option<&dyn Fn(&str) -> bool> = filter
             .is_active()
@@ -763,6 +874,14 @@ fn hybrid_search_mode(
             Ok(v) => v,
             Err(e) => return format!("ERR: {e}"),
         };
+
+        if cfg.splade_weight > 0.0 {
+            let splade = crate::core::splade_retrieval::hybrid_retrieve(query, index, top_k);
+            if !splade.is_empty() {
+                boost_with_splade(&mut results, &splade, cfg.splade_weight);
+            }
+        }
+
         results.truncate(top_k);
 
         let header = if compact {
@@ -915,11 +1034,28 @@ fn load_engine_and_index(
     let engine = crate::core::embeddings::shared_engine()
         .ok_or_else(|| "embedding engine load failed".to_string())?;
 
-    let mut idx =
-        EmbeddingIndex::load(root).unwrap_or_else(|| EmbeddingIndex::new(engine.dimensions()));
-    if idx.dimensions != engine.dimensions() {
-        idx = EmbeddingIndex::new(engine.dimensions());
+    let model_name = engine.model_name();
+    let mut idx = EmbeddingIndex::load(root)
+        .unwrap_or_else(|| EmbeddingIndex::new_with_model(engine.dimensions(), model_name));
+
+    if let Some((stored, current)) = idx.model_mismatch(model_name) {
+        tracing::warn!(
+            "[embeddings] model changed: {stored} → {current}. Re-indexing all embeddings."
+        );
+        idx = EmbeddingIndex::new_with_model(engine.dimensions(), model_name);
+    } else if idx.dimension_mismatch(engine.dimensions()) {
+        tracing::warn!(
+            "[embeddings] dimension mismatch: index={}d, engine={}d. Re-indexing.",
+            idx.dimensions,
+            engine.dimensions()
+        );
+        idx = EmbeddingIndex::new_with_model(engine.dimensions(), model_name);
     }
+
+    if idx.model_id.is_none() {
+        idx.model_id = Some(model_name.to_string());
+    }
+
     Ok((engine, idx))
 }
 
@@ -1096,6 +1232,34 @@ fn normalize_languages(langs: &[String]) -> HashSet<String> {
         }
     }
     out
+}
+
+/// Public wrapper for eval harness: load embedding engine + index.
+#[cfg(feature = "embeddings")]
+pub fn load_engine_and_index_pub(
+    root: &Path,
+) -> Result<(&'static EmbeddingEngine, EmbeddingIndex), String> {
+    load_engine_and_index(root)
+}
+
+/// Public wrapper for eval harness: prepare embeddings for a project.
+#[cfg(feature = "embeddings")]
+pub fn ensure_embeddings_for_eval(
+    root: &Path,
+    index: &BM25Index,
+    engine: &EmbeddingEngine,
+    embed_idx: &mut EmbeddingIndex,
+) -> Result<(Vec<Vec<f32>>, f64, Vec<String>), String> {
+    ensure_embeddings(root, index, engine, embed_idx)
+}
+
+/// Public wrapper for eval harness: apply SPLADE boosting.
+pub fn boost_with_splade_pub(
+    results: &mut [HybridResult],
+    splade: &[crate::core::splade_retrieval::SpladeResult],
+    weight: f64,
+) {
+    boost_with_splade(results, splade, weight);
 }
 
 #[cfg(test)]

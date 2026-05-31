@@ -104,8 +104,8 @@ mod passthrough_tests {
     fn auth_commands_excluded() {
         assert!(is_excluded_command("az login --use-device-code", &[]));
         assert!(is_excluded_command("gh auth login", &[]));
-        assert!(is_excluded_command("gh pr close --comment 'done'", &[]));
-        assert!(is_excluded_command("gh issue list", &[]));
+        assert!(!is_excluded_command("gh pr close --comment 'done'", &[]));
+        assert!(!is_excluded_command("gh issue list", &[]));
         assert!(is_excluded_command("gcloud auth login", &[]));
         assert!(is_excluded_command("aws sso login", &[]));
         assert!(is_excluded_command("firebase login", &[]));
@@ -362,18 +362,13 @@ mod passthrough_tests {
     }
 
     #[test]
-    fn gh_fully_excluded() {
-        assert!(is_excluded_command("gh", &[]));
-        assert!(is_excluded_command(
-            "gh pr close --comment 'closing — see #407'",
-            &[]
-        ));
-        assert!(is_excluded_command(
-            "gh issue create --title \"bug\" --body \"desc\"",
-            &[]
-        ));
-        assert!(is_excluded_command("gh api repos/owner/repo/pulls", &[]));
-        assert!(is_excluded_command("gh run list --limit 5", &[]));
+    fn gh_auth_excluded_but_data_commands_not() {
+        assert!(is_excluded_command("gh auth login", &[]));
+        assert!(is_excluded_command("gh browse", &[]));
+        assert!(!is_excluded_command("gh pr list", &[]));
+        assert!(!is_excluded_command("gh issue list", &[]));
+        assert!(!is_excluded_command("gh api repos/owner/repo/pulls", &[]));
+        assert!(!is_excluded_command("gh run list --limit 5", &[]));
     }
 }
 
@@ -480,9 +475,9 @@ mod verbatim_output_tests {
     }
 
     #[test]
-    fn kubectl_get_is_now_verbatim() {
-        assert!(is_verbatim_output("kubectl get pods"));
-        assert!(is_verbatim_output("kubectl get deployments"));
+    fn kubectl_get_uses_pattern_not_verbatim() {
+        assert!(!is_verbatim_output("kubectl get pods"));
+        assert!(!is_verbatim_output("kubectl get deployments"));
     }
 
     #[test]
@@ -557,10 +552,11 @@ mod verbatim_output_tests {
         assert!(is_verbatim_output("docker images -a"));
         assert!(is_verbatim_output("podman ps"));
         assert!(is_verbatim_output("podman images"));
-        assert!(is_verbatim_output("kubectl get pods"));
-        assert!(is_verbatim_output("kubectl get deployments -A"));
-        assert!(is_verbatim_output("kubectl get svc --all-namespaces"));
-        assert!(is_verbatim_output("k get pods"));
+        // kubectl get uses pattern compressor now (not verbatim)
+        assert!(!is_verbatim_output("kubectl get pods"));
+        assert!(!is_verbatim_output("kubectl get deployments -A"));
+        assert!(!is_verbatim_output("kubectl get svc --all-namespaces"));
+        assert!(!is_verbatim_output("k get pods"));
         assert!(is_verbatim_output("helm list"));
         assert!(is_verbatim_output("helm ls --all-namespaces"));
         assert!(is_verbatim_output("docker compose ps"));

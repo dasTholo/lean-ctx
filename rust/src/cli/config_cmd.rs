@@ -6,21 +6,32 @@ pub fn cmd_config(args: &[String]) {
 
     if args.is_empty() {
         println!("{}", cfg.show());
+        println!(
+            "\nTip: this is the full config. For the few knobs most people touch, run\n     `lean-ctx config show` (high-level summary), or change one with\n     `lean-ctx config set <key> <value>`."
+        );
         return;
     }
 
     match args[0].as_str() {
         "init" | "create" => {
-            let default = config::Config::default();
-            match default.save() {
-                Ok(()) => {
-                    let path = config::Config::path().map_or_else(
-                        || "~/.lean-ctx/config.toml".to_string(),
-                        |p| p.to_string_lossy().to_string(),
-                    );
-                    println!("Created default config at {path}");
+            let full = args.iter().any(|a| a == "--full");
+            if full {
+                let default = config::Config::default();
+                match default.save() {
+                    Ok(()) => {
+                        let path = config::Config::path().map_or_else(
+                            || "~/.lean-ctx/config.toml".to_string(),
+                            |p| p.to_string_lossy().to_string(),
+                        );
+                        println!("Created full config at {path}");
+                    }
+                    Err(e) => eprintln!("Error: {e}"),
                 }
-                Err(e) => eprintln!("Error: {e}"),
+            } else {
+                match write_simplified_config() {
+                    Ok(path) => println!("Created simplified config at {path}"),
+                    Err(e) => eprintln!("Error: {e}"),
+                }
             }
         }
         "set" => {
@@ -28,86 +39,63 @@ pub fn cmd_config(args: &[String]) {
                 eprintln!("Usage: lean-ctx config set <key> <value>");
                 std::process::exit(1);
             }
-            let mut cfg = cfg;
             let key = &args[1];
             let val = &args[2];
+
+            // Special validation hooks for keys that need custom logic
+            // beyond what the schema type system can express.
             match key.as_str() {
-                "ultra_compact" => cfg.ultra_compact = val == "true",
+                "theme" if theme::from_preset(val).is_none() && val != "custom" => {
+                    eprintln!(
+                        "Unknown theme '{val}'. Available: {}",
+                        theme::PRESET_NAMES.join(", ")
+                    );
+                    std::process::exit(1);
+                }
                 "tee_on_error" | "tee_mode" => {
-                    cfg.tee_mode = match val.as_str() {
-                        "true" | "failures" => config::TeeMode::Failures,
-                        "highcompression" | "high_compression" => config::TeeMode::HighCompression,
-                        "always" => config::TeeMode::Always,
-                        "false" | "never" => config::TeeMode::Never,
-                        _ => {
-                            eprintln!(
-                                "Valid tee_mode values: always, highcompression, failures, never"
-                            );
+                    let normalized = match val.as_str() {
+                        "true" => "failures",
+                        "false" => "never",
+                        other => other,
+                    };
+                    match config::setter::set_by_key("tee_mode", normalized) {
+                        Ok(_) => println!("Updated {key} = {val}"),
+                        Err(e) => {
+                            eprintln!("{e}");
                             std::process::exit(1);
                         }
-                    };
-                }
-                "checkpoint_interval" => {
-                    cfg.checkpoint_interval = val.parse().unwrap_or(15);
-                }
-                "theme" => {
-                    if theme::from_preset(val).is_some() || val == "custom" {
-                        cfg.theme.clone_from(val);
-                    } else {
-                        eprintln!(
-                            "Unknown theme '{val}'. Available: {}",
-                            theme::PRESET_NAMES.join(", ")
-                        );
-                        std::process::exit(1);
                     }
+                    return;
                 }
-                "slow_command_threshold_ms" => {
-                    cfg.slow_command_threshold_ms = val.parse().unwrap_or(5000);
-                }
-                "passthrough_urls" => {
-                    cfg.passthrough_urls = val.split(',').map(|s| s.trim().to_string()).collect();
-                }
-                "excluded_commands" => {
-                    cfg.excluded_commands = val
-                        .split(',')
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty())
-                        .collect();
-                }
-                "rules_scope" => match val.as_str() {
-                    "global" | "project" | "both" => {
-                        cfg.rules_scope = Some(val.clone());
-                    }
-                    _ => {
-                        eprintln!("Valid rules_scope values: global, project, both");
-                        std::process::exit(1);
-                    }
-                },
                 "project_root" => {
                     let path = std::path::Path::new(val.as_str());
                     if !path.exists() || !path.is_dir() {
                         eprintln!("Error: '{val}' is not an existing directory.");
                         std::process::exit(1);
                     }
-                    cfg.project_root = Some(val.clone());
                 }
-                "proxy.anthropic_upstream" => {
-                    cfg.proxy.anthropic_upstream = normalize_optional_upstream(val);
+                "proxy.anthropic_upstream" | "proxy.openai_upstream" | "proxy.gemini_upstream" => {
+                    let normalized = normalize_optional_upstream(val);
+                    let effective = normalized.as_deref().unwrap_or("");
+                    match config::setter::set_by_key(key, effective) {
+                        Ok(_) => println!("Updated {key} = {val}"),
+                        Err(e) => {
+                            eprintln!("{e}");
+                            std::process::exit(1);
+                        }
+                    }
+                    return;
                 }
-                "proxy.openai_upstream" => {
-                    cfg.proxy.openai_upstream = normalize_optional_upstream(val);
-                }
-                "proxy.gemini_upstream" => {
-                    cfg.proxy.gemini_upstream = normalize_optional_upstream(val);
-                }
-                _ => {
-                    eprintln!("Unknown config key: {key}");
+                _ => {}
+            }
+
+            // Generic schema-based setter handles all keys
+            match config::setter::set_by_key(key, val) {
+                Ok(_) => println!("Updated {key} = {val}"),
+                Err(e) => {
+                    eprintln!("{e}");
                     std::process::exit(1);
                 }
-            }
-            match cfg.save() {
-                Ok(()) => println!("Updated {key} = {val}"),
-                Err(e) => eprintln!("Error saving config: {e}"),
             }
         }
         "schema" => {
@@ -120,11 +108,14 @@ pub fn cmd_config(args: &[String]) {
         "validate" => {
             cmd_validate();
         }
+        "show" | "effective" => {
+            cmd_show_effective();
+        }
         "apply" | "reload" => {
             cmd_apply();
         }
         _ => {
-            eprintln!("Usage: lean-ctx config [init|set|schema|validate|apply]");
+            eprintln!("Usage: lean-ctx config [init|set|show|schema|validate|apply]");
             std::process::exit(1);
         }
     }
@@ -324,6 +315,20 @@ fn cmd_validate() {
         }
     }
 
+    let cfg = config::Config::load();
+    let budget = cfg.max_disk_mb_effective();
+    if budget > 0 {
+        let explicit_archive = cfg.archive.max_disk_mb;
+        let explicit_bm25 = cfg.bm25_max_cache_mb;
+        let sum = explicit_archive + explicit_bm25;
+        if sum > budget {
+            warnings += 1;
+            println!(
+                "  ⚠ max_disk_mb={budget} but archive.max_disk_mb({explicit_archive}) + bm25_max_cache_mb({explicit_bm25}) = {sum} exceeds budget"
+            );
+        }
+    }
+
     let total = validated + warnings;
     if warnings == 0 {
         println!(
@@ -396,6 +401,7 @@ fn normalize_optional_upstream(value: &str) -> Option<String> {
 
 pub fn cmd_benchmark(args: &[String]) {
     use crate::core::benchmark;
+    use crate::core::benchmark_compare;
 
     let action = args.first().map_or("run", std::string::String::as_str);
 
@@ -403,6 +409,31 @@ pub fn cmd_benchmark(args: &[String]) {
         "--help" | "-h" => {
             println!("Usage: lean-ctx benchmark run [path] [--json]");
             println!("       lean-ctx benchmark report [path]");
+            println!("       lean-ctx benchmark eval [path] [--json]");
+            println!("       lean-ctx benchmark compare [--repo path] [--output file.md]");
+        }
+        "eval" => {
+            let path = args.get(1).map_or(".", std::string::String::as_str);
+            let is_json = args.iter().any(|a| a == "--json");
+            let root = std::path::Path::new(path);
+
+            let index = crate::core::bm25_index::BM25Index::build_from_directory(root);
+            let cfg = crate::core::hybrid_search::HybridConfig::from_config();
+            let queries = crate::core::eval_harness::generate_self_eval(&index, 50);
+
+            if queries.is_empty() {
+                eprintln!("No symbols found — cannot generate eval queries.");
+                std::process::exit(1);
+            }
+
+            let scorecard = crate::core::eval_harness::run_eval(root, &queries, &index, &cfg);
+            if is_json {
+                if let Ok(json) = serde_json::to_string_pretty(&scorecard) {
+                    println!("{json}");
+                }
+            } else {
+                print!("{scorecard}");
+            }
         }
         "run" => {
             let path = args.get(1).map_or(".", std::string::String::as_str);
@@ -420,6 +451,24 @@ pub fn cmd_benchmark(args: &[String]) {
             let result = benchmark::run_project_benchmark(path);
             println!("{}", benchmark::format_markdown(&result));
         }
+        "compare" => {
+            let repo = parse_flag_value(args, "--repo").unwrap_or_else(|| ".".to_string());
+            let output = parse_flag_value(args, "--output");
+
+            let root = std::path::Path::new(&repo);
+            if !root.exists() {
+                eprintln!("Repository path does not exist: {repo}");
+                std::process::exit(1);
+            }
+
+            let report = benchmark_compare::run_compare(root, output.as_deref());
+
+            println!("{}", benchmark_compare::report::generate_terminal(&report));
+
+            if output.is_none() {
+                eprintln!("Tip: use --output BENCHMARKS.md to save the full markdown report");
+            }
+        }
         _ => {
             if std::path::Path::new(action).exists() {
                 let result = benchmark::run_project_benchmark(action);
@@ -427,10 +476,18 @@ pub fn cmd_benchmark(args: &[String]) {
             } else {
                 eprintln!("Usage: lean-ctx benchmark run [path] [--json]");
                 eprintln!("       lean-ctx benchmark report [path]");
+                eprintln!("       lean-ctx benchmark compare [--repo path] [--output file.md]");
                 std::process::exit(1);
             }
         }
     }
+}
+
+fn parse_flag_value(args: &[String], flag: &str) -> Option<String> {
+    args.iter()
+        .position(|a| a == flag)
+        .and_then(|i| args.get(i + 1))
+        .cloned()
 }
 
 pub fn cmd_stats(args: &[String]) {
@@ -572,7 +629,7 @@ pub fn prune_bm25_caches() -> PruneResult {
         return result;
     };
 
-    let max_bytes = crate::core::config::Config::load().bm25_max_cache_mb * 1024 * 1024;
+    let max_bytes = crate::core::config::Config::load().bm25_max_cache_mb_effective() * 1024 * 1024;
 
     for entry in entries.flatten() {
         let dir = entry.path();
@@ -718,6 +775,145 @@ fn try_read_project_root_from_graph(path: &std::path::Path) -> Option<String> {
     let content = String::from_utf8(data).ok()?;
     let val: serde_json::Value = serde_json::from_str(&content).ok()?;
     val.get("project_root")?.as_str().map(String::from)
+}
+
+pub const SIMPLIFIED_TEMPLATE: &str = r#"# lean-ctx — Simplified Configuration
+# Full reference: https://leanctx.com/docs/configuration
+# For all settings: lean-ctx config init --full
+
+# ── High-Level Knobs ─────────────────────────────────────────────────
+# These auto-adjust advanced settings. Override individual values below
+# only if you need fine-grained control.
+
+# Output style for the model's prose (not tool-output compression):
+#   off    — no style guidance
+#   lite   — plain-English concise (default; readable, still token-saving)
+#   standard / max — denser symbolic "power modes" (opt-in)
+compression_level = "lite"
+
+# RAM/feature trade-off: low | balanced | performance
+memory_profile = "balanced"
+
+# Maximum % of system RAM lean-ctx may use (1-50)
+max_ram_percent = 5
+
+# Total disk budget in MB (0 = use individual limits).
+# Distributes proportionally: archive ~25%, BM25 cache ~10%.
+# max_disk_mb = 2000
+
+# Auto-purge data older than N days (0 = disabled).
+# Flows into archive.max_age_hours.
+# max_staleness_days = 30
+
+# Explicit project paths to scan/index (default: auto-detect).
+# [ide_paths]
+# cursor = ["/home/user/projects/app1"]
+
+# ── Proxy ────────────────────────────────────────────────────────────
+# proxy_enabled = false
+# proxy_port = 3128
+"#;
+
+fn write_simplified_config() -> Result<String, String> {
+    let path = config::Config::path().ok_or_else(|| "Cannot determine config path".to_string())?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{e}"))?;
+    }
+    std::fs::write(&path, SIMPLIFIED_TEMPLATE).map_err(|e| format!("{e}"))?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+fn cmd_show_effective() {
+    let cfg = config::Config::load();
+    let compression = config::CompressionLevel::effective(&cfg);
+    let policy = cfg.memory_policy_effective().unwrap_or_default();
+
+    println!("╭─── Simplified (high-level) ───────────────────────────────╮");
+    println!(
+        "│ compression_level   = {:10}  {}",
+        format!("{compression:?}"),
+        source_hint(
+            "LEAN_CTX_COMPRESSION",
+            cfg.compression_level != config::CompressionLevel::Off
+        )
+    );
+    println!(
+        "│ max_disk_mb         = {:10}  {}",
+        cfg.max_disk_mb_effective(),
+        source_hint("LEAN_CTX_MAX_DISK_MB", cfg.max_disk_mb > 0)
+    );
+    println!(
+        "│ max_ram_percent     = {:10}  {}",
+        cfg.max_ram_percent,
+        source_hint("LEAN_CTX_MAX_RAM_PERCENT", cfg.max_ram_percent != 5)
+    );
+    println!(
+        "│ max_staleness_days  = {:10}  {}",
+        cfg.max_staleness_days_effective(),
+        source_hint("LEAN_CTX_MAX_STALENESS_DAYS", cfg.max_staleness_days > 0)
+    );
+    println!(
+        "│ memory_profile      = {:10}  {}",
+        format!("{:?}", cfg.memory_profile),
+        source_hint("LEAN_CTX_MEMORY_PROFILE", false)
+    );
+    println!("╰────────────────────────────────────────────────────────────╯");
+
+    println!();
+    println!("╭─── Derived effective limits ────────────────────────────────╮");
+    println!(
+        "│ archive_max_disk_mb    = {:>6} MB",
+        cfg.archive_max_disk_mb_effective()
+    );
+    println!(
+        "│ bm25_max_cache_mb      = {:>6} MB",
+        cfg.bm25_max_cache_mb_effective()
+    );
+    println!(
+        "│ archive_max_age_hours  = {:>6} h",
+        cfg.archive_max_age_hours_effective()
+    );
+    println!(
+        "│ graph_index_max_files  = {:>6}",
+        cfg.graph_index_max_files
+    );
+    println!("│");
+    println!(
+        "│ memory.knowledge.max_facts     = {:>6}",
+        policy.knowledge.max_facts
+    );
+    println!(
+        "│ memory.knowledge.max_patterns  = {:>6}",
+        policy.knowledge.max_patterns
+    );
+    println!(
+        "│ memory.episodic.max_episodes   = {:>6}",
+        policy.episodic.max_episodes
+    );
+    println!(
+        "│ memory.procedural.max_procedures = {:>4}",
+        policy.procedural.max_procedures
+    );
+    println!("╰────────────────────────────────────────────────────────────╯");
+
+    if cfg.max_disk_mb_effective() > 0 {
+        println!();
+        println!(
+            "  ℹ  max_disk_mb={} → limits scaled proportionally (factor: {:.1}x)",
+            cfg.max_disk_mb_effective(),
+            (cfg.max_disk_mb_effective() as f64 / 500.0).clamp(0.5, 10.0)
+        );
+    }
+}
+
+fn source_hint(env_var: &str, config_set: bool) -> &'static str {
+    if std::env::var(env_var).is_ok() {
+        "← env"
+    } else if config_set {
+        "← config"
+    } else {
+        "← default"
+    }
 }
 
 fn dir_size(path: &std::path::Path) -> u64 {

@@ -137,7 +137,7 @@ pub fn semantic_recall<'a>(
     query: &str,
     top_k: usize,
 ) -> Vec<ScoredFact<'a>> {
-    let Ok(query_embedding) = engine.embed(query) else {
+    let Ok(query_embedding) = engine.embed_query(query) else {
         return lexical_fallback(knowledge, query, top_k);
     };
 
@@ -213,7 +213,7 @@ pub fn semantic_recall_semantic_only<'a>(
     query: &str,
     top_k: usize,
 ) -> Vec<ScoredFact<'a>> {
-    let Ok(query_embedding) = engine.embed(query) else {
+    let Ok(query_embedding) = engine.embed_query(query) else {
         return Vec::new();
     };
 
@@ -435,6 +435,7 @@ mod tests {
             imported_from: None,
             archetype: KnowledgeArchetype::default(),
             fidelity: None,
+            revision_count: 0,
         });
         knowledge.facts.push(KnowledgeFact {
             category: "arch".to_string(),
@@ -457,6 +458,7 @@ mod tests {
             imported_from: None,
             archetype: KnowledgeArchetype::default(),
             fidelity: None,
+            revision_count: 0,
         });
 
         let mut idx = KnowledgeEmbeddingIndex::new(&knowledge.project_hash);
@@ -511,6 +513,7 @@ mod tests {
             imported_from: None,
             archetype: KnowledgeArchetype::default(),
             fidelity: None,
+            revision_count: 0,
         };
         let decay = recency_decay(&fact);
         assert!(
@@ -543,6 +546,7 @@ mod tests {
             imported_from: None,
             archetype: KnowledgeArchetype::default(),
             fidelity: None,
+            revision_count: 0,
         };
         let decay = recency_decay(&fact);
         assert_eq!(decay, 0.0, "100-day-old fact should have 0 recency");
@@ -590,6 +594,7 @@ mod tests {
             imported_from: None,
             archetype: KnowledgeArchetype::default(),
             fidelity: None,
+            revision_count: 0,
         };
         let scored = vec![ScoredFact {
             fact: &fact,

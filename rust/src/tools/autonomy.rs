@@ -15,7 +15,7 @@ use crate::core::tokens::count_tokens;
 use crate::tools::CrpMode;
 
 #[cfg(test)]
-const SEARCH_REPEAT_IDLE_RESET: Duration = Duration::from_millis(50);
+const SEARCH_REPEAT_IDLE_RESET: Duration = Duration::from_millis(500);
 #[cfg(not(test))]
 const SEARCH_REPEAT_IDLE_RESET: Duration = Duration::from_mins(5);
 
@@ -774,6 +774,7 @@ mod tests {
 
     #[test]
     fn track_search_none_first_three() {
+        let _lock = crate::core::data_dir::test_env_lock();
         let state = AutonomyState::new();
         assert!(state.track_search("foo", "src").is_none());
         assert!(state.track_search("foo", "src").is_none());
@@ -782,6 +783,7 @@ mod tests {
 
     #[test]
     fn track_search_hint_band() {
+        let _lock = crate::core::data_dir::test_env_lock();
         let state = AutonomyState::new();
         for _ in 0..3 {
             assert!(state.track_search("bar", ".").is_none());
@@ -793,6 +795,7 @@ mod tests {
 
     #[test]
     fn track_search_throttle_seventh() {
+        let _lock = crate::core::data_dir::test_env_lock();
         let state = AutonomyState::new();
         for _ in 0..6 {
             let _ = state.track_search("baz", "p");
@@ -804,11 +807,12 @@ mod tests {
 
     #[test]
     fn track_search_resets_after_idle() {
+        let _lock = crate::core::data_dir::test_env_lock();
         let state = AutonomyState::new();
         for _ in 0..3 {
             assert!(state.track_search("idle", "x").is_none());
         }
-        std::thread::sleep(std::time::Duration::from_millis(80));
+        std::thread::sleep(std::time::Duration::from_millis(600));
         assert!(
             state.track_search("idle", "x").is_none(),
             "count should reset after idle window"
@@ -817,6 +821,7 @@ mod tests {
 
     #[test]
     fn track_search_disabled_no_tracking_messages() {
+        let _lock = crate::core::data_dir::test_env_lock();
         let mut state = AutonomyState::new();
         state.config.enabled = false;
         for _ in 0..8 {
@@ -826,6 +831,7 @@ mod tests {
 
     #[test]
     fn track_search_distinct_keys() {
+        let _lock = crate::core::data_dir::test_env_lock();
         let state = AutonomyState::new();
         assert!(state.track_search("pat", "a").is_none());
         assert!(state.track_search("pat", "a").is_none());

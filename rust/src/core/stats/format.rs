@@ -496,9 +496,13 @@ pub fn format_gain_themed_at(t: &Theme, tick: Option<u64>) -> String {
             String::new()
         };
         return format!(
-            "{dim}No commands recorded yet.{rst}\
-             \n\n  MCP tools are tracked automatically when agents use lean-ctx.\
-             \n  Shell commands: use {cmd}lean-ctx -c \"command\"{rst} to track.\
+            "{bold}No savings recorded yet — and that's expected.{rst}\
+             \n\n  {dim}Savings appear after your AI tool uses lean-ctx for the first time.{rst}\
+             \n\n  Next:\
+             \n    1. Make sure your AI tool is connected:  {cmd}lean-ctx doctor{rst}\
+             \n    2. Fully restart your AI tool so it reconnects to lean-ctx.\
+             \n    3. Ask it to read a file or run a command — then check back here.\
+             \n\n  {dim}Tip: track a shell command yourself with {rst}{cmd}lean-ctx -c \"git status\"{rst}\
              \n\n  {dim}Stats path: {data_dir}{rst}{mcp_hint}{split_hint}",
             cmd = t.secondary.fg(),
         );
@@ -563,6 +567,22 @@ pub fn format_gain_themed_at(t: &Theme, tick: Option<u64>) -> String {
     out.push(box_line(&format!("    {l1}{l2}{l3}{l4}")));
     out.push(box_line(""));
     out.push(format!("  {}", t.box_bottom(w)));
+
+    // 30-day savings subtitle (only shown when enough history exists)
+    if store.daily.len() >= 2 {
+        let thirty_day_tokens: u64 = store
+            .daily
+            .iter()
+            .rev()
+            .take(30)
+            .map(|d| d.input_tokens.saturating_sub(d.output_tokens))
+            .sum();
+        let thirty_day_usd = usd_estimate(thirty_day_tokens);
+        let accent = t.accent.fg();
+        out.push(format!(
+            "    {dim}past 30 days:{rst}  {accent}{bold}{thirty_day_usd}{rst} {dim}saved{rst}"
+        ));
+    }
 
     {
         let cfg = crate::core::config::Config::load();
@@ -738,7 +758,11 @@ pub fn format_gain_themed_at(t: &Theme, tick: Option<u64>) -> String {
     if store.daily.len() >= 2 {
         out.push(String::new());
         out.push(String::new());
-        out.push(format!("  {}", t.section_title("Recent Days")));
+        out.push(format!(
+            "  {}  {dim}v{}{rst}",
+            t.section_title("Recent Days"),
+            env!("CARGO_PKG_VERSION"),
+        ));
         out.push(format!("  {ln}", ln = t.border_line(w)));
         out.push(String::new());
 

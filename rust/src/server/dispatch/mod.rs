@@ -39,7 +39,7 @@ impl LeanCtxServer {
             .await
             .clone()
             .unwrap_or_else(|| "unknown".to_string());
-        if name != "ctx_call" {
+        {
             if let crate::core::a2a::rate_limiter::RateLimitResult::Limited { retry_after_ms } =
                 crate::core::a2a::rate_limiter::check_rate_limit(&agent_id, name)
             {
@@ -79,6 +79,18 @@ impl LeanCtxServer {
                         format_rate_limited(&inner, &agent_id, retry_after_ms, arg_map.as_ref()),
                         0,
                     ));
+                }
+
+                let inner_role_check = crate::server::role_guard::check_tool_access(&inner);
+                if let Some(denied) =
+                    crate::server::role_guard::into_call_tool_result(&inner_role_check)
+                {
+                    let msg = denied
+                        .content
+                        .first()
+                        .and_then(|c| c.as_text())
+                        .map_or_else(|| "Blocked by role policy".to_string(), |t| t.text.clone());
+                    return Ok((msg, 0));
                 }
 
                 if !super::WORKFLOW_PASSTHROUGH_TOOLS.contains(&inner.as_str()) {
@@ -192,6 +204,8 @@ impl LeanCtxServer {
                 autonomy: Some(self.autonomy.clone()),
                 pressure_snapshot,
                 path_errors,
+                bm25_cache: Some(self.bm25_cache.clone()),
+                progress_sender: Some(self.progress_sender.clone()),
             };
             let output = tokio::task::block_in_place(|| tool.handle(args_map, &ctx))?;
 

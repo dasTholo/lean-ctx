@@ -14,6 +14,51 @@ macro_rules! static_regex {
 const MIN_IDENT_LENGTH: usize = 6;
 const SHORT_ID_PREFIX: char = 'α';
 
+/// Whether alpha/§MAP identifier substitution should be applied to tool output.
+///
+/// Activation order:
+/// 1. `LEAN_CTX_SYMBOL_MAP=1` env var → force on
+/// 2. `LEAN_CTX_SYMBOL_MAP=0` env var → force off
+/// 3. `symbol_map_auto = true` in config + project >50 source files → auto-on
+/// 4. Default: off
+pub fn substitution_enabled() -> bool {
+    if let Ok(v) = std::env::var("LEAN_CTX_SYMBOL_MAP") {
+        return v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on");
+    }
+    let cfg = crate::core::config::Config::load();
+    if cfg.symbol_map_auto {
+        return auto_detect_large_project();
+    }
+    false
+}
+
+fn auto_detect_large_project() -> bool {
+    use std::sync::OnceLock;
+    static DETECTED: OnceLock<bool> = OnceLock::new();
+    *DETECTED.get_or_init(|| {
+        let cwd = std::env::current_dir().unwrap_or_default();
+        let source_exts = [
+            "rs", "ts", "tsx", "js", "jsx", "py", "go", "java", "rb", "cpp", "c", "h",
+        ];
+        let count = ignore::WalkBuilder::new(&cwd)
+            .hidden(true)
+            .max_depth(Some(6))
+            .git_ignore(true)
+            .build()
+            .filter_map(std::result::Result::ok)
+            .filter(|e| {
+                e.file_type().is_some_and(|ft| ft.is_file())
+                    && e.path()
+                        .extension()
+                        .and_then(|ext| ext.to_str())
+                        .is_some_and(|ext| source_exts.contains(&ext))
+            })
+            .take(51)
+            .count();
+        count > 50
+    })
+}
+
 #[derive(Debug, Clone)]
 pub struct SymbolMap {
     forward: HashMap<String, String>,

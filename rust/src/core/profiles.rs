@@ -584,6 +584,51 @@ fn builtin_review() -> Profile {
     }
 }
 
+fn builtin_passthrough() -> Profile {
+    Profile {
+        profile: ProfileMeta {
+            name: "passthrough".to_string(),
+            inherits: None,
+            description: "No output modification — always full content, no compression".to_string(),
+        },
+        read: ReadConfig {
+            default_mode: Some("full".to_string()),
+            max_tokens_per_file: Some(10_000_000),
+            prefer_cache: Some(false),
+        },
+        compression: CompressionConfig {
+            crp_mode: Some("off".to_string()),
+            output_density: Some("normal".to_string()),
+            entropy_threshold: None,
+            terse_mode: Some(false),
+        },
+        translation: TranslationConfig {
+            enabled: Some(false),
+            ..TranslationConfig::default()
+        },
+        layout: LayoutConfig::default(),
+        memory: crate::core::memory_policy::MemoryPolicyOverrides::default(),
+        verification: crate::core::output_verification::VerificationConfig::default(),
+        budget: BudgetConfig {
+            max_context_tokens: Some(1_000_000),
+            ..BudgetConfig::default()
+        },
+        pipeline: PipelineConfig {
+            intent: Some(false),
+            relevance: Some(false),
+            compression: Some(false),
+            translation: Some(false),
+        },
+        routing: RoutingConfig::default(),
+        degradation: DegradationConfig {
+            enforce: Some(false),
+            ..DegradationConfig::default()
+        },
+        autonomy: ProfileAutonomy::default(),
+        output_hints: OutputHints::default(),
+    }
+}
+
 /// Returns all built-in profile definitions.
 pub fn builtin_profiles() -> HashMap<String, Profile> {
     let mut map = HashMap::new();
@@ -594,6 +639,7 @@ pub fn builtin_profiles() -> HashMap<String, Profile> {
         builtin_hotfix(),
         builtin_ci_debug(),
         builtin_review(),
+        builtin_passthrough(),
     ] {
         map.insert(p.profile.name.clone(), p);
     }
@@ -936,18 +982,51 @@ fn merge_profiles(parent: Profile, child: Profile) -> Profile {
     }
 }
 
-/// Returns the currently active profile name from env or default.
+/// Reads the `profile` key directly from `config.toml` without going through
+/// `Config::load()`. This avoids a reentrancy deadlock: `Config::load()` →
+/// `find_project_root()` (OnceLock) → `SessionState::load_latest()` →
+/// `normalize_loaded_session()` → `active_profile()` → here → `Config::load()`.
+fn profile_name_from_config_file() -> Option<String> {
+    let path = crate::core::config::Config::path()?;
+    let content = std::fs::read_to_string(path).ok()?;
+    let table: toml::Table = toml::from_str(&content).ok()?;
+    table
+        .get("profile")?
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+}
+
+/// Returns the currently active profile name.
+/// Resolution order: LEAN_CTX_PROFILE env var → config.toml `profile` field → "coder".
 pub fn active_profile_name() -> String {
-    std::env::var("LEAN_CTX_PROFILE")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| "coder".to_string())
+    if let Ok(v) = std::env::var("LEAN_CTX_PROFILE") {
+        let v = v.trim().to_string();
+        if !v.is_empty() {
+            return v;
+        }
+    }
+    if let Some(name) = profile_name_from_config_file() {
+        return name;
+    }
+    "coder".to_string()
 }
 
 /// Loads the currently active profile.
 pub fn active_profile() -> Profile {
     let name = active_profile_name();
-    load_profile(&name).unwrap_or_else(builtin_coder)
+    if let Some(p) = load_profile(&name) {
+        p
+    } else {
+        if name != "coder" {
+            tracing::warn!(
+                "Profile '{name}' not found (no built-in or disk file). \
+                 Falling back to 'coder'. Create it with: lean-ctx profile create {name}"
+            );
+        }
+        builtin_coder()
+    }
 }
 
 /// Sets the active profile for the current process by updating `LEAN_CTX_PROFILE`.
@@ -1056,13 +1135,14 @@ mod tests {
     #[test]
     fn builtin_profiles_count() {
         let builtins = builtin_profiles();
-        assert_eq!(builtins.len(), 6);
+        assert_eq!(builtins.len(), 7);
         assert!(builtins.contains_key("coder"));
         assert!(builtins.contains_key("exploration"));
         assert!(builtins.contains_key("bugfix"));
         assert!(builtins.contains_key("hotfix"));
         assert!(builtins.contains_key("ci-debug"));
         assert!(builtins.contains_key("review"));
+        assert!(builtins.contains_key("passthrough"));
     }
 
     #[test]

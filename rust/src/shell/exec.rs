@@ -100,6 +100,64 @@ fn wait_with_limits(mut child: Child, max_bytes: usize, timeout: std::time::Dura
     }
 }
 
+const DEFAULT_MAX_BYTES: usize = 8 * 1024 * 1024; // 8 MB
+const DEFAULT_TIMEOUT: std::time::Duration = std::time::Duration::from_mins(2);
+const HEAVY_MAX_BYTES: usize = 32 * 1024 * 1024; // 32 MB
+const HEAVY_TIMEOUT: std::time::Duration = std::time::Duration::from_mins(10);
+
+fn exec_limits(command: &str) -> (usize, std::time::Duration) {
+    if is_heavy_command(command) {
+        (HEAVY_MAX_BYTES, HEAVY_TIMEOUT)
+    } else {
+        (DEFAULT_MAX_BYTES, DEFAULT_TIMEOUT)
+    }
+}
+
+fn is_heavy_command(command: &str) -> bool {
+    let cmd = command.trim();
+    let lower = cmd.to_lowercase();
+    static HEAVY_PREFIXES: &[&str] = &[
+        "cargo build",
+        "cargo test",
+        "cargo clippy",
+        "cargo check",
+        "cargo install",
+        "cargo bench",
+        "npm run build",
+        "npm install",
+        "npm ci",
+        "pnpm install",
+        "pnpm build",
+        "yarn install",
+        "yarn build",
+        "bun install",
+        "make",
+        "cmake",
+        "bazel build",
+        "bazel test",
+        "gradle build",
+        "gradle test",
+        "mvn package",
+        "mvn install",
+        "mvn test",
+        "go build",
+        "go test",
+        "dotnet build",
+        "dotnet test",
+        "swift build",
+        "swift test",
+        "flutter build",
+        "docker build",
+        "docker compose build",
+        "pip install",
+        "poetry install",
+        "uv sync",
+        "bundle install",
+        "mix compile",
+    ];
+    HEAVY_PREFIXES.iter().any(|p| lower.starts_with(p))
+}
+
 /// Execute a command from pre-split argv without going through `sh -c`.
 /// Used by `-t` mode when the shell hook passes `"$@"` — arguments are
 /// already correctly split by the user's shell, so re-serializing them
@@ -130,13 +188,14 @@ pub fn exec_argv(args: &[String]) -> i32 {
 }
 
 fn exec_direct(args: &[String]) -> i32 {
-    let status = Command::new(&args[0])
-        .args(&args[1..])
+    let mut cmd = Command::new(&args[0]);
+    cmd.args(&args[1..])
         .env("LEAN_CTX_ACTIVE", "1")
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status();
+        .stderr(Stdio::inherit());
+    super::platform::apply_utf8_locale(&mut cmd);
+    let status = cmd.status();
 
     match status {
         Ok(s) => s.code().unwrap_or(1),
@@ -148,6 +207,10 @@ fn exec_direct(args: &[String]) -> i32 {
 }
 
 pub fn exec(command: &str) -> i32 {
+    if let Err(msg) = crate::core::shell_allowlist::check_shell_allowlist(command) {
+        tracing::warn!("[CLI] Command would be blocked in MCP mode: {msg}");
+    }
+
     let (shell, shell_flag) = super::platform::shell_and_flag();
     let command = crate::tools::ctx_shell::normalize_command_for_shell(command);
     let command = command.as_str();
@@ -191,14 +254,15 @@ pub fn exec(command: &str) -> i32 {
 }
 
 fn exec_inherit(command: &str, shell: &str, shell_flag: &str) -> i32 {
-    let status = Command::new(shell)
-        .arg(shell_flag)
+    let mut cmd = Command::new(shell);
+    cmd.arg(shell_flag)
         .arg(command)
         .env("LEAN_CTX_ACTIVE", "1")
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status();
+        .stderr(Stdio::inherit());
+    super::platform::apply_utf8_locale(&mut cmd);
+    let status = cmd.status();
 
     match status {
         Ok(s) => s.code().unwrap_or(1),
@@ -242,21 +306,35 @@ fn exec_buffered(command: &str, shell: &str, shell_flag: &str, cfg: &config::Con
                 "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; {}",
                 command
             );
-            let tmp = tempfile::Builder::new()
+            // A temp script lets us set UTF-8 output encoding. If the temp file
+            // cannot be created (full disk, perms, broken TMP), degrade to
+            // running the command inline rather than panicking the process.
+            match tempfile::Builder::new()
                 .prefix("lean-ctx-ps-")
                 .suffix(".ps1")
                 .tempfile()
-                .expect("failed to create temp file for PowerShell script");
-            let tmp_path = tmp.into_temp_path();
-            let _ = std::fs::write(&tmp_path, &ps_script);
-            cmd.args([
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                &tmp_path.to_string_lossy(),
-            ]);
-            ps_tmp_path = Some(tmp_path);
+            {
+                Ok(tmp) => {
+                    let tmp_path = tmp.into_temp_path();
+                    let _ = std::fs::write(&tmp_path, &ps_script);
+                    cmd.args([
+                        "-NoProfile",
+                        "-ExecutionPolicy",
+                        "Bypass",
+                        "-File",
+                        &tmp_path.to_string_lossy(),
+                    ]);
+                    ps_tmp_path = Some(tmp_path);
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "lean-ctx: temp script unavailable ({e}); running PowerShell inline"
+                    );
+                    cmd.arg(shell_flag);
+                    cmd.arg(command);
+                    ps_tmp_path = None;
+                }
+            }
         } else {
             cmd.arg(shell_flag);
             cmd.arg(command);
@@ -269,11 +347,11 @@ fn exec_buffered(command: &str, shell: &str, shell_flag: &str, cfg: &config::Con
         cmd.arg(command);
     }
 
-    let child = cmd
-        .env("LEAN_CTX_ACTIVE", "1")
+    cmd.env("LEAN_CTX_ACTIVE", "1")
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn();
+        .stderr(Stdio::piped());
+    super::platform::apply_utf8_locale(&mut cmd);
+    let child = cmd.spawn();
 
     let child = match child {
         Ok(c) => c,
@@ -287,10 +365,8 @@ fn exec_buffered(command: &str, shell: &str, shell_flag: &str, cfg: &config::Con
         }
     };
 
-    const MAX_BUFFERED_BYTES: usize = 8 * 1024 * 1024; // 8 MB
-    const EXEC_TIMEOUT: std::time::Duration = std::time::Duration::from_mins(2);
-
-    let output = wait_with_limits(child, MAX_BUFFERED_BYTES, EXEC_TIMEOUT);
+    let (max_bytes, timeout) = exec_limits(command);
+    let output = wait_with_limits(child, max_bytes, timeout);
 
     let duration_ms = start.elapsed().as_millis();
     let exit_code = output.status.code().unwrap_or(1);
@@ -455,5 +531,35 @@ mod exec_tests {
         );
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains("[lean-ctx: output truncated"));
+    }
+
+    #[test]
+    fn heavy_commands_get_higher_limits() {
+        let (bytes, timeout) = super::exec_limits("cargo build --release");
+        assert_eq!(bytes, super::HEAVY_MAX_BYTES);
+        assert_eq!(timeout, super::HEAVY_TIMEOUT);
+
+        let (bytes, timeout) = super::exec_limits("cargo test --lib");
+        assert_eq!(bytes, super::HEAVY_MAX_BYTES);
+        assert_eq!(timeout, super::HEAVY_TIMEOUT);
+
+        let (bytes, timeout) = super::exec_limits("npm run build");
+        assert_eq!(bytes, super::HEAVY_MAX_BYTES);
+        assert_eq!(timeout, super::HEAVY_TIMEOUT);
+
+        let (bytes, timeout) = super::exec_limits("docker build -t myapp .");
+        assert_eq!(bytes, super::HEAVY_MAX_BYTES);
+        assert_eq!(timeout, super::HEAVY_TIMEOUT);
+    }
+
+    #[test]
+    fn normal_commands_get_default_limits() {
+        let (bytes, timeout) = super::exec_limits("echo hello");
+        assert_eq!(bytes, super::DEFAULT_MAX_BYTES);
+        assert_eq!(timeout, super::DEFAULT_TIMEOUT);
+
+        let (bytes, timeout) = super::exec_limits("git status");
+        assert_eq!(bytes, super::DEFAULT_MAX_BYTES);
+        assert_eq!(timeout, super::DEFAULT_TIMEOUT);
     }
 }
