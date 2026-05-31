@@ -2,23 +2,28 @@
   "hooks": {
     "PreToolUse": [
       {
+        "matcher": "Bash|bash",
         "hooks": [
           {
-            "command": "lean-ctx hook rewrite",
-            "type": "command"
+            "type": "command",
+            "command": "lean-ctx hook rewrite"
           }
-        ],
-        "matcher": "Bash|bash"
+        ]
       },
       {
+        "matcher": "Read|read|ReadFile|read_file|View|view|Grep|grep|Search|search|ListFiles|list_files|ListDirectory|list_directory",
         "hooks": [
           {
-            "command": "lean-ctx hook redirect",
-            "type": "command"
+            "type": "command",
+            "command": "lean-ctx hook redirect"
           }
-        ],
-        "matcher": "Read|read|ReadFile|read_file|View|view|Grep|grep|Search|search|ListFiles|list_files|ListDirectory|list_directory"
+        ]
       }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "mcp__lean-ctx__ctx_shell"
     ]
   }
 }

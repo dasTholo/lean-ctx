@@ -2,7 +2,7 @@
 lib_version: 0.1.0
 mdai-pack:
   mode: import-only
-  exports: [file_check]
+  exports: [ file_check ]
 ---
 
 @markdownai v1.0
@@ -11,7 +11,10 @@ mdai-pack:
 @if file.exists({{ path }})
 
 - {{ path }} exists
-  @else
+
+@else
+
 - {{ path }} MISSING
+
 @if-end
 @define-end
