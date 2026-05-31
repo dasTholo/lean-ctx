@@ -33,8 +33,8 @@
 - `@include` resolves repo-root-relative and expands `${MDAI_LIBRARY_ROOT}` under MCP, but is document-relative with no
   env-expansion under `mai validate` / `render` (and `..` is parser-rejected). Unconditional `${MDAI_LIBRARY_ROOT}/...`
   includes therefore fail `mai validate` — verify via MCP. See `core/mcp-markdownai.md`.
-- `body.mdai.md:185` `@set render_target_resolved = render_target | default("none") /` — `@set` cannot be a pipe source
-  in 1.3.0 (pre-existing; out of this scope, tracked in findings-v3).
+- `body.mdai.md` `@set … | default(…) /` pipe-source error — **resolved in v0.1.4** (TG2): `@set`-Zeile entfernt,
+  Use-Site auf Inline-Interpolation umgestellt.
 
 ## v0.1.0 — 2026-05-24
 

@@ -182,12 +182,12 @@ cwd="<repo>"
 
 Optional inline-render (only when explicitly requested):
 
-@set render_target_resolved = render_target | default("none") /
+Wird kein render_target gesetzt, "none" übergeben (kein Inline-Render).
 
 mcp__markdownai__call_macro(
 file="mdai/skills/mdai-brainstorm/write-spec.md",
 macro="render_spec",
-args={ "slug": "{{ slug }}", "target": "{{ render_target_resolved }}" },
+args={ "slug": "{{ slug }}", "target": "{{ render_target }}" },
 cwd="<repo>"
 )
 
