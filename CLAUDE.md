@@ -15,6 +15,9 @@ bash# CLAUDE.md
 ## Hard Rules (always-on)
 
 - **Tests**: always `cargo nextest run`, never `cargo test`
+- **Editing `*.rs` files**: always use Serena tools (`mcp__serena__jet_brains_find_symbol`,
+  `replace_symbol_body`, `insert_before_symbol`/`insert_after_symbol`, `replace_content`,
+  `rename`/`move`/`safe_delete`) — never native `Edit`/`ctx_edit` on Rust files
 - **Deferred-tool reflex:** see `~/.claude/CLAUDE.md` Hard Rules — always
   `ToolSearch(query="select:...")` before any Bash workaround.
 - **Before `git add`**: run `mcp__jetbrains__reformat_file` on every changed file

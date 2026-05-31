@@ -1,5 +1,6 @@
 # MDAi Todos
 
+- set path damit Pläne src path immer referzieren können
 - muss in Macro alles aufgezählt sein? die calls passieren ja "einfach" so
 - ctx_shell (MCP)(command: "test -f /home/tholo/Scripts/lean-ctx/mdai/skills/mdai-brainstorm/body.mdai.md && echo
   EXISTS || echo MISSING") abfangen mit search

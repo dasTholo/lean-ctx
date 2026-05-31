@@ -59,9 +59,20 @@
 - `session.recently_touched_files()` exists: **NO (verified)**. There is no such accessor on `SessionState`;
   touched-files data only flows as an explicit `touched_files: &[String]` parameter into `core::intent_engine`
   (`from_file_patterns` / `from_query_with_session`), never exposed as a session-recent accessor.
-- Decision: **drop recent-neighbors from v1**. The other six `@graph` ops (via
+- Decision: ~~**drop recent-neighbors from v1**~~. The other six `@graph` ops (via
   `graph_index` / `call_graph` / `graph_context`) carry v1; recent-neighbors can be added with a small session
   API in Phase 4 if real demand appears.
+
+- **Correction (2026-05-31, post-gate — supersedes the decision above):** the "no accessor" finding was too
+  literal (it searched only for a method literally named `recently_touched_files()`). The data source **does
+  exist** and the exact recent-neighbors computation is **already wired in production**:
+  - `SessionState.files_touched` is a public field (loaded via `SessionState::load_latest_for_project_root`).
+  - `core/graph_context.rs:263 graph_neighbor_ranks_for_recent_files(root, recent, 40, 120)` exists.
+  - `tools/ctx_semantic_search.rs:791-815 graph_rrf_ranks_for_search_root` already builds the recent list
+    (`session.files_touched.iter().rev().filter(under_root).take(12).map(|f| f.path)`) and calls that helper.
+  → `@graph recent-neighbors` is a **thin R-router** like the other six graph ops — **no new session API**, and
+  it **stays in v1** (no Phase-4 deferral). Dashboard `/#compression` recent-files is a separate recency source
+  (`core/bounce_tracker.rs` `recent_reads`/`recently_edited`); the `@graph` op reuses `session.files_touched`.
 
 ## 4. Final v1 directive scope carried into Phase 1
 
@@ -69,7 +80,9 @@
   writes decisions, @on complete defers finding-writes to the existing `auto_findings` hook); tdd-output; and the
   9 Extension constructs.
 - DEFER:
-  - @graph **recent-neighbors** sub-op — per G-1 (no session accessor); revisit in Phase 4.
+  - ~~@graph **recent-neighbors** sub-op — per G-1 (no session accessor); revisit in Phase 4.~~
+    **Corrected (see §3 Correction):** now **BUILD in v1** — `session.files_touched` +
+    `graph_neighbor_ranks_for_recent_files` exist and are already wired in `ctx_semantic_search`.
   - `@if`'s `evalexpr` backing — Phase 3 (YAGNI; the dep was deliberately not added in Phase 0).
   - finding-writes inside `@on complete` — defer to the existing auto_findings hook rather than re-implement.
 

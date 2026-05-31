@@ -21,6 +21,10 @@ markdownai_directives_omitted: >
 
 Diese Spec erstellen lean-lmd Version 0.1.0.
 
+> **Phase-0-Gate bestanden (2026-05-31).** Verifizierte Wahrheiten aus
+> `docs/lean-md/decisions/2026-05-31-phase-0-gate-outcome.md` (referenziert als
+> „Gate-Outcome §N"). R-1 und G-1 gelöst.
+
 ---
 
 ## 1. Ziel & Abgrenzung
@@ -49,25 +53,25 @@ markdownai→lmd als Referenz), danach die übrigen Skills mit Hand-over auf lmd
 
 ### 2.1 Bestätigt — die teure Arbeit existiert bereits
 
-| Annahme der Spec    | Beleg (Datei:Zeile)                                                                                                                                                                                                                                                 | Status        |
-|---------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------|
-| Graph-Datei-API     | `core/graph_index.rs`: `file_count:304`, `edge_count:312`, `get_reverse_deps:320`, `get_related:343`, `load_or_build:373`                                                                                                                                           | ✅ exakt       |
-| Graph-Symbol-API    | `core/call_graph.rs`: `callers_of:416`, `callees_of:424`, `load_or_build:666`                                                                                                                                                                                       | ✅ exakt       |
-| Graph-Kontext-API   | `core/graph_context.rs`: `build_graph_context:77`, `build_related_hint:241`, `graph_neighbor_ranks_for_recent_files:263`, `format_graph_context:320`                                                                                                                | ✅ exakt       |
-| Session-Bridge      | `core/session/state.rs`: `add_finding:217`, `add_decision:233`                                                                                                                                                                                                      | ✅             |
-| Knowledge-Bridge    | `core/knowledge/core.rs:remember:92`, `query.rs:recall:7`/`recall_by_category:40`/`recall_for_output:100`; `retrieval_count` vorhanden                                                                                                                              | ✅             |
-| TDD-Dialect-Basis   | `core/tdd_schema.rs`: `tdd_schema_value`, `default_tdd_schema_path`, `write_if_changed`; `bin/gen_tdd_schema.rs`                                                                                                                                                    | ✅             |
-| Sync-Tool-Trait     | `server/tool_trait.rs`: `fn handle(&self, args, ctx) -> Result<ToolOutput, ErrorData>` (sync)                                                                                                                                                                       | ✅ §8a korrekt |
-| rushdown extensibel | crates.io, CommonMark 0.31.2 + GFM; custom block/inline parsers, `NodeKind`, `RenderNode`, AST-Transformer, `parser_extension(\|p\| p.add_inline_parser(Ctor, Opts, prio))`, `trigger()->&[u8]`, `parse()->Option<NodeRef>`, `.and()` → `new_markdown_to_html(...)` | ✅ §5 gedeckt  |
+| Annahme der Spec    | Beleg (Datei:Zeile)                                                                                                                                                                                                                                                                      | Status                         |
+|---------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------|
+| Graph-Datei-API     | `core/graph_index.rs`: `file_count:304`, `edge_count:312`, `get_reverse_deps:320`, `get_related:343`, `load_or_build:373`                                                                                                                                                                | ✅ exakt                        |
+| Graph-Symbol-API    | `core/call_graph.rs`: `callers_of:416`, `callees_of:424`, `load_or_build:666`                                                                                                                                                                                                            | ✅ exakt                        |
+| Graph-Kontext-API   | `core/graph_context.rs`: `build_graph_context:77`, `build_related_hint:241`, `graph_neighbor_ranks_for_recent_files:263`, `format_graph_context:320`                                                                                                                                     | ✅ exakt                        |
+| Session-Bridge      | `core/session/state.rs`: `add_finding:217`, `add_decision:233`                                                                                                                                                                                                                           | ✅                              |
+| Knowledge-Bridge    | `core/knowledge/core.rs:remember:92`, `query.rs:recall:7`/`recall_by_category:40`/`recall_for_output:100`; `retrieval_count` vorhanden                                                                                                                                                   | ✅                              |
+| TDD-Dialect-Basis   | `core/tdd_schema.rs`: `tdd_schema_value`, `default_tdd_schema_path`, `write_if_changed`; `bin/gen_tdd_schema.rs`                                                                                                                                                                         | ✅                              |
+| Sync-Tool-Trait     | `server/tool_trait.rs`: `fn handle(&self, args, ctx) -> Result<ToolOutput, ErrorData>` (sync)                                                                                                                                                                                            | ✅ §8a korrekt                  |
+| rushdown extensibel | rushdown **0.18** (gepinnt); CommonMark 0.31.2 + GFM; custom block (`open`)/inline (`parse`) parsers, `NodeKind`, `RenderNode`, AST-Transformer, `parser_extension(\|p\| p.add_inline_parser(Ctor, Opts, prio))`, `trigger()->&[u8]`, `.and()` → Closure aus `new_markdown_to_html(...)` | ✅ Spike grün (Gate-Outcome §1) |
 
 ### 2.2 Fehlt / abweichend — Risiken & Lücken
 
-| Punkt                                          | Befund                                                                                                           | Konsequenz                                                                        |
-|------------------------------------------------|------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------|
-| `rushdown`, `evalexpr` als Deps                | **nicht** in `rust/Cargo.toml`/`Cargo.lock`; `rushdown` nur in der Spec erwähnt                                  | Phase-0-Spike nötig (API-Ergonomie 0.17)                                          |
-| `tools/ctx_md.rs`, `cli/md_cmd.rs`, `src/lmd/` | existieren nicht                                                                                                 | Greenfield — wie erwartet                                                         |
-| `session.recently_touched_files()`             | existiert **nicht** auf Session-State                                                                            | `@graph recent-neighbors` braucht neue kleine API **oder** wird in v1 weggelassen |
-| Node-markdownai                                | unter `markdownai/` (node_modules, MCP-Server, `MDs/`) aktiv; mdai-Skills hängen an `mcp__markdownai__read_file` | Strangler: parallel halten, pro Skill ablösen                                     |
+| Punkt                                          | Befund                                                                                                           | Konsequenz                                                                                              |
+|------------------------------------------------|------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------|
+| `rushdown`, `evalexpr` als Deps                | `rushdown = "0.18"` jetzt in `rust/Cargo.toml` gepinnt; `evalexpr` bewusst **nicht** in Phase 0                  | Spike grün (Gate-Outcome §1); `evalexpr` erst Phase 3 (§4)                                              |
+| `tools/ctx_md.rs`, `cli/md_cmd.rs`, `src/lmd/` | `src/lmd/audit.rs` existiert (22 Einträge, 3 CI-Tests, Gate-Outcome §2); Rest noch nicht                         | Greenfield — wie erwartet                                                                               |
+| `session.files_touched` (Recent-Files)         | Feld **existiert**; `graph_neighbor_ranks_for_recent_files` verdrahtet (`ctx_semantic_search.rs:814`)            | `@graph recent-neighbors` **bleibt v1** (R-Router); kein neuer Session-API (Gate-Outcome §3 korrigiert) |
+| Node-markdownai                                | unter `markdownai/` (node_modules, MCP-Server, `MDs/`) aktiv; mdai-Skills hängen an `mcp__markdownai__read_file` | Strangler: parallel halten, pro Skill ablösen                                                           |
 
 ### 2.3 Hook-Befund — Enforcement ist bereits hart
 
@@ -158,31 +162,33 @@ lmd ist ein **dünnes Frontend**. Jede Direktive wird vor dem Bau klassifiziert:
   **kein Doppel-Tracking** sicherstellen.
 - **E (rushdown-Extension)** — echtes Engine-Konstrukt ohne lean-ctx-Äquivalent.
 
-| Direktive                       | Klasse | Backing                                                                        |
-|---------------------------------|--------|--------------------------------------------------------------------------------|
-| `@read`                         | R      | `core::structured_read` / `ctx_read`                                           |
-| `@search`                       | R      | `ctx_search`                                                                   |
-| `@list`                         | R      | `ctx_tree`                                                                     |
-| `@query` (shell)                | R      | `shell/exec` + compress (+ Security-Gate)                                      |
-| `@graph` (Datei/Symbol/Kontext) | R      | `graph_index`/`call_graph`/`graph_context` (verifiziert)                       |
-| `@remember`/`@recall`           | R      | `ctx_knowledge` (`remember`/`recall_for_output`, `no_track`)                   |
-| `@env`/`@date`/`@count`         | R      | `std::env`/chrono/glob (trivial)                                               |
-| `@phase`/`@on complete`         | R+H    | `ctx_session add_decision/add_finding` — **H-Check: schreibt Hook das schon?** |
-| `@lean-md` Header               | E      | Config-Parse                                                                   |
-| `@include`/`@import`            | E      | File-Inline / Definitions-Scope (fs + jail)                                    |
-| `@define`/`@call`               | E      | Macro-Engine — kein lean-ctx-Äquivalent                                        |
-| `@if`/`@consumer`               | E      | Container-Transformer (+ evalexpr)                                             |
-| `{{ expr }}` / Pipe + `@render` | E      | Inline-Eval / AstTransformer                                                   |
-| TDD-Output                      | R+E    | `tdd_schema` (R) + Render-Hook (E)                                             |
+| Direktive                       | Klasse | Backing                                                                                                                                                                       |
+|---------------------------------|--------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `@read`                         | R      | `core::structured_read` / `ctx_read`                                                                                                                                          |
+| `@search`                       | R      | `ctx_search`                                                                                                                                                                  |
+| `@list`                         | R      | `ctx_tree`                                                                                                                                                                    |
+| `@query` (shell)                | R      | `shell/exec` + compress (+ Security-Gate)                                                                                                                                     |
+| `@graph` (Datei/Symbol/Kontext) | R      | `graph_index`/`call_graph`/`graph_context` (verifiziert); recent-neighbors via `session.files_touched` + `graph_neighbor_ranks_for_recent_files` (Gate-Outcome §3 korrigiert) |
+| `@remember`/`@recall`           | R      | `ctx_knowledge` (`remember`/`recall_for_output`, `no_track`)                                                                                                                  |
+| `@env`/`@date`/`@count`         | R      | `std::env`/chrono/glob (trivial)                                                                                                                                              |
+| `@phase`/`@on complete`         | R+H    | `@phase`→`add_decision` (additiv); `@on complete` defert Finding-Writes an `auto_findings`-Hook `server/mod.rs:1156` (Gate-Outcome §2)                                        |
+| `@lean-md` Header               | E      | Config-Parse                                                                                                                                                                  |
+| `@include`/`@import`            | E      | File-Inline / Definitions-Scope (fs + jail)                                                                                                                                   |
+| `@define`/`@call`               | E      | Macro-Engine — kein lean-ctx-Äquivalent                                                                                                                                       |
+| `@if`/`@consumer`               | E      | Container-Transformer (+ evalexpr, Phase 3)                                                                                                                                   |
+| `{{ expr }}` / Pipe + `@render` | E      | Inline-Eval / AstTransformer                                                                                                                                                  |
+| TDD-Output                      | R+E    | `tdd_schema` (R) + Render-Hook (E)                                                                                                                                            |
 
 **Resultat:** Fast alle *Daten*-Direktiven sind R (Router von je wenigen Zeilen).
 Echte rushdown-Arbeit (E) reduziert sich auf **~6 Primitive** (§4). "15 Direktiven,
-3 Wochen" kollabiert auf "6 Engine-Primitive + N triviale Bridges".
+3 Wochen" kollabiert auf "6 Engine-Primitive + N triviale Bridges". Das Audit ist
+jetzt ausführbares Artefakt: `src/lmd/audit.rs::directive_audit()` — 22 Einträge,
+3 CI-Guards (Coverage, Backing, Anchor-Drift; Gate-Outcome §2).
 
-**Phase 0 (Gate):** Dieses Audit als ausführbares Artefakt (Tabelle pro Direktive:
-R/H/E + Backing-Symbol + Bridge-Zeilenschätzung) **+ rushdown-Spike** (1 Block- + 1
-Inline-Direktive gegen die echte 0.17-API, Vorbild `tests/extension.rs`). Erst dessen
-Ergebnis entscheidet den finalen v1-Umfang.
+**Phase 0 (Gate) — bestanden (Gate-Outcome §5):** Audit als ausführbares Artefakt
+(`src/lmd/audit.rs`, 22 Einträge) **+ rushdown-Spike** (1 Block- + 1 Inline-Direktive
+gegen die echte **0.18**-API, `rust/tests/lmd_rushdown_spike.rs`). Ergebnis: v1-Umfang
+fixiert, Extension-Pfad viabel — kein Preprocessor-Fallback nötig.
 
 ### 3.2 lmd erweitert lean-ctx — native Direktiven = lean-ctx/lmd-core
 
@@ -264,7 +270,7 @@ Drei Schichten, von "vermeiden" zu "blocken":
 2. **Inline-Parser** — Trigger `{{` und `@` inline (`{{ expr }}`, `@recall`,
    `@on complete`).
 3. **Container-Transformer** — `@if`/`@elseif`/`@else`/`@if-end` + `@consumer=ai/human`
-   als Whole-AST-Transformer (rushdown AST-Transformer + evalexpr).
+   als Whole-AST-Transformer (rushdown AST-Transformer + evalexpr; evalexpr erst Phase 3).
 4. **Macro-Engine** — `@define`/`@call` mit Parameter-Substitution (`{{ param }}`),
    `@include` (Content sichtbar) / `@import` (nur Definitions). Kein lean-ctx-Äquivalent.
 5. **Pipe + `@render`** — Postfix-AstTransformer (`… | @render type=table`).
@@ -293,24 +299,29 @@ Jede R-Direktive ist eine Bridge, die in eine existierende Core-API routet. Beis
 ### 4.3 rushdown-Extension-Mapping
 
 ```rust
-// src/lmd/parser/block.rs (Skizze)
+// src/lmd/parser/block.rs (Skizze) — exakte Trait-/Methoden-Namen + Render-Wiring: Gate-Outcome §1
 fn lmd_extension() -> impl ParserExtension {
     parser_extension(|p| {
-        p.add_block_parser(LmdBlockParser::new, NoParserOptions, PRIORITY_BLOCK_HIGH);
+        p.add_block_parser(LmdBlockParser::new, NoParserOptions, PRIORITY_ATX_HEADING);
         p.add_inline_parser(LmdInlineParser::new, NoParserOptions, PRIORITY_EMPHASIS + 100);
     })
 }
-// LmdBlockParser: trigger() -> b"@"; parse() -> Option<NodeRef> (NodeKind::LmdDirective{name,args})
+// LmdBlockParser: impl BlockParser, trigger() -> b"@"; open(arena, parent, reader, ctx)
+//   -> Option<(NodeRef, State)> (NICHT parse); can_interrupt_paragraph() -> true.
+// LmdInlineParser: impl InlineParser, trigger() -> b"{"/b"@"; parse(...) -> Option<NodeRef>;
+//   Dispatcher konsumiert Trigger-Byte NICHT → reader.advance(match_len) selbst aufrufen.
+// Entry-Point: new_markdown_to_html(...) liefert Closure render(&mut out, input).
 // RenderNode für NodeKind::LmdDirective ruft die Bridge-Registry und schreibt das Ergebnis.
 ```
 
 ### 4.4 Neue Integrationspunkte
 
-- `src/lmd/` (Modul-Baum aus v0.6 §5).
+- `src/lmd/` (Modul-Baum aus v0.6 §5; `audit.rs` bereits angelegt, Gate-Outcome §2).
 - `src/tools/ctx_md.rs` — `ctx_md_render`/`ctx_md_read_phase`/`ctx_md_list_phases`/
   `ctx_md_constraints` MCP-Tools (Strangler-Ersatz für `mcp__markdownai__*`).
 - `src/cli/md_cmd.rs` — `lean-ctx md render|read|phases <file>`.
-- Cargo-Deps: `rushdown` (Version nach Spike fixieren), `evalexpr`.
+- Cargo-Deps: `rushdown = "0.18"` (gepinnt, Gate-Outcome §1); `evalexpr` **erst Phase 3**
+  (in Phase 0 bewusst nicht hinzugefügt, Gate-Outcome §4).
 
 ---
 
@@ -356,17 +367,17 @@ Anbindung; hier wird Q-05 scharf, §9).
 
 ## 6. Phasenplan (Sequenz)
 
-| Phase | Inhalt                                                                                     | Gate / Ergebnis                                                         |
-|-------|--------------------------------------------------------------------------------------------|-------------------------------------------------------------------------|
-| **0** | Notwendigkeits-Audit (R/H/E je Direktive) + rushdown-0.17-Spike (1 Block + 1 Inline)       | entscheidet finalen v1-Umfang; bricht ab, falls rushdown-API ungeeignet |
-| **1** | Header-Parser + Block/Inline-Parser + Bridge-Registry + Fragment-Resolver (built-in-first) | `@lean-md`, `@include`, ein R-Router (`@read`) rendern e2e              |
-| **2** | R-Bridges: `@read`/`@search`/`@list`/`@query`/`@graph`/`@env`/`@date`/`@count`             | Daten-Direktiven live                                                   |
-| **3** | E-Konstrukte: `@define`/`@call`, `@import`, `@if`/`@consumer`, `{{ }}`, Pipe/`@render`     | Macro-Engine + Container live                                           |
-| **4** | Bridges `@phase`/`@on complete` (+ H-Check Doppel-Tracking), `@remember`/`@recall`         | Session/Knowledge live                                                  |
-| **5** | `@dispatch` + Tool-Disziplin-Constraint-Injektion + Hook-Lücke schließen                   | Subagent-Dispatch ohne Drift                                            |
-| **6** | TDD-Render-Hook (`tdd_schema`)                                                             | Output-Kompression                                                      |
-| **7** | `ctx_md_*`-MCP-Tools + `lean-ctx md`-CLI                                                   | Strangler-Oberfläche                                                    |
-| **8** | Pilot-Migration `mdai-brainstorm` + Parity-/Phase-Isolation-Tests                          | erster Skill auf lmd                                                    |
+| Phase | Inhalt                                                                                                      | Gate / Ergebnis                                                           |
+|-------|-------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------|
+| **0** | ✅ **bestanden** — Audit (`src/lmd/audit.rs`, 22) + rushdown-**0.18**-Spike (1 Block + 1 Inline)             | v1-Umfang fixiert; Extension-Pfad viabel, kein Fallback (Gate-Outcome §5) |
+| **1** | Header-Parser + Block/Inline-Parser + Bridge-Registry + Fragment-Resolver (built-in-first)                  | `@lean-md`, `@include`, ein R-Router (`@read`) rendern e2e                |
+| **2** | R-Bridges: `@read`/`@search`/`@list`/`@query`/`@graph`/`@env`/`@date`/`@count`                              | Daten-Direktiven live                                                     |
+| **3** | E-Konstrukte: `@define`/`@call`, `@import`, `@if`/`@consumer`, `{{ }}`, Pipe/`@render`                      | Macro-Engine + Container live                                             |
+| **4** | Bridges `@phase` (→`add_decision`) / `@on complete` (defert an `auto_findings`-Hook), `@remember`/`@recall` | Session/Knowledge live (Gate-Outcome §2)                                  |
+| **5** | `@dispatch` + Tool-Disziplin-Constraint-Injektion + Hook-Lücke schließen                                    | Subagent-Dispatch ohne Drift                                              |
+| **6** | TDD-Render-Hook (`tdd_schema`)                                                                              | Output-Kompression                                                        |
+| **7** | `ctx_md_*`-MCP-Tools + `lean-ctx md`-CLI                                                                    | Strangler-Oberfläche                                                      |
+| **8** | Pilot-Migration `mdai-brainstorm` + Parity-/Phase-Isolation-Tests                                           | erster Skill auf lmd                                                      |
 
 ---
 
@@ -390,9 +401,10 @@ Anbindung; hier wird Q-05 scharf, §9).
 
 ## 8. Test- / Parity-Strategie
 
-1. **rushdown-Spike-Akzeptanz (Phase 0):** ein Custom-`@`-Block + ein Inline-`{{ }}`
-   rendern korrekt; Abbruchkriterium dokumentiert, falls die Extension-API die
-   Direktiven nicht sauber ausdrückt (Fallback-Pfad: Preprocessor vor rushdown).
+1. **rushdown-Spike-Akzeptanz (Phase 0) — ✅ bestanden:** Custom-`@upper`-Block +
+   Inline-`{{ shout:… }}` rendern korrekt gegen die echte rushdown-0.18-API
+   (`rust/tests/lmd_rushdown_spike.rs`). Extension-Pfad viabel; Preprocessor-Fallback
+   nicht gezogen (Gate-Outcome §1/§5).
 2. **Golden-Output-Parity:** für jede migrierte Direktive/jeden Skill rendert lmd
    byte-nah identisch zum Node-markdownai-Output (Snapshot-Tests).
 3. **Phase-Isolation-Token-Check (gegen Benchmark-Zielmarken §2.5):**
@@ -412,11 +424,11 @@ Anbindung; hier wird Q-05 scharf, §9).
 
 ## 9. Offene Punkte / deferred
 
-| ID   | Frage                                                                        | Status                                                                                         |
-|------|------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------|
-| Q-05 | `@phase`-Fehlerverhalten (abort vs. continue)                                | **deferred** — wird in der `executing-plans`-Migration (§5.2) scharf, nicht in der Engine-Spec |
-| G-1  | `@graph recent-neighbors` braucht `session.recently_touched_files()` (fehlt) | kleine neue Session-API **oder** Op in v1 weglassen — Entscheid in Phase 0                     |
-| R-1  | rushdown-0.17-API-Ergonomie / exakte Version                                 | Phase-0-Spike fixiert Version + bestätigt Extension-Pfad                                       |
+| ID   | Frage                                                    | Status                                                                                                                                                                                                              |
+|------|----------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Q-05 | `@phase`-Fehlerverhalten (abort vs. continue)            | **deferred** — wird in der `executing-plans`-Migration (§5.2) scharf, nicht in der Engine-Spec                                                                                                                      |
+| G-1  | `@graph recent-neighbors` — Datenquelle für Recent-Files | **gelöst (Gate-Outcome §3 korrigiert):** `session.files_touched` + `graph_neighbor_ranks_for_recent_files` existieren, Muster live in `ctx_semantic_search.rs:791` → recent-neighbors **bleibt v1**, kein neuer API |
+| R-1  | rushdown-API-Ergonomie / exakte Version                  | **gelöst:** rushdown 0.18 gepinnt, Extension-Pfad viabel (Gate-Outcome §1/§5)                                                                                                                                       |
 
 Übergangs-Default Q-05 (wie v0.6 §8): Phase läuft Body sequentiell; Error wird als
 `decision`-Eintrag geschlossen, Render bricht nicht ab.
@@ -434,5 +446,6 @@ Anbindung; hier wird Q-05 scharf, §9).
 
 ---
 
-*Status: v0.7 draft — an verifizierten Code-Befund + Adoption (Hooks, Regel-Bibliothek,
-Dispatch) gebunden. Nächster Schritt nach Review: writing-plans (Phase-0-Gate zuerst).*
+*Status: v0.8 — Phase-0-Gate bestanden (Gate-Outcome §5); R-1/G-1 gelöst, Wahrheiten
+eingearbeitet. An verifizierten Code-Befund + Adoption (Hooks, Regel-Bibliothek,
+Dispatch) gebunden. Nächster Schritt: writing-plans für Phase 1.*
