@@ -50,7 +50,7 @@ Constraints for the dialog phase:
 - Spec target: docs/mdai/specs/ (NOT docs/superpowers/specs/)
 - NO plan target — plan-write is a separate skill invocation (handoff phase)
 - Hard rules: see @include above
-  @phase-end
+@phase-end
 
 @phase dialog-rules
 

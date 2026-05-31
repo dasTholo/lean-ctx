@@ -17,15 +17,15 @@ mdai-pack:
 - ABORT: Spec file already exists at docs/mdai/specs/{{ spec_date }}-{{ slug }}-design.mdai.md
 - Choose a different slug, delete the existing file first, or amend the body in place.
 - Not overwriting to prevent silent data loss.
-  @else
-  @mkdir docs/mdai/specs /
-  @render-template from="mdai/skills/mdai-brainstorm/templates/spec-template.md" to="docs/mdai/specs/{{ spec_date }}-{{ slug }}-design.mdai.md" force
-  slug={{ slug }}
-  date={{ spec_date }}
-  body={{ body }}
-  @render-template-end
+@else
+@mkdir docs/mdai/specs /
+@render-template from="mdai/skills/mdai-brainstorm/templates/spec-template.md" to="docs/mdai/specs/{{ spec_date }}-{{ slug }}-design.mdai.md" force
+slug={{ slug }}
+date={{ spec_date }}
+body={{ body }}
+@render-template-end
 - wrote docs/mdai/specs/{{ spec_date }}-{{ slug }}-design.mdai.md
-  @if-end
+@if-end
 
 @define-end
 
@@ -46,17 +46,16 @@ mdai-pack:
 
 - err: Cannot render — spec file does not exist at {{ spec_path }}
 - Call write_spec(slug, body) first.
-  @if-end
-  @case "file"
-  @if file.exists({{ spec_path }})
-  @mkdir docs/mdai/specs/rendered /
-  @query mcp lean-ctx ctx_shell cmd="cd markdownai && npx mai render \"../{{ spec_path }}\" > /
-  \"../docs/mdai/specs/rendered/{{ spec_date }}-{{ slug }}.rendered.md\""
-  @else
+@if-end
+@case "file"
+@if file.exists({{ spec_path }})
+@mkdir docs/mdai/specs/rendered /
+@query mcp lean-ctx ctx_shell cmd="cd markdownai && npx mai render \"../{{ spec_path }}\" > \"../docs/mdai/specs/rendered/{{ spec_date }}-{{ slug }}.rendered.md\"" /
+@else
 - err: Cannot render — spec file does not exist at {{ spec_path }}
 - Call write_spec(slug, body) first.
-  @if-end
-  @switch-end
+@if-end
+@switch-end
 
 @define-end
 
@@ -73,4 +72,4 @@ recommendations={{ recommendations }}
 @render-template-end
 
 - wrote docs/mdai/reviews/{{ slug }}-review.md
-  @define-end
+@define-end
