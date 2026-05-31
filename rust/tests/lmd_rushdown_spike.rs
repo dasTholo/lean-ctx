@@ -17,7 +17,6 @@
 //! Fallback if it had proven impossible: a preprocessor stage that rewrites
 //! the directives into plain HTML/markdown before handing off to rushdown.
 
-extern crate alloc;
 
 use core::{
     any::TypeId,
@@ -341,6 +340,8 @@ where
 
 fn shout_inline_parser_extension() -> impl ParserExtension {
     parser_extension(|p| {
+        // PRIORITY_EMPHASIS + 100: run after CommonMark emphasis so our `{{ ... }}` inline claims
+        // the span (higher value = later); `{` is not a CommonMark inline trigger, so no real collision.
         p.add_inline_parser(
             ShoutInlineParser::new,
             NoParserOptions,
