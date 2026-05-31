@@ -1,0 +1,12 @@
+# Fast dev builds: mold linker via clang. Codegen stays on the default LLVM
+# backend (Cranelift cannot lower the AVX-512 SIMD kernels in the rten ML deps).
+[build]
+jobs = 15
+
+[target.x86_64-unknown-linux-gnu]
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+
+[profile.dev]
+opt-level = 0
+incremental = true
