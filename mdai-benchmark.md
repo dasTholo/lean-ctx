@@ -125,8 +125,8 @@ und detaillierte Begründungen pro Schritt.
   der Leser sieht alles, die Source ist kompakt. Kein manuelles Duplizieren nötig.
 - `@include`: Hard-Rules und Tool-Tabelle werden aus geteilten Macro-Dateien gezogen.
   Änderung an einer Stelle → alle Pläne, die `@include` nutzen, sind aktuell.
-- `@phase ... @end`: Phasengrenzen sind maschinenlesbar — Voraussetzung für
-  zukünftiges selektives Phase-Rendering (`mai render --phase A3`).
+- `@phase ... @end`: Phasengrenzen sind maschinenlesbar — Basis für die selektive
+  Phase-Isolation via MCP `read_file(phase=…)` (kein CLI-Flag, siehe v5).
 
 **Was die ~74 % nicht belegt:**
 
@@ -168,12 +168,9 @@ Subagent alles, was er für die Phase braucht — Hard Rules sind nicht weglassb
 
 1. **Absolute Pfade werden geblockt** ("Path traversal blocked"). Der Server akzeptiert
    ausschließlich Pfade relativ zu `cwd`. Bei Launch via `.mcp.json` ist `cwd` = Projekt-Root.
-2. **MCP-Protocol-Compliance-Patch nötig** (lokal angewendet, upstream offen):
-   Der Server returnt für `tools/call` rohe Objekte (`{phases: [...]}`) statt der
-   spezifizierten Form `{content: [{type: "text", text: ...}], structuredContent: {...}}`.
-   Ohne Patch zeigt Claude Codes MCP-Client „completed with no output".
-   Patch: neue `respondTool()`-Funktion in `markdownai/packages/mcp/src/server.ts`,
-   ersetzt 9× `respond(id, …)` in `dispatchTool`. Rebuild via `npx tsc`. Verifiziert live.
+2. **MCP-Protocol-Compliance-Envelope nötig:** ohne `content[]`+`structuredContent`-Wrapper
+   verwirft Claude Codes MCP-Client die rohe `tools/call`-Antwort („completed with no
+   output"). In der `feat-mdai`-Dist (= 1.3.0, v5) enthalten, MCP-Calls live bestätigt.
 
 ---
 
@@ -314,21 +311,11 @@ einsetzt und nicht für Dispatch-Routing, hebt das eigentliche Token-Potential n
 | Plan mit ≥3 Tasks, jeder mit gleichem Commit-Muster       | **Ja** — `@define`/`@call` spart Duplikate, expandiert korrekt         |
 | Mehrere Pläne teilen dieselben Hard-Rules / Tool-Tabellen | **Ja** — `@include` aus gemeinsamen Macro-Dateien, eine Stelle pflegen |
 | Plan mit viel Erklärungsprosa ohne Struktur-Redundanz     | **Bedingt** — manuelle Verdichtung nötig, MDAI allein reicht nicht     |
-| Selektives Phase-Rendering gewünscht (nur A3 an Subagent) | **Ja, sobald** `mai render --phase <id>` implementiert ist             |
+| Selektives Phase-Rendering gewünscht (nur A3 an Subagent) | **Ja** — via MCP `read_file(phase=…)`, in 1.3.0 verfügbar (siehe v5)   |
 
-**Konkrete nächste Schritte (falls Integration gewünscht):**
-
-1. Phase-Isolation läuft bereits via MCP (`mcp__markdownai__read_file` mit `phase=`).
-   Kein zusätzlicher `mai render --phase`-CLI-Flag nötig — Live-Messung: 704 Tokens
-   für A3 statt 8 834 für den vollständigen Original-Plan.
-2. Macro-Bibliothek für Standardmuster aufbauen: Hard-Rules, Tool-Ref, Commit-Schritte
-   (Vorbild: `tmp/mdai-bench/macros/`).
-3. Pläne künftig direkt in MDAI-Syntax schreiben statt nachträglich zu konvertieren.
-4. **MCP-Protocol-Compliance-Patch upstream einreichen** (`respondTool()` in
-   `markdownai/packages/mcp/src/server.ts`) — sonst geht der Patch bei jedem
-   `npm install` / `git pull` im markdownai-Repo verloren.
-5. Skill-Wrapper bauen, die `mcp__markdownai__*` für Subagent-Dispatch nutzen
-   (`mdai-plans`, `mdai-execution`, `mdai-memory`) — siehe Brainstorming.
+Die in v2 noch offenen Integrations-Schritte (Macro-Bibliothek, Plan-Authoring in
+MDAI-Syntax, Skill-Wrapper für Subagent-Dispatch) sind mit der mdai-Library v0.1.4
+umgesetzt — Stand und Messungen siehe Update v5.
 
 ---
 
@@ -344,52 +331,54 @@ ausgeführt mit 7 Subagents via `superpowers:subagent-driven-development`-Skill.
 
 ### Renderer-Sanity (markdownai v1.0.0)
 
-| Test-File                                | Status   | Note                                                                              |
-| `markdownai/MDs/tests/test-include-import.md`     | ✅ PASS | `@include` rendert inline, `@import` lädt Macros (kein sichtbarer Output)        |
-| `markdownai/MDs/tests/test-phase-isolation.md`    | ✅ PASS | 4 Phasen (alpha/beta/gamma/delta) korrekt isoliert                                |
-| MCP `list_phases`                                  | ✅ PASS | liefert `{name, transitions}` korrekt                                             |
-| MCP `read_file phase=alpha format=ai`             | ✅ PASS | nur Alpha-Sentinel + global intro, KEIN Beta/Gamma/Delta-Leak                     |
+| Test-File | Status | Note |
+| `markdownai/MDs/tests/test-include-import.md`     | ✅ PASS | `@include` rendert inline, `@import` lädt Macros (kein
+sichtbarer Output)        |
+| `markdownai/MDs/tests/test-phase-isolation.md`    | ✅ PASS | 4 Phasen (alpha/beta/gamma/delta) korrekt isoliert |
+| MCP `list_phases`                                  | ✅ PASS | liefert `{name, transitions}` korrekt |
+| MCP `read_file phase=alpha format=ai`             | ✅ PASS | nur Alpha-Sentinel + global intro, KEIN
+Beta/Gamma/Delta-Leak |
 
 Engine ist binärkompatibel zur v3-Messung — keine Breaking Changes festgestellt.
 
 ### Ziel-Plan-Vergleich zu v3 S3a-Baseline
 
-| Metrik              | v3 S3a (2026-05-21) | Part-B (2026-05-26)  | Delta             |
-| Bytes               |              35 336 |               35 245 | nahezu identisch  |
-| Lines               |                 943 |                  778 | Part-B kompakter  |
-| Tokens (tiktoken)   |               8 834 |                8 811 | nahezu identisch  |
+| Metrik | v3 S3a (2026-05-21) | Part-B (2026-05-26)  | Delta |
+| Bytes | 35 336 | 35 245 | nahezu identisch |
+| Lines | 943 | 778 | Part-B kompakter |
+| Tokens (tiktoken)   | 8 834 | 8 811 | nahezu identisch |
 
 Damit ist Part-B ein fairer Vergleichspunkt zur v3-Baseline trotz unterschiedlicher
 Plan-Sorte (Audit statt Refactoring).
 
 ### Per-Task Phase-Isolation (Part-B, 5 Tasks)
 
-| Task                              | Bytes  | Lines | Tokens (tiktoken)  | % of Plan |
-| T0 Pre-Flight                     |  1 617 |    43 |              404   |     4.6 % |
-| T4 Findings-v2                    | 10 462 |   247 |            2 615   |    29.7 % |
-| T5 Dedup-Audit                    | 12 938 |   280 |            3 234   |    36.7 % |
-| T6 End-Gate                       |  1 513 |    38 |              378   |     4.3 % |
-| T7 Final-Verif                    |  2 219 |    48 |              554   |     6.3 % |
-| **Σ Per-Task**                    | 28 749 |   656 |          **7 185** |   **81.5 %** |
-| Rest (Frontmatter/File-Map/Notes) |  6 496 |   122 |            1 626   |    18.5 % |
+| Task | Bytes | Lines | Tokens (tiktoken)  | % of Plan |
+| T0 Pre-Flight | 1 617 | 43 | 404 | 4.6 % |
+| T4 Findings-v2 | 10 462 | 247 | 2 615 | 29.7 % |
+| T5 Dedup-Audit | 12 938 | 280 | 3 234 | 36.7 % |
+| T6 End-Gate | 1 513 | 38 | 378 | 4.3 % |
+| T7 Final-Verif | 2 219 | 48 | 554 | 6.3 % |
+| **Σ Per-Task**                    | 28 749 | 656 |          **7 185** |   **81.5 %** |
+| Rest (Frontmatter/File-Map/Notes) | 6 496 | 122 | 1 626 | 18.5 % |
 
 ### Phase-Isolation vs. Full-Plan-Dispatch (per-Subagent ratio)
 
-| Variante                              | Tokens   | vs. Original |
-| Full plan (Subagent kriegt alles)    |    8 811 | baseline     |
-| Phase A3 isolated (v3 S3a baseline)  |      704 |       −92 %  |
-| Part-B kleinste Phase (T0)            |      404 |   **−95 %**  |
-| Part-B mittlere Phase (T7)            |      554 |   **−94 %**  |
-| Part-B größte Phase (T5)              |    3 234 |       −63 %  |
+| Variante | Tokens | vs. Original |
+| Full plan (Subagent kriegt alles)    | 8 811 | baseline |
+| Phase A3 isolated (v3 S3a baseline)  | 704 | −92 % |
+| Part-B kleinste Phase (T0)            | 404 |   **−95 %**  |
+| Part-B mittlere Phase (T7)            | 554 |   **−94 %**  |
+| Part-B größte Phase (T5)              | 3 234 | −63 % |
 
 Größere Phasen sparen weniger, was zu erwarten ist. T5 hat 7 Steps × 5 Optionen ×
 3 Cluster — intrinsisch komplex.
 
 ### MCP Phase-Isolation Live-Test (test-phase-isolation.md)
 
-| Format                                       | Bytes | Tokens | Savings  |
-| `read_file` (no phase, format=ai)            | 2 934 |   734  | baseline |
-| `read_file` (phase=alpha, format=ai)         | 2 515 |   629  | **−14.3 %** |
+| Format | Bytes | Tokens | Savings |
+| `read_file` (no phase, format=ai)            | 2 934 | 734 | baseline |
+| `read_file` (phase=alpha, format=ai)         | 2 515 | 629 | **−14.3 %** |
 
 Kleine Ratio weil das Test-File vom `[AI INSTRUCTION]`-Block (~500 Tokens)
 dominiert wird, der in beiden Outputs identisch erscheint. Auf einem echten Plan
@@ -401,41 +390,44 @@ drastisch.
 Workflow: 7 Subagents (T0-PreFlight + T4-Findings-v2 + T4-fix + T5a-Analyze +
 T5a-fix-rescore + T5c-Commit + T7-Verification) via `superpowers:subagent-driven-development`.
 
-| Approach                                                 | Input-Tokens (7 Subagents) | Sonnet ($3/M) | Opus ($15/M) |
-| Ohne Phase-Isolation: jeder Subagent kriegt vollen Plan |        7 × 8 811 = 61 677 |       $0.185  |     $0.925   |
-| Mit MDAI Phase-Isolation: per-task + ~480 Tok Overhead  |                     9 585 |       $0.029  |     $0.144   |
-| **Saved (Input only)**                                   |         **52 092 (−84.5 %)** |   **$0.156**  |   **$0.781** |
+| Approach | Input-Tokens (7 Subagents) | Sonnet ($3/M) | Opus ($15/M) |
+| Ohne Phase-Isolation: jeder Subagent kriegt vollen Plan | 7 × 8 811 = 61 677 |       $0.185 |     $0.925 |
+| Mit MDAI Phase-Isolation: per-task + ~480 Tok Overhead | 9 585 |       $0.029 |     $0.144 |
+| **Saved (Input only)**                                   |         **52 092 (−84.5 %)** |   **$0.156**  |   **$0.781
+** |
 
 ### Repeated-Pattern-Analyse (potenzielle `@define`/`@include`-Ziele in Part-B)
 
-| Pattern                                | Vorkommen | MDAI-Mechanismus                                       | Source-Ersparnis  |
-| `mcp__lean-ctx__ctx_shell(…)`          |       17× | `@define ctxShell(cmd, cwd)`                           | ~3-5 %            |
-| `mcp__lean-ctx__ctx_search(…)`         |        7× | `@define ctxSearch(pattern, path)`                     | ~1-2 %            |
-| `mcp__lean-ctx__ctx_read(…)`           |        6× | `@define ctxRead(path, mode)`                          | ~1 %              |
-| `mcp__lean-ctx__ctx_edit(…)`           |        5× | `@define ctxEdit(…)`                                   | ~1 %              |
-| Heredoc-Commit-Pattern                 |        7× | `@define heredocCommit(msg-file, body)`                | ~2-3 %            |
-| `mcp__jetbrains__reformat_file`        |        4× | `@call reformatBeforeAdd(file)`                        | ~1 %              |
-| Hard-Rules-Block in jedem Subagent-Prompt | wiederholt | `@include macros/hard-rules.md`                      | ~5-8 % bei 3+ Plänen |
+| Pattern | Vorkommen | MDAI-Mechanismus | Source-Ersparnis |
+| `mcp__lean-ctx__ctx_shell(…)`          | 17× | `@define ctxShell(cmd, cwd)`                           | ~3-5 % |
+| `mcp__lean-ctx__ctx_search(…)`         | 7× | `@define ctxSearch(pattern, path)`                     | ~1-2 % |
+| `mcp__lean-ctx__ctx_read(…)`           | 6× | `@define ctxRead(path, mode)`                          | ~1 % |
+| `mcp__lean-ctx__ctx_edit(…)`           | 5× | `@define ctxEdit(…)`                                   | ~1 % |
+| Heredoc-Commit-Pattern | 7× | `@define heredocCommit(msg-file, body)`                | ~2-3 % |
+| `mcp__jetbrains__reformat_file`        | 4× | `@call reformatBeforeAdd(file)`                        | ~1 % |
+| Hard-Rules-Block in jedem Subagent-Prompt | wiederholt | `@include macros/hard-rules.md`                      | ~5-8 %
+bei 3+ Plänen |
 
 **Total potenzielle Source-Ersparnis** (MDAI-spezifisch, OHNE Phase-Isolation):
 ~14-20 %. Part-B würde damit von 8 811 → ~7 000-7 500 Tokens fallen.
 
 ### Drei Mess-Szenarien (v3-Schema auf Part-B)
 
-| Szenario                              | Tokens         | vs. Original    | MDAI-Anteil      | Mechanismus                                         |
-| (1) Plan-Source schreiben             |        ~7 200  |         −18 %   | ~14-20 %         | `@define`/`@include` reduzieren Source              |
-| (2) Plan vollständig rendern          |        ~8 500  |          −4 %   | minimal          | Rendered Output expandiert Macros                   |
-| (3) Subagent-Dispatch (eine Phase)    |     **404-3 234** |   **−63 bis −95 %** | **strukturell** | Phase + Hard-Rules-Overhead                        |
+| Szenario | Tokens | vs. Original | MDAI-Anteil | Mechanismus |
+| (1) Plan-Source schreiben |        ~7 200 | −18 % | ~14-20 % | `@define`/`@include` reduzieren Source |
+| (2) Plan vollständig rendern |        ~8 500 | −4 % | minimal | Rendered Output expandiert Macros |
+| (3) Subagent-Dispatch (eine Phase)    |     **404-3 234** |   **−63 bis −95 %** | **strukturell** | Phase +
+Hard-Rules-Overhead |
 
 ### Vergleich der zwei Pläne (v3 S3a vs Part-B)
 
-| Metrik                                    | v3 S3a               | Part-B           |
-| Original Tokens                           |              8 834   |       8 811      |
-| Single-Phase isolated (best)              |        704 (−92 %)   |  **404 (−95 %)** |
-| Single-Phase isolated (worst)             |     (keine v3-Daten) |  3 234 (−63 %)   |
-| 7-Subagent-Cost without isolation (Sonnet)|              ~$0.185 |          $0.185  |
-| 7-Subagent-Cost MDAI-isolated (Sonnet)    |        ~$0.018       |       **$0.029** |
-| Cost saved per run (Sonnet)               |              ~$0.17  |       **$0.156** |
+| Metrik | v3 S3a | Part-B |
+| Original Tokens | 8 834 | 8 811 |
+| Single-Phase isolated (best)              | 704 (−92 %)   |  **404 (−95 %)** |
+| Single-Phase isolated (worst)             |     (keine v3-Daten) | 3 234 (−63 %)   |
+| 7-Subagent-Cost without isolation (Sonnet)|              ~$0.185 |          $0.185 |
+| 7-Subagent-Cost MDAI-isolated (Sonnet)    |        ~$0.018 |       **$0.029** |
+| Cost saved per run (Sonnet)               |              ~$0.17 |       **$0.156** |
 
 Part-B-MDAI-isolated ist teurer als v3 weil Audit-Pläne größere Tasks haben
 (T5 = 3 234 Tokens, kein Äquivalent zu einer schmalen v3-Phase). Trotzdem
@@ -465,8 +457,8 @@ Aus dem Part-B-Workflow + Dedup-Audit (Per-Cluster-User-Decisions 2026-05-26):
 
 - **Cluster 1 + Cluster 3 → Option A** (Fragment-File + `@include`): v0.1.3
   schreibt `mdai/core/lean-context-anchors.md` und `mdai/core/anti-patterns.md`
-  mit `@markdownai v1.0`-Header (siehe Findings-v2 §13: Fragment-Files OHNE
-  Header → silent empty return).
+  mit `@markdownai v1.0`-Header (Begründung: Fragment-Files OHNE Header →
+  silent empty return).
 - **Cluster 2 → Option E** (Status Quo + Drift-Tracking): nicht migrieren.
 - **Library-Root-Variante: B** (`${MDAI_LIBRARY_ROOT}`-Prefix in Spawn-Env).
 
@@ -478,3 +470,139 @@ Aus dem Part-B-Workflow + Dedup-Audit (Per-Cluster-User-Decisions 2026-05-26):
   Sentinel-Strings (kein Cross-Phase-Leak).
 - `superpowers:subagent-driven-development` als Brücke zum MDAI-Adoption-Pfad
   identifiziert.
+
+---
+
+## Update v5 — markdownai 1.3.0 (mdai v0.1.4 Hardening, 2026-05-31)
+
+Datum: 2026-05-31 · Engine: markdownai **1.3.0** (= `feat-mdai`-Dist, `origin/main@aac0825`
+
++ 2 lokale Fixes: `f16b4c2` named-arg-Propagation, `ede9793` `@foreach`-Objekt-Dot-Access) ·
+  mdai-Library: **v0.1.4** · Tokenizer: tiktoken `cl100k_base` (exakt).
+
+Zwei Mess-Gegenstände: **(A)** dieselbe S3a-Fixture wie v3 (`tmp/mdai-bench/`), nach
+v2 migriert, gegen 1.3.0 — direkter Cross-Version-Vergleich auf identischem Plan.
+**(B)** das reale Library-Skill-Artefakt `mdai/skills/mdai-brainstorm/body.mdai.md`.
+
+### Breaking Change v1.0.0 → 1.3.0: v2-Directive-Syntax
+
+Anders als v4 („binärkompatibel, keine Breaking Changes") ist 1.3.0 **syntaktisch
+nicht abwärtskompatibel**. Die kanonische v3-Fixture
+`tmp/mdai-bench/2026-05-17-phase-4-S3a-…mdai.md` parst unter 1.3.0 **nicht mehr**:
+
+```
+ParseError: v1 close tag "@end" not accepted in v2 — use "@include-end" instead
+```
+
+v2-Regeln: Block-Directives schließen mit `@<name>-end` (`@constraint-end`,
+`@phase-end`, `@define-end`, `@if-end`, `@foreach-end`); argument-lose Directives
+self-closen mit trailing ` /` (`@include … /`, `@call … /`). Die Library-Migration
+auf v2 war daher **mandatorisch** — das ist der Anlass des v0.1.4-Hardenings.
+Migrierte v2-Kopie für die Messung: `tmp/mdai-bench/v2/`.
+
+### (A) Same-Plan-Cross-Version: S3a unter 1.0.0 vs 1.3.0 (identische Fixture)
+
+| Metrik (S3a)            | v3 (1.0.0, Bytes÷4) | v5 (1.3.0, tiktoken) |     Bytes-Drift     |
+|-------------------------|--------------------:|---------------------:|:-------------------:|
+| Source (Bytes / Tokens) |       7 056 / 1 764 |        7 127 / 2 309 | +71 B (` /`-Closer) |
+| Full-Render Bytes       |               9 062 |                9 027 |   −35 B (≈0,4 %)    |
+| Full-Render Tokens      |          2 266 (÷4) |     2 852 (tiktoken) |    nur Tokenizer    |
+| A3-isoliert Bytes       |               2 818 |                2 774 |   −44 B (≈1,5 %)    |
+| A3-isoliert Tokens      |            704 (÷4) |       829 (tiktoken) |    nur Tokenizer    |
+
+**Begründung — Engine-Output ist byte-stabil:** Full-Render und A3-Isolat sind
+zwischen 1.0.0 und 1.3.0 byte-genau (≈0,4–1,5 % Drift, allein aus den ` /`-Self-Closern
+der Source). Die scheinbar großen Token-Differenzen (+26 %) sind **reine
+Tokenizer-Methodik** (tiktoken vs. Bytes÷4), kein Engine-Verhalten. Fazit: der Render
+ist über die Major-Versionen stabil — nur die *Source-Syntax* bricht (v1→v2).
+
+### S3a Phase-Isolation unter 1.3.0 (Baseline = Full-Render 2 852 Tokens)
+
+| Phase           | Tokens | vs. Full | vs. Original (10 629) |
+|-----------------|-------:|:--------:|:---------------------:|
+| **Full-Render** |  2 852 | Baseline |         −73 %         |
+| P0-context      |  1 293 |  −55 %   |         −88 %         |
+| A1-debug-output |    846 |  −70 %   |         −92 %         |
+| A2-ui-event     |    744 |  −74 %   |         −93 %         |
+| A3-rpc-wire     |    829 |  −71 %   |         −92 %         |
+| A4-loader       |    728 |  −74 %   |         −93 %         |
+| A5-register     |    716 |  −75 %   |         −93 %         |
+| A-final-gate    |    841 |  −70 %   |         −92 %         |
+
+Hier liegt der `@include`-Hard-Rules-Block **vor** den Phasen → die Engine stellt ihn
+*jeder* isolierten Phase voran (~480 Tok Overhead pro Subagent, wie v3/v4). Daher die
+flache −70…−75 %-Spanne. Gegen den **Original-Plan** (35 336 B / 10 629 Tok tiktoken)
+spart jede Einzelphase −88 % bis −93 %.
+
+### (B) Library-Skill-Artefakt: body.mdai.md (5 Phasen)
+
+Anders als ein Plan (Source < Original) ist dies das Laufzeit-Artefakt: die Source ist
+*lean authored*, der Render expandiert via `@include`/`@call` auf das, was der Agent
+tatsächlich lädt. Render fehlerfrei unter 1.3.0, **kein** `@set`-Pipe-Fehler mehr
+(v0.1.4 TG2-Fix verifiziert; verbleibende Warnings sind Laufzeit-`@call`/`@query`).
+
+| Variante                              |  Bytes | Tokens | Kommentar                                  |
+|---------------------------------------|-------:|-------:|--------------------------------------------|
+| **Source** (lean authored)            | 12 412 |  2 885 | das, was der Autor pflegt                  |
+| Render `--format standard`            | 24 990 |  5 553 | volle Expansion                            |
+| Render `--format ai`                  | 24 851 |  5 508 | nur −0,8 % vs standard (siehe Begründung)  |
+| Geteilte core-Macros (single-sourced) | 12 275 |  2 513 | hard-rules + lean-context + tool-quick-ref |
+
+**Warum `--format ai` hier kaum spart:** der Body ist Prosa + Macro-Expansion, keine
+priorisierten `@section`-Blöcke. `--format ai`/`--budget` greifen erst mit
+`<!-- mda-section priority=… -->`-Markern; auf reinen Prosa-Skills ist `ai` ≈ `standard`.
+
+Phase-Isolation (Baseline = Full-Render 5 546 Tok):
+
+| Phase           | Tokens | vs. Full | Inhalt                                       |
+|-----------------|-------:|:--------:|----------------------------------------------|
+| **Full-Render** |  5 546 | Baseline | alle 5 Phasen                                |
+| pre-context     |  2 169 |  −61 %   | trägt `@include` hard-rules + tool-quick-ref |
+| dialog-rules    |  1 391 |  −75 %   | Constraints + Dialog-Gates                   |
+| write-outputs   |  1 162 |  −79 %   | Spec-Konventionen-Fragment                   |
+| dialog-process  |    819 |  −85 %   | Prozess-Schritte                             |
+| handoff         |    291 |  −95 %   | Übergabe an writing-plans                    |
+
+**Begründung — besseres Layout als S3a:** in `body.mdai.md` liegt der schwere
+`@include`-Block (2 513 Tok) **nur in `pre-context`**, nicht global vor den Phasen.
+Ein Subagent in `handoff` zieht 291 Tok statt 5 546 (−95 %), ohne die Regeln
+mitzuschleppen. Genau dieser Unterschied erklärt die steilere Spanne (−61…−95 %)
+gegenüber S3as flachem −70…−75 % (globaler Regel-Block).
+
+### Single-Sourcing-Gewinn (das eigentliche v0.1.4-Argument)
+
+Die geteilten core-Macros (hard-rules + lean-context + tool-quick-ref) = **2 513 Tokens**
+liegen **einmal** in `mdai/core/`, von jedem Skill via `@include ${MDAI_LIBRARY_ROOT}/core/*`
+gezogen. Bei N konsumierenden Skills: ohne Library N × 2 513 Tok Copy-Paste + N-fache
+Sync-Last; mit Library 1 × 2 513 Tok, `(N − 1) × 2 513` Tok gespart, Konsistenz
+garantiert. Das ist der „Cross-Plan-Konsistenz"-Gewinn aus v4-Finding #4 — in v0.1.4 umgesetzt.
+
+### Vergleich v3 → v4 → v5
+
+| Metrik / Eigenschaft      | v3 (S3a, 1.0.0)   | v4 (Part-B, 1.0.0) | v5 (1.3.0)                          |
+|---------------------------|-------------------|--------------------|-------------------------------------|
+| Mess-Gegenstand           | Refactoring-Plan  | Audit-Plan         | S3a-Replay **+ Library-Skill**      |
+| Tokenizer                 | Bytes ÷ 4         | tiktoken           | tiktoken                            |
+| Beste Phase-Isolation     | 704 (−92 %)       | 404 (−95 %)        | 291 (−95 %, body/handoff)           |
+| Schlechteste Phase        | —                 | 3 234 (−63 %)      | 1 293 (−55 %, S3a/P0)               |
+| Source-Syntax             | v1 (`@end`)       | v1 (`@end`)        | **v2 (`@…-end`, ` /`)**             |
+| Engine-Render-Stabilität  | Baseline          | binärkompatibel    | **byte-stabil zu 1.0.0** (≈0,4 %)   |
+| Hard-Rules-Verteilung     | global/je Phase   | global/je Phase    | global (S3a) **vs. 1 Phase (body)** |
+| Single-Sourcing produktiv | nein (tmp-Macros) | nein (Prognose)    | **ja (`mdai/core/`)**               |
+
+### Findings v5
+
+1. **Engine-Render ist über 1.0.0→1.3.0 byte-stabil** (S3a Full 9 062→9 027 B,
+   A3 2 818→2 774 B). Die Token-Differenzen sind reine Tokenizer-Methodik, kein
+   Verhaltens-Drift.
+2. **v1→v2 ist ein echter Breaking Change** auf Source-Ebene: die v3-Fixture parst
+   ohne Migration nicht mehr. Library-Migration auf v2 war Pflicht, nicht Kür.
+3. **Phase-Isolation reproduziert sich ein drittes Mal** — −55 % bis −95 % über zwei
+   weitere Artefakte (S3a-Replay + Library-Skill). Robust über Engine-Versionen,
+   Tokenizer *und* Dokumenttypen.
+4. **Layout entscheidet über die Ersparnis:** Hard-Rules global (S3a) → flach −70 %;
+   Hard-Rules in einer Phase (body) → bis −95 %. Library-Skills sollten den Regel-Block
+   in eine eigene `pre-context`-Phase legen.
+5. **`--format ai` / `--budget` sind no-ops ohne `@section`-Prioritäten** — wer
+   Budget-Dropping will, muss Skill-Bodies mit `priority=`-Sektionen strukturieren.
+6. **Single-Sourcing ist jetzt real** (2 513 Tok geteilt in `mdai/core/`), nicht mehr Prognose.
