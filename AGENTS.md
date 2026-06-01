@@ -29,8 +29,8 @@ lean-ctx ls src/              # directory map
 When working on lean-ctx itself:
 
 1. **Before building**: `lean-ctx stop` (LaunchAgent respawns otherwise)
-2. **Build**: `cd rust && cargo build --release`
-3. **Test**: `cargo test --lib` + `cargo clippy -- -W clippy::all`
+2. **Build**: `cargo build`
+3. **Test**: `cargo nextest run` + `cargo clippy -- -W clippy::all`
 4. **Install**: `lean-ctx dev-install` (atomic stop→build→install→restart)
 
 ## Session Continuity
@@ -50,7 +50,7 @@ After completing a significant task (implementation, bugfix, refactoring):
 2. Record progress: `ctx_session(action="task", value="<current task> [N%]")`
 3. Record blockers: `ctx_knowledge(action="remember", category="blocker", content="...")`
 
-After 30+ tool calls without documentation:
+After 15+ tool calls without documentation:
 - lean-ctx will prompt with `[CHECKPOINT: please document current progress]`
 - Respond by calling `ctx_session(action="task")` with current status
 
