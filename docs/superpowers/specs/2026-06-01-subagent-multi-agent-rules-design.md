@@ -3,7 +3,8 @@
 - **Datum:** 2026-06-01
 - **Status:** Approved (Design)
 - **Branch:** feat-lmd-v1
-- **Quellen:** `docs/reference/08-multi-agent.md`, `docs/reference/03-memory-and-knowledge.md`, `docs/reference/05-advanced.md §7`
+- **Quellen:** `docs/reference/08-multi-agent.md`, `docs/reference/03-memory-and-knowledge.md`,
+  `docs/reference/05-advanced.md §7`
 - **Skill-Kontext:** `superpowers:subagent-driven-development`
 
 ---
@@ -22,20 +23,34 @@ superpowers-Flow gar nicht genutzt.
 
 `.claude/settings.local.json` enthält bereits Hooks:
 
-| Hook | Matcher | Kommando |
-|------|---------|----------|
-| PreToolUse | `Bash\|bash` | `lean-ctx hook rewrite` |
-| PreToolUse | `Read\|Grep\|Search\|ListFiles\|...` | `lean-ctx hook redirect` |
-| PostToolUse | `.*` | `lean-ctx hook observe` |
-| PreCompact / UserPromptSubmit | — | `lean-ctx hook observe` |
+| Hook                          | Matcher                              | Kommando                 |
+|-------------------------------|--------------------------------------|--------------------------|
+| PreToolUse                    | `Bash\|bash`                         | `lean-ctx hook rewrite`  |
+| PreToolUse                    | `Read\|Grep\|Search\|ListFiles\|...` | `lean-ctx hook redirect` |
+| PostToolUse                   | `.*`                                 | `lean-ctx hook observe`  |
+| PreCompact / UserPromptSubmit | —                                    | `lean-ctx hook observe`  |
 
 **Verifiziert (Quelle: code.claude.com/docs — hooks.md, memory.md, subagents.md):**
 Ein per Task-Tool dispatchter Subagent läuft in eigener Session, **lädt aber dieselben
-Projekt-Dateien neu** — sowohl `.claude/settings.local.json` (→ die Hooks feuern auch
-in der Subagent-Session) als auch projekt- und globale `CLAUDE.md`. Daraus folgt:
+Konfig-Dateien neu** — sowohl `.claude/settings.local.json` als auch die globale
+`~/.claude/settings.json` und die projekt-/globale `CLAUDE.md`. Daraus folgt: alle
+unten genannten Hooks feuern auch in der Subagent-Session.
+
+**Wichtig — wer das Deny *wirklich* liefert (verifiziert per Test):** Das projekt-
+`lean-ctx hook redirect` gibt `{"permissionDecision":"allow"}` zurück — es ist
+**soft-allow + observe**, *kein* Deny. Das **harte Deny** auf native `Read/Grep/List`
+kommt aus zwei **globalen** Python-Hooks in `~/.claude/settings.json`:
+`hooks/read-tool-discipline.py` (+ `hooks/edit-tool-discipline.py` für Edits). Da
+diese global verdrahtet sind, greifen sie auch in Subagenten.
 
 → Die **native-Tool-Umleitung** (`Read/Grep/Bash/ListFiles` → `ctx_*`) ist für
-Subagenten **bereits hart erzwungen**. Sie braucht keine zusätzliche Regel.
+Subagenten **bereits hart erzwungen** — aber durch die globalen `*-discipline.py`-
+Hooks, **nicht** durch die lean-ctx-Config. Sie braucht keine zusätzliche Regel.
+
+> **Follow-up (nicht Teil dieser Spec):** Bekäme `lean-ctx hook redirect` einen
+> echten Deny-Modus, wären die `*-discipline.py`-Skripte ablösbar und das Deny käme
+> aus der lean-ctx-Config statt aus Python-Hooks. → Antwort auf „kann das Skript
+> entfernt werden?": **derzeit nein**, da `redirect` nur soft-allow liefert.
 
 ### Die eigentliche Lücke
 
@@ -68,6 +83,16 @@ bewusst abgewählt).
   der Controller **jedem** Subagent-Prompt voranstellen MUSS. Das ist der harte
   Hebel, weil der gecraftete Task-Prompt das dominante Signal im isolierten
   Subagenten ist.
+
+**Prinzip — Single Source of Truth für Tool-Parameter:** Die Regeln tragen nur den
+*Verhaltens-Contract* (welches Tool *wann*, in welcher Reihenfolge, welche Pflicht).
+Tool-Namen, Parameter & Signaturen kommen aus `docs/reference/generated/mcp-tools.md`
+(auto-generiert aus `rust/src/core/reference_docs.rs`, CI-drift-getestet via
+`reference_docs_drift.rs`) — von Agenten on-demand via
+`ctx_read(..., mode=map|signatures)` gelesen. **Kein verbatim-Auszug** in den Regeln
+(das wäre ein zweiter, ungetesteter Wahrheitsort und würde driften). Diese Verlinkung
+ist für menschliche Docs (`docs/reference/README.md`) etabliert, für die
+agenten-gerichteten Regeln aber neu.
 
 ---
 
@@ -123,6 +148,8 @@ You run in an isolated context. Before any other action:
 Tool discipline:
 - Reads/search/shell → ctx_read / ctx_search / ctx_shell (never fresh, never raw)
 - Rust (*.rs) edits → Serena tools only (never native Edit / ctx_edit)
+- Tool params/signatures → authoritative in docs/reference/generated/mcp-tools.md
+  (ctx_read it on demand; do NOT rely on memory)
 During work: ctx_agent action=diary category=<discovery|decision|blocker|progress>
 On finish:
 - ctx_agent action=post category=<status|finding> msg="<summary>"
@@ -135,20 +162,21 @@ Report final status: DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED
 
 ## 4. Konflikt-Auflösung (gegen bestehende Mechanismen geprüft)
 
-| Bestehender Mechanismus | Spannung | Auflösung |
-|-------------------------|----------|-----------|
-| **Hooks** (`redirect`/`rewrite`) | Würde Regel native→`ctx_*` duplizieren | Regeln **verweisen** nur, duplizieren nicht. Hooks bleiben die Durchsetzung. |
-| **superpowers-Skill** („Controller liefert vollen Task-Text, Subagent liest Plan nicht") | Scheinbar gegen `ctx_share` | Kein Widerspruch: `ctx_share` betrifft **Quelldateien**, nicht den Plan. Voller Task-Text bleibt im Prompt. |
-| **Projektregel „no `fresh`/`raw`"** | Kalter Subagent-Cache | Gelöst durch `ctx_share push→pull`. Einzige Ausnahme: kein Push erfolgt → `fresh=true` beim **allerersten** Read, explizit dokumentiert. |
-| **lean-ctx `rules sync`** (managed `<!-- lean-ctx -->`-Blöcke) | Würde Hand-Inhalt überschreiben | Unseren Inhalt **außerhalb** der `<!-- lean-ctx -->`-Marker platzieren. |
-| **Plugin-Cache-Skill-Dateien** | Direktes Patchen wäre fragil | **Nicht** patchen; Verhalten über Dispatch-Contract injizieren. |
+| Bestehender Mechanismus                                                                  | Spannung                               | Auflösung                                                                                                                                |
+|------------------------------------------------------------------------------------------|----------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------|
+| **Hooks** (`redirect`/`rewrite`)                                                         | Würde Regel native→`ctx_*` duplizieren | Regeln **verweisen** nur, duplizieren nicht. Hooks bleiben die Durchsetzung.                                                             |
+| **superpowers-Skill** („Controller liefert vollen Task-Text, Subagent liest Plan nicht") | Scheinbar gegen `ctx_share`            | Kein Widerspruch: `ctx_share` betrifft **Quelldateien**, nicht den Plan. Voller Task-Text bleibt im Prompt.                              |
+| **Projektregel „no `fresh`/`raw`"**                                                      | Kalter Subagent-Cache                  | Gelöst durch `ctx_share push→pull`. Einzige Ausnahme: kein Push erfolgt → `fresh=true` beim **allerersten** Read, explizit dokumentiert. |
+| **lean-ctx `rules sync`** (managed `<!-- lean-ctx -->`-Blöcke)                           | Würde Hand-Inhalt überschreiben        | Unseren Inhalt **außerhalb** der `<!-- lean-ctx -->`-Marker platzieren.                                                                  |
+| **Plugin-Cache-Skill-Dateien**                                                           | Direktes Patchen wäre fragil           | **Nicht** patchen; Verhalten über Dispatch-Contract injizieren.                                                                          |
 
 ---
 
 ## 5. Betroffene Dateien
 
 1. **NEU** `.claude/rules/subagent-multi-agent.md` — drei Verträge (§3.1–3.3) +
-   Dispatch-Contract (§3.4).
+   Dispatch-Contract (§3.4). Verlinkt `docs/reference/generated/mcp-tools.md` als
+   autoritative Tool-Parameter-Quelle (kein verbatim-Auszug — siehe Prinzip in §2).
 2. `CLAUDE.md` (projekt) — neuer Abschnitt „## Subagent-Driven Execution" mit
    2–3 Sätzen (wann es greift) + `@rules/subagent-multi-agent.md`-Import.
 3. `AGENTS.md` — gespiegelter Abschnitt für Nicht-Claude-Agenten, **außerhalb** der
@@ -164,7 +192,7 @@ der auto-generierten Blöcke; zentrale `rules.toml` existiert noch nicht).
 - Ein dispatchter Implementer ruft nachweislich `ctx_agent register` +
   `ctx_share pull` + `ctx_agent diary` + `ctx_agent handoff` auf.
 - `ctx_agent action=sync` zeigt nach einem Plan-Lauf: `plan`/`dev`/`review`-Agenten
-  + Diaries + shared knowledge.
+    + Diaries + shared knowledge.
 - Keine `fresh`-Reads in Subagent-Transkripten (außer dokumentierter Ausnahme).
 - `lean-ctx rules diff` meldet keine Drift (Inhalt außerhalb der Marker).
 
