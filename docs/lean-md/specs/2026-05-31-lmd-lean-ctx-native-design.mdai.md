@@ -323,7 +323,15 @@ Subagent (§3.5, in den Dispatch-Constraint injiziert).
 
 Re-Entrancy-Constraint: `@read` borrowt `ctx.cache` nur kurz in `execute` und droppt
 vor Return — kein überlappender `RefCell`-Borrow über die rekursive `render_body`-
-Grenze (`@include`).
+Grenze (`@include`). (Phase-1-Review-verifiziert sicher.)
+
+> **Phase-1-Implementierungs-Befund (Follow-up F-1, §9):** Der geteilte Cache warmt
+> verifiziert — `@read x mode=full` 3× → 2./3. Read = `[unchanged]`-Stub, ohne
+> `fresh`/`raw`. Die *saubere* Zwei-Read-Beobachtbarkeit der Garantie ist aktuell
+> durch zwei `ctx_read`-Bugs blockiert (`full_content_delivered` nur im `was_hit`-
+> Zweig; `cache_hit_proof_line` leakt die erste Zeile in den Stub) — Detail + Fix in
+> §9 F-1. Das §6-Gate prüft Read→Delta daher über die 3-Read/`mode=full`-Form; der
+> Engine-Unit-Test der 2-Read-Form ist bis zum ctx_read-Fix `#[ignore]`'d.
 
 ### 4.3 rushdown-Extension-Mapping
 
@@ -496,6 +504,8 @@ Anbindung; hier wird Q-05 scharf, §9).
 | Q-05 | `@phase`-Fehlerverhalten (abort vs. continue)            | **deferred** — wird in der `executing-plans`-Migration (§5.2) scharf, nicht in der Engine-Spec                                                                                                                      |
 | G-1  | `@graph recent-neighbors` — Datenquelle für Recent-Files | **gelöst (Gate-Outcome §3 korrigiert):** `session.files_touched` + `graph_neighbor_ranks_for_recent_files` existieren, Muster live in `ctx_semantic_search.rs:791` → recent-neighbors **bleibt v1**, kein neuer API |
 | R-1  | rushdown-API-Ergonomie / exakte Version                  | **gelöst:** rushdown 0.18 gepinnt, Extension-Pfad viabel (Gate-Outcome §1/§5)                                                                                                                                       |
+| F-1  | Read→Delta-Cache-Hit über lmd nicht sauber 2-Read-beobachtbar (Phase-1-Befund) | **deferred (ctx_read-Scope, nicht lmd):** zwei `ctx_read`-Bugs — `full_content_delivered` wird nur im `was_hit`-Zweig gesetzt (`ctx_read.rs:743`); `cache_hit_proof_line` (`ctx_read.rs:53`) leakt die erste Datei-Zeile in den `[unchanged]`-Stub. Folge: `@read x` 2× (mode=auto) liefert keinen sauberen Single-Sentinel-Cache-Hit. Der geteilte `EngineContext`-Cache warmt nachweislich (3× `@read x mode=full` → 2./3. = `[unchanged]`-Stub, ohne `fresh`/`raw`). §6-Gate beweist Read→Delta ehrlich via 3-Read/`mode=full`; Engine-Test `reread_same_path_is_cache_hit_not_full` ist `#[ignore]`'d bis zum Fix (Flag auch beim ersten Full-Delivery setzen + Proof-Line aus dem Sentinel-Contract nehmen). lmd-Verdrahtung ist korrekt. |
+| F-2  | HTML-Kommentar-Injection im Render-Fallback (Phase-1-Befund) | **deferred — mit HTML-Escaping/Output-Target bündeln (§10):** `render.rs::dispatch` emittiert `<!-- lmd: unknown directive @{name} -->` bzw. `<!-- lmd:@{name} error: {e:?} -->` via `write_html` (roh, nur Null-Sanitization). Inline-Namen sind — anders als Block-Namen (`[a-z0-9-]` in `parse_directive_line`) — nicht charset-beschränkt → `{{ -->x }}` schließt den Kommentar vorzeitig; `args`/`{e:?}` ebenso. Minor (Phase-1-Target = AI-Kontext, nicht Browser-DOM). Fix: `name`/`{e:?}` escapen ODER Inline-Name-Charset an die Block-Grammatik angleichen. |
 
 Übergangs-Default Q-05 (wie v0.6 §8): Phase läuft Body sequentiell; Error wird als
 `decision`-Eintrag geschlossen, Render bricht nicht ab.
