@@ -197,6 +197,11 @@ oberste Direktive" wörtlich und strukturell: es gibt kein Sprachkonstrukt für 
 `cat`/`grep`/`ls`. Das Schärfste ist `@query`/`@call ctx_shell`, und das ist
 Security-gegatet (§7).
 
+Die nativen R-Direktiven `@read`/`@search`/`@list`/`@query` decken sich strukturell
+mit dem **Minimal-5-Tool-Profil** (`ctx_read`/`ctx_search`/`ctx_tree`/`ctx_shell`/
+`ctx_session`, appendix-mcp-tools) — der unvermeidbare lean-ctx-Tool-Kern ist genau
+die lmd-Sprachbasis.
+
 ### 3.3 Fragment-Auflösung: built-in-first, Datei-Fallback
 
 | Herkunft                         | Wofür                                                                                           | Kosten                                                                 | Präzedenz                                                          |
@@ -246,7 +251,8 @@ Drei Schichten, von "vermeiden" zu "blocken":
    `cat` zu schreiben.
 2. **Dispatch (`@dispatch`-Direktive / Phase-Isolation):** beim Subagent-Spawn
    generiert lmd den Prompt aus (a) dem phasen-isolierten, TDD-komprimierten Inhalt
-   **+** (b) eingebetteter Tool-Disziplin-Constraint **+** (c) explizitem
+   **+** (b) eingebetteter Tool-Disziplin-Constraint (inkl. „Reads ohne `fresh`/`raw`;
+   **kein `fresh` nach Cache-Read**" — §4.2a) **+** (c) explizitem
    `ToolSearch(select:mcp__lean-ctx__ctx_*)`-Bootstrap, damit deferred-Tools **vor**
    dem ersten Read geladen sind. Der Subagent bekommt ein gerendertes Vorbild statt
    einer Versuchung.
@@ -296,6 +302,29 @@ Jede R-Direktive ist eine Bridge, die in eine existierende Core-API routet. Beis
 `@read`/`@search`/`@list` rufen dieselben Core-Funktionen wie `ctx_read`/`ctx_search`/
 `ctx_tree`. Keine Neualgorithmik.
 
+### 4.2a EngineContext + Cache-Lifecycle (Read→Delta-Garantie)
+
+`EngineContext` hält **einen** `RefCell<SessionCache>`, geteilt über alle Bridges
+eines Renders. `execute(&self, ctx: &Rc<EngineContext>, …)` bleibt — Interior
+Mutability, keine Signatur-Abweichung. Das ist **nicht-optional**: `ctx_read`s
+Kernwert ist der Session-Cache (appendix-mcp-tools §1 — „session cache + compression;
+re-reads ~13 tokens"; Signatur `tools::ctx_read::handle(&mut SessionCache, path, mode,
+CrpMode)` verifiziert, Muster `dashboard/routes/tools.rs:233`). Ein
+`SessionCache::new()` pro `@read`-Call wäre ein Cold-Cache → immer Full-Read, nie der
+13-Token-Re-Read, nie Auto-Delta.
+
+**Read→Delta-Garantie (verbindlich):** Mit warmem Cache liefert `ctx_read::handle`
+intern Auto-Delta (`handle_full_with_auto_delta`, `AUTO_DELTA_THRESHOLD`, mtime-
+Auto-Validierung). Daraus folgt: `@read x` zweimal → 1. Full, 2. Cache-Hit/Delta —
+**ohne `fresh`/`raw`**. `fresh`/`lines:N-M` sind der explizite Disk-Re-Read-Escape,
+nicht der Default. **Anti-Pattern (in Sessions beobachtet):** ein `fresh`-Read direkt
+nach einem Cache-Read hebt den Gewinn auf — verboten im Engine-Pfad **und** im
+Subagent (§3.5, in den Dispatch-Constraint injiziert).
+
+Re-Entrancy-Constraint: `@read` borrowt `ctx.cache` nur kurz in `execute` und droppt
+vor Return — kein überlappender `RefCell`-Borrow über die rekursive `render_body`-
+Grenze (`@include`).
+
 ### 4.3 rushdown-Extension-Mapping
 
 ```rust
@@ -319,6 +348,18 @@ fn lmd_extension() -> impl ParserExtension {
 - `src/lmd/` (Modul-Baum aus v0.6 §5; `audit.rs` bereits angelegt, Gate-Outcome §2).
 - `src/tools/ctx_md.rs` — `ctx_md_render`/`ctx_md_read_phase`/`ctx_md_list_phases`/
   `ctx_md_constraints` MCP-Tools (Strangler-Ersatz für `mcp__markdownai__*`).
+  Registrierung folgt dem Zwei-Schicht-Muster `tools/<tool>.rs` (Logik) +
+  `tools/registered/<tool>.rs` (`tool_def()`-Schema, vgl. appendix-mcp-tools-Kopf);
+  neue `ctx_md_*` müssen zusätzlich in `appendix-mcp-tools.md` + die Profil-Tabellen
+  eingetragen werden (Phase-7-Doku-Pflicht).
+  **Phase-7-Doku-/Integrations-Oberfläche (aus Referenz-Sweep `docs/reference`):** über
+  die MCP-Tool-Map hinaus mit dem Strangler-Cutover zu aktualisieren — `appendix-cli-map`
+  (`lean-ctx md render|read|phases`), `generated/config-keys` (`[lmd.security]`,
+  `jail_root`, `max_chain_depth`, `shell`), `06-lifecycle` (uninstall +
+  `.lean-ctx.bak`-Cleanup für `.lmd.md`-Artefakte), `09-team-cloud-ci`
+  (CI-headless-lmd-Test + token-aware `ctx_md_*`-API), `12-troubleshooting`
+  (`doctor integrations` listet `ctx_md_*`), `appendix-glossary`
+  (Begriffe lmd/TDD/Phase-Isolation/Strangler — Glossary ist noch v0.6-Stand).
 - `src/cli/md_cmd.rs` — `lean-ctx md render|read|phases <file>`.
 - Cargo-Deps: `rushdown = "0.18"` (gepinnt, Gate-Outcome §1); `evalexpr` **erst Phase 3**
   (in Phase 0 bewusst nicht hinzugefügt, Gate-Outcome §4).
@@ -367,35 +408,61 @@ Anbindung; hier wird Q-05 scharf, §9).
 
 ## 6. Phasenplan (Sequenz)
 
-| Phase | Inhalt                                                                                                      | Gate / Ergebnis                                                           |
-|-------|-------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------|
-| **0** | ✅ **bestanden** — Audit (`src/lmd/audit.rs`, 22) + rushdown-**0.18**-Spike (1 Block + 1 Inline)             | v1-Umfang fixiert; Extension-Pfad viabel, kein Fallback (Gate-Outcome §5) |
-| **1** | Header-Parser + Block/Inline-Parser + Bridge-Registry + Fragment-Resolver (built-in-first)                  | `@lean-md`, `@include`, ein R-Router (`@read`) rendern e2e                |
-| **2** | R-Bridges: `@read`/`@search`/`@list`/`@query`/`@graph`/`@env`/`@date`/`@count`                              | Daten-Direktiven live                                                     |
-| **3** | E-Konstrukte: `@define`/`@call`, `@import`, `@if`/`@consumer`, `{{ }}`, Pipe/`@render`                      | Macro-Engine + Container live                                             |
-| **4** | Bridges `@phase` (→`add_decision`) / `@on complete` (defert an `auto_findings`-Hook), `@remember`/`@recall` | Session/Knowledge live (Gate-Outcome §2)                                  |
-| **5** | `@dispatch` + Tool-Disziplin-Constraint-Injektion + Hook-Lücke schließen                                    | Subagent-Dispatch ohne Drift                                              |
-| **6** | TDD-Render-Hook (`tdd_schema`)                                                                              | Output-Kompression                                                        |
-| **7** | `ctx_md_*`-MCP-Tools + `lean-ctx md`-CLI                                                                    | Strangler-Oberfläche                                                      |
-| **8** | Pilot-Migration `mdai-brainstorm` + Parity-/Phase-Isolation-Tests                                           | erster Skill auf lmd                                                      |
+| Phase | Inhalt                                                                                                                       | Gate / Ergebnis                                                                                                        |
+|-------|------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------|
+| **0** | ✅ **bestanden** — Audit (`src/lmd/audit.rs`, 22) + rushdown-**0.18**-Spike (1 Block + 1 Inline)                              | v1-Umfang fixiert; Extension-Pfad viabel, kein Fallback (Gate-Outcome §5)                                              |
+| **1** | Header-Parser + Block/Inline-Parser + Bridge-Registry + Fragment-Resolver (built-in-first) + geteilter `EngineContext`-Cache | `@lean-md`, `@include`, ein R-Router (`@read`) rendern e2e; `@read`-Re-Read = Cache-Hit/Delta **ohne `fresh`** (§4.2a) |
+| **2** | R-Bridges: `@read`/`@search`/`@list`/`@query`/`@graph`/`@env`/`@date`/`@count`                                               | Daten-Direktiven live                                                                                                  |
+| **3** | E-Konstrukte: `@define`/`@call`, `@import`, `@if`/`@consumer`, `{{ }}`, Pipe/`@render`                                       | Macro-Engine + Container live                                                                                          |
+| **4** | Bridges `@phase` (→`add_decision`) / `@on complete` (defert an `auto_findings`-Hook), `@remember`/`@recall`                  | Session/Knowledge live (Gate-Outcome §2)                                                                               |
+| **5** | `@dispatch` + Tool-Disziplin-Constraint-Injektion + Hook-Lücke schließen                                                     | Subagent-Dispatch ohne Drift                                                                                           |
+| **6** | TDD-Render-Hook (`tdd_schema`)                                                                                               | Output-Kompression                                                                                                     |
+| **7** | `ctx_md_*`-MCP-Tools + `lean-ctx md`-CLI                                                                                     | Strangler-Oberfläche                                                                                                   |
+| **8** | Pilot-Migration `mdai-brainstorm` + Parity-/Phase-Isolation-Tests                                                            | erster Skill auf lmd                                                                                                   |
 
 ---
 
 ## 7. Security + Strangler-Schnitt
 
-- **Jail:** `[lmd.security] mode=strict jail_root="."`; `@include`/`@import` nur
-  innerhalb Jail (`max_chain_depth=16`), keine Symlinks aus dem Jail.
-- **Shell-Gate:** `@query`/`@call ctx_shell` nur mit `@lean-md shell=allow` **und**
-  `[lmd.security.shell] enabled=true`; deny-patterns (`rm *`, `sudo *`, `curl *`).
-  `@query` läuft durch dieselbe Allowlist/Redaction wie `ctx_shell`.
-- **Knowledge-Schreibrechte:** `profile=skill` darf `@remember`, `profile=doc` nicht
-  (`doc_can_recall=true`).
+**Grundsatz: erben, nicht neu erfinden.** lmd-Direktiven routen durch
+`ctx_read`/`ctx_shell`/`ctx_search` und erben damit lean-ctx' Defense-in-Depth
+**on-by-default** (docs/reference/13-security-and-governance): **PathJail**
+(`core/pathjail.rs`, Projekt-Root-Confinement, `allow_auto_reroot=false`, blockt
+`../`-Traversal), **Shell-Allowlist** (`core/shell_allowlist.rs`,
+~200 Binaries = Compression-Scope) **+ `shell_strict_mode`** (`$()`/Backtick-Block),
+**Secret-Redaction** (`core/secret_detection.rs`, maskiert nur bei `redact=true`),
+**OS-Sandbox** (Seatbelt/Landlock für `ctx_execute`), **Harden-Mode**
+(`cli/harden.rs` — erzwingt den komprimierten Pfad, deny native Read/Grep),
+**Role-Policies** (`core/context_policies.rs`). lmd baut **nur** die Lücken obendrauf:
+
+- **`@include`/`@import`-Kette (lmd-net-new):** `max_chain_depth=16` + keine
+  Symlink-Eskalation — PathJail jailt Pfade, kennt aber keine Include-Tiefe.
+  `@read`/`@search`/`@list` erben PathJail direkt (verifiziert `ctx_read.rs:97`
+  → `pathjail::allow_paths_from_env_and_config`); **kein eigener `@read`-Jail nötig**.
+- **Shell-Gate:** `@query`/`@call ctx_shell` zusätzlich **consumer-gegatet**: nur mit
+  `@lean-md shell=allow`. Darunter greifen die bestehenden lean-ctx-Schichten, jede mit
+  klar getrennter Rolle (nicht vermengen):
+    - `shell_strict_mode=true` (empfohlen) blockt `$()`/Backticks.
+    - **Secret-Redaction** maskiert Credentials im Output — **nur bei `redact=true`**
+      (`enabled=true, redact=false` erkennt, maskiert aber nicht; `secret_detection.rs:166/172`).
+    - die `shell_allowlist` (~200 Binaries) bestimmt **nur, welche Befehle komprimiert/
+      gewrappt** werden; nicht-Allowlist-Befehle passieren *untouched* — sie ist **kein
+      Denylist-Filter**.
+    - der eigentliche **Deny** von nativem `cat`/`grep`/`Read` kommt aus **Harden-Mode +
+      Disziplin-Hooks**, nicht aus der Allowlist.
+
+  lmd erfindet darüber **keine eigenen deny-patterns**.
+- **Knowledge-Schreibrechte:** auf **Role-Policies** (`ctx_session action=role`)
+  abbilden statt paralleler `profile`-Logik — `doc`-Consumer = read-only (kein
+  `@remember`), `skill` = schreibend. `consumer: ai/human` (§10) ist nur Audience,
+  **nicht** das Privileg-Modell.
 - **Strangler-Schnitt:** Node-markdownai bleibt, bis ein Skill migriert ist; pro Skill
   Cutover erst nach bestandener Parity + Phase-Isolation-Test. `mcp__markdownai__*`
   und `ctx_md_*` koexistieren in dieser Zeit; kein gleichzeitiges Doppel-Rendern
   derselben Datei.
-- **Audit-Log:** keins — `ctx_session`/`ctx_knowledge` haben eigene Stats
-  (Doppel-Tracking vermeiden, vgl. §3.1 H-Check).
+- **Audit-Log:** kein **neuer** — `ctx_session`/`ctx_knowledge`-Stats + der
+  bestehende `core/audit_trail.rs` (security-relevante Aktionen, OWASP-Map
+  `core/owasp_alignment.rs`) decken es ab (Doppel-Tracking vermeiden, §3.1 H-Check).
 
 ---
 
@@ -446,6 +513,9 @@ Anbindung; hier wird Q-05 scharf, §9).
 
 ---
 
-*Status: v0.8 — Phase-0-Gate bestanden (Gate-Outcome §5); R-1/G-1 gelöst, Wahrheiten
-eingearbeitet. An verifizierten Code-Befund + Adoption (Hooks, Regel-Bibliothek,
-Dispatch) gebunden. Nächster Schritt: writing-plans für Phase 1.*
+*Status: v0.9 — Phase-0-Gate bestanden (Gate-Outcome §5); R-1/G-1 gelöst. Referenz-
+Audit (`docs/reference`) eingearbeitet: §4.2a geteilter `EngineContext`-Cache +
+Read→Delta-Garantie (ohne `fresh`/`raw`), §3.2 Minimal-5-Stütze, §4.4 `registered/`-
+Doku-Pflicht, §7 Defense-in-Depth (PathJail/Allowlist/`shell_strict_mode`/Redaction/
+Harden/Role-Policies) erben statt neu erfinden. An verifizierten Code-Befund + Adoption (Hooks, Regel-Bibliothek,
+Dispatch) gebunden. Plan: `docs/lean-md/plans/2026-06-01-lmd-phase-1.md`.*

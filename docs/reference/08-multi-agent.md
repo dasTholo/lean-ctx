@@ -6,6 +6,7 @@
 > coordinate, hand off work, and not step on each other.
 
 Source files referenced here:
+
 - `rust/src/tools/ctx_agent.rs` + `registered/ctx_agent.rs` — registry + message bus + diaries
 - `rust/src/tools/ctx_task.rs` — A2A task orchestration
 - `rust/src/tools/registered/ctx_handoff.rs` + `core/handoff_ledger.rs` — Context Ledger Protocol
@@ -19,15 +20,15 @@ Source files referenced here:
 lean-ctx already gives every session a shared, project-scoped memory (knowledge +
 CCP, Journey 3). Multi-agent builds **coordination** on top of that shared memory:
 
-| Layer | Tool | Analogy |
-|-------|------|---------|
-| Presence | `ctx_agent` register/status/list | "who's online" |
-| Messaging | `ctx_agent` post/read | a team chat channel |
-| Long-term notes | `ctx_agent` diary | each agent's lab notebook |
-| Fact sharing | `ctx_agent` share_knowledge | a shared whiteboard |
-| Work transfer | `ctx_handoff`, `ctx_agent handoff` | a baton pass |
-| Task tracking | `ctx_task` | a shared task board |
-| Context transfer | `ctx_share` | "here, look at these files I already loaded" |
+| Layer            | Tool                               | Analogy                                      |
+|------------------|------------------------------------|----------------------------------------------|
+| Presence         | `ctx_agent` register/status/list   | "who's online"                               |
+| Messaging        | `ctx_agent` post/read              | a team chat channel                          |
+| Long-term notes  | `ctx_agent` diary                  | each agent's lab notebook                    |
+| Fact sharing     | `ctx_agent` share_knowledge        | a shared whiteboard                          |
+| Work transfer    | `ctx_handoff`, `ctx_agent handoff` | a baton pass                                 |
+| Task tracking    | `ctx_task`                         | a shared task board                          |
+| Context transfer | `ctx_share`                        | "here, look at these files I already loaded" |
 
 All of it is persisted under the data dir (`agents/`, `handoffs/`), so it survives
 restarts and works whether agents run side-by-side or one after another.
@@ -146,10 +147,10 @@ ctx_handoff action=import path=auth-handoff.json
 
 On `pull`/`import` you control what gets applied (all default `true`):
 
-| Flag | Applies |
-|------|---------|
-| `apply_workflow` | the workflow state machine position |
-| `apply_session` | the session snapshot (tasks/findings/decisions) |
+| Flag              | Applies                                                            |
+|-------------------|--------------------------------------------------------------------|
+| `apply_workflow`  | the workflow state machine position                                |
+| `apply_session`   | the session snapshot (tasks/findings/decisions)                    |
 | `apply_knowledge` | knowledge facts (contradictions are surfaced, not silently merged) |
 
 - `privacy`: `redacted` (default) or `full` (admin only) for exports.
@@ -248,14 +249,14 @@ exactly where it left off.
 
 ## Storage layout (multi-agent)
 
-| Path | Contents |
-|------|----------|
+| Path                               | Contents                        |
+|------------------------------------|---------------------------------|
 | `agents/registry.json` (+ `.lock`) | the agent registry + scratchpad |
-| `agents/diaries/` | per-agent persistent diaries |
-| `agents/shared_knowledge.json` | broadcast facts (cap 500) |
-| `handoffs/<ts>-<md5>.json` | handoff bundles |
-| `keys/<agent-id>.key` / `.pub` | per-agent identity keys |
-| `audit/trail.jsonl` | tamper-evident action log |
+| `agents/diaries/`                  | per-agent persistent diaries    |
+| `agents/shared_knowledge.json`     | broadcast facts (cap 500)       |
+| `handoffs/<ts>-<md5>.json`         | handoff bundles                 |
+| `keys/<agent-id>.key` / `.pub`     | per-agent identity keys         |
+| `audit/trail.jsonl`                | tamper-evident action log       |
 
 ---
 

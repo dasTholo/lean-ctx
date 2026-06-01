@@ -117,7 +117,7 @@ Hard rules:
 
 1. **Start:** `ctx_agent action=register agent_type=subagent role=dev` +
    `ctx_share action=pull` (warmen Cache des Controllers ziehen) → **kein `fresh`**.
-2. Reads/Search/Shell explizit als `ctx_read`/`ctx_search`/`ctx_shell` ohne `fresh`
+2. Reads/Search/Shell explizit als `ctx_read`/`ctx_search`/`ctx_shell` ohne `fresh` oder 'mode=raw'
    (Hook leitet native ohnehin um; explizit hält den Cache konsistent).
 3. **Rust-Edits via Serena** (`replace_symbol_body`, `insert_*`, `rename`/`move`/
    `safe_delete`) — Projektregel, nie native `Edit`/`ctx_edit` auf `*.rs`.

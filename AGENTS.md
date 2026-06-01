@@ -10,11 +10,11 @@ lean-ctx optimizes LLM context by compressing file reads, shell output, and sear
 
 ## MCP tools (use for reads)
 
-| Tool | Purpose |
-|------|---------|
-| `ctx_read(path, mode)` | Cached, compressed file reads (10 modes) |
-| `ctx_search(pattern, path)` | Token-efficient code search |
-| `ctx_shell(command)` | Compressed shell output (alternative to CLI) |
+| Tool                        | Purpose                                      |
+|-----------------------------|----------------------------------------------|
+| `ctx_read(path, mode)`      | Cached, compressed file reads (10 modes)     |
+| `ctx_search(pattern, path)` | Token-efficient code search                  |
+| `ctx_shell(command)`        | Compressed shell output (alternative to CLI) |
 
 ## CLI commands (optimized shell, lower overhead)
 
@@ -36,6 +36,7 @@ When working on lean-ctx itself:
 ## Session Continuity
 
 lean-ctx automatically persists session context across restarts:
+
 - **Findings**: Recent tool results (reads, searches, test outcomes)
 - **Decisions**: Architecture choices made during the session
 - **Files**: Touched files with summaries and modification status
@@ -46,11 +47,13 @@ This data is injected into every new session via the `ACTIVE SESSION` LITM block
 ### Active Documentation (Agent Responsibility)
 
 After completing a significant task (implementation, bugfix, refactoring):
+
 1. Record the decision: `ctx_knowledge(action="remember", category="decision", content="...")`
 2. Record progress: `ctx_session(action="task", value="<current task> [N%]")`
 3. Record blockers: `ctx_knowledge(action="remember", category="blocker", content="...")`
 
 After 15+ tool calls without documentation:
+
 - lean-ctx will prompt with `[CHECKPOINT: please document current progress]`
 - Respond by calling `ctx_session(action="task")` with current status
 
@@ -61,7 +64,8 @@ All provider data flows through the same consolidation pipeline:
 
 1. `ContextProvider::execute()` → raw `ProviderResult`
 2. `consolidation::consolidate()` → `ConsolidationArtifacts` (BM25 chunks, graph edges, knowledge facts, cache entries)
-3. `apply_artifacts_to_stores()` → persists to BM25 index, Graph index, ProjectKnowledge, Session cache (background thread)
+3. `apply_artifacts_to_stores()` → persists to BM25 index, Graph index, ProjectKnowledge, Session cache (background
+   thread)
 
 This means `ctx_semantic_search` finds issues/PRs/tickets, `ctx_knowledge` recalls provider facts,
 and `ctx_read` shows cross-source hints (e.g. "Issue #42 references this file").
@@ -95,6 +99,7 @@ params/signatures are authoritative in `docs/reference/generated/mcp-tools.md`
   DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED.
 
 <!-- lean-ctx -->
+
 ## lean-ctx
 
 Prefer lean-ctx MCP tools over native equivalents for token savings.
@@ -102,10 +107,12 @@ Full rules: @LEAN-CTX.md
 <!-- /lean-ctx -->
 <!-- lean-ctx-compression -->
 OUTPUT STYLE: dense
+
 - Each statement = one atomic fact line
 - Use abbreviations: fn, cfg, impl, deps, req, res, ctx, err, ret
 - Diff lines only (+/-/~), never repeat unchanged code
 - Symbols: → (causes), + (adds), − (removes), ~ (modifies), ∴ (therefore)
 - No narration, no filler, no hedging
 - BUDGET: ≤200 tokens per response unless code block required
+
 <!-- /lean-ctx-compression -->
