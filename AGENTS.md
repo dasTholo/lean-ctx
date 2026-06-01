@@ -72,6 +72,28 @@ and `ctx_read` shows cross-source hints (e.g. "Issue #42 references this file").
 - Security: PathJail, Shell Allowlist, bounded_lock, no hardcoded secrets
 - No mock data, no placeholders, no stubs
 
+## Subagent-Driven Multi-Agent Execution
+
+When a controller agent executes a plan by dispatching one fresh subagent per
+task, every agent MUST use the lean-ctx coordination + memory tools. Tool
+params/signatures are authoritative in `docs/reference/generated/mcp-tools.md`
+(read on demand) — the rules below carry only the behavioral contract.
+
+- **Controller:** `ctx_overview` at start; `ctx_agent action=register role=plan`
+  once; persist plan facts via `ctx_knowledge action=remember` + broadcast via
+  `ctx_agent action=post`; per task, warm-read sources then
+  `ctx_share action=push to_agent=<sub-id>`; `ctx_session action=task` after each
+  task; `ctx_agent action=sync` for team status.
+- **Subagent (dev/review):** before anything,
+  `ctx_agent action=register agent_type=subagent role=<dev|review>` +
+  `ctx_share action=pull` (warm cache — never `fresh`). Reads/search/shell via
+  `ctx_read`/`ctx_search`/`ctx_shell` (never `fresh`/`raw`). Rust `*.rs` edits via
+  Serena only. Log progress via `ctx_agent action=diary`. On finish:
+  `ctx_agent action=post category=<status|finding> message="…"` +
+  `ctx_agent action=handoff to_agent=<controller-id>`; durable facts via
+  `ctx_knowledge action=remember`. Report status:
+  DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED.
+
 <!-- lean-ctx -->
 ## lean-ctx
 
