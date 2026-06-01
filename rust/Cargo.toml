@@ -44,6 +44,11 @@ path = "src/bin/gen_tdd_schema.rs"
 required-features = ["dev-tools"]
 
 [[example]]
+name = "gen_docs"
+path = "src/bin/gen_docs.rs"
+required-features = ["dev-tools"]
+
+[[example]]
 name = "seed_observatory"
 path = "src/bin/seed_observatory.rs"
 required-features = ["dev-tools"]
@@ -171,6 +176,7 @@ zstd = "0.13"
 memmap2 = "0.9"
 lsp-types = "0.97"
 rushdown = "0.18"
+fs2 = "0.4.3"
 
 [lints.rust]
 unreachable_pub = "warn"
