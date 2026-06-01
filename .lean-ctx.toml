@@ -1,3 +1,8 @@
+# Token/Verbosity (Gruppe A) — only keys present in merge_local() take effect here
+minimal_overhead = true           # skip session/knowledge/gotcha blocks in MCP instructions
+# NOTE: savings_footer / content_defined_chunking / max_disk_mb are NOT in
+# merge_local()'s allowlist -> set them globally (lean-ctx config set ...).
+
 [autonomy]
 enabled = true                    # Master switch for all autonomy features
 auto_preload = true               # Pre-cache imported files after ctx_read

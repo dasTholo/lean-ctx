@@ -78,7 +78,6 @@ and `ctx_read` shows cross-source hints (e.g. "Issue #42 references this file").
 Prefer lean-ctx MCP tools over native equivalents for token savings.
 Full rules: @LEAN-CTX.md
 <!-- /lean-ctx -->
-
 <!-- lean-ctx-compression -->
 OUTPUT STYLE: dense
 - Each statement = one atomic fact line
