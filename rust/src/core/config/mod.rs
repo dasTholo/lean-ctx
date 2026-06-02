@@ -180,6 +180,12 @@ pub struct Config {
     /// Override via LEAN_CTX_NO_HOOK env var.
     #[serde(default)]
     pub shell_hook_disabled: bool,
+    /// Shadow mode: transparently intercepts native tool calls (Read/Grep/Shell)
+    /// via hooks, strengthens MCP instructions to MUST-level, and activates
+    /// immediate bypass hints on first native tool use. Enables "transparent
+    /// replacement" so agents use ctx_* without explicit opt-in.
+    #[serde(default)]
+    pub shadow_mode: bool,
     /// Controls when the shell hook auto-activates aliases.
     /// - `always`: (Default) Aliases active in every interactive shell.
     /// - `agents-only`: Aliases only active when an AI agent env var is detected.
@@ -199,7 +205,7 @@ pub struct Config {
     #[serde(default = "serde_defaults::default_bm25_max_cache_mb")]
     pub bm25_max_cache_mb: u64,
     /// Maximum number of files scanned by the lightweight JSON graph index.
-    /// Increase for large monorepos. Default: 5000.
+    /// 0 = unlimited (default). Set >0 to cap for constrained systems.
     #[serde(default = "serde_defaults::default_graph_index_max_files")]
     pub graph_index_max_files: u64,
     /// Controls RAM vs feature trade-off. Values: "low", "balanced" (default), "performance".
@@ -781,6 +787,7 @@ impl Default for Config {
             search: crate::core::hybrid_search::HybridConfig::default(),
             llm: crate::core::llm_enhance::LlmConfig::default(),
             shell_hook_disabled: false,
+            shadow_mode: false,
             shell_activation: ShellActivation::default(),
             update_check_disabled: false,
             updates: UpdatesConfig::default(),
@@ -2037,6 +2044,10 @@ impl Config {
     }
 
     /// Persists the current config to the global config file.
+    ///
+    /// Preserves user comments, formatting, and unknown keys, keeps the file
+    /// minimal (defaults that were never set on disk stay implicit), and writes
+    /// atomically with a `.bak` backup so customizations are always recoverable.
     pub fn save(&self) -> std::result::Result<(), super::error::LeanCtxError> {
         let path = Self::path().ok_or_else(|| {
             super::error::LeanCtxError::Config("cannot determine home directory".into())
@@ -2046,7 +2057,15 @@ impl Config {
         }
         let content = toml::to_string_pretty(self)
             .map_err(|e| super::error::LeanCtxError::Config(e.to_string()))?;
-        std::fs::write(&path, content)?;
+        // Baseline = what loading an empty config yields. This honors serde's
+        // field-level `#[serde(default)]` (which can diverge from the struct's
+        // `Default` impl), so minimal mode skips exactly the keys that a fresh
+        // load would produce — no spurious lines on save.
+        let baseline = toml::from_str::<Self>("").unwrap_or_else(|_| Self::default());
+        let defaults = toml::to_string_pretty(&baseline)
+            .map_err(|e| super::error::LeanCtxError::Config(e.to_string()))?;
+        crate::config_io::write_toml_preserving_minimal(&path, &content, &defaults)
+            .map_err(super::error::LeanCtxError::Config)?;
         Ok(())
     }
 

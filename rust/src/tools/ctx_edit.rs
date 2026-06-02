@@ -387,7 +387,15 @@ pub fn run_io(params: &EditParams, last_mode: &str) -> (String, CacheEffect) {
     let path = Path::new(file_path);
     let pre = match read_preimage(path, cap, params.allow_lossy_utf8) {
         Ok(p) => p,
-        Err(e) => return (e, CacheEffect::None),
+        Err(e) => {
+            // File missing? Tell the agent whether it moved or the path is
+            // wrong, instead of a bare "cannot open" (#331 point 3).
+            if !path.exists() {
+                let hint = crate::tools::edit_recovery::moved_or_deleted_hint(path);
+                return (format!("{e}{hint}"), CacheEffect::None);
+            }
+            return (e, CacheEffect::None);
+        }
     };
     if let Err(e) = verify_expected_preimage(&pre, params) {
         return (e, CacheEffect::None);
@@ -397,6 +405,13 @@ pub fn run_io(params: &EditParams, last_mode: &str) -> (String, CacheEffect) {
     if params.old_string.is_empty() {
         return (
             "ERROR: old_string must not be empty (use create=true to create a new file)".into(),
+            CacheEffect::None,
+        );
+    }
+
+    if params.old_string == params.new_string {
+        return (
+            "ERROR: old_string and new_string are identical — nothing to change.".into(),
             CacheEffect::None,
         );
     }
@@ -477,6 +492,17 @@ pub fn run_io(params: &EditParams, last_mode: &str) -> (String, CacheEffect) {
         }
     }
 
+    // Check if edit was already applied (new_string exists but old_string doesn't)
+    if content.contains(new_str) {
+        return (
+            format!(
+                "ERROR: old_string not found in {file_path}, but new_string already exists in the file. \
+                 The edit was likely already applied (by a previous tool call or another agent)."
+            ),
+            CacheEffect::None,
+        );
+    }
+
     let preview = if old_str.len() > 80 {
         format!("{}...", &old_str[..old_str.floor_char_boundary(77)])
     } else {
@@ -488,16 +514,73 @@ pub fn run_io(params: &EditParams, last_mode: &str) -> (String, CacheEffect) {
         ""
     };
 
+    // Same-file hint: closest matching line (usually a whitespace/indent diff).
+    let closest_hint = find_closest_line_hint(content, old_str);
+    // Cross-file hint: did the agent target the wrong file? (#331 point 2)
+    let cross_file = crate::tools::edit_recovery::cross_file_hint(path, old_str);
+
     let (escalation, effect) = auto_escalate_reread(last_mode, file_path);
 
     (
         format!(
             "ERROR: old_string not found in {file_path}{hint}. \
              Make sure it matches exactly (including whitespace/indentation).\n\
-             Searched for: {preview}{escalation}"
+             Searched for: {preview}{closest_hint}{cross_file}{escalation}"
         ),
         effect,
     )
+}
+
+/// Finds the closest matching line in the file content to help the agent
+/// understand what went wrong. Returns a hint string or empty if no useful match.
+fn find_closest_line_hint(content: &str, old_str: &str) -> String {
+    let first_line = old_str.lines().next().unwrap_or("").trim();
+    if first_line.len() < 4 {
+        return String::new();
+    }
+
+    let mut best_line: Option<(usize, &str)> = None;
+
+    // Try exact substring match first
+    for (i, line) in content.lines().enumerate() {
+        if line.contains(first_line) {
+            best_line = Some((i + 1, line));
+            break;
+        }
+    }
+
+    // Try matching with significant identifiers from old_string's first line
+    if best_line.is_none() {
+        let keywords: Vec<&str> = first_line
+            .split(|c: char| !c.is_alphanumeric() && c != '_')
+            .filter(|w| w.len() >= 4)
+            .collect();
+
+        if let Some(keyword) = keywords.first() {
+            for (i, line) in content.lines().enumerate() {
+                if line.contains(keyword) {
+                    best_line = Some((i + 1, line));
+                    break;
+                }
+            }
+        }
+    }
+
+    match best_line {
+        Some((line_num, line_content)) => {
+            let trimmed = line_content.trim();
+            let preview = if trimmed.len() > 100 {
+                format!("{}...", &trimmed[..trimmed.floor_char_boundary(97)])
+            } else {
+                trimmed.to_string()
+            };
+            format!(
+                "\nClosest match at line {line_num}: `{preview}`\n\
+                 Hint: check indentation/whitespace differences."
+            )
+        }
+        None => String::new(),
+    }
 }
 
 /// Auto-escalation: when old_string is not found and the file was previously read
@@ -1151,5 +1234,88 @@ mod tests {
             cache.get(&f.path().to_string_lossy()).is_some(),
             "StoreFull must re-populate the entry"
         );
+    }
+
+    #[test]
+    fn identical_old_new_rejected() {
+        let f = make_temp("fn main() {}\n");
+        let mut cache = SessionCache::new();
+        let result = handle(
+            &mut cache,
+            &mk_params(f.path(), "fn main() {}", "fn main() {}", false, false),
+        );
+        assert!(result.contains("identical"));
+    }
+
+    #[test]
+    fn edit_already_applied_detected() {
+        let f = make_temp("fn updated() {}\n");
+        let (text, effect) = run_io(
+            &mk_params(
+                f.path(),
+                "fn original() {}",
+                "fn updated() {}",
+                false,
+                false,
+            ),
+            "",
+        );
+        assert!(text.contains("already exists"));
+        assert!(text.contains("already applied"));
+        assert!(matches!(effect, CacheEffect::None));
+    }
+
+    #[test]
+    fn closest_line_hint_shown() {
+        let f = make_temp("  fn hello() {\n    println!(\"hi\");\n  }\n");
+        let (text, _) = run_io(
+            &mk_params(f.path(), "fn hello(){", "fn hello_world(){", false, false),
+            "",
+        );
+        assert!(text.contains("Closest match at line"));
+    }
+
+    #[test]
+    fn missing_file_suggests_relocated_path() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        std::fs::create_dir_all(dir.path().join("src/new")).unwrap();
+        std::fs::write(dir.path().join("src/new/gizmo.rs"), "fn gizmo() {}\n").unwrap();
+
+        let (text, effect) = run_io(
+            &mk_params(
+                &dir.path().join("src/old/gizmo.rs"),
+                "fn gizmo() {}",
+                "fn gizmo2() {}",
+                false,
+                false,
+            ),
+            "",
+        );
+        assert!(text.contains("same-named file was found"), "got: {text}");
+        assert!(text.contains("gizmo.rs"), "got: {text}");
+        assert!(matches!(effect, CacheEffect::None));
+    }
+
+    #[test]
+    fn old_string_in_other_file_is_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        let target = dir.path().join("a.rs");
+        std::fs::write(&target, "fn unrelated_a() {}\n").unwrap();
+        std::fs::write(dir.path().join("b.rs"), "fn the_target_symbol() {}\n").unwrap();
+
+        let (text, _) = run_io(
+            &mk_params(
+                &target,
+                "fn the_target_symbol() {}",
+                "fn renamed() {}",
+                false,
+                false,
+            ),
+            "",
+        );
+        assert!(text.contains("matching line exists in"), "got: {text}");
+        assert!(text.contains("b.rs"), "got: {text}");
     }
 }
