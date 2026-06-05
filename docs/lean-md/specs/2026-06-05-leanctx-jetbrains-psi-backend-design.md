@@ -28,6 +28,17 @@ eigenes In-IDE-Plugin erreichbar.
 `packages/jetbrains-lean-ctx`, das als **zweites Backend (B)** für lean-ctx dient
 und so die Serena-Funktionslücken schließt — ohne Funktionsverlust gegenüber heute.
 
+**Strategische Vision (bestätigt 2026-06-05):** lean-ctx soll künftig die
+**alleinige Code-Intelligence-Schnittstelle** des Agenten sein — sowohl **Serena**
+als auch das **offizielle JetBrains-MCP** (`mcp__jetbrains__*`) werden für
+Code-Intelligence (Symbole, Navigation, Refactoring, Format, Inspektionen)
+**entbehrlich**. Der Agent ruft nur `ctx_*`-Tools; lean-ctx-Rust spricht intern mit
+Backing B (eigenes Plugin) oder Backing A (rust-analyzer). Deshalb **voller v1-Scope**
+inkl. `format`/`inspections` (trotz Überlappung mit dem JetBrains-MCP) — eine
+einheitliche, token-komprimierte, jail-geschützte Schnittstelle ohne Fremd-MCP.
+(DB-/Run-/SQL-/Terminal-Funktionen des JetBrains-MCP sind **nicht** Scope — die deckt
+lean-ctx über `ctx_shell` o. Ä. anders ab.)
+
 ---
 
 ## 2. Getroffene Architektur-Entscheidungen (vom User bestätigt)
@@ -43,6 +54,40 @@ und so die Serena-Funktionslücken schließt — ohne Funktionsverlust gegenübe
 Eigenständiger Nachbau auf **Architektur-/Klassennamen-Ebene** (kein dekompilierter
 Serena-Code). Lizenz = lean-ctx-Projektlizenz. Distribution v1: im lean-ctx-Repo
 (`packages/jetbrains-lean-ctx`), **kein** JetBrains-Marketplace.
+
+### 2.1 Abgrenzung gegen bereits verbundene MCPs (Befund 2026-06-05)
+
+Vor dem Plugin-Bau wurde geprüft, was **bereits verbundene** MCPs an Code-Intelligence
+liefern — das offizielle **JetBrains-MCP** (`mcp__jetbrains__*`) und **Serenas** MCP
+(`mcp__serena__jet_brains_*`). Ergebnis (Evidenz = geladene Tool-Schemata):
+
+| Op | offiz. JetBrains-MCP | Serena-MCP | echte Lücke |
+|----|----------------------|------------|-------------|
+| `find` (Symbol-Suche) | `search_symbol` ✓ | `jet_brains_find_symbol` ✓ | nein |
+| `definition` | `get_symbol_info` ~teilw. | `find_symbol` ✓ | teilweise |
+| `declaration` | `get_symbol_info` ~teilw. | `jet_brains_find_declaration` ✓ | teilweise |
+| **`references`** | ❌ | `jet_brains_find_referencing_symbols` ✓ | **nur Serena** |
+| **`implementations`** | ❌ | `jet_brains_find_implementations` ✓ | **nur Serena** |
+| **`type_hierarchy`** | ❌ | `jet_brains_type_hierarchy` ✓ | **nur Serena** |
+| `overview` | `search_symbol` ~teilw. | `jet_brains_get_symbols_overview` ✓ | teilweise |
+| `format` | `reformat_file` ✓ | (über IDE) | gelöst |
+| `inspections` | `get_file_problems` + `run_inspection_kts` ✓ | `jet_brains_run_inspections` ✓ | gelöst |
+| `rename` (v2) | `rename_refactoring` ✓ | `jet_brains_rename` ✓ | gelöst |
+| `move`/`safe_delete`/`inline` (v2) | ❌ | `jet_brains_move`/`safe_delete`/`inline` ✓ | **nur Serena** |
+
+**Schlussfolgerung (verändert die Motivation, nicht den Scope):**
+1. Der **harte Kern** (`references`, `implementations`, `type_hierarchy` + symbolische
+   Edits `move`/`safe_delete`/`inline`) fehlt dem offiziellen JetBrains-MCP **komplett**
+   — heute löst ihn **nur Serena**. Das ist der eindeutige, einzigartige Mehrwert des
+   eigenen Plugins und der Kern der Q-06-Begründung.
+2. `format`/`inspections`/`rename`/`find`/`def`/`decl` sind vom JetBrains-MCP (teils
+   Serena) **schon abgedeckt**. Sie werden im Plugin **trotzdem** gebaut (Entscheidung
+   „voller v1"), damit lean-ctx die **alleinige** Code-Intelligence-Schnittstelle wird
+   und **beide** Fremd-MCPs eingespart werden können — nicht weil eine Lücke besteht,
+   sondern um Vereinheitlichung + Token-Kompression + Jail unter einem Dach zu haben.
+3. Das JetBrains-MCP **beweist** den In-IDE-PSI-MCP-Weg, exponiert aber kein
+   `find_references`/`type_hierarchy` → ein eigenes Plugin bleibt der einzige Weg zu
+   diesen Ops **ohne** Serena.
 
 ---
 
@@ -220,9 +265,13 @@ das Jail. **Diese Umstellung ist Pflicht-Bestandteil von Phase 0.**
   konzeptionell zu `@symbol` und kommen als **v2** (additive Trait-Methoden +
   `WriteCommandAction` im Plugin). Saubere Trennung: `@edit` = Text, `@symbol`-v2 =
   symbolische Refactorings.
-- **Serena-Rolle nach v1:** Read/Navigation vollständig durch Backing B (oder A)
-  abgelöst. Nach v2 (Edits) ist Serena auch als Edit-Engine entbehrlich → lean-ctx
-  vollständig serena-unabhängig (Q-06-Ziel).
+- **Serena- UND JetBrains-MCP-Ablösung nach v1:** Read/Navigation/Format/Inspections
+  vollständig durch Backing B (oder A) abgelöst → das **offizielle JetBrains-MCP** wird
+  für Code-Intelligence entbehrlich (seine `references`/`implementations`/`type_hierarchy`
+  fehlen ohnehin, siehe §2.1). Nach v2 (symbolische Edits move/safe_delete/inline) ist
+  auch **Serena** als Edit-Engine entbehrlich → lean-ctx wird die **alleinige**
+  Code-Intelligence-Schnittstelle, serena- und fremd-MCP-frei (Q-06-Ziel).
+  (Out of scope bleiben die DB-/Run-/SQL-/Terminal-Tools des JetBrains-MCP.)
 
 ---
 
