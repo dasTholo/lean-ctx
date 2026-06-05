@@ -1,12 +1,12 @@
 # Design-Spec: lean-ctx JetBrains-PSI-Backend (Serena-Ablösung, Q-06 / Backing B)
 
-| Feld | Wert |
-|------|------|
-| Status | Draft (Design genehmigt 2026-06-05) |
-| Datum | 2026-06-05 |
-| Tracking | Q-06 — `docs/lean-md/specs/2026-05-31-lmd-lean-ctx-native-design.mdai.md` §9 |
-| Scope | Eigenständiges Kotlin/IntelliJ-Vorhaben — **nicht** lmd Phase 3 (Rust-only) |
-| Nächster Schritt | `superpowers:writing-plans` (Implementierungsplan Phasen 0–5) |
+| Feld             | Wert                                                                         |
+|------------------|------------------------------------------------------------------------------|
+| Status           | Draft (Design genehmigt 2026-06-05)                                          |
+| Datum            | 2026-06-05                                                                   |
+| Tracking         | Q-06 — `docs/lean-md/specs/2026-05-31-lmd-lean-ctx-native-design.mdai.md` §9 |
+| Scope            | Eigenständiges Kotlin/IntelliJ-Vorhaben — **nicht** lmd Phase 3 (Rust-only)  |
+| Nächster Schritt | `superpowers:writing-plans` (Implementierungsplan Phasen 0–5)                |
 
 ---
 
@@ -43,12 +43,12 @@ lean-ctx über `ctx_shell` o. Ä. anders ab.)
 
 ## 2. Getroffene Architektur-Entscheidungen (vom User bestätigt)
 
-| # | Frage | Entscheidung |
-|---|-------|--------------|
-| 1 | Backend-Verhältnis | **Koexistenz A+B.** Neues `LspBackend`-Trait. `LspClient` (rust-analyzer, stdio) bleibt **CI-/Headless-Fallback** (Backing A). `JetBrainsHttpBackend` = Backing B, genutzt wenn IDE erreichbar. |
-| 2 | Transport + Discovery | **HTTP/JSON auf 127.0.0.1** + **Port-Datei-Discovery**: Plugin schreibt Port+Token nach `~/.lean-ctx/jetbrains-<projecthash>.port`; Rust liest sie. Kein fester Port, kein Range-Scan. |
-| 3 | v1-Scope | **Navigation + `type_hierarchy`** (+ Format/Inspections, read-only-artig). Edits (rename-apply/move/safe-delete/inline) = **v2-Ausblick**, nicht v1. |
-| 4 | Security/PathJail | **Rust-PathJail (`jail_path`) ist alleiniger Validierungspunkt**, läuft VOR jedem HTTP-Request. Plugin re-validiert Pfade **nicht** (vertraut localhost-Caller), lauscht nur auf 127.0.0.1, verlangt Token. |
+| # | Frage                 | Entscheidung                                                                                                                                                                                                |
+|---|-----------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 1 | Backend-Verhältnis    | **Koexistenz A+B, B-first.** Neues `LspBackend`-Trait. **Standard: zuerst `JetBrainsHttpBackend` (Backing B)** — nur wenn die IDE **nicht** erreichbar ist (keine/stale Port-Datei, `/health` schlägt fehl), Fallback auf `LspClient` (rust-analyzer, stdio = Backing A). A ist damit **Fallback** (CI/Headless), nicht Default.             |
+| 2 | Transport + Discovery | **HTTP/JSON auf 127.0.0.1** + **Port-Datei-Discovery**: Plugin schreibt Port+Token nach `~/.lean-ctx/jetbrains-<projecthash>.port`; Rust liest sie. Kein fester Port, kein Range-Scan.                      |
+| 3 | v1-Scope              | **Navigation + `type_hierarchy`** (+ Format/Inspections, read-only-artig). Edits (rename-apply/move/safe-delete/inline) = **v2-Ausblick**, nicht v1.                                                        |
+| 4 | Security/PathJail     | **Rust-PathJail (`jail_path`) ist alleiniger Validierungspunkt**, läuft VOR jedem HTTP-Request. Plugin re-validiert Pfade **nicht** (vertraut localhost-Caller), lauscht nur auf 127.0.0.1, verlangt Token. |
 
 **Lizenz/Distribution (Frage 7 — vorgeschlagener Default, beim Spec-Review bestätigen):**
 Eigenständiger Nachbau auf **Architektur-/Klassennamen-Ebene** (kein dekompilierter
@@ -61,21 +61,22 @@ Vor dem Plugin-Bau wurde geprüft, was **bereits verbundene** MCPs an Code-Intel
 liefern — das offizielle **JetBrains-MCP** (`mcp__jetbrains__*`) und **Serenas** MCP
 (`mcp__serena__jet_brains_*`). Ergebnis (Evidenz = geladene Tool-Schemata):
 
-| Op | offiz. JetBrains-MCP | Serena-MCP | echte Lücke |
-|----|----------------------|------------|-------------|
-| `find` (Symbol-Suche) | `search_symbol` ✓ | `jet_brains_find_symbol` ✓ | nein |
-| `definition` | `get_symbol_info` ~teilw. | `find_symbol` ✓ | teilweise |
-| `declaration` | `get_symbol_info` ~teilw. | `jet_brains_find_declaration` ✓ | teilweise |
-| **`references`** | ❌ | `jet_brains_find_referencing_symbols` ✓ | **nur Serena** |
-| **`implementations`** | ❌ | `jet_brains_find_implementations` ✓ | **nur Serena** |
-| **`type_hierarchy`** | ❌ | `jet_brains_type_hierarchy` ✓ | **nur Serena** |
-| `overview` | `search_symbol` ~teilw. | `jet_brains_get_symbols_overview` ✓ | teilweise |
-| `format` | `reformat_file` ✓ | (über IDE) | gelöst |
-| `inspections` | `get_file_problems` + `run_inspection_kts` ✓ | `jet_brains_run_inspections` ✓ | gelöst |
-| `rename` (v2) | `rename_refactoring` ✓ | `jet_brains_rename` ✓ | gelöst |
-| `move`/`safe_delete`/`inline` (v2) | ❌ | `jet_brains_move`/`safe_delete`/`inline` ✓ | **nur Serena** |
+| Op                                 | offiz. JetBrains-MCP                         | Serena-MCP                                 | echte Lücke    |
+|------------------------------------|----------------------------------------------|--------------------------------------------|----------------|
+| `find` (Symbol-Suche)              | `search_symbol` ✓                            | `jet_brains_find_symbol` ✓                 | nein           |
+| `definition`                       | `get_symbol_info` ~teilw.                    | `find_symbol` ✓                            | teilweise      |
+| `declaration`                      | `get_symbol_info` ~teilw.                    | `jet_brains_find_declaration` ✓            | teilweise      |
+| **`references`**                   | ❌                                            | `jet_brains_find_referencing_symbols` ✓    | **nur Serena** |
+| **`implementations`**              | ❌                                            | `jet_brains_find_implementations` ✓        | **nur Serena** |
+| **`type_hierarchy`**               | ❌                                            | `jet_brains_type_hierarchy` ✓              | **nur Serena** |
+| `overview`                         | `search_symbol` ~teilw.                      | `jet_brains_get_symbols_overview` ✓        | teilweise      |
+| `format`                           | `reformat_file` ✓                            | (über IDE)                                 | gelöst         |
+| `inspections`                      | `get_file_problems` + `run_inspection_kts` ✓ | `jet_brains_run_inspections` ✓             | gelöst         |
+| `rename` (v2)                      | `rename_refactoring` ✓                       | `jet_brains_rename` ✓                      | gelöst         |
+| `move`/`safe_delete`/`inline` (v2) | ❌                                            | `jet_brains_move`/`safe_delete`/`inline` ✓ | **nur Serena** |
 
 **Schlussfolgerung (verändert die Motivation, nicht den Scope):**
+
 1. Der **harte Kern** (`references`, `implementations`, `type_hierarchy` + symbolische
    Edits `move`/`safe_delete`/`inline`) fehlt dem offiziellen JetBrains-MCP **komplett**
    — heute löst ihn **nur Serena**. Das ist der eindeutige, einzigartige Mehrwert des
@@ -120,6 +121,7 @@ stabil. Backend-Wahl ist intern und transparent. PathJail validiert vor dem Back
 (L209-297) — **kein** `type_hierarchy/format/inspections/symbols_overview`.
 
 ### 4.1 Neuer Trait (`rust/src/lsp/backend.rs`)
+
 - Pflicht-Methoden (in beiden Backings): `open_file`, `references`, `definition`,
   `implementations`, `rename` (bleibt — heutiger Pfad darf nicht brechen).
 - **Default-degradierende** Methoden (Backing-B-bevorzugt, Default = klarer
@@ -129,6 +131,7 @@ stabil. Backend-Wahl ist intern und transparent. PathJail validiert vor dem Back
   `SymbolOverviewItem`, `InspectionDiag`.
 
 ### 4.2 Impls
+
 - `impl LspBackend for LspClient` (client.rs): delegiert die 4+1 vorhandenen
   Methoden; Rest = Default-Err. `LspClient` selbst unverändert.
 - `JetBrainsHttpBackend` (neu `lsp/jetbrains_backend.rs`): `base_url`/`token`,
@@ -137,19 +140,28 @@ stabil. Backend-Wahl ist intern und transparent. PathJail validiert vor dem Back
   → mappt auf `lsp_types`.
 
 ### 4.3 Router-Umbau
+
 - `HashMap<String, Box<dyn LspBackend>>`; `with_client` → `with_backend`
   (Closure-Param `&mut dyn LspBackend`). Die 4 Call-Sites in `ctx_refactor.rs`
   (L55/72/88/117) ändern nur den Param-Typ.
 - **Factory `select_backend(language, project_root)`:**
-  1. Port-Datei `~/.lean-ctx/jetbrains-<projecthash>.port` vorhanden + `pid`-Live
-     + `/health`-Ping (Token, ~300 ms Timeout) → **Backing B**.
-  2. Config erzwingt B aber IDE nicht erreichbar → sauberer Fehler.
-  3. sonst → **Backing A** (`LspClient::start`, wie heute).
-- **Config:** `cfg.lsp` ist `HashMap<String,String>` (config/mod.rs:272). Magic-Value
-  `"jetbrains"`/`"auto"` pro Sprache = bevorzugt B mit Fallback A; Binary-Pfad = nur A
-  (heutiges Verhalten). Kein Schema-Migrationszwang.
+    1. Port-Datei `~/.lean-ctx/jetbrains-<projecthash>.port` vorhanden + `pid`-Live
+        + `/health`-Ping (Token, ~300 ms Timeout) → **Backing B**.
+    2. Config erzwingt B aber IDE nicht erreichbar → sauberer Fehler.
+    3. sonst → **Backing A** (`LspClient::start`, wie heute).
+- **Config:** `cfg.lsp` ist `HashMap<String,String>` (config/mod.rs:272). **Default
+  (kein Eintrag) = `"auto"` = B-first** (zuerst JetBrains, Fallback A) — entspricht
+  Entscheidung 1. Magic-Value `"jetbrains"` = nur B (Fehler statt Fallback, wenn IDE
+  fehlt); expliziter Binary-Pfad = nur A (erzwingt das heutige rust-analyzer-Verhalten).
+  Kein Schema-Migrationszwang.
+- **Latenz-Hinweis:** Da B-first jeden ersten Zugriff pro `(language, project_root)`
+  einen `/health`-Ping kostet, wird das Selektionsergebnis in der `BACKENDS`-HashMap
+  **gecacht** (nicht pro Call neu geprüft). Ohne IDE entsteht so genau **ein**
+  Ping-Timeout (~300 ms), danach steht Backing A. Stale-Erkennung invalidiert den
+  Cache-Eintrag und löst Re-Selektion aus.
 
 ### 4.4 `type_hierarchy` & Co. in den Tools
+
 - **Neue Actions auf `ctx_refactor`** (kein neues Tool — vermeidet Nachziehen in
   `tool_profiles.rs`/`dynamic_tools.rs`/`workflow/types.rs`): `type_hierarchy`
   (`direction: subtypes|supertypes`, default supertypes), `overview`, `format`,
@@ -160,6 +172,7 @@ stabil. Backend-Wahl ist intern und transparent. PathJail validiert vor dem Back
 - `ctx_symbol` bleibt **unberührt** (nutzt graph_provider, nicht LSP).
 
 ### 4.5 ⚠ Sicherheitskritische Naht (Entscheidung 4)
+
 `ctx_refactor::handle` baut `abs_path` heute **selbst** aus `project_root + path`
 (L20-23) statt `ctx.resolved_path("path")` zu verwenden, das durch
 `tool_trait.rs::resolve_path_sync` → `jail_path` (pathjail.rs L88-179) läuft.
@@ -170,16 +183,17 @@ Da das Plugin bewusst **nicht** re-validiert, MUSS sichergestellt sein, dass
 das Jail. **Diese Umstellung ist Pflicht-Bestandteil von Phase 0.**
 
 ### 4.6 Änderungsstellen
-| Datei | Änderung |
-|---|---|
-| `rust/src/lsp/backend.rs` | NEU: Trait + Begleittypen |
-| `rust/src/lsp/jetbrains_backend.rs` | NEU: `JetBrainsHttpBackend` (ureq) |
-| `rust/src/lsp/port_discovery.rs` | NEU: projecthash, Port-Datei, Token, `/health` |
-| `rust/src/lsp/client.rs` | `impl LspBackend for LspClient` |
-| `rust/src/lsp/router.rs` | `Box<dyn LspBackend>`, `with_backend`, `select_backend` |
-| `rust/src/lsp/mod.rs` | Modul-Exporte |
-| `rust/src/tools/ctx_refactor.rs` | neue Actions + **§4.5-Pfad-Fix** |
-| `rust/src/tools/registered/ctx_refactor.rs` | Schema-Erweiterung |
+
+| Datei                                       | Änderung                                                |
+|---------------------------------------------|---------------------------------------------------------|
+| `rust/src/lsp/backend.rs`                   | NEU: Trait + Begleittypen                               |
+| `rust/src/lsp/jetbrains_backend.rs`         | NEU: `JetBrainsHttpBackend` (ureq)                      |
+| `rust/src/lsp/port_discovery.rs`            | NEU: projecthash, Port-Datei, Token, `/health`          |
+| `rust/src/lsp/client.rs`                    | `impl LspBackend for LspClient`                         |
+| `rust/src/lsp/router.rs`                    | `Box<dyn LspBackend>`, `with_backend`, `select_backend` |
+| `rust/src/lsp/mod.rs`                       | Modul-Exporte                                           |
+| `rust/src/tools/ctx_refactor.rs`            | neue Actions + **§4.5-Pfad-Fix**                        |
+| `rust/src/tools/registered/ctx_refactor.rs` | Schema-Erweiterung                                      |
 
 ---
 
@@ -189,6 +203,7 @@ das Jail. **Diese Umstellung ist Pflicht-Bestandteil von Phase 0.**
 `com.leanctx`. plugin.xml deklariert `LeanCtxStartupActivity` (postStartupActivity).
 
 ### 5.1 Packages (`com.leanctx.plugin`)
+
 - `LeanCtxStartupActivity` → bootet HTTP-Server **pro `Project`**.
 - `server/`: `BackendHttpServer` (Lifecycle, Bind 127.0.0.1), `RequestRouter`
   (Dispatch + Token-Check), `PortFileWriter` (atomar temp+rename), `JsonCodec` (gson).
@@ -201,6 +216,7 @@ das Jail. **Diese Umstellung ist Pflicht-Bestandteil von Phase 0.**
 - `dto/`: Position, TextRange, SymbolDTO, TypeHierarchyNodeDTO, …
 
 ### 5.2 PSI-APIs (konkret)
+
 - Pfad→PSI: `LocalFileSystem.findFileByPath` → `PsiManager.findFile`; line/col→offset
   via `PsiDocumentManager.getDocument` + `document.getLineStartOffset`.
 - References: `ReferencesSearch.search(element, scope)`.
@@ -214,17 +230,20 @@ das Jail. **Diese Umstellung ist Pflicht-Bestandteil von Phase 0.**
   `psiClass.getSupers()`.
 
 ### 5.3 Threading
+
 - Alle PSI-Reads in `ReadAction.compute {}` bzw. `ReadAction.nonBlocking{}.
   executeSynchronously()`. HTTP-Handler laufen off-EDT (HttpServer-Pool) → **nie**
   EDT blockieren. Index-Schutz: `DumbService.runReadActionInSmartMode`, sonst
   `error: INDEXING` mit Retry-Hinweis. v1 read-only → keine WriteAction.
 
 ### 5.4 HTTP-Stack
+
 - **`com.sun.net.httpserver.HttpServer` (JDK-eingebaut)**, wie Serena. Begründung:
   null Extra-Dependency, kein ClassLoader-Konflikt mit IDE-Runtime (Ktor/Netty-Drift),
   read-only-JSON braucht keinen async Stack. gson `compileOnly` (IDE bündelt gson).
 
 ### 5.5 Port/Token-Datei
+
 - Pfad: `~/.lean-ctx/jetbrains-<projecthash>.port`, Permissions `0600`, atomar.
 - **`projecthash` = `sha256(canonical(projectRoot))[..16]`** — Rust und Kotlin müssen
   identisch canonicalisieren (Symlink/Trailing-Slash-Falle).
