@@ -175,7 +175,7 @@ lmd ist ein **dünnes Frontend**. Jede Direktive wird vor dem Bau klassifiziert:
 | `@lean-md` Header               | E      | Config-Parse                                                                                                                                                                  |
 | `@include`/`@import`            | E      | File-Inline / Definitions-Scope (fs + jail)                                                                                                                                   |
 | `@define`/`@call`               | E      | Macro-Engine — kein lean-ctx-Äquivalent                                                                                                                                       |
-| `@if`/`@consumer`               | E      | Container-Transformer (+ evalexpr, Phase 3)                                                                                                                                   |
+| `@if`/`@consumer`               | E      | Container-Transformer (+ evalexpr, Phase 4)                                                                                                                                   |
 | `{{ expr }}` / Pipe + `@render` | E      | Inline-Eval / AstTransformer                                                                                                                                                  |
 | TDD-Output                      | R+E    | `tdd_schema` (R) + Render-Hook (E)                                                                                                                                            |
 
@@ -276,7 +276,7 @@ Drei Schichten, von "vermeiden" zu "blocken":
 2. **Inline-Parser** — Trigger `{{` und `@` inline (`{{ expr }}`, `@recall`,
    `@on complete`).
 3. **Container-Transformer** — `@if`/`@elseif`/`@else`/`@if-end` + `@consumer=ai/human`
-   als Whole-AST-Transformer (rushdown AST-Transformer + evalexpr; evalexpr erst Phase 3).
+   als Whole-AST-Transformer (rushdown AST-Transformer + evalexpr; evalexpr erst Phase 4).
 4. **Macro-Engine** — `@define`/`@call` mit Parameter-Substitution (`{{ param }}`),
    `@include` (Content sichtbar) / `@import` (nur Definitions). Kein lean-ctx-Äquivalent.
 5. **Pipe + `@render`** — Postfix-AstTransformer (`… | @render type=table`).
@@ -374,7 +374,7 @@ fn lmd_extension() -> impl ParserExtension {
   (`doctor integrations` listet `ctx_md_*`), `appendix-glossary`
   (Begriffe lmd/TDD/Phase-Isolation/Strangler — Glossary ist noch v0.6-Stand).
 - `src/cli/md_cmd.rs` — `lean-ctx md render|read|phases <file>`.
-- Cargo-Deps: `rushdown = "0.18"` (gepinnt, Gate-Outcome §1); `evalexpr` **erst Phase 3**
+- Cargo-Deps: `rushdown = "0.18"` (gepinnt, Gate-Outcome §1); `evalexpr` **erst Phase 4**
   (in Phase 0 bewusst nicht hinzugefügt, Gate-Outcome §4).
 
 ---
@@ -421,17 +421,18 @@ Anbindung; hier wird Q-05 scharf, §9).
 
 ## 6. Phasenplan (Sequenz)
 
-| Phase | Inhalt                                                                                                                       | Gate / Ergebnis                                                                                                        |
-|-------|------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------|
-| **0** | ✅ **bestanden** — Audit (`src/lmd/audit.rs`, 22) + rushdown-**0.18**-Spike (1 Block + 1 Inline)                              | v1-Umfang fixiert; Extension-Pfad viabel, kein Fallback (Gate-Outcome §5)                                              |
-| **1** | ✅ **bestanden** — Header-Parser + Block/Inline-Parser + Bridge-Registry + Fragment-Resolver (built-in-first) + geteilter `EngineContext`-Cache | **Gate bestanden (2026-06-05):** `@lean-md`/`@include`/`@read` rendern e2e; `@read`-Re-Read = Cache-Hit/Delta **ohne `fresh`** (§4.2a; `[unchanged]`-Stub ist `mode=full`-Feature, `auto` by-design kompakt — F-1); 35/35 lmd-Tests grün (Parser/Render/Engine/Bridge); Phase-1-Follow-ups F-1/F-2 gelöst (2026-06-02) |
-| **2** | R-Bridges: `@read`/`@search`/`@list`/`@query`/`@graph`/`@env`/`@date`/`@count`                                               | Daten-Direktiven live                                                                                                  |
-| **3** | E-Konstrukte: `@define`/`@call`, `@import`, `@if`/`@consumer`, `{{ }}`, Pipe/`@render`                                       | Macro-Engine + Container live                                                                                          |
-| **4** | Bridges `@phase` (→`add_decision`) / `@on complete` (defert an `auto_findings`-Hook), `@remember`/`@recall`                  | Session/Knowledge live (Gate-Outcome §2)                                                                               |
-| **5** | `@dispatch` + Tool-Disziplin-Constraint-Injektion + Hook-Lücke schließen                                                     | Subagent-Dispatch ohne Drift                                                                                           |
-| **6** | TDD-Render-Hook (`tdd_schema`)                                                                                               | Output-Kompression                                                                                                     |
-| **7** | `ctx_md_*`-MCP-Tools + `lean-ctx md`-CLI                                                                                     | Strangler-Oberfläche                                                                                                   |
-| **8** | Pilot-Migration `mdai-brainstorm` + Parity-/Phase-Isolation-Tests                                                            | erster Skill auf lmd                                                                                                   |
+| Phase | Inhalt                                                                                                                                                                                       | Gate / Ergebnis                                                                                                                                                                                                                                                                                                        |
+|-------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **0** | ✅ **bestanden** — Audit (`src/lmd/audit.rs`, 22) + rushdown-**0.18**-Spike (1 Block + 1 Inline)                                                                                              | v1-Umfang fixiert; Extension-Pfad viabel, kein Fallback (Gate-Outcome §5)                                                                                                                                                                                                                                              |
+| **1** | ✅ **bestanden** — Header-Parser + Block/Inline-Parser + Bridge-Registry + Fragment-Resolver (built-in-first) + geteilter `EngineContext`-Cache                                               | **Gate bestanden (2026-06-05):** `@lean-md`/`@include`/`@read` rendern e2e; `@read`-Re-Read = Cache-Hit/Delta **ohne `fresh`** (§4.2a; `[unchanged]`-Stub ist `mode=full`-Feature, `auto` by-design kompakt — F-1); 35/35 lmd-Tests grün (Parser/Render/Engine/Bridge); Phase-1-Follow-ups F-1/F-2 gelöst (2026-06-02) |
+| **2** | ✅ **bestanden** — R-Bridges: `@search`/`@list`/`@env`/`@date`/`@count`/`@query` live; `DirectiveArgs::raw()` (§6); `@read` bereits Phase 1                                                   | ✅ **bestanden** — R-Bridges @search/@list/@env/@date/@count/@query live; @query consumer-gegatet (§7); 58 lmd-Tests grün                                                                                                                                                                                               |
+| **3** | **`@graph`** (Datei/Symbol/Kontext, 7 Ops) — `EngineContext` um Graph-Handles erweitern (`graph_index`/`call_graph::load_or_build`, analog §4.2a-Cache); erbt PathJail (§7), kein neuer Jail | Graph-Direktive live; `@graph dependents` == `graph_index::get_reverse_deps` (Bridge-Unit-Test §8.5); Build-Traversal bleibt im `jail_root`                                                                                                                                                                            |
+| **4** | E-Konstrukte: `@define`/`@call`, `@import`, `@if`/`@consumer`, `{{ }}`, Pipe/`@render`                                                                                                       | Macro-Engine + Container live                                                                                                                                                                                                                                                                                          |
+| **5** | Bridges `@phase` (→`add_decision`) / `@on complete` (defert an `auto_findings`-Hook), `@remember`/`@recall`                                                                                  | Session/Knowledge live (Gate-Outcome §2)                                                                                                                                                                                                                                                                               |
+| **6** | `@dispatch` + Tool-Disziplin-Constraint-Injektion + Hook-Lücke schließen                                                                                                                     | Subagent-Dispatch ohne Drift                                                                                                                                                                                                                                                                                           |
+| **7** | TDD-Render-Hook (`tdd_schema`)                                                                                                                                                               | Output-Kompression                                                                                                                                                                                                                                                                                                     |
+| **8** | `ctx_md_*`-MCP-Tools + `lean-ctx md`-CLI                                                                                                                                                     | Strangler-Oberfläche                                                                                                                                                                                                                                                                                                   |
+| **9** | Pilot-Migration `mdai-brainstorm` + Parity-/Phase-Isolation-Tests                                                                                                                            | erster Skill auf lmd                                                                                                                                                                                                                                                                                                   |
 
 ---
 
@@ -441,8 +442,11 @@ Anbindung; hier wird Q-05 scharf, §9).
 `ctx_read`/`ctx_shell`/`ctx_search` und erben damit lean-ctx' Defense-in-Depth
 **on-by-default** (docs/reference/13-security-and-governance): **PathJail**
 (`core/pathjail.rs`, Projekt-Root-Confinement, `allow_auto_reroot=false`, blockt
-`../`-Traversal), **Shell-Allowlist** (`core/shell_allowlist.rs`,
-~200 Binaries = Compression-Scope) **+ `shell_strict_mode`** (`$()`/Backtick-Block),
+`../`-Traversal), **Shell-Allowlist** (`core/shell_allowlist.rs` — **Deny-by-Default
+wenn nicht-leer**: Built-in-Default `defaults_allowlist::default_shell_allowlist()`
+≈ 201 Binaries (verifiziert `doctor`: „201 enforced"), jedes nicht-gelistete
+Base-Binary → hart `[BLOCKED]` via `check_all_segments:578`; `shell_allowlist=[]` =
+Blocklist-only) **+ `shell_strict_mode`** (`$()`/Backtick-Block),
 **Secret-Redaction** (`core/secret_detection.rs`, maskiert nur bei `redact=true`),
 **OS-Sandbox** (Seatbelt/Landlock für `ctx_execute`), **Harden-Mode**
 (`cli/harden.rs` — erzwingt den komprimierten Pfad, deny native Read/Grep),
@@ -450,19 +454,34 @@ Anbindung; hier wird Q-05 scharf, §9).
 
 - **`@include`/`@import`-Kette (lmd-net-new):** `max_chain_depth=16` + keine
   Symlink-Eskalation — PathJail jailt Pfade, kennt aber keine Include-Tiefe.
-  `@read`/`@search`/`@list` erben PathJail direkt (verifiziert `ctx_read.rs:97`
-  → `pathjail::allow_paths_from_env_and_config`); **kein eigener `@read`-Jail nötig**.
+  `@read`/`@search`/`@list`/`@graph` erben PathJail direkt (verifiziert `ctx_read.rs:97`
+  → `pathjail::allow_paths_from_env_and_config`); der `@graph`-Build-Traversal
+  (`graph_index`/`call_graph`) bleibt im `jail_root`, keine Symlink-Eskalation;
+  **kein eigener `@read`/`@graph`-Jail nötig**.
 - **Shell-Gate:** `@query`/`@call ctx_shell` zusätzlich **consumer-gegatet**: nur mit
   `@lean-md shell=allow`. Darunter greifen die bestehenden lean-ctx-Schichten, jede mit
   klar getrennter Rolle (nicht vermengen):
     - `shell_strict_mode=true` (empfohlen) blockt `$()`/Backticks.
     - **Secret-Redaction** maskiert Credentials im Output — **nur bei `redact=true`**
       (`enabled=true, redact=false` erkennt, maskiert aber nicht; `secret_detection.rs:166/172`).
-    - die `shell_allowlist` (~200 Binaries) bestimmt **nur, welche Befehle komprimiert/
-      gewrappt** werden; nicht-Allowlist-Befehle passieren *untouched* — sie ist **kein
-      Denylist-Filter**.
-    - der eigentliche **Deny** von nativem `cat`/`grep`/`Read` kommt aus **Harden-Mode +
-      Disziplin-Hooks**, nicht aus der Allowlist.
+    - die `shell_allowlist` ist bei **nicht-leerer** Liste (= Default-Config!) ein
+      **Deny-by-Default-Ausführungs-Gate**: jedes Segment, dessen Base-Binary nicht
+      gelistet ist, wird hart abgewiesen (`allowlist_block_message`, `check_all_segments:578`).
+      Nur bei `shell_allowlist=[]` greift Blocklist-only (alles außer `UNCONDITIONAL_BLOCKED`).
+      `@query` **erbt** dieses Gate via `check_shell_allowlist` — nicht neu erfinden.
+    - **Erweitern, nicht ersetzen:** `shell_allowlist` in der Config **ersetzt** die
+      Built-in-Liste komplett (`config/mod.rs:339/1049`); der **additive** Pfad ist
+      `shell_allowlist_extra` bzw. `lean-ctx allow <cmd>`. Wer `@query <tool>` mit einem
+      nicht-Default-Tool braucht, nutzt `lean-ctx allow <tool>` — lmd-Pläne dürfen die
+      Allowlist **nicht** still überschreiben. (`#[serde(default = default_shell_allowlist)]`
+      → fehlt das Feld, gilt der ≈201-Default; ein gesetzter Wert, der **nicht greift**,
+      ist meist ein Config-Parse-Fallback auf die Defaults.)
+    - **Abgrenzung Allowlist vs. Hook (nicht verwechseln):** `ls`/`grep`/`cat` *stehen* in
+      der Default-Allowlist — ihr Deny in der Agent-Shell kommt aus den **Disziplin-Hooks**
+      (`bash-enforce-ctx-shell.py`), einer **anderen** Schicht. Beide wirken parallel.
+      Native I/O hat ohnehin native Direktiven (`@read`/`@search`/`@list`); `@query` ist
+      nur für shell-only-Tools ohne nativen Sprachkern (git, cargo, make …), nicht für
+      `echo`/`cat`/`ls`.
 
   lmd erfindet darüber **keine eigenen deny-patterns**.
 - **Knowledge-Schreibrechte:** auf **Role-Policies** (`ctx_session action=role`)
@@ -504,13 +523,13 @@ Anbindung; hier wird Q-05 scharf, §9).
 
 ## 9. Offene Punkte / deferred
 
-| ID   | Frage                                                                          | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-|------|--------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Q-05 | `@phase`-Fehlerverhalten (abort vs. continue)                                  | **deferred** — wird in der `executing-plans`-Migration (§5.2) scharf, nicht in der Engine-Spec                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| G-1  | `@graph recent-neighbors` — Datenquelle für Recent-Files                       | **gelöst (Gate-Outcome §3 korrigiert):** `session.files_touched` + `graph_neighbor_ranks_for_recent_files` existieren, Muster live in `ctx_semantic_search.rs:791` → recent-neighbors **bleibt v1**, kein neuer API                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| R-1  | rushdown-API-Ergonomie / exakte Version                                        | **gelöst:** rushdown 0.18 gepinnt, Extension-Pfad viabel (Gate-Outcome §1/§5)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ID   | Frage                                                                          | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+|------|--------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Q-05 | `@phase`-Fehlerverhalten (abort vs. continue)                                  | **deferred** — wird in der `executing-plans`-Migration (§5.2) scharf, nicht in der Engine-Spec                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| G-1  | `@graph recent-neighbors` — Datenquelle für Recent-Files                       | **gelöst (Gate-Outcome §3 korrigiert):** `session.files_touched` + `graph_neighbor_ranks_for_recent_files` existieren, Muster live in `ctx_semantic_search.rs:791` → recent-neighbors **bleibt v1**, kein neuer API                                                                                                                                                                                                                                                                                                                                    |
+| R-1  | rushdown-API-Ergonomie / exakte Version                                        | **gelöst:** rushdown 0.18 gepinnt, Extension-Pfad viabel (Gate-Outcome §1/§5)                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | F-1  | Read→Delta-Cache-Hit über lmd nicht sauber 2-Read-beobachtbar (Phase-1-Befund) | **gelöst (2026-06-02, empirisch):** kein produktiver ctx_read-Bug — der `[unchanged]`-Stub ist ein `mode=full`-Feature und funktioniert (klein+groß ~99 %); `auto` komprimiert by-design (Auto-Re-Read groß ~50 Tok, klein trivial). F-1 war Test-Korrektheit: `reread_same_path_is_cache_hit_not_full` erwartete fälschlich einen `auto`-2-Read-Stub. Fix: Test über `mode=full` + mehrzeilige Fixture (Sentinel nicht Zeile 1 → Proof-Line leakt nicht) + 3 Reads, un-`#[ignore]`'d. `@read` bleibt `auto`. Keine `ctx_read.rs`/`cache.rs`-Änderung. |
-| F-2  | HTML-Kommentar-Injection im Render-Fallback (Phase-1-Befund)                   | **gelöst (2026-06-02):** beide Vektoren zu — Inline-Name-Charset in `parser/inline.rs::parse_inline_body` an die Block-Grammatik `[a-z0-9-]` (ascii-alpha-Start) angeglichen (invalider Name → pass-through statt Dispatch); `render.rs::dispatch` sanitisiert `name` **und** `{e:?}` via `sanitize_comment` (`-->`/`<!--` neutralisiert). Tests: `rejects_comment_injection_name`, `sanitizes_comment_breakout_sequences`, e2e `inline_comment_injection_is_inert`.                                                                                                                                                                          |
+| F-2  | HTML-Kommentar-Injection im Render-Fallback (Phase-1-Befund)                   | **gelöst (2026-06-02):** beide Vektoren zu — Inline-Name-Charset in `parser/inline.rs::parse_inline_body` an die Block-Grammatik `[a-z0-9-]` (ascii-alpha-Start) angeglichen (invalider Name → pass-through statt Dispatch); `render.rs::dispatch` sanitisiert `name` **und** `{e:?}` via `sanitize_comment` (`-->`/`<!--` neutralisiert). Tests: `rejects_comment_injection_name`, `sanitizes_comment_breakout_sequences`, e2e `inline_comment_injection_is_inert`.                                                                                   |
 
 Übergangs-Default Q-05 (wie v0.6 §8): Phase läuft Body sequentiell; Error wird als
 `decision`-Eintrag geschlossen, Render bricht nicht ab.
@@ -528,7 +547,15 @@ Anbindung; hier wird Q-05 scharf, §9).
 
 ---
 
-*Status: v0.9 — Phase-0/1-Gate bestanden (Gate-Outcome §5; Phase-1 e2e 2026-06-05, 35/35 lmd-Tests grün, siehe docs/lean-md/plans/2026-06-01-lmd-phase-1.md); R-1/G-1 gelöst; Phase-1-Follow-ups F-1/F-2 gelöst (2026-06-02, siehe docs/lean-md/plans/2026-06-02-lmd-f1-f2-hardening.md). Referenz-
+*Status: v0.10 — §6 re-sequenziert (2026-06-05): `@graph` → eigene Phase 3
+(EngineContext-Graph-Handles `graph_index`/`call_graph::load_or_build`, PathJail-Vererbung
+§7); alte Phasen 3–8 → 4–9; evalexpr-Refs auf Phase 4 nachgezogen. §7 Shell-Allowlist
+korrigiert (verifiziert gegen `shell_allowlist/mod.rs` + `defaults_allowlist.rs` + `doctor`):
+**Deny-by-Default bei nicht-leerer Liste** (≈201 Default-Binaries), ersetzt-nicht-additiv,
+`@query` erbt `check_shell_allowlist`; Allowlist ≠ Disziplin-Hook (frühere „nur
+Compression-Scope/kein Denylist"-Aussage war falsch). — Phase-0/1-Gate bestanden (Gate-Outcome §5; Phase-1
+e2e 2026-06-05, 35/35 lmd-Tests grün, siehe docs/lean-md/plans/2026-06-01-lmd-phase-1.md); R-1/G-1 gelöst;
+Phase-1-Follow-ups F-1/F-2 gelöst (2026-06-02, siehe docs/lean-md/plans/2026-06-02-lmd-f1-f2-hardening.md). Referenz-
 Audit (`docs/reference`) eingearbeitet: §4.2a geteilter `EngineContext`-Cache +
 Read→Delta-Garantie (ohne `fresh`/`raw`), §3.2 Minimal-5-Stütze, §4.4 `registered/`-
 Doku-Pflicht, §7 Defense-in-Depth (PathJail/Allowlist/`shell_strict_mode`/Redaction/
