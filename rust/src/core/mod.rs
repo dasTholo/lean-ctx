@@ -165,6 +165,7 @@ pub mod context_packing;
 pub mod cooccurrence;
 pub mod dense_backend;
 pub mod embedding_index;
+pub mod embedding_quant;
 pub mod embeddings;
 pub mod energy;
 pub mod hybrid_search;
@@ -408,3 +409,4 @@ pub mod signatures;
 #[cfg(feature = "tree-sitter")]
 pub mod signatures_ts;
 pub mod storage_maintenance;
+pub mod structured_compact;
