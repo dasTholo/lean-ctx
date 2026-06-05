@@ -1,11 +1,11 @@
-# Design-Spec: lean-ctx JetBrains-PSI-Backend (Serena-Ablösung, Q-06 / Backing B)
+# Design-Spec: lean-ctx JetBrains-PSI-Backend (Serena-Ablösung / Backing B)
 
 | Feld             | Wert                                                                         |
 |------------------|------------------------------------------------------------------------------|
 | Status           | Draft (Design genehmigt 2026-06-05)                                          |
 | Datum            | 2026-06-05                                                                   |
-| Tracking         | Q-06 — `docs/lean-md/specs/2026-05-31-lmd-lean-ctx-native-design.mdai.md` §9 |
-| Scope            | Eigenständiges Kotlin/IntelliJ-Vorhaben — **nicht** lmd Phase 3 (Rust-only)  |
+| Vorhaben         | Eigenständiges JetBrains-Plugin + Rust-Backend-Anbindung (Serena-Ablösung)   |
+| Scope            | Kotlin/IntelliJ-Plugin (Backing B) + `LspBackend`-Refaktorierung im Rust-Kern |
 | Nächster Schritt | `superpowers:writing-plans` (Implementierungsplan Phasen 0–5)                |
 
 ---
@@ -80,7 +80,7 @@ liefern — das offizielle **JetBrains-MCP** (`mcp__jetbrains__*`) und **Serenas
 1. Der **harte Kern** (`references`, `implementations`, `type_hierarchy` + symbolische
    Edits `move`/`safe_delete`/`inline`) fehlt dem offiziellen JetBrains-MCP **komplett**
    — heute löst ihn **nur Serena**. Das ist der eindeutige, einzigartige Mehrwert des
-   eigenen Plugins und der Kern der Q-06-Begründung.
+   eigenen Plugins und die Kern-Begründung des Vorhabens.
 2. `format`/`inspections`/`rename`/`find`/`def`/`decl` sind vom JetBrains-MCP (teils
    Serena) **schon abgedeckt**. Sie werden im Plugin **trotzdem** gebaut (Entscheidung
    „voller v1"), damit lean-ctx die **alleinige** Code-Intelligence-Schnittstelle wird
@@ -272,25 +272,25 @@ das Jail. **Diese Umstellung ist Pflicht-Bestandteil von Phase 0.**
 
 ---
 
-## 7. lmd-Anbindung (Frage 6) & Serena-Neueinordnung
+## 7. Serena- & JetBrains-MCP-Neueinordnung
 
-- **`@symbol`** (lmd Phase 3.2) routet auf `ctx_refactor` (refs/def/impl) +
-  `ctx_symbol` (find/overview). Mit Backing B aktiv kommen `type_hierarchy` +
-  IDE-Genauigkeit **transparent** dazu — gleiche Tool-Schnittstelle, keine neue
-  lmd-Syntax. Backing A bleibt Phase-3.2-Default (CI).
-- **`@edit`** bleibt laut lmd-Spec §4.5 **ausnahmslos `ctx_edit`** (textueller
-  search-replace) — **nie** Serena, **nie** native Edit. Symbolische PSI-Edits
-  (rename-apply/move/safe-delete/inline) sind **keine `@edit`-Sache**; sie gehören
-  konzeptionell zu `@symbol` und kommen als **v2** (additive Trait-Methoden +
-  `WriteCommandAction` im Plugin). Saubere Trennung: `@edit` = Text, `@symbol`-v2 =
-  symbolische Refactorings.
+- **Tool-Schnittstelle stabil:** `ctx_refactor` (refs/def/impl + neue Actions
+  type_hierarchy/overview/format/inspections) und `ctx_symbol` (find/overview) bleiben
+  unverändert. Mit Backing B aktiv kommen `type_hierarchy` + IDE-Genauigkeit
+  **transparent** dazu — gleiche Aufrufe, anderes Backend. Backing A bleibt der
+  CI-/Headless-Fallback.
 - **Serena- UND JetBrains-MCP-Ablösung nach v1:** Read/Navigation/Format/Inspections
   vollständig durch Backing B (oder A) abgelöst → das **offizielle JetBrains-MCP** wird
   für Code-Intelligence entbehrlich (seine `references`/`implementations`/`type_hierarchy`
-  fehlen ohnehin, siehe §2.1). Nach v2 (symbolische Edits move/safe_delete/inline) ist
-  auch **Serena** als Edit-Engine entbehrlich → lean-ctx wird die **alleinige**
-  Code-Intelligence-Schnittstelle, serena- und fremd-MCP-frei (Q-06-Ziel).
+  fehlen ohnehin, siehe §2.1). Nach v2 (symbolische Edits rename-apply/move/safe-delete/
+  inline + `insert_*`/`replace_symbol_body`) ist auch **Serena** als Edit-Engine
+  entbehrlich → lean-ctx wird die **alleinige** Code-Intelligence-Schnittstelle,
+  serena- und fremd-MCP-frei.
   (Out of scope bleiben die DB-/Run-/SQL-/Terminal-Tools des JetBrains-MCP.)
+- **Abgrenzung textuelle vs. symbolische Edits:** Textuelle Edits laufen unverändert
+  über `ctx_edit` (search-and-replace, read-only-Kern bleibt). Symbolische PSI-Edits
+  (rename-apply/move/safe-delete/inline/insert) sind eine **andere Klasse** und kommen
+  als eigener v2-Edit-Spec (§9 v2-Ausblick) — nicht über `ctx_edit`.
 
 ---
 
@@ -340,8 +340,8 @@ das Jail. **Diese Umstellung ist Pflicht-Bestandteil von Phase 0.**
   `jet_brains_safe_delete`, `jet_brains_inline_symbol` — werden **NICHT** in diesem
   v1-Spec behandelt, sondern in einem **separaten v2-Edit-Spec**. Begründung: sie
   brauchen ein fundamental anderes Modell (`WriteCommandAction` auf EDT,
-  Transaktionalität, Undo, Konflikt-Handling, Cache-Kohärenz mit `ctx_edit` nach
-  §4.2a) als die read-only-v1-Ops. Sie kommen additiv als Default-`Err`-Trait-Methoden
+  Transaktionalität, Undo, Konflikt-Handling, Cache-Kohärenz mit dem Session-Cache
+  von `ctx_edit`) als die read-only-v1-Ops. Sie kommen additiv als Default-`Err`-Trait-Methoden
   hinzu (kein Breaking Change an v1). Erst dieser v2-Spec macht Serena auch als
   Edit-Engine entbehrlich.
 
@@ -405,7 +405,9 @@ akzeptabel).
    `rust/src/tools/registered/ctx_compile.rs`, Registrierung `registry.rs:175`
    entfernen. *(Verifizieren: ob `ctx_compile` ausschließlich lmd dient — falls ja, raus.)*
 5. `rust/Cargo.toml:3` — Versions-Suffix `"3.7.3-lmd"` → `"3.7.3"`.
-6. `docs/lean-md/` — lmd-Docs optional belassen oder verschieben (kein Build-Einfluss).
+6. `docs/lean-md/` — **alle Dateien entfernen AUSSER diesem Spec**
+   (`2026-06-05-leanctx-jetbrains-psi-backend-design.md`). Er ist self-contained und das
+   **einzige** mitwandernde Dokument; lmd-Specs/-Pläne bleiben auf `feat-lmd-v1`.
 
 ### 12.3 Vorgehen (empfohlen)
 
@@ -421,7 +423,10 @@ git commit -m "feat: lmd-v1 state minus lmd module (base for JetBrains plugin)"
 Entkopplung. Erst danach beginnt die Plugin-Implementierung (Phase 0, §9) auf diesem
 Branch.
 
-**Offen (User-Entscheidung):** (a) Branch-Name; (b) ob die `docs/lean-md/`-Specs/Pläne
-(inkl. dieses Specs) mitwandern; (c) ob die Granular-Historie der 383 Commits erhalten
-werden muss (dann statt Baum-Übernahme: `git rebase --onto` mit Drop der lmd-Commits —
-deutlich aufwändiger).
+**Entschieden:** Nur **dieser** Spec wandert mit (self-contained, keine Querverweise
+auf andere lmd-Dokumente) — alle übrigen `docs/lean-md/`-Dateien werden **nicht**
+übernommen.
+
+**Offen (User-Entscheidung):** (a) Branch-Name (Vorschlag `feat-jetbrains-plugin`);
+(b) ob die Granular-Historie der 383 Commits erhalten werden muss (dann statt
+Baum-Übernahme: `git rebase --onto` mit Drop der lmd-Commits — deutlich aufwändiger).
