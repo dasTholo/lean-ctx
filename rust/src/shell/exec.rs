@@ -119,6 +119,7 @@ fn is_heavy_command(command: &str) -> bool {
     static HEAVY_PREFIXES: &[&str] = &[
         "cargo build",
         "cargo test",
+        "cargo nextest",
         "cargo clippy",
         "cargo check",
         "cargo install",
@@ -540,6 +541,10 @@ mod exec_tests {
         assert_eq!(timeout, super::HEAVY_TIMEOUT);
 
         let (bytes, timeout) = super::exec_limits("cargo test --lib");
+        assert_eq!(bytes, super::HEAVY_MAX_BYTES);
+        assert_eq!(timeout, super::HEAVY_TIMEOUT);
+
+        let (bytes, timeout) = super::exec_limits("cargo nextest run");
         assert_eq!(bytes, super::HEAVY_MAX_BYTES);
         assert_eq!(timeout, super::HEAVY_TIMEOUT);
 
