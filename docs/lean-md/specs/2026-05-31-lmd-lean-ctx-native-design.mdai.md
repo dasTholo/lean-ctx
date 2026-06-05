@@ -162,22 +162,24 @@ lmd ist ein **dünnes Frontend**. Jede Direktive wird vor dem Bau klassifiziert:
   **kein Doppel-Tracking** sicherstellen.
 - **E (rushdown-Extension)** — echtes Engine-Konstrukt ohne lean-ctx-Äquivalent.
 
-| Direktive                       | Klasse | Backing                                                                                                                                                                       |
-|---------------------------------|--------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `@read`                         | R      | `core::structured_read` / `ctx_read`                                                                                                                                          |
-| `@search`                       | R      | `ctx_search`                                                                                                                                                                  |
-| `@list`                         | R      | `ctx_tree`                                                                                                                                                                    |
-| `@query` (shell)                | R      | `shell/exec` + compress (+ Security-Gate)                                                                                                                                     |
-| `@graph` (Datei/Symbol/Kontext) | R      | `graph_index`/`call_graph`/`graph_context` (verifiziert); recent-neighbors via `session.files_touched` + `graph_neighbor_ranks_for_recent_files` (Gate-Outcome §3 korrigiert) |
-| `@remember`/`@recall`           | R      | `ctx_knowledge` (`remember`/`recall_for_output`, `no_track`)                                                                                                                  |
-| `@env`/`@date`/`@count`         | R      | `std::env`/chrono/glob (trivial)                                                                                                                                              |
-| `@phase`/`@on complete`         | R+H    | `@phase`→`add_decision` (additiv); `@on complete` defert Finding-Writes an `auto_findings`-Hook `server/mod.rs:1156` (Gate-Outcome §2)                                        |
-| `@lean-md` Header               | E      | Config-Parse                                                                                                                                                                  |
-| `@include`/`@import`            | E      | File-Inline / Definitions-Scope (fs + jail)                                                                                                                                   |
-| `@define`/`@call`               | E      | Macro-Engine — kein lean-ctx-Äquivalent                                                                                                                                       |
-| `@if`/`@consumer`               | E      | Container-Transformer (+ evalexpr, Phase 4)                                                                                                                                   |
-| `{{ expr }}` / Pipe + `@render` | E      | Inline-Eval / AstTransformer                                                                                                                                                  |
-| TDD-Output                      | R+E    | `tdd_schema` (R) + Render-Hook (E)                                                                                                                                            |
+| Direktive                               | Klasse        | Backing                                                                                                                                                                                              |
+|-----------------------------------------|---------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `@read`                                 | R             | `core::structured_read` / `ctx_read`                                                                                                                                                                 |
+| `@search`                               | R             | `ctx_search`                                                                                                                                                                                         |
+| `@list`                                 | R             | `ctx_tree`                                                                                                                                                                                           |
+| `@query` (shell)                        | R             | `shell/exec` + compress (+ Security-Gate)                                                                                                                                                            |
+| `@graph` (Datei/Symbol/Kontext)         | R             | `graph_index`/`call_graph`/`graph_context` (verifiziert, **statisch/kein LSP**); recent-neighbors via `session.files_touched` + `graph_neighbor_ranks_for_recent_files` (Gate-Outcome §3 korrigiert) |
+| `@symbol` (refs/def/impl/find/overview) | R (+Anreich.) | `ctx_refactor` (LSP) + `ctx_symbol` + Cache-Namen-Anreicherung (§4.5: Output-Veredelung, kein neuer Algo) — **Serena-frei** (§4.5, Phase 3.2); `type-hierarchy` = Nav-Lücke (opt. Serena/PSI-Plugin) |
+| `@edit` (search-replace)                | R             | **ausnahmslos `ctx_edit`** (nie native `Edit`/Serena; §4.5, Phase 3.1)                                                                                                                               |
+| `@remember`/`@recall`                   | R             | `ctx_knowledge` (`remember`/`recall_for_output`, `no_track`)                                                                                                                                         |
+| `@env`/`@date`/`@count`                 | R             | `std::env`/chrono/glob (trivial)                                                                                                                                                                     |
+| `@phase`/`@on complete`                 | R+H           | `@phase`→`add_decision` (additiv); `@on complete` defert Finding-Writes an `auto_findings`-Hook `server/mod.rs:1156` (Gate-Outcome §2)                                                               |
+| `@lean-md` Header                       | E             | Config-Parse                                                                                                                                                                                         |
+| `@include`/`@import`                    | E             | File-Inline / Definitions-Scope (fs + jail)                                                                                                                                                          |
+| `@define`/`@call`                       | E             | Macro-Engine — kein lean-ctx-Äquivalent                                                                                                                                                              |
+| `@if`/`@consumer`                       | E             | Container-Transformer (+ evalexpr, Phase 4)                                                                                                                                                          |
+| `{{ expr }}` / Pipe + `@render`         | E             | Inline-Eval / AstTransformer                                                                                                                                                                         |
+| TDD-Output                              | R+E           | `tdd_schema` (R) + Render-Hook (E)                                                                                                                                                                   |
 
 **Resultat:** Fast alle *Daten*-Direktiven sind R (Router von je wenigen Zeilen).
 Echte rushdown-Arbeit (E) reduziert sich auf **~6 Primitive** (§4). "15 Direktiven,
@@ -338,24 +340,6 @@ Grenze (`@include`). (Phase-1-Review-verifiziert sicher.)
 > (Sentinel nicht in Zeile 1, damit die Proof-Line ihn nie leakt) + 3 Reads.
 > `@read` behält `auto` als Default.
 
-### 4.3 rushdown-Extension-Mapping
-
-```rust
-// src/lmd/parser/block.rs (Skizze) — exakte Trait-/Methoden-Namen + Render-Wiring: Gate-Outcome §1
-fn lmd_extension() -> impl ParserExtension {
-    parser_extension(|p| {
-        p.add_block_parser(LmdBlockParser::new, NoParserOptions, PRIORITY_ATX_HEADING);
-        p.add_inline_parser(LmdInlineParser::new, NoParserOptions, PRIORITY_EMPHASIS + 100);
-    })
-}
-// LmdBlockParser: impl BlockParser, trigger() -> b"@"; open(arena, parent, reader, ctx)
-//   -> Option<(NodeRef, State)> (NICHT parse); can_interrupt_paragraph() -> true.
-// LmdInlineParser: impl InlineParser, trigger() -> b"{"/b"@"; parse(...) -> Option<NodeRef>;
-//   Dispatcher konsumiert Trigger-Byte NICHT → reader.advance(match_len) selbst aufrufen.
-// Entry-Point: new_markdown_to_html(...) liefert Closure render(&mut out, input).
-// RenderNode für NodeKind::LmdDirective ruft die Bridge-Registry und schreibt das Ergebnis.
-```
-
 ### 4.4 Neue Integrationspunkte
 
 - `src/lmd/` (Modul-Baum aus v0.6 §5; `audit.rs` bereits angelegt, Gate-Outcome §2).
@@ -376,6 +360,110 @@ fn lmd_extension() -> impl ParserExtension {
 - `src/cli/md_cmd.rs` — `lean-ctx md render|read|phases <file>`.
 - Cargo-Deps: `rushdown = "0.18"` (gepinnt, Gate-Outcome §1); `evalexpr` **erst Phase 4**
   (in Phase 0 bewusst nicht hinzugefügt, Gate-Outcome §4).
+
+### 4.5 Code-Intelligence-Direktiven — `@graph` / `@symbol` / `@edit` (Serena-frei)
+
+**Empirisch belegt (2026-06-05, Messung gegen den realen lean-ctx- + Serena/JetBrains-Stack.)**
+Phase 3 spaltet in drei orthogonale R-Bridges; **keine teilt Code** (außer dem
+Phase-1-`EngineContext`+Cache), daher frei sequenzierbar. Gewählte Reihenfolge =
+**aufsteigendes Risiko + Spike-Gating:** `@graph` (read-only, kein LSP) → `@edit`
+(Write, isoliert) → `@symbol` (LSP-abhängig, Spike-vorbedingt).
+
+#### `@graph` (Phase 3) — statischer Graph, immer verfügbar
+
+Rein lean-ctx-nativ: **7 R-Aliasse** auf `graph_index`/`call_graph`/`graph_context`,
+**kein LSP**. tree-sitter-AST → deterministisch, IDE-unabhängig, läuft headless/CI
+(Voraussetzung Golden-Parity §8.2). Ops → Backing:
+`dependents`→`graph_index::get_reverse_deps`, `dependencies`→`graph_index` (forward),
+`related`→`graph_index::get_related`, `callers`→`call_graph::callers_of`,
+`callees`→`call_graph::callees_of`, `context`→`graph_context::build_graph_context`,
+`recent-neighbors`→`graph_context::graph_neighbor_ranks_for_recent_files`
+(+ `session.files_touched`, G-1). `EngineContext` um Graph-Handles erweitern
+(`load_or_build`, analog §4.2a-Cache); erbt PathJail (§7), Build-Traversal im `jail_root`.
+
+#### `@edit` (Phase 3.1) — einzige Schreib-Direktive, **ausnahmslos `ctx_edit`**
+
+`@edit` routet **strukturell und ausnahmslos auf `ctx_edit`** (search-and-replace
+`old_string`→`new_string`) — **nie** native `Edit`, **nie** Serena. Begründung:
+
+1. **lean-ctx-Mandat:** wie `@read`/`@search`/`@list` Read auf lean-ctx zwingen, zwingt
+   `@edit` Write auf `ctx_edit` — es gibt **kein lmd-Sprachkonstrukt** für native
+   `Edit`/`sed` (strukturell, nicht als Empfehlung, vgl. §3.2).
+2. **Cache-Kohärenz (§4.2a):** `ctx_edit` aktualisiert/invalidiert **denselben**
+   Session-Cache, den `@read`/`@graph`/`@symbol` warm halten → Edit→Re-Read bleibt
+   delta-konsistent. Deshalb **nach** den Lesern gebaut: Invalidierung wird gegen das
+   reale Leser-Set (`@read`+`@graph`) verifiziert, nicht nur gegen `@read`.
+3. **Strangler-tauglich:** ein Backing, kein Provider-Switch.
+
+Risiko-isoliert (keine Kopplung an `@graph`/`@symbol`); einzige Sorgfalt: Write-Kategorie
+(Cache-Invalidierung, Idempotenz, Fehler bei nicht-eindeutigem `old_string`).
+
+#### `@symbol` (Phase 3.2) — LSP-Navigation, **Serena-frei**
+
+Symbol-genaue Navigation **ohne Serena-Abhängigkeit**, gebacked von `ctx_refactor`
+(LSP) + `ctx_symbol` + **Cache-Namen-Anreicherung**. Ops → Backing:
+`refs`→`ctx_refactor references` · `def`→`ctx_refactor definition` ·
+`impl`→`ctx_refactor implementations`+Cache · `find`/`overview`→`ctx_symbol`
+(Body+Range+Kind). **Token-Messung (Agent-Kontext, gleiche Frage):**
+
+| Op                                   | lean-ctx                                                   | Serena roh | Faktor    |
+|--------------------------------------|------------------------------------------------------------|------------|-----------|
+| `refs` (`EngineContext`, 54 Treffer) | ~600 tok (`ctx_refactor`, nackte Positionen = die Antwort) | ~1.750 tok | **2,9×**  |
+| `impl` (`DirectiveBridge`, 8 Impls)  | ~120 tok (`ctx_refactor`+Cache-Namen)                      | ~210 tok   | **1,75×** |
+
+**Cache-Namen-Anreicherung (der Schlüssel):** `ctx_refactor implementations` liefert
+nackte `file:line:col`. Die Bridge liest die Ziel-Zeile aus dem **shared
+`EngineContext.cache`** (§4.2a, warm → ~13-tok-Hit) und extrahiert den Typ-Namen
+(`impl X for Y` → `Y`) — **intern in Rust, null Agent-Kontext-Token**. lean-ctx
+produziert die verwertbaren Symbol-Namen damit *billiger* als Serenas reicher
+Roh-Output. Den Positions-Lookup (`ctx_refactor` braucht 1-idx `line` + 0-idx `column`,
+verifiziert `tools/ctx_refactor.rs:17-18`) kapselt die Bridge ebenfalls intern.
+
+**Verfügbarkeit:** `ctx_refactor` startet **heute** seinen *eigenen* Sprachserver
+(`crate::lsp::router`, rust-analyzer-Binary) — IDE-unabhängig, CI-tauglich. Serena
+nutzt den **laufenden JetBrains-IDE-Index**. `@symbol` ist daher Default-mäßig CI-fähig.
+
+**JetBrains-Zugang — Spike-Befund (2026-06-05, `serena-jetbrains-plugin` zerlegt):**
+Serena greift **nicht per LSP** auf JetBrains zu — es ist ein **IntelliJ-Platform-Plugin**
+(`<depends>com.intellij.modules.platform</depends>`, `de.oraios.serena`), das die native
+**PSI-API** der IDE nutzt und beim Start (`postStartupActivity`) einen **lokalen
+HTTP+JSON-Server** öffnet (`SerenaBackendService`/`PostRequestHandler`/gson). Der
+Python-MCP-Server spricht via HTTP mit dem Plugin:
+`Claude ⇄ serena-MCP ⇄ HTTP/JSON ⇄ Plugin ⇄ PSI ⇄ IDE-Index`. Die `endpoint/`-Handler
+sind 1:1 die Serena-Tools (`Find*`, `GetSymbolsOverview`,
+`TypeHierarchy`/`GetSub|Supertypes`, `Rename`/`Move`/`SafeDelete`/`Inline`,
+`RunInspections`/`ApplyQuickFix`, `Format`, `Completions`, `DebugRepl`).
+**Konsequenz:** der „JetBrains-LSP" ist **PSI, kein externer LSP-Server** — JetBrains
+exponiert PSI nicht nach außen. Der einzige Weg zu IDE-Index/`type_hierarchy`/PSI-Edits
+ist ein **eigenes In-IDE-Plugin**. lean-ctx hat das **Gerüst bereits**
+(`packages/jetbrains-lean-ctx`, IntelliJ-Platform 2.14.0/Kotlin, group `com.leanctx`) —
+aber **leer/unimplementiert**. Damit zwei `@symbol`-Backings: **(A) rust-analyzer-LSP**
+(`ctx_refactor` heute: CI-tauglich, kein `type_hierarchy`/PSI-Edit) = **Phase-3.2-Default**;
+**(B) `jetbrains-lean-ctx`-Plugin** (PSI/HTTP nach Serena-Muster: IDE-genau,
+`type_hierarchy` + symbolische Edits, aber IDE-abhängig + Kotlin-Bau) = **eigenes
+Plugin-Vorhaben**, der Pfad zur *vollständigen* Serena-Ablösung inkl. symbolischem
+`@edit` (Q-06, §9). **Nicht Phase 3.**
+
+**`type-hierarchy` — einzige Nav-Lücke:** `ctx_refactor implementations` ≈ subtypes;
+der volle Supertyp-/Vererbungsbaum hat **kein** lean-ctx-Äquivalent. In Rust selten
+nötig (keine Klassen-Vererbung, nur Trait-Impls → `impl` reicht meist). Deferred /
+optionaler `serena type_hierarchy`-Pfad.
+
+#### Serena-Neueinordnung (Korrektur zu §3.4 / §5.0)
+
+Serenas **Read/Navigation** (`find_symbol`/`find_referencing_symbols`/
+`find_implementations`/`find_declaration`/`get_symbols_overview`) ist durch `@symbol`
+(lean-ctx-nativ) **vollständig und token-effizienter ablösbar** — für lmd-Lese-Direktiven
+ist Serena **entbehrlich**. Serena bleibt nur **Edit-Engine** für `*.rs`
+(`replace_symbol_body`/`insert_*_symbol`/`move`/`safe_delete`/`inline`), weil lean-ctx
+**read-only by design** ist. `serena.lmd.md`/`jetbrains.lmd.md` (§5.0) schrumpfen
+entsprechend auf den Edit-/Inspektions-Teil; der Nav-Teil entfällt.
+**Deferred (eigenes Vorhaben, nicht Phase 3):** `ctx_symbol` liefert exakte
+Symbol-Ranges (`L19-30`, verifiziert) → eine künftige *symbolische* `@edit`-Variante
+(Range + `ctx_edit`) könnte `replace_symbol_body`/`insert_*_symbol` **nativ** nachbauen
+und Serenas Edit-Rolle in lmd ablösen — weniger robust an Edge-Cases
+(Attribute/doc-Kommentare/Makro-Grenzen, die Serena via PSI sauber trifft), daher
+eigener Spike (gekoppelt an den JetBrains-LSP-Spike oben).
 
 ---
 
@@ -421,18 +509,20 @@ Anbindung; hier wird Q-05 scharf, §9).
 
 ## 6. Phasenplan (Sequenz)
 
-| Phase | Inhalt                                                                                                                                                                                       | Gate / Ergebnis                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-|-------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **0** | ✅ **bestanden** — Audit (`src/lmd/audit.rs`, 22) + rushdown-**0.18**-Spike (1 Block + 1 Inline)                                                                                              | v1-Umfang fixiert; Extension-Pfad viabel, kein Fallback (Gate-Outcome §5)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| **1** | ✅ **bestanden** — Header-Parser + Block/Inline-Parser + Bridge-Registry + Fragment-Resolver (built-in-first) + geteilter `EngineContext`-Cache                                               | **Gate bestanden (2026-06-05):** `@lean-md`/`@include`/`@read` rendern e2e; `@read`-Re-Read = Cache-Hit/Delta **ohne `fresh`** (§4.2a; `[unchanged]`-Stub ist `mode=full`-Feature, `auto` by-design kompakt — F-1); 35/35 lmd-Tests grün (Parser/Render/Engine/Bridge); Phase-1-Follow-ups F-1/F-2 gelöst (2026-06-02)                                                                                                                                                                                                                                                                                                                                                                                                    |
-| **2** | ✅ **bestanden** — R-Bridges: `@search`/`@list`/`@env`/`@date`/`@count`/`@query` live; `DirectiveArgs::raw()` (§6); `@read` bereits Phase 1                                                   | **Gate bestanden (2026-06-05):** 6 R-Bridges (`@search`→`ctx_search`, `@list`→`ctx_tree`, `@env`, `@date`→`chrono`, `@count`→`glob`, `@query`→Shell) als dünne Router in bestehende lean-ctx-Core-APIs (kein Neualgorithmik, §4.2); `@query` consumer-gegatet (`shell=allow`) **+ erbt §7-Defenses** (`validate_command` + `check_shell_allowlist` Deny-by-Default mit `$()`/Backtick-Block + Secret-Redaction) — **kein neuer Deny-Pattern**; `DirectiveArgs::raw()` für space-preserving Command-Line; 58/58 lmd-Tests grün, `cargo fmt --check` clean (CI-Gate); jede Task spec+quality-reviewed, `@query` zusätzlich opus-security-reviewed. Plan: `docs/lean-md/plans/2026-06-05-lmd-phase-2.md`. `@graph` → Phase 3 |
-| **3** | **`@graph`** (Datei/Symbol/Kontext, 7 Ops) — `EngineContext` um Graph-Handles erweitern (`graph_index`/`call_graph::load_or_build`, analog §4.2a-Cache); erbt PathJail (§7), kein neuer Jail | Graph-Direktive live; `@graph dependents` == `graph_index::get_reverse_deps` (Bridge-Unit-Test §8.5); Build-Traversal bleibt im `jail_root`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| **4** | E-Konstrukte: `@define`/`@call`, `@import`, `@if`/`@consumer`, `{{ }}`, Pipe/`@render`                                                                                                       | Macro-Engine + Container live                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| **5** | Bridges `@phase` (→`add_decision`) / `@on complete` (defert an `auto_findings`-Hook), `@remember`/`@recall`                                                                                  | Session/Knowledge live (Gate-Outcome §2)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| **6** | `@dispatch` + Tool-Disziplin-Constraint-Injektion + Hook-Lücke schließen                                                                                                                     | Subagent-Dispatch ohne Drift                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| **7** | TDD-Render-Hook (`tdd_schema`)                                                                                                                                                               | Output-Kompression                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| **8** | `ctx_md_*`-MCP-Tools + `lean-ctx md`-CLI                                                                                                                                                     | Strangler-Oberfläche                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| **9** | Pilot-Migration `mdai-brainstorm` + Parity-/Phase-Isolation-Tests                                                                                                                            | erster Skill auf lmd                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Phase   | Inhalt                                                                                                                                                                                                                            | Gate / Ergebnis                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+|---------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **0**   | ✅ **bestanden** — Audit (`src/lmd/audit.rs`, 22) + rushdown-**0.18**-Spike (1 Block + 1 Inline)                                                                                                                                   | v1-Umfang fixiert; Extension-Pfad viabel, kein Fallback (Gate-Outcome §5)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| **1**   | ✅ **bestanden** — Header-Parser + Block/Inline-Parser + Bridge-Registry + Fragment-Resolver (built-in-first) + geteilter `EngineContext`-Cache                                                                                    | **Gate bestanden (2026-06-05):** `@lean-md`/`@include`/`@read` rendern e2e; `@read`-Re-Read = Cache-Hit/Delta **ohne `fresh`** (§4.2a; `[unchanged]`-Stub ist `mode=full`-Feature, `auto` by-design kompakt — F-1); 35/35 lmd-Tests grün (Parser/Render/Engine/Bridge); Phase-1-Follow-ups F-1/F-2 gelöst (2026-06-02)                                                                                                                                                                                                                                                                                                                                                                                                    |
+| **2**   | ✅ **bestanden** — R-Bridges: `@search`/`@list`/`@env`/`@date`/`@count`/`@query` live; `DirectiveArgs::raw()` (§6); `@read` bereits Phase 1                                                                                        | **Gate bestanden (2026-06-05):** 6 R-Bridges (`@search`→`ctx_search`, `@list`→`ctx_tree`, `@env`, `@date`→`chrono`, `@count`→`glob`, `@query`→Shell) als dünne Router in bestehende lean-ctx-Core-APIs (kein Neualgorithmik, §4.2); `@query` consumer-gegatet (`shell=allow`) **+ erbt §7-Defenses** (`validate_command` + `check_shell_allowlist` Deny-by-Default mit `$()`/Backtick-Block + Secret-Redaction) — **kein neuer Deny-Pattern**; `DirectiveArgs::raw()` für space-preserving Command-Line; 58/58 lmd-Tests grün, `cargo fmt --check` clean (CI-Gate); jede Task spec+quality-reviewed, `@query` zusätzlich opus-security-reviewed. Plan: `docs/lean-md/plans/2026-06-05-lmd-phase-2.md`. `@graph` → Phase 3 |
+| **3**   | ✅ **bestanden (2026-06-05):** **`@graph`** (7 statische Ops, R-Aliasse `graph_index`/`call_graph`/`graph_context`, **kein LSP**, read-only) — `EngineContext` um Graph-Handles (`load_or_build`, §4.2a-Cache); erbt PathJail (§7), kein neuer Jail; Design §4.5 | `@graph` live (7 Ops: dependents/dependencies/related/callers/callees/context/recent-neighbors); `get_forward_deps` (dependencies) als symmetrische Core-Methode ergänzt; `recent-neighbors` v1 = explizite Seeds (Session-Auto → Phase-8-Follow-up); EngineContext-Graph-Memo (§4.2a-analog, ein Build/Render); `context` §7-jail-gehärtet (`jail_path`); 4808/4808 lmd-Tests grün, `cargo fmt --check` clean; `dependents` == `graph_index::get_reverse_deps` (Bridge-Unit-Test §8.5); Build-Traversal im `jail_root`; **IDE-unabhängig** → CI/Golden-Parity §8.2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| **3.1** | **`@edit`** — einzige Schreib-Direktive, routet **ausnahmslos auf `ctx_edit`** (nie native `Edit`/Serena; §4.5)                                                                                                                   | `@edit` live; **Cache-Invalidierung (§4.2a) gegen das Leser-Set `@read`+`@graph` verifiziert**; isolierteste Bridge, keine Kopplung an `@graph`/`@symbol`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| **3.2** | **`@symbol`** (LSP-Nav, **Serena-frei**: `ctx_refactor`+`ctx_symbol`+Cache-Namen-Anreicherung; §4.5)                                                                                                                              | `@symbol impl` == `ctx_refactor implementations`+Cache-Namen (**gemessen ~1,75× günstiger als Serena**, `refs` ~2,9×); **Vorbedingungs-Spike: JetBrains-LSP-Zugang für lean-ctx _analog Serena_ prüfen** (sonst eigener rust-analyzer); `type-hierarchy` = Nav-Lücke (opt. Serena)                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| **4**   | E-Konstrukte: `@define`/`@call`, `@import`, `@if`/`@consumer`, `{{ }}`, Pipe/`@render`                                                                                                                                            | Macro-Engine + Container live                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| **5**   | Bridges `@phase` (→`add_decision`) / `@on complete` (defert an `auto_findings`-Hook), `@remember`/`@recall`                                                                                                                       | Session/Knowledge live (Gate-Outcome §2)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| **6**   | `@dispatch` + Tool-Disziplin-Constraint-Injektion + Hook-Lücke schließen                                                                                                                                                          | Subagent-Dispatch ohne Drift                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| **7**   | TDD-Render-Hook (`tdd_schema`)                                                                                                                                                                                                    | Output-Kompression                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| **8**   | `ctx_md_*`-MCP-Tools + `lean-ctx md`-CLI                                                                                                                                                                                          | Strangler-Oberfläche                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| **9**   | Pilot-Migration `mdai-brainstorm` + Parity-/Phase-Isolation-Tests                                                                                                                                                                 | erster Skill auf lmd                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 ---
 
@@ -500,10 +590,8 @@ Blocklist-only) **+ `shell_strict_mode`** (`$()`/Backtick-Block),
 
 ## 8. Test- / Parity-Strategie
 
-1. **rushdown-Spike-Akzeptanz (Phase 0) — ✅ bestanden:** Custom-`@upper`-Block +
-   Inline-`{{ shout:… }}` rendern korrekt gegen die echte rushdown-0.18-API
-   (`rust/tests/lmd_rushdown_spike.rs`). Extension-Pfad viabel; Preprocessor-Fallback
-   nicht gezogen (Gate-Outcome §1/§5).
+1. **rushdown-Spike + Parser (Phase 0/1) — ✅ bestanden:** Extension-Pfad live, kein
+   Preprocessor-Fallback (`rust/tests/lmd_rushdown_spike.rs` + Phase-1-Parser).
 2. **Golden-Output-Parity:** für jede migrierte Direktive/jeden Skill rendert lmd
    byte-nah identisch zum Node-markdownai-Output (Snapshot-Tests).
 3. **Phase-Isolation-Token-Check (gegen Benchmark-Zielmarken §2.5):**
@@ -526,8 +614,9 @@ Blocklist-only) **+ `shell_strict_mode`** (`$()`/Backtick-Block),
 | ID   | Frage                                                                          | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 |------|--------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Q-05 | `@phase`-Fehlerverhalten (abort vs. continue)                                  | **deferred** — wird in der `executing-plans`-Migration (§5.2) scharf, nicht in der Engine-Spec                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Q-06 | JetBrains-PSI-Plugin-Pfad (Serena-Ablösung inkl. Edits/`type_hierarchy`)       | **Spike-Befund 2026-06-05 (§4.5):** Serena = IntelliJ-Plugin (**PSI** + lokaler HTTP/JSON-Server), **kein LSP**; JetBrains exponiert PSI nicht extern → IDE-Genauigkeit nur via **eigenes In-IDE-Plugin**. Gerüst `packages/jetbrains-lean-ctx` (IntelliJ-Platform 2.14.0/Kotlin) existiert, **leer/unimplementiert**. Eigenes Plugin-Vorhaben (Kotlin, nicht Rust), **nicht Phase 3**; Phase-3.2-`@symbol` nutzt rust-analyzer-LSP (Backing A)                                                                                                        |
 | G-1  | `@graph recent-neighbors` — Datenquelle für Recent-Files                       | **gelöst (Gate-Outcome §3 korrigiert):** `session.files_touched` + `graph_neighbor_ranks_for_recent_files` existieren, Muster live in `ctx_semantic_search.rs:791` → recent-neighbors **bleibt v1**, kein neuer API                                                                                                                                                                                                                                                                                                                                    |
-| R-1  | rushdown-API-Ergonomie / exakte Version                                        | **gelöst:** rushdown 0.18 gepinnt, Extension-Pfad viabel (Gate-Outcome §1/§5)                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| R-1  | rushdown-API / Version                                                         | **gelöst (Phase 0/1, integriert):** rushdown 0.18, Parser live                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | F-1  | Read→Delta-Cache-Hit über lmd nicht sauber 2-Read-beobachtbar (Phase-1-Befund) | **gelöst (2026-06-02, empirisch):** kein produktiver ctx_read-Bug — der `[unchanged]`-Stub ist ein `mode=full`-Feature und funktioniert (klein+groß ~99 %); `auto` komprimiert by-design (Auto-Re-Read groß ~50 Tok, klein trivial). F-1 war Test-Korrektheit: `reread_same_path_is_cache_hit_not_full` erwartete fälschlich einen `auto`-2-Read-Stub. Fix: Test über `mode=full` + mehrzeilige Fixture (Sentinel nicht Zeile 1 → Proof-Line leakt nicht) + 3 Reads, un-`#[ignore]`'d. `@read` bleibt `auto`. Keine `ctx_read.rs`/`cache.rs`-Änderung. |
 | F-2  | HTML-Kommentar-Injection im Render-Fallback (Phase-1-Befund)                   | **gelöst (2026-06-02):** beide Vektoren zu — Inline-Name-Charset in `parser/inline.rs::parse_inline_body` an die Block-Grammatik `[a-z0-9-]` (ascii-alpha-Start) angeglichen (invalider Name → pass-through statt Dispatch); `render.rs::dispatch` sanitisiert `name` **und** `{e:?}` via `sanitize_comment` (`-->`/`<!--` neutralisiert). Tests: `rejects_comment_injection_name`, `sanitizes_comment_breakout_sequences`, e2e `inline_comment_injection_is_inert`.                                                                                   |
 
@@ -547,7 +636,17 @@ Blocklist-only) **+ `shell_strict_mode`** (`$()`/Backtick-Block),
 
 ---
 
-*Status: v0.10 — §6 re-sequenziert (2026-06-05): `@graph` → eigene Phase 3
+*Status: v0.11 (2026-06-05) — §4.5 Code-Intelligence-Direktiven `@graph`/`@symbol`/`@edit`
+(Serena-frei) ergänzt; §6 Phase 3 aufgespalten → **3 `@graph`** (7 statische Ops, kein LSP,
+read-only) / **3.1 `@edit`** (ausnahmslos `ctx_edit`) / **3.2 `@symbol`** (LSP-Nav,
+Serena-frei) nach aufsteigendem Risiko. Empirisch (gegen realen lean-ctx+Serena-Stack):
+`@symbol refs` ~2,9× / `impl` ~1,75× günstiger als Serena via Cache-Namen-Anreicherung
+(§4.2a, null Agent-Token); Serena-**Nav** vollständig durch `@symbol` ablösbar, Serena
+bleibt nur **Edit-Engine** für `*.rs`. JetBrains-Spike (Q-06, §9): `serena-jetbrains-plugin`
+zerlegt → Serena = IntelliJ-**PSI**-Plugin + lokaler HTTP/JSON-Server, **kein LSP**;
+vollständige Serena-Ablösung (inkl. Edits/`type_hierarchy`) nur über **eigenes In-IDE-Plugin**
+(`packages/jetbrains-lean-ctx`-Gerüst vorhanden, leer), eigenes Vorhaben — Phase-3.2-Default
+bleibt rust-analyzer-LSP. — v0.10 — §6 re-sequenziert (2026-06-05): `@graph` → eigene Phase 3
 (EngineContext-Graph-Handles `graph_index`/`call_graph::load_or_build`, PathJail-Vererbung
 §7); alte Phasen 3–8 → 4–9; evalexpr-Refs auf Phase 4 nachgezogen. §7 Shell-Allowlist
 korrigiert (verifiziert gegen `shell_allowlist/mod.rs` + `defaults_allowlist.rs` + `doctor`):
