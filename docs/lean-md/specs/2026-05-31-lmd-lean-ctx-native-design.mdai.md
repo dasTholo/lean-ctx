@@ -325,13 +325,18 @@ Re-Entrancy-Constraint: `@read` borrowt `ctx.cache` nur kurz in `execute` und dr
 vor Return — kein überlappender `RefCell`-Borrow über die rekursive `render_body`-
 Grenze (`@include`). (Phase-1-Review-verifiziert sicher.)
 
-> **Phase-1-Implementierungs-Befund (Follow-up F-1, §9):** Der geteilte Cache warmt
-> verifiziert — `@read x mode=full` 3× → 2./3. Read = `[unchanged]`-Stub, ohne
-> `fresh`/`raw`. Die *saubere* Zwei-Read-Beobachtbarkeit der Garantie ist aktuell
-> durch zwei `ctx_read`-Bugs blockiert (`full_content_delivered` nur im `was_hit`-
-> Zweig; `cache_hit_proof_line` leakt die erste Zeile in den Stub) — Detail + Fix in
-> §9 F-1. Das §6-Gate prüft Read→Delta daher über die 3-Read/`mode=full`-Form; der
-> Engine-Unit-Test der 2-Read-Form ist bis zum ctx_read-Fix `#[ignore]`'d.
+> **Phase-1-Befund F-1 — gelöst (2026-06-02, empirisch).** Messung (echte
+> `ctx_read`-Runtime, kalter Cache) zeigt: der `[unchanged]`-Stub ist ein
+> **`mode=full`-Feature** und funktioniert korrekt (klein **und** groß: ~99 %
+> Ersparnis). `auto` komprimiert bewusst — Auto-Re-Reads sind bereits kompakt
+> (große Datei ~50 Tok) bzw. trivial klein (kleine Datei). **Kein produktiver
+> `ctx_read`/`cache`-Bug**: der Auto-Pfad prüft das `full_content_delivered`-Flag
+> nie und ist eh kompakt; der Full-Pfad markiert via `:508`/`:743` korrekt. F-1
+> war ein **Test-Korrektheits-Problem** — der Engine-Test erwartete fälschlich
+> einen `auto`-2-Read-Stub. Behoben: `reread_same_path_is_cache_hit_not_full`
+> läuft jetzt (kein `#[ignore]`) über `mode=full` + mehrzeilige Fixture
+> (Sentinel nicht in Zeile 1, damit die Proof-Line ihn nie leakt) + 3 Reads.
+> `@read` behält `auto` als Default.
 
 ### 4.3 rushdown-Extension-Mapping
 
@@ -419,7 +424,7 @@ Anbindung; hier wird Q-05 scharf, §9).
 | Phase | Inhalt                                                                                                                       | Gate / Ergebnis                                                                                                        |
 |-------|------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------|
 | **0** | ✅ **bestanden** — Audit (`src/lmd/audit.rs`, 22) + rushdown-**0.18**-Spike (1 Block + 1 Inline)                              | v1-Umfang fixiert; Extension-Pfad viabel, kein Fallback (Gate-Outcome §5)                                              |
-| **1** | Header-Parser + Block/Inline-Parser + Bridge-Registry + Fragment-Resolver (built-in-first) + geteilter `EngineContext`-Cache | `@lean-md`, `@include`, ein R-Router (`@read`) rendern e2e; `@read`-Re-Read = Cache-Hit/Delta **ohne `fresh`** (§4.2a) |
+| **1** | Header-Parser + Block/Inline-Parser + Bridge-Registry + Fragment-Resolver (built-in-first) + geteilter `EngineContext`-Cache | `@lean-md`, `@include`, ein R-Router (`@read`) rendern e2e; `@read`-Re-Read = Cache-Hit/Delta **ohne `fresh`** (§4.2a; `[unchanged]`-Stub ist `mode=full`-Feature, `auto` ist by-design kompakt — F-1 2026-06-02) |
 | **2** | R-Bridges: `@read`/`@search`/`@list`/`@query`/`@graph`/`@env`/`@date`/`@count`                                               | Daten-Direktiven live                                                                                                  |
 | **3** | E-Konstrukte: `@define`/`@call`, `@import`, `@if`/`@consumer`, `{{ }}`, Pipe/`@render`                                       | Macro-Engine + Container live                                                                                          |
 | **4** | Bridges `@phase` (→`add_decision`) / `@on complete` (defert an `auto_findings`-Hook), `@remember`/`@recall`                  | Session/Knowledge live (Gate-Outcome §2)                                                                               |
@@ -504,8 +509,8 @@ Anbindung; hier wird Q-05 scharf, §9).
 | Q-05 | `@phase`-Fehlerverhalten (abort vs. continue)                                  | **deferred** — wird in der `executing-plans`-Migration (§5.2) scharf, nicht in der Engine-Spec                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | G-1  | `@graph recent-neighbors` — Datenquelle für Recent-Files                       | **gelöst (Gate-Outcome §3 korrigiert):** `session.files_touched` + `graph_neighbor_ranks_for_recent_files` existieren, Muster live in `ctx_semantic_search.rs:791` → recent-neighbors **bleibt v1**, kein neuer API                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | R-1  | rushdown-API-Ergonomie / exakte Version                                        | **gelöst:** rushdown 0.18 gepinnt, Extension-Pfad viabel (Gate-Outcome §1/§5)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| F-1  | Read→Delta-Cache-Hit über lmd nicht sauber 2-Read-beobachtbar (Phase-1-Befund) | **deferred (ctx_read-Scope, nicht lmd):** zwei `ctx_read`-Bugs — `full_content_delivered` wird nur im `was_hit`-Zweig gesetzt (`ctx_read.rs:743`); `cache_hit_proof_line` (`ctx_read.rs:53`) leakt die erste Datei-Zeile in den `[unchanged]`-Stub. Folge: `@read x` 2× (mode=auto) liefert keinen sauberen Single-Sentinel-Cache-Hit. Der geteilte `EngineContext`-Cache warmt nachweislich (3× `@read x mode=full` → 2./3. = `[unchanged]`-Stub, ohne `fresh`/`raw`). §6-Gate beweist Read→Delta ehrlich via 3-Read/`mode=full`; Engine-Test `reread_same_path_is_cache_hit_not_full` ist `#[ignore]`'d bis zum Fix (Flag auch beim ersten Full-Delivery setzen + Proof-Line aus dem Sentinel-Contract nehmen). lmd-Verdrahtung ist korrekt. |
-| F-2  | HTML-Kommentar-Injection im Render-Fallback (Phase-1-Befund)                   | **deferred — mit HTML-Escaping/Output-Target bündeln (§10):** `render.rs::dispatch` emittiert `<!-- lmd: unknown directive @{name} -->` bzw. `<!-- lmd:@{name} error: {e:?} -->` via `write_html` (roh, nur Null-Sanitization). Inline-Namen sind — anders als Block-Namen (`[a-z0-9-]` in `parse_directive_line`) — nicht charset-beschränkt → `{{ -->x }}` schließt den Kommentar vorzeitig; `args`/`{e:?}` ebenso. Minor (Phase-1-Target = AI-Kontext, nicht Browser-DOM). Fix: `name`/`{e:?}` escapen ODER Inline-Name-Charset an die Block-Grammatik angleichen.                                                                                                                                                                          |
+| F-1  | Read→Delta-Cache-Hit über lmd nicht sauber 2-Read-beobachtbar (Phase-1-Befund) | **gelöst (2026-06-02, empirisch):** kein produktiver ctx_read-Bug — der `[unchanged]`-Stub ist ein `mode=full`-Feature und funktioniert (klein+groß ~99 %); `auto` komprimiert by-design (Auto-Re-Read groß ~50 Tok, klein trivial). F-1 war Test-Korrektheit: `reread_same_path_is_cache_hit_not_full` erwartete fälschlich einen `auto`-2-Read-Stub. Fix: Test über `mode=full` + mehrzeilige Fixture (Sentinel nicht Zeile 1 → Proof-Line leakt nicht) + 3 Reads, un-`#[ignore]`'d. `@read` bleibt `auto`. Keine `ctx_read.rs`/`cache.rs`-Änderung. |
+| F-2  | HTML-Kommentar-Injection im Render-Fallback (Phase-1-Befund)                   | **gelöst (2026-06-02):** beide Vektoren zu — Inline-Name-Charset in `parser/inline.rs::parse_inline_body` an die Block-Grammatik `[a-z0-9-]` (ascii-alpha-Start) angeglichen (invalider Name → pass-through statt Dispatch); `render.rs::dispatch` sanitisiert `name` **und** `{e:?}` via `sanitize_comment` (`-->`/`<!--` neutralisiert). Tests: `rejects_comment_injection_name`, `sanitizes_comment_breakout_sequences`, e2e `inline_comment_injection_is_inert`.                                                                                                                                                                          |
 
 Übergangs-Default Q-05 (wie v0.6 §8): Phase läuft Body sequentiell; Error wird als
 `decision`-Eintrag geschlossen, Render bricht nicht ab.
@@ -523,7 +528,7 @@ Anbindung; hier wird Q-05 scharf, §9).
 
 ---
 
-*Status: v0.9 — Phase-0-Gate bestanden (Gate-Outcome §5); R-1/G-1 gelöst. Referenz-
+*Status: v0.9 — Phase-0-Gate bestanden (Gate-Outcome §5); R-1/G-1 gelöst; Phase-1-Follow-ups F-1/F-2 gelöst (2026-06-02, siehe docs/lean-md/plans/2026-06-02-lmd-f1-f2-hardening.md). Referenz-
 Audit (`docs/reference`) eingearbeitet: §4.2a geteilter `EngineContext`-Cache +
 Read→Delta-Garantie (ohne `fresh`/`raw`), §3.2 Minimal-5-Stütze, §4.4 `registered/`-
 Doku-Pflicht, §7 Defense-in-Depth (PathJail/Allowlist/`shell_strict_mode`/Redaction/
