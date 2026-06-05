@@ -424,7 +424,7 @@ Anbindung; hier wird Q-05 scharf, §9).
 | Phase | Inhalt                                                                                                                       | Gate / Ergebnis                                                                                                        |
 |-------|------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------|
 | **0** | ✅ **bestanden** — Audit (`src/lmd/audit.rs`, 22) + rushdown-**0.18**-Spike (1 Block + 1 Inline)                              | v1-Umfang fixiert; Extension-Pfad viabel, kein Fallback (Gate-Outcome §5)                                              |
-| **1** | Header-Parser + Block/Inline-Parser + Bridge-Registry + Fragment-Resolver (built-in-first) + geteilter `EngineContext`-Cache | `@lean-md`, `@include`, ein R-Router (`@read`) rendern e2e; `@read`-Re-Read = Cache-Hit/Delta **ohne `fresh`** (§4.2a; `[unchanged]`-Stub ist `mode=full`-Feature, `auto` ist by-design kompakt — F-1 2026-06-02) |
+| **1** | ✅ **bestanden** — Header-Parser + Block/Inline-Parser + Bridge-Registry + Fragment-Resolver (built-in-first) + geteilter `EngineContext`-Cache | **Gate bestanden (2026-06-05):** `@lean-md`/`@include`/`@read` rendern e2e; `@read`-Re-Read = Cache-Hit/Delta **ohne `fresh`** (§4.2a; `[unchanged]`-Stub ist `mode=full`-Feature, `auto` by-design kompakt — F-1); 35/35 lmd-Tests grün (Parser/Render/Engine/Bridge); Phase-1-Follow-ups F-1/F-2 gelöst (2026-06-02) |
 | **2** | R-Bridges: `@read`/`@search`/`@list`/`@query`/`@graph`/`@env`/`@date`/`@count`                                               | Daten-Direktiven live                                                                                                  |
 | **3** | E-Konstrukte: `@define`/`@call`, `@import`, `@if`/`@consumer`, `{{ }}`, Pipe/`@render`                                       | Macro-Engine + Container live                                                                                          |
 | **4** | Bridges `@phase` (→`add_decision`) / `@on complete` (defert an `auto_findings`-Hook), `@remember`/`@recall`                  | Session/Knowledge live (Gate-Outcome §2)                                                                               |
@@ -528,7 +528,7 @@ Anbindung; hier wird Q-05 scharf, §9).
 
 ---
 
-*Status: v0.9 — Phase-0-Gate bestanden (Gate-Outcome §5); R-1/G-1 gelöst; Phase-1-Follow-ups F-1/F-2 gelöst (2026-06-02, siehe docs/lean-md/plans/2026-06-02-lmd-f1-f2-hardening.md). Referenz-
+*Status: v0.9 — Phase-0/1-Gate bestanden (Gate-Outcome §5; Phase-1 e2e 2026-06-05, 35/35 lmd-Tests grün, siehe docs/lean-md/plans/2026-06-01-lmd-phase-1.md); R-1/G-1 gelöst; Phase-1-Follow-ups F-1/F-2 gelöst (2026-06-02, siehe docs/lean-md/plans/2026-06-02-lmd-f1-f2-hardening.md). Referenz-
 Audit (`docs/reference`) eingearbeitet: §4.2a geteilter `EngineContext`-Cache +
 Read→Delta-Garantie (ohne `fresh`/`raw`), §3.2 Minimal-5-Stütze, §4.4 `registered/`-
 Doku-Pflicht, §7 Defense-in-Depth (PathJail/Allowlist/`shell_strict_mode`/Redaction/
