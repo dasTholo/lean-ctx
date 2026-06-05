@@ -17,7 +17,6 @@
 //! Fallback if it had proven impossible: a preprocessor stage that rewrites
 //! the directives into plain HTML/markdown before handing off to rushdown.
 
-
 use core::{
     any::TypeId,
     fmt::{self, Write},
