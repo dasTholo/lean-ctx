@@ -1,12 +1,12 @@
 # Design-Spec: lean-ctx JetBrains-PSI-Backend (Serena-Ablösung / Backing B)
 
-| Feld             | Wert                                                                         |
-|------------------|------------------------------------------------------------------------------|
-| Status           | Draft (Design genehmigt 2026-06-05)                                          |
-| Datum            | 2026-06-05                                                                   |
-| Vorhaben         | Eigenständiges JetBrains-Plugin + Rust-Backend-Anbindung (Serena-Ablösung)   |
+| Feld             | Wert                                                                          |
+|------------------|-------------------------------------------------------------------------------|
+| Status           | Draft (Design genehmigt 2026-06-05)                                           |
+| Datum            | 2026-06-05                                                                    |
+| Vorhaben         | Eigenständiges JetBrains-Plugin + Rust-Backend-Anbindung (Serena-Ablösung)    |
 | Scope            | Kotlin/IntelliJ-Plugin (Backing B) + `LspBackend`-Refaktorierung im Rust-Kern |
-| Nächster Schritt | `superpowers:writing-plans` (Implementierungsplan Phasen 0–5)                |
+| Nächster Schritt | `superpowers:writing-plans` (Implementierungsplan Phasen 0–5)                 |
 
 ---
 
@@ -43,12 +43,12 @@ lean-ctx über `ctx_shell` o. Ä. anders ab.)
 
 ## 2. Getroffene Architektur-Entscheidungen (vom User bestätigt)
 
-| # | Frage                 | Entscheidung                                                                                                                                                                                                |
-|---|-----------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 1 | Backend-Verhältnis    | **Koexistenz A+B, B-first.** Neues `LspBackend`-Trait. **Standard: zuerst `JetBrainsHttpBackend` (Backing B)** — nur wenn die IDE **nicht** erreichbar ist (keine/stale Port-Datei, `/health` schlägt fehl), Fallback auf `LspClient` (rust-analyzer, stdio = Backing A). A ist damit **Fallback** (CI/Headless), nicht Default.             |
-| 2 | Transport + Discovery | **HTTP/JSON auf 127.0.0.1** + **Port-Datei-Discovery**: Plugin schreibt Port+Token nach `~/.lean-ctx/jetbrains-<projecthash>.port`; Rust liest sie. Kein fester Port, kein Range-Scan.                      |
-| 3 | v1-Scope              | **Navigation + `type_hierarchy`** (+ Format/Inspections, read-only-artig). Edits (rename-apply/move/safe-delete/inline) = **v2-Ausblick**, nicht v1.                                                        |
-| 4 | Security/PathJail     | **Rust-PathJail (`jail_path`) ist alleiniger Validierungspunkt**, läuft VOR jedem HTTP-Request. Plugin re-validiert Pfade **nicht** (vertraut localhost-Caller), lauscht nur auf 127.0.0.1, verlangt Token. |
+| # | Frage                 | Entscheidung                                                                                                                                                                                                                                                                                                                     |
+|---|-----------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 1 | Backend-Verhältnis    | **Koexistenz A+B, B-first.** Neues `LspBackend`-Trait. **Standard: zuerst `JetBrainsHttpBackend` (Backing B)** — nur wenn die IDE **nicht** erreichbar ist (keine/stale Port-Datei, `/health` schlägt fehl), Fallback auf `LspClient` (rust-analyzer, stdio = Backing A). A ist damit **Fallback** (CI/Headless), nicht Default. |
+| 2 | Transport + Discovery | **HTTP/JSON auf 127.0.0.1** + **Port-Datei-Discovery**: Plugin schreibt Port+Token nach `~/.lean-ctx/jetbrains-<projecthash>.port`; Rust liest sie. Kein fester Port, kein Range-Scan.                                                                                                                                           |
+| 3 | v1-Scope              | **Navigation + `type_hierarchy`** (+ Format/Inspections, read-only-artig). Edits (rename-apply/move/safe-delete/inline) = **v2-Ausblick**, nicht v1.                                                                                                                                                                             |
+| 4 | Security/PathJail     | **Rust-PathJail (`jail_path`) ist alleiniger Validierungspunkt**, läuft VOR jedem HTTP-Request. Plugin re-validiert Pfade **nicht** (vertraut localhost-Caller), lauscht nur auf 127.0.0.1, verlangt Token.                                                                                                                      |
 
 **Lizenz/Distribution (Frage 7 — vorgeschlagener Default, beim Spec-Review bestätigen):**
 Eigenständiger Nachbau auf **Architektur-/Klassennamen-Ebene** (kein dekompilierter
@@ -382,6 +382,7 @@ lmd verfügbar/mergebar wird.
 ### 12.1 Recherche-Befund (2026-06-05) — funktioniert das?
 
 **Ja.** Verifiziert:
+
 - **Keine Code-Kopplung Plugin↔lmd:** 0 `use/mod …lmd`-Treffer in `rust/src/lsp/`,
   `ctx_refactor.rs`, `ctx_symbol.rs`. Das Backing-B-Backend hängt **nicht** von lmd ab.
 - **lmd ist minimal eingehängt:** nur `rust/src/lib.rs:36 → pub mod lmd;`. Keine
@@ -412,21 +413,26 @@ akzeptabel).
 ### 12.3 Vorgehen (empfohlen)
 
 ```
-git checkout -b feat-jetbrains-plugin main      # neuer Branch von main
-git checkout feat-lmd-v1 -- .                    # gesamten lmd-v1-Baumzustand übernehmen
-# Checkliste 12.2 anwenden (lmd-Modul/Tests/Tool/lib.rs-Zeile/Cargo-Suffix entfernen)
-cargo nextest run                                # Gate: kompiliert + grün OHNE lmd
-git commit -m "feat: lmd-v1 state minus lmd module (base for JetBrains plugin)"
+git checkout -b feat-jetbrains-plugin main       # neuer Branch von main
+git checkout feat-lmd-v1 -- .                     # gesamten lmd-v1-Baumzustand übernehmen (Squash)
+# diesen Spec retten, BEVOR docs/lean-md entfernt wird:
+mkdir -p docs/superpowers/specs
+git mv docs/lean-md/specs/2026-06-05-leanctx-jetbrains-psi-backend-design.md \
+       docs/superpowers/specs/2026-06-05-leanctx-jetbrains-psi-backend-design.md
+git rm -r docs/lean-md                            # alle übrigen lmd-Docs raus
+# Checkliste 12.2 (1–5) anwenden: lmd-Modul/Tests/ctx_compile/lib.rs-Zeile/Cargo-Suffix
+cargo nextest run                                 # Gate: kompiliert + grün OHNE lmd
+git add -A && git commit -m "feat: lmd-v1 state minus lmd (base for JetBrains plugin)"
 ```
 
 **Gate-Kriterium:** `cargo nextest run` grün ohne lmd-Modul → bestätigt empirisch die
 Entkopplung. Erst danach beginnt die Plugin-Implementierung (Phase 0, §9) auf diesem
 Branch.
 
-**Entschieden:** Nur **dieser** Spec wandert mit (self-contained, keine Querverweise
-auf andere lmd-Dokumente) — alle übrigen `docs/lean-md/`-Dateien werden **nicht**
-übernommen.
-
-**Offen (User-Entscheidung):** (a) Branch-Name (Vorschlag `feat-jetbrains-plugin`);
-(b) ob die Granular-Historie der 383 Commits erhalten werden muss (dann statt
-Baum-Übernahme: `git rebase --onto` mit Drop der lmd-Commits — deutlich aufwändiger).
+**Entschieden (2026-06-05):**
+- **Branch-Name:** `feat-jetbrains-plugin` (von `main`).
+- **Spec-Ablage:** zieht nach `docs/superpowers/specs/` (raus aus dem lmd-Verzeichnis).
+- **Nur dieser** Spec wandert mit (self-contained); alle übrigen `docs/lean-md/`-Dateien
+  bleiben auf `feat-lmd-v1` und werden **nicht** übernommen.
+- **Historie:** **Squash** via Baum-Übernahme (1 Commit) — Granular-Historie der 383
+  Commits wird **nicht** erhalten.
