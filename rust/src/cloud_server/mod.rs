@@ -13,7 +13,9 @@ mod helpers;
 mod knowledge;
 mod models;
 mod oauth;
+mod site_theme;
 mod stats;
+mod wrapped;
 
 use axum::routing::{get, post};
 use axum::Router;
@@ -47,6 +49,7 @@ pub async fn run() -> anyhow::Result<()> {
         .allow_methods([
             axum::http::Method::GET,
             axum::http::Method::POST,
+            axum::http::Method::DELETE,
             axum::http::Method::OPTIONS,
         ])
         .allow_headers([
@@ -94,6 +97,22 @@ pub async fn run() -> anyhow::Result<()> {
             get(feedback::get_feedback).post(feedback::post_feedback),
         )
         .route("/api/sync/gain", get(gain::get_gain).post(gain::post_gain))
+        .route(
+            // Hard memory cap (DoS defence-in-depth); the documented 8 KB limit is enforced
+            // inside the handler so oversized bodies get the JSON `payload_too_large` envelope.
+            "/api/wrapped",
+            post(wrapped::publish).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
+            "/api/wrapped/{id}",
+            get(wrapped::get_card).delete(wrapped::delete_card),
+        )
+        .route("/api/wrapped/{id}/card.svg", get(wrapped::get_card_svg))
+        .route("/api/wrapped/{id}/card.png", get(wrapped::get_card_png))
+        .route("/api/wrapped/{id}/claim", post(wrapped::claim_card))
+        .route("/w/{id}", get(wrapped::get_permalink_page))
+        .route("/api/leaderboard", get(wrapped::leaderboard))
+        .route("/leaderboard", get(wrapped::get_leaderboard_page))
         .route("/api/global-stats", get(global_stats::get_global_stats))
         .route("/api/cloud/models", get(models::get_models))
         .with_state(state)

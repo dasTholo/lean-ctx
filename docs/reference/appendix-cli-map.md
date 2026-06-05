@@ -33,9 +33,9 @@ Every CLI command lean-ctx exposes, grouped by purpose. Source of truth:
 | `find <pattern> [path]` | Find files (compressed) |
 | `ls [path]` | Compressed directory map; `--depth`, `-a` |
 | `deps [path]` | Show project dependencies |
-| `gain` | Token-savings dashboard; `--live`, `--graph`, `--daily`, `--json`, `--wrapped`, `--cost`, `--tasks`, `--agents`, `--heatmap` |
+| `gain` | Token-savings dashboard; `--live`, `--graph`, `--daily`, `--json`, `--wrapped`, `--svg`, `--share`, `--copy`, `--open`, `--publish`, `--leaderboard`, `--unpublish`, `--cost`, `--tasks`, `--agents`, `--heatmap` |
 | `token-report` (`report-tokens`) | Token + memory report; `--json` |
-| `discover` | Find uncompressed commands in shell history |
+| `discover` | Find uncompressed commands in shell history; `--card` (shareable "before" SVG) |
 | `ghost` | Ghost-token report (hidden waste); `--json` |
 | `cheatsheet` (`cheat`) | Workflow cheat sheet |
 | `dashboard` | Web dashboard (localhost:3333); `--port`, `--host` |
@@ -101,6 +101,7 @@ Every CLI command lean-ctx exposes, grouped by purpose. Source of truth:
 | Command | Purpose |
 |---------|---------|
 | `tools` | MCP tool profile: `minimal`, `standard`, `power`, `show`, `list` |
+| `allow` | Shell allowlist: add/remove commands in `shell_allowlist_extra`, `--list` shows the effective allowlist + any parse errors |
 | `profile` | Context profiles: `list`, `show`, `active`, `diff`, `create`, `set` |
 | `config` | Config file: dump, `init`, `set <k> <v>`, `schema`, `validate`, `show`, `apply` |
 | `theme` | Terminal colors: `list`, `set`, `export`, `import` |

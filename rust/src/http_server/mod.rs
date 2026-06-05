@@ -26,8 +26,7 @@ use crate::engine::ContextEngine;
 use crate::tools::LeanCtxServer;
 
 pub mod context_views;
-
-#[cfg(feature = "team-server")]
+pub mod savings_ingest;
 pub mod team;
 
 /// Wrapper stream that calls `record_sse_disconnect` on drop.

@@ -21,7 +21,7 @@ This catalog is the single feature inventory for LeanCTX at release/runtime leve
 
 ## Runtime Surface (Current)
 
-- Granular MCP tools: **67**
+- Granular MCP tools: **68**
 - Unified MCP tools: **5**
 - MCP Resources: **5**
 - MCP Prompts: **5**
@@ -43,7 +43,7 @@ This catalog is the single feature inventory for LeanCTX at release/runtime leve
 
 ---
 
-## Granular MCP Tools (67)
+## Granular MCP Tools (68)
 
 ### A) Read / Search / IO Surface
 
@@ -54,6 +54,7 @@ This catalog is the single feature inventory for LeanCTX at release/runtime leve
 - `ctx_search`
 - `ctx_semantic_search`
 - `ctx_shell`
+- `shell` _(alias of `ctx_shell` — gives Codex Desktop/Cloud the same shell-output compression; registered for all MCP clients)_
 - `ctx_edit`
 - `ctx_delta`
 - `ctx_dedup`

@@ -166,6 +166,7 @@ pub mod cooccurrence;
 pub mod dense_backend;
 pub mod embedding_index;
 pub mod embeddings;
+pub mod energy;
 pub mod hybrid_search;
 #[cfg(feature = "qdrant")]
 pub mod qdrant_store;
@@ -326,6 +327,8 @@ pub mod io_health;
 pub mod journal;
 pub mod jsonc;
 pub mod language_capabilities;
+#[cfg(target_os = "macos")]
+pub mod launchd;
 pub mod limits;
 pub mod llm_enhance;
 pub mod llm_feedback;
@@ -361,6 +364,7 @@ pub mod search_delta;
 pub mod search_index;
 pub mod secret_detection;
 pub mod session_token;
+pub mod share;
 pub mod shell_allowlist;
 pub mod startup_guard;
 pub mod stats;

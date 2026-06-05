@@ -114,17 +114,36 @@ USAGE:
 COMMANDS:
     gain                           Visual dashboard (colors, bars, sparklines, USD)
     gain --live                    Live mode: auto-refreshes every 1s in-place
+    gain --deep                    Full breakdown (cost + tasks + agents + heatmap combined)
     gain --graph                   30-day savings chart
     gain --daily                   Bordered day-by-day table with USD
+    gain --score                   Gain score breakdown (4 sub-scores + trend)
+    gain --cost                    Agent cost attribution report
+    gain --tasks                   Task breakdown by category
+    gain --agents                  Top agents by tool spend
+    gain --heatmap                 Top files by tokens saved
+    gain --json                    Raw JSON export of all stats
+    gain --pipeline                Pipeline compression stats
+    gain --opportunity             Find missed savings in shell history (replaces discover/ghost)
+    gain --raw [--json]            Plain stats output (machine-friendly)
+    gain --reset                   Clear all token savings data
+    gain --model=<model>           Model for USD pricing calculations
+    gain --period=<week|month|all> Period for wrapped/stats (default: all)
+    gain --limit=<N>               Row limit for tables (default: 10, max: 50)
     gain --wrapped                 Shareable Wrapped card (terminal)
     gain --svg [=<path>]           Shareable Wrapped card as SVG (social/OG image)
     gain --share [=<path>]         Self-hostable Wrapped page (HTML, opt-in permalink)
-    gain --json                    Raw JSON export of all stats
-    savings [summary|verify|export] Verified per-event savings ledger (local, auditable)
+    gain --copy                    Copy a ready-to-post share line to the clipboard
+    gain --svg|--share --open      Also open the written card/page in your browser
+    gain --publish [--name=<n>]    Publish an opt-in permalink (leanctx.com/w/<id>)
+    gain --publish --leaderboard   Also list the card on the public leaderboard (opt-in)
+    gain --unpublish[=<id>]        Remove a published permalink (most recent if no id)
+    config set gain.auto_publish true  Auto-(re)publish your recap on each `gain` (opt-in, throttled, off by default)
+    savings [summary|verify|export|sign|verify-batch] Verified savings ledger (local, signed)
          token-report [--json]          Token + memory report (project + session + CEP)
     pack --pr                      PR Context Pack (changed files, impact, tests, artifacts)
     index <status|build|build-full|watch>  Codebase index utilities
-    cep                            CEP impact report (score trends, cache, modes)
+    cep                            CEP report (compression metrics, cache, modes, trends)
     watch                          Live TUI dashboard (real-time event stream)
     dashboard [--port=N] [--host=H] Open web dashboard (default: http://localhost:3333)
     serve [--host H] [--port N]    MCP over HTTP (Streamable HTTP, local-first)
@@ -133,7 +152,6 @@ COMMANDS:
     daemon start|stop|status       IPC daemon management
     daemon enable|disable          Auto-start daemon on login (systemd/LaunchAgent)
     cache [list|clear|stats]       Show/manage file read cache
-    wrapped [--week|--month|--all] Deprecated alias for gain --wrapped
     sessions [list|show|cleanup]   Manage saved CCP session snapshots (alias: session-store)
     benchmark run [path] [--json]  Run real benchmark on project files
     benchmark report [path]        Generate shareable Markdown report
@@ -153,6 +171,7 @@ COMMANDS:
     ls [path]                      Directory listing with compression
     deps [path]                    Show project dependencies
     discover                       Find uncompressed commands in shell history
+    discover --card [=<path>]      Shareable 'before lean-ctx' SVG from your history
     ghost [--json]                 Ghost Token report: find hidden token waste
     filter [list|validate|init]    Manage custom compression filters (~/.lean-ctx/filters/)
     session                        Show adoption statistics
@@ -257,11 +276,16 @@ EXAMPLES:
     lean-ctx gain --svg=card.svg --period=month  Monthly SVG card to a chosen path
     lean-ctx gain --share          Self-hostable Wrapped page -> lean-ctx-wrapped.html
     lean-ctx gain --share --base-url=https://you.dev/w  Page with social preview meta
+    lean-ctx gain --copy           Copy your share line to the clipboard
+    lean-ctx gain --publish        Publish an opt-in permalink and copy its URL
     lean-ctx savings               Verified per-event savings ledger (auditable)
     lean-ctx savings verify        Re-check the savings ledger SHA-256 hash chain
+    lean-ctx savings sign          Export an Ed25519-signed savings batch (ROI/audit artifact)
+    lean-ctx savings verify-batch <file>  Verify a signed batch offline (no ledger needed)
     lean-ctx sessions list         List all CCP sessions
     lean-ctx sessions show         Show latest session state
     lean-ctx discover              Find missed savings in shell history
+    lean-ctx discover --card       Shareable 'before' SVG -> lean-ctx-before.svg
     lean-ctx setup                 One-command setup (shell + editors + verify)
     lean-ctx install --repair      Premium repair path (non-interactive, merge-based)
     lean-ctx bootstrap             Non-interactive setup + fix (zero-config)

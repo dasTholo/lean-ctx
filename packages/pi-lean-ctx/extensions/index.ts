@@ -1,4 +1,9 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type {
+  AgentToolResult,
+  BashToolDetails,
+  ExtensionAPI,
+  ReadToolDetails,
+} from "@earendil-works/pi-coding-agent";
 import {
   createBashToolDefinition,
   createReadToolDefinition,
@@ -8,12 +13,13 @@ import {
   truncateHead,
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { existsSync, readFileSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { extname, resolve } from "node:path";
 import { homedir, platform } from "node:os";
 import { McpBridge } from "./mcp-bridge.js";
+import { loadPiConfig } from "./config.js";
 import type { CompressionStats } from "./types.js";
 
 const CODE_EXTENSIONS = new Set([
@@ -36,11 +42,13 @@ const CODE_FULL_READ_MAX_BYTES = 8 * 1024;
 const CODE_SIGNATURES_MIN_BYTES = 96 * 1024;
 
 // Pi builtins that can be replaced with ctx_ prefixed versions.
-// LEAN_CTX_PI_MODE controls behavior:
-//   "additive" (default) — keep Pi builtins, add ctx_* alongside
-//   "replace"            — disable Pi builtins, only expose ctx_*
+// Settings resolve from (most explicit first): LEAN_CTX_PI_* env vars, then
+// ~/.pi/agent/extensions/pi-lean-ctx/config.json, then defaults (issue #344).
+//   mode "additive" (default) — keep Pi builtins, add ctx_* alongside
+//   mode "replace"            — disable Pi builtins, only expose ctx_*
 const DISABLED_BUILTIN_TOOLS = new Set(["read", "bash", "ls", "find", "grep"]);
-const PI_MODE = (process.env.LEAN_CTX_PI_MODE || "additive").toLowerCase();
+const PI_CONFIG = loadPiConfig();
+const PI_MODE = PI_CONFIG.mode;
 // Max bytes constant for truncation warnings (same as Pi's DEFAULT_MAX_BYTES)
 const DEFAULT_MAX_BYTES = 8192;
 
@@ -93,16 +101,23 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-function envFlag(name: string): boolean {
-  const raw = process.env[name];
-  if (!raw) return false;
-  const v = raw.trim().toLowerCase();
-  return v === "1" || v === "true" || v === "yes" || v === "on";
+// Environment for every lean-ctx subprocess: config.json `env` overrides
+// (lowest precedence) < the caller's env < the flags lean-ctx must always see.
+function leanCtxEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return {
+    ...PI_CONFIG.forwardedEnv,
+    ...base,
+    LEAN_CTX_COMPRESS: "1",
+    LEAN_CTX_SAVINGS_FOOTER: "always",
+  };
 }
 
 function resolveBinary(): string {
   const envBin = process.env.LEAN_CTX_BIN;
   if (envBin && existsSync(envBin)) return envBin;
+  if (PI_CONFIG.binaryOverride && existsSync(PI_CONFIG.binaryOverride)) {
+    return PI_CONFIG.binaryOverride;
+  }
 
   const home = homedir();
   const isWin = platform() === "win32";
@@ -282,7 +297,7 @@ function isMcpAdapterConfigured(): boolean {
 
 async function execLeanCtx(pi: ExtensionAPI, args: string[]) {
   const bin = resolveBinary();
-  const result = await pi.exec(bin, args, { env: { ...process.env, LEAN_CTX_COMPRESS: "1", LEAN_CTX_SAVINGS_FOOTER: "always" } });
+  const result = await pi.exec(bin, args);
   if (result.code !== 0) {
     const msg = (result.stderr || result.stdout || `lean-ctx failed: ${args.join(" ")}`).trim();
     throw new Error(msg);
@@ -291,6 +306,17 @@ async function execLeanCtx(pi: ExtensionAPI, args: string[]) {
 }
 
 export default async function (pi: ExtensionAPI) {
+  // pi.exec()'s ExecOptions carries no `env`, so lean-ctx subprocesses inherit
+  // THIS process's environment. Seed it once with the config.json `env` overrides
+  // (issue #344) plus the flags lean-ctx must always see, so every path — pi.exec,
+  // the bash spawnHook, and the MCP bridge — shares one environment. An explicitly
+  // set environment variable always wins over the config file.
+  for (const [key, value] of Object.entries(PI_CONFIG.forwardedEnv)) {
+    if (process.env[key] === undefined) process.env[key] = value;
+  }
+  process.env.LEAN_CTX_COMPRESS = "1";
+  process.env.LEAN_CTX_SAVINGS_FOOTER ??= "always";
+
   // Defer setActiveTools to session_start — runtime actions aren't available during extension load
   // In "replace" mode, disable Pi builtins and only expose ctx_* tools.
   // In "additive" mode (default), keep Pi builtins alongside ctx_* tools.
@@ -307,7 +333,7 @@ export default async function (pi: ExtensionAPI) {
       return {
         command: `${shellQuote(bin)} -c ${shellQuote(command)}`,
         cwd,
-        env: { ...env, LEAN_CTX_COMPRESS: "1", LEAN_CTX_SAVINGS_FOOTER: "always" },
+        env: leanCtxEnv(env),
       };
     },
   });
@@ -341,8 +367,15 @@ export default async function (pi: ExtensionAPI) {
         : (context.lastComponent ?? new Text("", 0, 0));
     },
     renderResult(result, options, theme, context) {
+      // ctx_shell wraps Pi's bash tool; its renderer is typed for BashToolDetails,
+      // while our result adds compression stats on top of the same shape.
       return baseBashTool.renderResult
-        ? baseBashTool.renderResult(result, options, theme, context)
+        ? baseBashTool.renderResult(
+            result as AgentToolResult<BashToolDetails | undefined>,
+            options,
+            theme,
+            context,
+          )
         : (context.lastComponent ?? new Text("", 0, 0));
     },
     async execute(toolCallId, params, signal, onUpdate, ctx) {
@@ -397,8 +430,14 @@ export default async function (pi: ExtensionAPI) {
     },
     renderResult(result, options, theme, context) {
       if (result.content.some((block) => block.type === "image")) {
+        // Reuse Pi's read renderer for images; its detail type is ReadToolDetails.
         return nativeReadTool.renderResult
-          ? nativeReadTool.renderResult(result, options, theme, context)
+          ? nativeReadTool.renderResult(
+              result as AgentToolResult<ReadToolDetails | undefined>,
+              options,
+              theme,
+              context,
+            )
           : (context.lastComponent ?? new Text("", 0, 0));
       }
 
@@ -438,7 +477,10 @@ export default async function (pi: ExtensionAPI) {
         text += `\n\n${theme.fg("muted", footer)}`;
       }
 
-      const component = context.lastComponent ?? new Text("", 0, 0);
+      // setText only exists on Text; lastComponent is the wider Component type.
+      const component = context.lastComponent instanceof Text
+        ? context.lastComponent
+        : new Text("", 0, 0);
       component.setText(text);
       return component;
     },
@@ -542,7 +584,7 @@ export default async function (pi: ExtensionAPI) {
       searchArgs.push(params.pattern, absolutePath);
 
       const bin = resolveBinary();
-      const result = await pi.exec(bin, ["-c", ...searchArgs], { env: { ...process.env, LEAN_CTX_COMPRESS: "1", LEAN_CTX_SAVINGS_FOOTER: "always" } });
+      const result = await pi.exec(bin, ["-c", ...searchArgs]);
       if (result.code >= 2) {
         const msg = (result.stderr || result.stdout || `lean-ctx grep failed: ${params.pattern}`).trim();
         throw new Error(msg);
@@ -574,9 +616,12 @@ export default async function (pi: ExtensionAPI) {
     },
   });
 
-  const enableMcpBridge = envFlag("LEAN_CTX_PI_ENABLE_MCP");
+  const enableMcpBridge = PI_CONFIG.enableMcp;
   const adapterConfigured = isMcpAdapterConfigured();
-  const mcpBridge = enableMcpBridge && !adapterConfigured ? new McpBridge(resolveBinary()) : null;
+  const mcpBridge =
+    enableMcpBridge && !adapterConfigured
+      ? new McpBridge(resolveBinary(), PI_CONFIG.forwardedEnv)
+      : null;
 
   if (mcpBridge) {
     try {
@@ -595,11 +640,15 @@ export default async function (pi: ExtensionAPI) {
 
       const lines: string[] = [];
       lines.push(found ? `Binary: ${bin}` : "Binary: NOT FOUND — install: cargo install lean-ctx");
+      if (PI_CONFIG.loaded) {
+        lines.push(`Config: ${PI_CONFIG.configPath}`);
+      }
+      lines.push(`Mode: ${PI_MODE}`);
       if (adapterConfigured) {
         lines.push("MCP bridge: adapter-configured (extension bridge disabled)");
       } else if (!enableMcpBridge) {
         lines.push("MCP bridge: disabled (CLI-first)");
-        lines.push("  Enable: set LEAN_CTX_PI_ENABLE_MCP=1 and restart Pi");
+        lines.push('  Enable: LEAN_CTX_PI_ENABLE_MCP=1 or "enableMcp": true in config.json, then restart Pi');
       } else if (status) {
         lines.push(`MCP bridge: ${status.mode} (${status.connected ? "connected" : "disconnected"})`);
         lines.push(`Reconnect attempts: ${status.reconnectAttempts}`);

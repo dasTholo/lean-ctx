@@ -38,6 +38,7 @@ Top-level configuration keys
 - `no_degrade` (boolean, default `false`) — Disable all automatic read-mode degradation. Override via LCTX_NO_DEGRADE=1
 - `output_density` (enum: normal | terse | ultra, default `normal` — env `LEAN_CTX_OUTPUT_DENSITY`) — Controls how dense/compact MCP tool output is formatted
 - `passthrough_urls` (string[], default `[]`) — URLs to pass through without proxy interception
+- `preserve_compact_formats` (string[], default `["toon"]`) — Already-compact output formats preserved verbatim instead of recompressed (e.g. ["toon"]). Set to [] to disable
 - `profile` (string, default `""`) — Persistent profile name. Checked after LEAN_CTX_PROFILE env var. Set via: lean-ctx config set profile passthrough
 - `project_root` (string?, default `null` — env `LEAN_CTX_PROJECT_ROOT`) — Explicit project root directory. Prevents accidental home-directory scans
 - `proxy_enabled` (bool?, default `null`) — Enable/disable the proxy layer. null = auto-detect, true = force on, false = force off
@@ -52,14 +53,15 @@ Top-level configuration keys
 - `shadow_mode` (bool, default `false` — env `LEAN_CTX_SHADOW_MODE`) — Transparently intercept native Read/Grep/Shell calls via hooks and route them through lean-ctx
 - `shell_activation` (enum: always | agents-only | off, default `always` — env `LEAN_CTX_SHELL_ACTIVATION`) — Controls when the shell hook auto-activates aliases
 - `shell_allowlist` (array, default `[]` — env `LEAN_CTX_SHELL_ALLOWLIST`) — Optional shell command allowlist. When non-empty, only listed binaries are permitted
+- `shell_allowlist_extra` (array, default `[]`) — Commands merged on top of shell_allowlist without replacing the defaults. Managed via `lean-ctx allow <cmd>`
 - `shell_hook_disabled` (bool, default `false` — env `LEAN_CTX_NO_HOOK`) — Disable shell hook injection
 - `shell_strict_mode` (bool, default `false`) — Block $(), backticks, <() in shell arguments. Default false = warn only.
 - `slow_command_threshold_ms` (u64, default `5000`) — Commands taking longer than this (ms) are recorded in the slow log. Set to 0 to disable
-- `symbol_map_auto` (bool, default `true`) — Auto-enable SymbolMap for projects with >50 source files
+- `symbol_map_auto` (bool, default `false`) — Opt-in: α-code identifier substitution in aggressive reads (>50-file projects). Off by default — abbreviated symbols hinder editing/refactoring
 - `tee_mode` (enum: never | failures | always, default `failures`) — Controls when shell output is tee'd to disk for later retrieval
 - `terse_agent` (enum: off | lite | full | ultra, default `off` — env `LEAN_CTX_TERSE_AGENT`) — Controls agent output verbosity via instructions injection
 - `theme` (string, default `default`) — Dashboard color theme
-- `tool_profile` (enum: minimal | standard | power, default `""`) — Tool visibility profile: minimal (5 tools), standard (20), power (all). Override via LEAN_CTX_TOOL_PROFILE
+- `tool_profile` (enum: minimal | standard | power, default `""`) — Tool visibility profile: minimal (6 tools), standard (21), power (all). Override via LEAN_CTX_TOOL_PROFILE
 - `tools_enabled` (string[], default `[]`) — Explicit list of enabled tool names (overrides tool_profile when non-empty)
 - `ultra_compact` (bool, default `false`) — Legacy flag for maximum compression (use compression_level instead)
 - `update_check_disabled` (bool, default `false` — env `LEAN_CTX_NO_UPDATE_CHECK`) — Disable the daily version check
@@ -112,6 +114,21 @@ Custom command aliases (array of {command, alias} entries). Note: field names ar
 
 - `alias` (string, default `""`) — The alias definition to execute
 - `command` (string, default `""`) — The command pattern to match (e.g. 'deploy')
+
+## `[embedding]`
+
+Semantic-embedding engine settings (model selection for ctx_semantic_search)
+
+- `model` (string, default `minilm` — env `LEAN_CTX_EMBEDDING_MODEL`) — Local ONNX embedding model for ctx_semantic_search. One of: minilm (all-MiniLM-L6-v2, 384d, default), jina-code-v2 (768d, code-optimized), nomic (768d). Switching models re-indexes once on the next search.
+
+## `[gain]`
+
+Token-savings recap publishing (gain --publish / auto-publish)
+
+- `auto_publish` (bool, default `false`) — Automatically (re)publish your Wrapped recap when you run `lean-ctx gain` (opt-in, off by default; throttled and sends only an aggregate payload)
+- `auto_publish_interval_hours` (u64, default `24`) — Minimum hours between automatic publishes (throttle; default 24)
+- `display_name` (string?, default `null`) — Optional display name shown on your published card / leaderboard entry
+- `leaderboard` (bool, default `true`) — When auto-publishing, also list the card on the public opt-in leaderboard
 
 ## `[ide_paths]`
 

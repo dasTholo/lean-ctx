@@ -142,6 +142,7 @@ fn integration_generic(
             checks.push(check_codex_toml(&target.config_path, binary));
             checks.push(check_codex_hooks_enabled(home));
             checks.push(check_codex_hooks_json(home, binary));
+            checks.push(codex_desktop_note());
         }
         crate::core::editor_registry::types::ConfigType::VsCodeMcp => {
             checks.push(check_vscode_mcp(&target.config_path, binary, data_dir));
@@ -842,6 +843,21 @@ fn check_codex_hooks_enabled(home: &std::path::Path) -> NamedCheck {
     }
 }
 
+/// Informational note (always `ok`): lean-ctx's transparent shell/file
+/// compression is hook-driven, and whether Codex lifecycle hooks fire depends on
+/// the surface (CLI / Desktop / Cloud), the Codex version, and whether the hooks
+/// are trusted (`/hooks`). Rather than asserting any one surface "can't" run hooks
+/// (it varies and changes across Codex releases), this note points at the reliable
+/// path: the lean-ctx MCP tools (`ctx_shell`/`ctx_read`/`ctx_search`) compress on
+/// every surface. Guidance only — it never fails.
+fn codex_desktop_note() -> NamedCheck {
+    NamedCheck {
+        name: "Codex compression".to_string(),
+        ok: true,
+        detail: "hooks auto-compress when trusted (/hooks); the ctx_shell/ctx_read/ctx_search MCP tools compress reliably on every surface (CLI/Desktop/Cloud)".to_string(),
+    }
+}
+
 fn check_codex_hooks_json(home: &std::path::Path, binary: &str) -> NamedCheck {
     let codex_dir = crate::core::home::resolve_codex_dir().unwrap_or_else(|| home.join(".codex"));
     let path = codex_dir.join("hooks.json");
@@ -1106,6 +1122,20 @@ fn check_claude_hooks(path: &std::path::Path, binary: &str) -> NamedCheck {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn codex_desktop_note_is_informational_and_never_fails() {
+        let note = codex_desktop_note();
+        assert!(
+            note.ok,
+            "the Codex Desktop note is informational, never a failure"
+        );
+        assert!(
+            note.detail.contains("ctx_shell") && note.detail.contains("every surface"),
+            "note must steer users to the MCP tools as the reliable cross-surface path: {}",
+            note.detail
+        );
+    }
 
     #[test]
     fn hook_binary_refs_extracts_token_before_hook_keyword() {

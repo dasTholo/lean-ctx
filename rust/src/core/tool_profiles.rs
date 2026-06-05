@@ -33,8 +33,8 @@ impl ToolProfile {
 
     pub fn description(&self) -> &str {
         match self {
-            Self::Minimal => "5 essential tools for new users",
-            Self::Standard => "20 balanced tools (recommended)",
+            Self::Minimal => "6 essential tools for new users",
+            Self::Standard => "21 balanced tools (recommended)",
             Self::Power => "All tools exposed",
             Self::Custom(v) => {
                 if v.is_empty() {
@@ -110,6 +110,7 @@ impl fmt::Display for ToolProfile {
 const MINIMAL_TOOLS: &[&str] = &[
     "ctx_read",
     "ctx_shell",
+    "shell",
     "ctx_search",
     "ctx_tree",
     "ctx_session",
@@ -119,6 +120,7 @@ const STANDARD_TOOLS: &[&str] = &[
     // Everything in minimal
     "ctx_read",
     "ctx_shell",
+    "shell",
     "ctx_search",
     "ctx_tree",
     "ctx_session",
@@ -153,12 +155,12 @@ pub fn list_profiles() -> Vec<ProfileInfo> {
     vec![
         ProfileInfo {
             name: "minimal",
-            tool_count: "5",
+            tool_count: "6",
             description: "Essential tools for new users / skeptics",
         },
         ProfileInfo {
             name: "standard",
-            tool_count: "20",
+            tool_count: "21",
             description: "Balanced set (recommended for most users)",
         },
         ProfileInfo {
@@ -212,13 +214,13 @@ mod tests {
     }
 
     #[test]
-    fn minimal_has_5_tools() {
-        assert_eq!(MINIMAL_TOOLS.len(), 5);
+    fn minimal_has_6_tools() {
+        assert_eq!(MINIMAL_TOOLS.len(), 6);
     }
 
     #[test]
-    fn standard_has_20_tools() {
-        assert_eq!(STANDARD_TOOLS.len(), 20);
+    fn standard_has_21_tools() {
+        assert_eq!(STANDARD_TOOLS.len(), 21);
     }
 
     #[test]
@@ -269,6 +271,25 @@ mod tests {
         assert!(profile.is_tool_enabled("ctx_read"));
         assert!(profile.is_tool_enabled("ctx_shell"));
         assert!(!profile.is_tool_enabled("ctx_search"));
+    }
+
+    #[test]
+    fn profile_display_counts_match_tool_arrays() {
+        // The numbers shown by `lean-ctx tools` must equal the actual array
+        // lengths, so adding/removing a profile tool (e.g. the `shell` alias)
+        // can never silently desync the advertised count from reality.
+        let profiles = list_profiles();
+        assert_eq!(
+            profiles[0].tool_count.parse::<usize>().unwrap(),
+            MINIMAL_TOOLS.len(),
+            "minimal count must match MINIMAL_TOOLS length",
+        );
+        assert_eq!(
+            profiles[1].tool_count.parse::<usize>().unwrap(),
+            STANDARD_TOOLS.len(),
+            "standard count must match STANDARD_TOOLS length",
+        );
+        assert_eq!(profiles[2].tool_count, "all");
     }
 
     #[test]

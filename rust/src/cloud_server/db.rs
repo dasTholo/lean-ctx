@@ -181,6 +181,29 @@ CREATE TABLE IF NOT EXISTS feedback_thresholds (
   PRIMARY KEY (user_id, language)
 );
 
+CREATE TABLE IF NOT EXISTS wrapped_cards (
+  id              TEXT PRIMARY KEY,
+  edit_token_hash TEXT NOT NULL,
+  user_id         UUID NULL REFERENCES users(id) ON DELETE SET NULL,
+  payload_json    TEXT NOT NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  ip_hash         TEXT NULL,
+  view_count      BIGINT NOT NULL DEFAULT 0,
+  leaderboard_opt_in BOOLEAN NOT NULL DEFAULT FALSE,
+  tokens_saved    BIGINT NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS wrapped_cards_ip_created ON wrapped_cards (ip_hash, created_at);
+CREATE INDEX IF NOT EXISTS wrapped_cards_leaderboard ON wrapped_cards (leaderboard_opt_in, tokens_saved DESC);
+
+-- Login-less publisher identity (sha256 of the client's Ed25519 public key) + period, so a
+-- re-publish from the same machine UPSERTs its existing card instead of piling up duplicates.
+-- Partial unique index: legacy anonymous rows (publisher_id NULL) never collide.
+ALTER TABLE wrapped_cards ADD COLUMN IF NOT EXISTS publisher_id TEXT;
+ALTER TABLE wrapped_cards ADD COLUMN IF NOT EXISTS period TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS wrapped_cards_publisher_period
+  ON wrapped_cards (publisher_id, period) WHERE publisher_id IS NOT NULL;
+
 DROP TABLE IF EXISTS team_invites CASCADE;
 DROP TABLE IF EXISTS team_members CASCADE;
 DROP TABLE IF EXISTS teams CASCADE;
@@ -189,6 +212,8 @@ DO $$ BEGIN
   ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
   ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;
   ALTER TABLE buddy_state ADD COLUMN IF NOT EXISTS state_json TEXT;
+  ALTER TABLE wrapped_cards ADD COLUMN IF NOT EXISTS leaderboard_opt_in BOOLEAN NOT NULL DEFAULT FALSE;
+  ALTER TABLE wrapped_cards ADD COLUMN IF NOT EXISTS tokens_saved BIGINT NOT NULL DEFAULT 0;
 EXCEPTION WHEN others THEN NULL;
 END $$;
 ",

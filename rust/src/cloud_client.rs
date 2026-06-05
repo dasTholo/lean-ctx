@@ -325,6 +325,47 @@ pub fn contribute(entries: &[serde_json::Value]) -> Result<String, String> {
         .to_string())
 }
 
+/// Result of a successful Wrapped publish (`POST /api/wrapped`). The `edit_token` is returned
+/// (and must be stored to delete/claim later) only on a *fresh* insert; on a signed re-publish
+/// the server updates the existing card in place and omits it (the client keeps the stored one).
+#[derive(serde::Deserialize)]
+pub struct PublishedCard {
+    pub id: String,
+    #[serde(default)]
+    pub edit_token: Option<String>,
+    pub url: String,
+}
+
+/// Publish a whitelisted Wrapped payload. Accepts either a bare payload (legacy anonymous) or a
+/// signed envelope `{payload_json, public_key, signature}` (login-less identity → server upsert).
+/// No account auth; the server rate-limits per IP. Contract: `docs/contracts/wrapped-permalink-v1.md`.
+pub fn publish_wrapped(payload: &serde_json::Value) -> Result<PublishedCard, String> {
+    let url = format!("{}/api/wrapped", api_url());
+
+    let resp = ureq::post(&url)
+        .header("Content-Type", "application/json")
+        .send(&serde_json::to_vec(payload).map_err(|e| format!("JSON error: {e}"))?)
+        .map_err(|e| format!("Publish failed: {e}"))?;
+
+    let resp_body = resp
+        .into_body()
+        .read_to_string()
+        .map_err(|e| format!("Failed to read response: {e}"))?;
+
+    serde_json::from_str(&resp_body).map_err(|e| format!("Invalid response: {e}"))
+}
+
+/// Delete a previously published card using its one-time `edit_token` (sent as `X-Edit-Token`).
+pub fn unpublish_wrapped(id: &str, edit_token: &str) -> Result<(), String> {
+    let url = format!("{}/api/wrapped/{id}", api_url());
+
+    ureq::delete(&url)
+        .header("X-Edit-Token", edit_token)
+        .call()
+        .map_err(|e| format!("Unpublish failed: {e}"))?;
+    Ok(())
+}
+
 pub fn push_knowledge(entries: &[serde_json::Value]) -> Result<String, String> {
     let bearer = auth_bearer_token()?;
     let url = format!("{}/api/sync/knowledge", api_url());

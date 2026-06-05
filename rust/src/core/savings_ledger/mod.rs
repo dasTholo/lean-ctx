@@ -5,9 +5,11 @@
 //! `docs/business/03-verified-savings-ledger.md`.
 
 pub mod event;
+pub mod signed_batch;
 pub mod store;
 
 pub use event::SavingsEvent;
+pub use signed_batch::{BatchVerifyResult, SignedSavingsBatchV1};
 pub use store::{LedgerSummary, VerifyResult};
 
 use std::sync::OnceLock;
@@ -154,6 +156,15 @@ pub fn summary() -> LedgerSummary {
 /// Re-walks the hash chain and reports whether it is intact.
 pub fn verify() -> VerifyResult {
     store::default_path().map_or_else(VerifyResult::empty, |p| store::verify(&p))
+}
+
+/// Re-hashes the ledger under the current (v2) canonical scheme, repairing a chain broken by
+/// the legacy float round-trip bug. Returns the number of re-chained events (0 if no ledger).
+pub fn rechain() -> std::io::Result<usize> {
+    match store::default_path() {
+        Some(p) if p.exists() => store::rechain(&p),
+        _ => Ok(0),
+    }
 }
 
 /// Every recorded event (for `ledger export`).

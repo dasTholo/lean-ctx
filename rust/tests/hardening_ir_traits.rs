@@ -598,8 +598,8 @@ mod contracts_integrity {
             "ARCHITECTURE.md should reference IR recording in flow"
         );
         assert!(
-            content.contains("ToolRegistry (61)") || content.contains("Registry (61"),
-            "ARCHITECTURE.md should reference current registry count"
+            content.contains("68 trait-based tools"),
+            "ARCHITECTURE.md should reference the current registry count (68 trait-based tools)"
         );
         assert!(
             !content.contains("pipeline_stages.rs"),
@@ -608,6 +608,24 @@ mod contracts_integrity {
         assert!(
             !content.contains("DispatchRead"),
             "ARCHITECTURE.md should NOT reference non-existent DispatchRead"
+        );
+    }
+
+    /// Guards the load-bearing invariant behind #348: in MCP stdio mode `stdout`
+    /// is the JSON-RPC transport, so every diagnostic MUST go to `stderr`. A stray
+    /// switch to stdout would silently corrupt every MCP client's protocol stream.
+    /// `tracing-subscriber` does not expose the runtime writer, so we assert on the
+    /// logging single-source-of-truth instead.
+    #[test]
+    fn mcp_logging_targets_stderr_never_stdout() {
+        let logging = include_str!("../src/core/logging.rs");
+        assert!(
+            logging.matches("with_writer(std::io::stderr)").count() >= 2,
+            "both init_logging and init_mcp_logging must pin the tracing writer to stderr"
+        );
+        assert!(
+            !logging.contains("std::io::stdout"),
+            "logging must never route tracing to stdout — it corrupts the MCP JSON-RPC channel (#348)"
         );
     }
 }

@@ -130,6 +130,7 @@ fn install_macos_launchagent(
     <string>{binary_str}</string>
     <string>update</string>
     <string>--quiet</string>
+    <string>--scheduled</string>
   </array>
   <key>StartInterval</key>
   <integer>{interval_secs}</integer>
@@ -145,20 +146,12 @@ fn install_macos_launchagent(
         stderr_log.display()
     );
 
-    let _ = std::process::Command::new("launchctl")
-        .args(["unload", &path.to_string_lossy()])
-        .output();
+    crate::core::launchd::bootout(LABEL, &path);
 
     std::fs::write(&path, plist).map_err(|e| format!("Failed to write plist: {e}"))?;
 
-    let out = std::process::Command::new("launchctl")
-        .args(["load", &path.to_string_lossy()])
-        .output()
-        .map_err(|e| format!("Failed to load LaunchAgent: {e}"))?;
-
-    if !out.status.success() {
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        return Err(format!("launchctl load failed: {stderr}"));
+    if !crate::core::launchd::bootstrap(LABEL, &path) {
+        return Err("launchctl bootstrap failed; check: launchctl print gui/$(id -u)".into());
     }
 
     Ok(ScheduleInfo {
@@ -174,9 +167,7 @@ fn install_macos_launchagent(
 fn remove_macos_launchagent() -> Result<(), String> {
     let path = plist_path();
     if path.exists() {
-        let _ = std::process::Command::new("launchctl")
-            .args(["unload", &path.to_string_lossy()])
-            .output();
+        crate::core::launchd::bootout(LABEL, &path);
         std::fs::remove_file(&path).map_err(|e| format!("Failed to remove plist: {e}"))?;
     }
     Ok(())
@@ -246,7 +237,7 @@ fn install_linux_systemd(
     let binary_str = binary.to_string_lossy();
 
     let service = format!(
-        "[Unit]\nDescription=lean-ctx auto-updater\n\n[Service]\nType=oneshot\nExecStart={binary_str} update --quiet\n"
+        "[Unit]\nDescription=lean-ctx auto-updater\n\n[Service]\nType=oneshot\nExecStart={binary_str} update --quiet --scheduled\n"
     );
     let timer = format!(
         "[Unit]\nDescription=lean-ctx auto-update timer\n\n[Timer]\nOnBootSec=1h\nOnUnitActiveSec={interval_hours}h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n"
@@ -293,7 +284,10 @@ fn install_linux_cron(
         format!("0 */{interval_hours} * * *")
     };
 
-    let entry = format!("{cron_expr} {} update --quiet", binary.to_string_lossy());
+    let entry = format!(
+        "{cron_expr} {} update --quiet --scheduled",
+        binary.to_string_lossy()
+    );
 
     let existing = std::process::Command::new("crontab")
         .arg("-l")
@@ -319,7 +313,7 @@ fn install_linux_cron(
     child
         .stdin
         .take()
-        .unwrap()
+        .ok_or_else(|| "failed to open crontab stdin".to_string())?
         .write_all(filtered.as_bytes())
         .map_err(|e| e.to_string())?;
     child.wait().map_err(|e| e.to_string())?;
@@ -423,7 +417,7 @@ fn install_windows_task(
             "/TN",
             "lean-ctx autoupdate",
             "/TR",
-            &format!("\"{binary_str}\" update --quiet"),
+            &format!("\"{binary_str}\" update --quiet --scheduled"),
             "/SC",
             "HOURLY",
             "/MO",
