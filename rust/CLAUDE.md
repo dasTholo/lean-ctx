@@ -11,7 +11,7 @@ PREFER lean-ctx MCP tools over native equivalents for token savings:
 
 ## ctx_read Modes
 
-- `full` — cached read (use for files you will edit)
+- `full` — cached read, don't use with fresh, auto mode!
 - `map` — deps + API signatures (use for context-only files)
 - `signatures` — API surface only
 - `diff` — changed lines only (after edits)

@@ -410,29 +410,58 @@ akzeptabel).
    (`2026-06-05-leanctx-jetbrains-psi-backend-design.md`). Er ist self-contained und das
    **einzige** mitwandernde Dokument; lmd-Specs/-Pläne bleiben auf `feat-lmd-v1`.
 
-### 12.3 Vorgehen (empfohlen)
+## 13. Follow-up — Vollständige Serena-/JetBrains-MCP-Tool-Abdeckung (Backlog)
 
-```
-git checkout -b feat-jetbrains-plugin main       # neuer Branch von main
-git checkout feat-lmd-v1 -- .                     # gesamten lmd-v1-Baumzustand übernehmen (Squash)
-# diesen Spec retten, BEVOR docs/lean-md entfernt wird:
-mkdir -p docs/superpowers/specs
-git mv docs/lean-md/specs/2026-06-05-leanctx-jetbrains-psi-backend-design.md \
-       docs/superpowers/specs/2026-06-05-leanctx-jetbrains-psi-backend-design.md
-git rm -r docs/lean-md                            # alle übrigen lmd-Docs raus
-# Checkliste 12.2 (1–5) anwenden: lmd-Modul/Tests/ctx_compile/lib.rs-Zeile/Cargo-Suffix
-cargo nextest run                                 # Gate: kompiliert + grün OHNE lmd
-git add -A && git commit -m "feat: lmd-v1 state minus lmd (base for JetBrains plugin)"
-```
+**Ziel:** Damit lean-ctx die *alleinige* Code-Intelligence-Schnittstelle wird (§1, §7),
+müssen die **restlichen relevanten** Serena- und JetBrains-MCP-Tools als `ctx_*`-Ops
+(Backing B, Fallback A) nachgezogen werden. Diese Liste ist das Backlog dazu — sie speist
+den separaten **v2-Edit-Spec** (§9 v2-Ausblick) und etwaige Folge-Ops. Nicht-Code-
+Intelligence (DB/Run/SQL/Terminal des JetBrains-MCP) bleibt **out of scope** (§1).
 
-**Gate-Kriterium:** `cargo nextest run` grün ohne lmd-Modul → bestätigt empirisch die
-Entkopplung. Erst danach beginnt die Plugin-Implementierung (Phase 0, §9) auf diesem
-Branch.
+### 13.1 Navigation / Symbol-Lesen (read-only)
 
-**Entschieden (2026-06-05):**
-- **Branch-Name:** `feat-jetbrains-plugin` (von `main`).
-- **Spec-Ablage:** zieht nach `docs/superpowers/specs/` (raus aus dem lmd-Verzeichnis).
-- **Nur dieser** Spec wandert mit (self-contained); alle übrigen `docs/lean-md/`-Dateien
-  bleiben auf `feat-lmd-v1` und werden **nicht** übernommen.
-- **Historie:** **Squash** via Baum-Übernahme (1 Commit) — Granular-Historie der 383
-  Commits wird **nicht** erhalten.
+| Fremd-Tool                                   | lean-ctx-Ziel                                       | Status               |
+|----------------------------------------------|-----------------------------------------------------|----------------------|
+| `serena.jet_brains_find_symbol`              | `ctx_symbol action=find`                            | v1 (vorhanden)       |
+| `serena.jet_brains_find_declaration`         | `ctx_refactor action=declaration`                   | v1                   |
+| `serena.jet_brains_find_implementations`     | `ctx_refactor action=implementations`               | v1                   |
+| `serena.jet_brains_find_referencing_symbols` | `ctx_refactor action=references`                    | v1                   |
+| `serena.jet_brains_get_symbols_overview`     | `ctx_refactor action=overview`                      | v1                   |
+| `serena.jet_brains_type_hierarchy`           | `ctx_refactor action=type_hierarchy`                | v1                   |
+| `jetbrains.search_symbol`                    | `ctx_symbol action=find`                            | v1 (abgedeckt)       |
+| `jetbrains.get_symbol_info`                  | `ctx_refactor action=definition/declaration`        | v1 (teilw.)          |
+| `jetbrains.generate_psi_tree`                | NEU `ctx_refactor action=psi_tree` (PSI-Dump/Debug) | Follow-up (optional) |
+
+### 13.2 Symbolische Edits (write — Kern des v2-Edit-Specs)
+
+| Fremd-Tool                                                  | lean-ctx-Ziel                                   | Status |
+|-------------------------------------------------------------|-------------------------------------------------|--------|
+| `serena.replace_symbol_body`                                | NEU `ctx_refactor action=replace_symbol_body`   | v2     |
+| `serena.insert_before_symbol`                               | NEU `ctx_refactor action=insert_before_symbol`  | v2     |
+| `serena.insert_after_symbol`                                | NEU `ctx_refactor action=insert_after_symbol`   | v2     |
+| `serena.jet_brains_rename` / `jetbrains.rename_refactoring` | NEU `ctx_refactor action=rename_apply`          | v2     |
+| `serena.jet_brains_move`                                    | NEU `ctx_refactor action=move`                  | v2     |
+| `serena.jet_brains_safe_delete`                             | NEU `ctx_refactor action=safe_delete`           | v2     |
+| `serena.jet_brains_inline_symbol`                           | NEU `ctx_refactor action=inline`                | v2     |
+| `serena.replace_content`                                    | bereits `ctx_edit` (textuell, kein Symbol-Edit) | gelöst |
+
+Diese Ops brauchen ein anderes Modell als read-only-v1 — `WriteCommandAction` auf EDT,
+Transaktionalität/Undo, Konflikt-Handling, Cache-Kohärenz mit `ctx_edit` — Details im
+**v2-Edit-Spec** (§9). Sie kommen additiv als Default-`Err`-Trait-Methoden (kein Breaking
+Change an v1).
+
+### 13.3 Format / Inspektionen / Diagnostik
+
+| Fremd-Tool                                               | lean-ctx-Ziel                       | Status       |
+|----------------------------------------------------------|-------------------------------------|--------------|
+| `jetbrains.reformat_file`                                | `ctx_refactor action=format`        | v1           |
+| `jetbrains.get_file_problems` / `run_inspection_kts`     | `ctx_refactor action=inspections`   | v1           |
+| `serena.jet_brains_run_inspections` / `list_inspections` | `ctx_refactor action=inspections`   | v1           |
+| `serena.jet_brains_debug`                                | (kein Code-Intelligence-Äquivalent) | out of scope |
+
+### 13.4 Akzeptanzkriterium
+
+Sobald 12.1–12.3 (außer „out of scope") als `ctx_*`-Ops vorliegen und gegen ein
+Java/Kotlin-Testprojekt verifiziert sind (Abgleich mit IDE-Verhalten), können
+**Serena-MCP** und das **offizielle JetBrains-MCP** für Code-Intelligence aus der
+Agent-Konfiguration entfernt werden — lean-ctx ist dann die alleinige Schnittstelle (§7).
