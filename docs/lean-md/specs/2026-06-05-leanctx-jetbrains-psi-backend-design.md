@@ -373,42 +373,47 @@ das Jail. **Diese Umstellung ist Pflicht-Bestandteil von Phase 0.**
 
 ---
 
-## 12. Branch- & Release-Strategie (lmd-frei)
+## 12. Branch- & Release-Strategie (worktree-frei, sauber von `main`)
 
-**Anforderung:** Ein neuer Branch, der **von `main` abgeht** und **alle Änderungen aus
-`feat-lmd-v1` AUSSER dem lmd-Modul** trägt — damit das JetBrains-Plugin/Backend ohne
-lmd verfügbar/mergebar wird.
+**Anforderung:** Ein eigener Branch `feat-jetbrains-plugin`, der **von `main` abgeht**
+und **ausschließlich** JetBrains-Plugin-Arbeit trägt — **kein** lmd, **keine**
+Baum-Übernahme aus `feat-lmd-v1`, **kein** worktree (Projekt-Rule „No worktrees").
 
-### 12.1 Recherche-Befund (2026-06-05) — funktioniert das?
+### 12.1 Ausgangslage (verifiziert 2026-06-05)
 
-**Ja.** Verifiziert:
+- **`feat-jetbrains-plugin` existiert bereits** auf sauberer Basis: `main` (v3.6.11)
+  + **1 Commit** (lmd-freies Spec + Projekt-Rules). Kein lmd auf dem Branch → **nichts
+  zu entfernen**.
+- **Kein Plugin-Code auf `feat-lmd-v1` zu übertragen:** `rust/src/lsp` Δ = 1 Zeile,
+  `packages/jetbrains-lean-ctx` Δ = 0. Die Phasen 0–5 (§9) sind **alle offen** und
+  werden frisch auf diesem Branch implementiert.
+- **Die alte „Baum-Übernahme + lmd-Entfernung"-Strategie entfällt ersatzlos.**
+  `feat-lmd-v1` ist 393 Commits vor `main` und vermischt weit über lmd hinaus (CI-
+  Workflows, `.bak`-Dateien, README, VS-Code-Publish …). Diesen Wust per Baum-Übernahme
+  mitzuschleppen, nur um lmd wieder herauszuoperieren, ist unnötig und unsauber.
 
-- **Keine Code-Kopplung Plugin↔lmd:** 0 `use/mod …lmd`-Treffer in `rust/src/lsp/`,
-  `ctx_refactor.rs`, `ctx_symbol.rs`. Das Backing-B-Backend hängt **nicht** von lmd ab.
-- **lmd ist minimal eingehängt:** nur `rust/src/lib.rs:36 → pub mod lmd;`. Keine
-  Verdrahtung in `server/registry.rs`, `core/tool_profiles.rs`, `server/dynamic_tools.rs`,
-  `cli/`.
-- **Es ist NICHT nötig, in `feat-lmd-v1` zu bleiben.** lmd und Plugin koexistieren
-  konfliktfrei; lmd zu entfernen ist eine **Release-/Produkt-Entscheidung**, keine
-  Build-Notwendigkeit.
+### 12.2 Spec-Sync (einmalig)
 
-**Caveat:** `feat-lmd-v1` ist **383 Commits** vor `main`. Ein „alles außer lmd"-Branch
-entsteht daher **nicht** per 383er-Cherry-pick, sondern per **Baum-Übernahme + lmd-
-Entfernung als ein Commit** (Granular-Historie geht verloren — für einen Feature-Branch
-akzeptabel).
+- Dieses Spec (inkl. neuer §12/§13) ist das **einzige** mitwandernde Dokument. Es wird
+  als **ein** Update-Commit von `feat-lmd-v1` → `feat-jetbrains-plugin` übernommen
+  (Datei-Inhalt, kein Cherry-pick der Historie).
+- Allgemeine Projekt-Rules (`CLAUDE.md`, `rust/CLAUDE.md`, lean-ctx-/Serena-Tool-
+  Discipline) wandern mit, **lmd-spezifische Referenzen dabei bereinigen** (z. B.
+  lmd-Spec-Verweise in `.claude/rules/subagent-multi-agent.md`). lmd-Specs/-Pläne unter
+  `docs/lean-md/` bleiben auf `feat-lmd-v1`.
 
-### 12.2 lmd-Entfernungs-Checkliste (vollständiger Footprint)
+### 12.3 Implementierung — ein Commit pro Phase
 
-1. `rust/src/lmd/` — gesamtes Modul (22 Dateien) löschen.
-2. `rust/src/lib.rs:36` — `pub mod lmd;` entfernen.
-3. `rust/tests/lmd_phase1_gate.rs`, `rust/tests/lmd_rushdown_spike.rs` — löschen.
-4. **`ctx_compile`** (lmd-Render-Tool): `rust/src/tools/ctx_compile*`,
-   `rust/src/tools/registered/ctx_compile.rs`, Registrierung `registry.rs:175`
-   entfernen. *(Verifizieren: ob `ctx_compile` ausschließlich lmd dient — falls ja, raus.)*
-5. `rust/Cargo.toml:3` — Versions-Suffix `"3.7.3-lmd"` → `"3.7.3"`.
-6. `docs/lean-md/` — **alle Dateien entfernen AUSSER diesem Spec**
-   (`2026-06-05-leanctx-jetbrains-psi-backend-design.md`). Er ist self-contained und das
-   **einzige** mitwandernde Dokument; lmd-Specs/-Pläne bleiben auf `feat-lmd-v1`.
+- Phasen 0–5 (§9) werden **frisch** auf `feat-jetbrains-plugin` umgesetzt: **je ein
+  Commit pro Phase**, jeweils erst nach erfülltem Phasen-Gate (§9/§10). Saubere,
+  reviewbare Feature-Historie; **kein** Squash während der Entwicklung.
+- Direkt auf dem Branch — **kein worktree**.
+
+### 12.4 Release/Merge
+
+- Finaler Merge nach `main` via **Squash-Merge-PR**: Das Squashing passiert **am
+  Schluss beim Merge**, nicht währenddessen. So bleibt die Phasen-Historie bis zum PR
+  erhalten, `main` erhält genau **einen** sauberen Feature-Commit.
 
 ## 13. Follow-up — Vollständige Serena-/JetBrains-MCP-Tool-Abdeckung (Backlog)
 
