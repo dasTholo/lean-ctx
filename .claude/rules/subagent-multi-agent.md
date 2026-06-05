@@ -19,20 +19,32 @@ hooks cannot inject.
 ## lean-ctx tool set (3.7.x — use these proactively)
 
 Requires `tool_profile = "standard"`+ (`lean-ctx tools standard`). Standard tools
-below are direct. **Power-profile** tools (`ctx_share`, `ctx_task`, `ctx_handoff`,
-`ctx_workflow`) are NOT exposed as direct tools under `standard` — reach them via
-the `ctx_call` gateway: `ctx_call name=ctx_share arguments={action:…}`. (Alt:
-`lean-ctx tools power` exposes them directly but bloats the tool catalog.)
+below are direct — **call them directly** (`ctx_read`, `ctx_search`, `ctx_shell`,
+`ctx_tree`, `ctx_multi_read`, `ctx_delta`, …). If a standard tool shows up
+**deferred** in an isolated subagent catalog, run `ToolSearch(query="select:<tool>")`
+FIRST, then call it directly. **NEVER wrap a standard tool in `ctx_call`** (no
+`ctx_call name=ctx_read`, no `ctx_call name=ctx_shell` — that is pure overhead).
 
-| Need                              | Tool                                      | Note                                                  |
-|-----------------------------------|-------------------------------------------|-------------------------------------------------------|
-| Orient at start                   | `ctx_overview` + `ctx_repomap`            | repomap = PageRank top symbols                        |
-| Warm-read N files before dispatch | `ctx_multi_read paths=[…]`                | one call, not N× `ctx_read`                           |
-| Re-read after an edit             | `ctx_delta path=…`                        | only changed lines (cheaper than diff)                |
-| Checkpoint at phase boundary      | `ctx_compress`                            | long-conversation context save                        |
-| Warm-cache handoff to a subagent  | `ctx_call name=ctx_share {action:push,…}` | power tool → via gateway                              |
-| Team coordination / diaries       | `ctx_agent`                               | register/post/read/diary/sync/handoff/share_knowledge |
-| Blast radius (risk gate)          | `ctx_impact`, `ctx_callgraph`             | standard — direct                                     |
+Only **power-profile** tools (`ctx_task`, `ctx_handoff`, `ctx_workflow`) are NOT
+exposed directly under `standard` — reach those via the `ctx_call` gateway:
+`ctx_call name=ctx_task arguments={action:…}`. (Alt: `lean-ctx tools power`
+exposes them directly but bloats the tool catalog.)
+
+> **No `ctx_share`:** the lean-ctx file cache is shared across all agents in the
+> session (one MCP process). A subagent's first `ctx_read` is already warm, so
+> warm-cache push/pull via `ctx_share` is redundant ceremony and is intentionally
+> NOT part of this contract. Subagents just `ctx_read` — **never `fresh`**
+> (mtime auto-validation keeps cached entries current), **never `raw`**.
+
+| Need                              | Tool                           | Note                                                    |
+|-----------------------------------|--------------------------------|---------------------------------------------------------|
+| Orient at start                   | `ctx_overview` + `ctx_repomap` | repomap = PageRank top symbols                          |
+| Warm-read N files before dispatch | `ctx_multi_read paths=[…]`     | one call, not N× `ctx_read`                             |
+| Re-read after an edit             | `ctx_delta path=…`             | only changed lines (cheaper than diff)                  |
+| Checkpoint at phase boundary      | `ctx_compress`                 | long-conversation context save                          |
+| Warm cache for a subagent         | (automatic — shared MCP cache) | no `ctx_share`; subagent just `ctx_read`, never `fresh` |
+| Team coordination / diaries       | `ctx_agent`                    | register/post/read/diary/sync/handoff/share_knowledge   |
+| Blast radius (risk gate)          | `ctx_impact`, `ctx_callgraph`  | standard — direct                                       |
 
 ## Controller contract (main agent, drives the plan)
 
@@ -43,9 +55,9 @@ the `ctx_call` gateway: `ctx_call name=ctx_share arguments={action:…}`. (Alt:
     - `ctx_knowledge action=remember category=decision …`
     - `ctx_agent action=post category=decision message="key=val;…"`
 4. **Per task, BEFORE dispatch:** warm-read the relevant source files in one call
-   via `ctx_multi_read paths=[…]`, then push the warm cache with
-   `ctx_call name=ctx_share arguments={action:push, to_agent:<sub-id>, paths:[…]}`
-   (lets the subagent pull without `fresh`).
+   via `ctx_multi_read paths=[…]`. The cache is shared across all session agents
+   (one MCP process) — the subagent's first `ctx_read` hits these warm entries
+   automatically. No `ctx_share` push, no `fresh` needed.
 5. Prepend the **Dispatch Contract** (below) to every subagent prompt.
 6. **After each task:** `ctx_session action=task value="<task> [N%]"`; durable
    facts via `ctx_knowledge action=remember`.
@@ -54,13 +66,17 @@ the `ctx_call` gateway: `ctx_call name=ctx_share arguments={action:…}`. (Alt:
 
 ## Implementer subagent contract
 
-1. **Start:** `ctx_agent action=register agent_type=subagent role=dev` +
-   `ctx_call name=ctx_share arguments={action:pull}` (pull controller's warm
-   cache) → **never `fresh`**.
-2. Reads/search/shell explicitly as `ctx_read`/`ctx_search`/`ctx_shell`, never
-   `fresh`, never `raw` (hooks redirect natives anyway; explicit keeps the cache
-   consistent). Batch multiple files with `ctx_multi_read`; re-read after your own
-   edits with `ctx_delta` (changed lines only).
+1. **Start:** `ctx_agent action=register agent_type=subagent role=dev`. The
+   controller's warm cache is already shared (one MCP process) — just `ctx_read`,
+   **never `fresh`**, **no `ctx_share` pull**.
+2. Reads/search/shell via `ctx_read`/`ctx_search`/`ctx_shell` called **directly**
+   (if deferred → `ToolSearch(query="select:<tool>")` first; **never** wrap them in
+   `ctx_call`). **Never `fresh`** (mtime auto-validates; `fresh` right after a
+   cache read is forbidden — lmd spec §4.2a), **never `raw`**. Search with
+   `ctx_search`, not `grep`/`rg` inside `ctx_shell`; read files with `ctx_read`,
+   not `cat`. Batch files with `ctx_multi_read`; re-read after your own edits with
+   `ctx_delta` (changed lines only — that is what `ctx_delta` is for, not a `fresh`
+   full re-read).
 3. **Rust (`*.rs`) edits via Serena only** (`replace_symbol_body`, `insert_*`,
    `rename`/`move`/`safe_delete`) — never native `Edit`/`ctx_edit` on Rust.
 4. **During work:** `ctx_agent action=diary category=<discovery|decision|blocker|progress|insight>`
@@ -71,8 +87,9 @@ the `ctx_call` gateway: `ctx_call name=ctx_share arguments={action:…}`. (Alt:
 
 ## Reviewer subagent contract (spec-reviewer + code-quality-reviewer)
 
-1. **Start:** `ctx_agent action=register agent_type=subagent role=review` +
-   `ctx_call name=ctx_share arguments={action:pull}`.
+1. **Start:** `ctx_agent action=register agent_type=subagent role=review` (warm
+   cache already shared — just `ctx_read` directly, never `fresh`, never via
+   `ctx_call`).
 2. Post findings via `ctx_agent action=post category=finding` (in addition to the
    text return to the controller).
 3. `ctx_agent action=diary` for non-trivial judgments.
@@ -83,12 +100,17 @@ the `ctx_call` gateway: `ctx_call name=ctx_share arguments={action:…}`. (Alt:
 ## lean-ctx Subagent Contract (MANDATORY)
 You run in an isolated context. Before any other action:
 1. ctx_agent action=register agent_type=subagent role=<dev|review>
-2. ctx_call name=ctx_share arguments={action:pull}   # warm cache from controller — DO NOT use fresh=true
+   (controller's cache is already shared — no ctx_share pull, just ctx_read)
 Tool discipline:
-- Reads/search/shell → ctx_read / ctx_search / ctx_shell (never fresh, never raw)
+- ctx_read / ctx_search / ctx_shell / ctx_tree / ctx_multi_read / ctx_delta are
+  DIRECT standard tools — call them DIRECTLY. If one shows up deferred, run
+  ToolSearch(query="select:<tool>") FIRST, then call it. NEVER wrap a standard
+  tool in ctx_call (no ctx_call name=ctx_read / name=ctx_shell — pure overhead).
+- NEVER fresh, NEVER raw (mtime auto-validates; fresh after a cache read is forbidden)
+- Search → ctx_search (never grep/rg in ctx_shell); read files → ctx_read (never cat)
 - Batch reads → ctx_multi_read ; re-read after your edit → ctx_delta (changed lines)
 - Rust (*.rs) edits → Serena tools only (never native Edit / ctx_edit)
-- Power tools (ctx_share, ctx_task, ctx_handoff) → via ctx_call name=<tool>
+- Power tools ONLY (ctx_task, ctx_handoff, ctx_workflow) → via ctx_call name=<tool>
 - Tool params/signatures → authoritative in docs/reference/appendix-mcp-tools.md
   (generated/mcp-tools.md also valid IF freshly generated; ctx_read on demand, not memory)
 During work: ctx_agent action=diary category=<discovery|decision|blocker|progress>

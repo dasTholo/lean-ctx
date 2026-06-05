@@ -2,8 +2,6 @@
 
 ## Startup
 
-- **Always activate Serena** at the start of every conversation: `mcp__serena__activate_project`.
-
 ## Project Hard Rules
 
 > lean-ctx tool-discipline (ctx_read/ctx_shell/ctx_search/ctx_tree mapping, read
