@@ -1,4 +1,9 @@
 {
+  "permissions": {
+    "allow": [
+      "mcp__lean-ctx__ctx_shell"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
       {
@@ -21,9 +26,8 @@
       }
     ]
   },
-  "permissions": {
-    "allow": [
-      "mcp__lean-ctx__ctx_shell"
-    ]
-  }
+  "enabledMcpjsonServers": [
+    "jetbrains",
+    "markdownai"
+  ]
 }
