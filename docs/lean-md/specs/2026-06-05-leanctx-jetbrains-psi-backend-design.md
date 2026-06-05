@@ -379,24 +379,29 @@ das Jail. **Diese Umstellung ist Pflicht-Bestandteil von Phase 0.**
 und **ausschließlich** JetBrains-Plugin-Arbeit trägt — **kein** lmd, **keine**
 Baum-Übernahme aus `feat-lmd-v1`, **kein** worktree (Projekt-Rule „No worktrees").
 
-### 12.1 Ausgangslage (verifiziert 2026-06-05)
+### 12.1 Ausgangslage (verifiziert + korrigiert 2026-06-05)
 
-- **`feat-jetbrains-plugin` existiert bereits** auf sauberer Basis: `main` (v3.6.11)
-  + **1 Commit** (lmd-freies Spec + Projekt-Rules). Kein lmd auf dem Branch → **nichts
-  zu entfernen**.
-- **Kein Plugin-Code auf `feat-lmd-v1` zu übertragen:** `rust/src/lsp` Δ = 1 Zeile,
-  `packages/jetbrains-lean-ctx` Δ = 0. Die Phasen 0–5 (§9) sind **alle offen** und
-  werden frisch auf diesem Branch implementiert.
-- **Die alte „Baum-Übernahme + lmd-Entfernung"-Strategie entfällt ersatzlos.**
-  `feat-lmd-v1` ist 393 Commits vor `main` und vermischt weit über lmd hinaus (CI-
-  Workflows, `.bak`-Dateien, README, VS-Code-Publish …). Diesen Wust per Baum-Übernahme
-  mitzuschleppen, nur um lmd wieder herauszuoperieren, ist unnötig und unsauber.
+- **Korrektur:** Der lokale `feat-jetbrains-plugin` saß auf einem **veralteten lokalen
+  `main` (v3.6.11)** und lag **231 Commits hinter `origin/main`** (nur 1 voraus =
+  alter Spec-Commit). „Sauber von main" war damit faktisch falsch → dieser Branch wird
+  **verworfen und neu angelegt**.
+- **Korrekte Basis = `origin/main` = `v3.7.4`** (Fork `dasTholo/lean-ctx` ist auf
+  Upstream `yvgude/lean-ctx` gesynct; beide 3.7.4). `feat-jetbrains-plugin` wird **frisch
+  von `origin/main` (3.7.4)** erstellt; späteres Merge-Ziel = `origin/main`.
+- **Deps bereits vorhanden:** `ureq = "3.3.0"` und `sha2 = "0.10"` sind auf
+  `origin/main` (3.7.4) vorhanden → keine `Cargo.toml`-Dependency-Änderung in Phase 1.
+- **Kein lmd, keine Baum-Übernahme:** Phasen 0–5 (§9) werden frisch implementiert;
+  `feat-lmd-v1` (393 Commits, vermischt CI/Docs/lmd) wird **nicht** als Baum übernommen.
+  Aus `feat-lmd-v1` wandert **nur** dieses Spec (+ Phase-0/1-Plan) als Datei-Inhalt mit.
 
-### 12.2 Spec-Sync (einmalig)
+### 12.2 Branch-Neuanlage + Spec-Sync (einmalig)
 
-- Dieses Spec (inkl. neuer §12/§13) ist das **einzige** mitwandernde Dokument. Es wird
-  als **ein** Update-Commit von `feat-lmd-v1` → `feat-jetbrains-plugin` übernommen
-  (Datei-Inhalt, kein Cherry-pick der Historie).
+- **`feat-jetbrains-plugin` neu von `origin/main` (3.7.4)** anlegen (alten lokalen
+  Branch löschen). Lokales `main` zuvor auf `origin/main` aktualisieren (fast-forward),
+  damit „from main" wieder stimmt.
+- Dieses Spec (inkl. korrigierter §12/§13) **und** der Phase-0/1-Plan sind die **einzigen**
+  mitwandernden Dokumente — als **ein** Commit (Datei-Inhalt aus `feat-lmd-v1`, kein
+  Cherry-pick der Historie) auf den frischen Branch.
 - Allgemeine Projekt-Rules (`CLAUDE.md`, `rust/CLAUDE.md`, lean-ctx-/Serena-Tool-
   Discipline) wandern mit, **lmd-spezifische Referenzen dabei bereinigen** (z. B.
   lmd-Spec-Verweise in `.claude/rules/subagent-multi-agent.md`). lmd-Specs/-Pläne unter
