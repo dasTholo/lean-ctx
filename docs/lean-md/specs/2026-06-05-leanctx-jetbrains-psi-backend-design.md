@@ -334,8 +334,16 @@ das Jail. **Diese Umstellung ist Pflicht-Bestandteil von Phase 0.**
 - **Phase 5 — format + inspections + Härtung:** read-only Handler; stale/PID/401/
   atomare Writes; Plugin-CI-Job. *Gate:* strukturierte Ergebnisse; stale → Fallback
   ohne Hänger; Plugin-CI grün.
-- **v2-Ausblick (nicht jetzt):** Edits (rename-apply/move/safe-delete/inline) als
-  additive Trait-Methoden + `WriteCommandAction`-Handler.
+- **v2-Ausblick (eigener Spec, nicht hier):** Die **symbolischen Edit-Ops** —
+  Serena-Äquivalente `replace_symbol_body`, `insert_before_symbol`,
+  `insert_after_symbol`, `jet_brains_rename` (apply), `jet_brains_move`,
+  `jet_brains_safe_delete`, `jet_brains_inline_symbol` — werden **NICHT** in diesem
+  v1-Spec behandelt, sondern in einem **separaten v2-Edit-Spec**. Begründung: sie
+  brauchen ein fundamental anderes Modell (`WriteCommandAction` auf EDT,
+  Transaktionalität, Undo, Konflikt-Handling, Cache-Kohärenz mit `ctx_edit` nach
+  §4.2a) als die read-only-v1-Ops. Sie kommen additiv als Default-`Err`-Trait-Methoden
+  hinzu (kein Breaking Change an v1). Erst dieser v2-Spec macht Serena auch als
+  Edit-Engine entbehrlich.
 
 ---
 
@@ -362,3 +370,58 @@ das Jail. **Diese Umstellung ist Pflicht-Bestandteil von Phase 0.**
 - Rust-Backend-Pfad: `rust/src/lsp/{router,client,config}.rs`,
   `rust/src/tools/ctx_refactor.rs`, `rust/src/core/pathjail.rs`,
   `rust/src/server/tool_trait.rs`.
+
+---
+
+## 12. Branch- & Release-Strategie (lmd-frei)
+
+**Anforderung:** Ein neuer Branch, der **von `main` abgeht** und **alle Änderungen aus
+`feat-lmd-v1` AUSSER dem lmd-Modul** trägt — damit das JetBrains-Plugin/Backend ohne
+lmd verfügbar/mergebar wird.
+
+### 12.1 Recherche-Befund (2026-06-05) — funktioniert das?
+
+**Ja.** Verifiziert:
+- **Keine Code-Kopplung Plugin↔lmd:** 0 `use/mod …lmd`-Treffer in `rust/src/lsp/`,
+  `ctx_refactor.rs`, `ctx_symbol.rs`. Das Backing-B-Backend hängt **nicht** von lmd ab.
+- **lmd ist minimal eingehängt:** nur `rust/src/lib.rs:36 → pub mod lmd;`. Keine
+  Verdrahtung in `server/registry.rs`, `core/tool_profiles.rs`, `server/dynamic_tools.rs`,
+  `cli/`.
+- **Es ist NICHT nötig, in `feat-lmd-v1` zu bleiben.** lmd und Plugin koexistieren
+  konfliktfrei; lmd zu entfernen ist eine **Release-/Produkt-Entscheidung**, keine
+  Build-Notwendigkeit.
+
+**Caveat:** `feat-lmd-v1` ist **383 Commits** vor `main`. Ein „alles außer lmd"-Branch
+entsteht daher **nicht** per 383er-Cherry-pick, sondern per **Baum-Übernahme + lmd-
+Entfernung als ein Commit** (Granular-Historie geht verloren — für einen Feature-Branch
+akzeptabel).
+
+### 12.2 lmd-Entfernungs-Checkliste (vollständiger Footprint)
+
+1. `rust/src/lmd/` — gesamtes Modul (22 Dateien) löschen.
+2. `rust/src/lib.rs:36` — `pub mod lmd;` entfernen.
+3. `rust/tests/lmd_phase1_gate.rs`, `rust/tests/lmd_rushdown_spike.rs` — löschen.
+4. **`ctx_compile`** (lmd-Render-Tool): `rust/src/tools/ctx_compile*`,
+   `rust/src/tools/registered/ctx_compile.rs`, Registrierung `registry.rs:175`
+   entfernen. *(Verifizieren: ob `ctx_compile` ausschließlich lmd dient — falls ja, raus.)*
+5. `rust/Cargo.toml:3` — Versions-Suffix `"3.7.3-lmd"` → `"3.7.3"`.
+6. `docs/lean-md/` — lmd-Docs optional belassen oder verschieben (kein Build-Einfluss).
+
+### 12.3 Vorgehen (empfohlen)
+
+```
+git checkout -b feat-jetbrains-plugin main      # neuer Branch von main
+git checkout feat-lmd-v1 -- .                    # gesamten lmd-v1-Baumzustand übernehmen
+# Checkliste 12.2 anwenden (lmd-Modul/Tests/Tool/lib.rs-Zeile/Cargo-Suffix entfernen)
+cargo nextest run                                # Gate: kompiliert + grün OHNE lmd
+git commit -m "feat: lmd-v1 state minus lmd module (base for JetBrains plugin)"
+```
+
+**Gate-Kriterium:** `cargo nextest run` grün ohne lmd-Modul → bestätigt empirisch die
+Entkopplung. Erst danach beginnt die Plugin-Implementierung (Phase 0, §9) auf diesem
+Branch.
+
+**Offen (User-Entscheidung):** (a) Branch-Name; (b) ob die `docs/lean-md/`-Specs/Pläne
+(inkl. dieses Specs) mitwandern; (c) ob die Granular-Historie der 383 Commits erhalten
+werden muss (dann statt Baum-Übernahme: `git rebase --onto` mit Drop der lmd-Commits —
+deutlich aufwändiger).
