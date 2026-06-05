@@ -1,6 +1,6 @@
 [package]
 name = "lean-ctx"
-version = "3.7.3"
+version = "3.7.3-lmd"
 edition = "2021"
 autobins = false
 description = "Context Runtime for AI Agents with CCP. 68 MCP tools, 10 read modes, 60+ compression patterns, cross-session memory (CCP), persistent AI knowledge with temporal facts + contradiction detection, multi-agent context sharing, LITM-aware positioning, AAAK compact format, adaptive compression with Thompson Sampling bandits. Supports 24+ AI tools. Reduces LLM token consumption by up to 99%."
@@ -65,37 +65,37 @@ qdrant = ["embeddings"]
 team-server = ["http-server"]
 secure-update = []
 cloud-server = [
-  "http-server",
-  "dep:deadpool-postgres",
-  "dep:tokio-postgres",
-  "dep:lettre",
-  "dep:jsonwebtoken",
-  "dep:uuid",
-  "dep:hex",
-  "dep:rand",
-  "dep:argon2",
-  "dep:resvg",
+    "http-server",
+    "dep:deadpool-postgres",
+    "dep:tokio-postgres",
+    "dep:lettre",
+    "dep:jsonwebtoken",
+    "dep:uuid",
+    "dep:hex",
+    "dep:rand",
+    "dep:argon2",
+    "dep:resvg",
 ]
 tree-sitter = [
-  "dep:tree-sitter",
-  "dep:tree-sitter-rust",
-  "dep:tree-sitter-typescript",
-  "dep:tree-sitter-javascript",
-  "dep:tree-sitter-python",
-  "dep:tree-sitter-go",
-  "dep:tree-sitter-java",
-  "dep:tree-sitter-c",
-  "dep:tree-sitter-cpp",
-  "dep:tree-sitter-ruby",
-  "dep:tree-sitter-c-sharp",
-  "dep:tree-sitter-kotlin-ng",
-  "dep:tree-sitter-swift",
-  "dep:tree-sitter-php",
-  "dep:tree-sitter-bash",
-  "dep:tree-sitter-dart",
-  "dep:tree-sitter-scala",
-  "dep:tree-sitter-elixir",
-  "dep:tree-sitter-zig",
+    "dep:tree-sitter",
+    "dep:tree-sitter-rust",
+    "dep:tree-sitter-typescript",
+    "dep:tree-sitter-javascript",
+    "dep:tree-sitter-python",
+    "dep:tree-sitter-go",
+    "dep:tree-sitter-java",
+    "dep:tree-sitter-c",
+    "dep:tree-sitter-cpp",
+    "dep:tree-sitter-ruby",
+    "dep:tree-sitter-c-sharp",
+    "dep:tree-sitter-kotlin-ng",
+    "dep:tree-sitter-swift",
+    "dep:tree-sitter-php",
+    "dep:tree-sitter-bash",
+    "dep:tree-sitter-dart",
+    "dep:tree-sitter-scala",
+    "dep:tree-sitter-elixir",
+    "dep:tree-sitter-zig",
 ]
 
 [dependencies]
