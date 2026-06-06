@@ -288,7 +288,10 @@ schon modern (keine Code-Modernisierung nötig); Phase 2 erweitert
   (Fallback = roher Pfad). Kotlin: `Path.toRealPath()` (Fallback = roher Pfad), SHA-256
   der UTF-8-Bytes, erste 8 Bytes → 16 lowercase-hex. Naht-Test: gleicher Input → gleicher
   16-hex-Output auf beiden Seiten.
-- Inhalt: `{port, token (32-byte hex via SecureRandom), pid, projectRoot, ideVersion, startedAt}`.
+- Inhalt (JSON-Keys **snake_case** = Rust `PortFile`-serde, `port_discovery.rs`):
+  `{port, token (32-byte hex via SecureRandom), pid, project_root, ide_version, started_at}`.
+  ⚠ NICHT camelCase — Rust liest `project_root`/`ide_version` per serde; `started_at` ist
+  Zusatzfeld (von Rust ignoriert).
 - Token als Header `X-LeanCtx-Token`; ohne/falsch → 401. Bei `projectClosing`/`dispose` löschen.
 
 ---
@@ -631,7 +634,7 @@ token-geschütztes `/health`, und räumt beim Schließen sauber ab. **Noch keine
 | Datei (neu/~erweitert) | Aufgabe | Serena-Ref |
 | `server/BackendHttpServer.kt` | `Disposable` Project-Service; bindet `com.sun.net.httpserver.HttpServer` auf `127.0.0.1:0` (ephemerer OS-Port); off-EDT-Pool; `dispose()` → stop + Port-Datei löschen | `SerenaBackendService` |
 | `server/RequestRouter.kt` | `HttpHandler`-Dispatch + `X-LeanCtx-Token`-Check → sonst 401; Phase 2 registriert nur `/health` | `PostRequestHandler.handleExchange` + `HttpExchangeUtils` |
-| `server/PortFileWriter.kt` | `<data_dir>/jetbrains-<hash>.port` atomar (temp+rename), `0600`, JSON `{port, token, pid, projectRoot, ideVersion, startedAt}` | (Serena: Range-Scan — wir: Datei) |
+| `server/PortFileWriter.kt` | `<data_dir>/jetbrains-<hash>.port` atomar (temp+rename), `0600`, JSON snake_case `{port, token, pid, project_root, ide_version, started_at}` (= Rust `PortFile`-serde) | (Serena: Range-Scan — wir: Datei) |
 | `server/LeanCtxPaths.kt` | Data-Dir-Resolver **identisch zu Rust** (`LEAN_CTX_DATA_DIR` → `~/.lean-ctx` mit Daten → `$XDG_CONFIG_HOME/lean-ctx`) + `projectHash = sha256(realpath(root))[..16]` | — (Parität-Naht §5.5) |
 | `server/HealthHandler.kt` | `GET /health` → `{status:"ok", ideVersion, project}` | `endpoint/*Handler`-Muster |
 | `dto/Health.kt`, `dto/ErrorResponse.kt` | gson-DTOs (gson `compileOnly`) | `service/dto/*`, `ErrorResponse` |
