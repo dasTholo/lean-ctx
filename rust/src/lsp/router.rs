@@ -3,12 +3,13 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
 
+use super::backend::LspBackend;
 use super::client::{file_path_to_uri, LspClient};
 use super::config::{
     check_server_available, default_servers, language_for_extension, LspServerConfig,
 };
 
-static CLIENTS: std::sync::LazyLock<Mutex<HashMap<String, LspClient>>> =
+static BACKENDS: std::sync::LazyLock<Mutex<HashMap<String, Box<dyn LspBackend>>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn expand_tilde(path: &str) -> String {
@@ -42,9 +43,9 @@ fn resolve_config_for_language(language: &str) -> LspServerConfig {
     })
 }
 
-pub fn with_client<F, R>(file_path: &str, project_root: &str, f: F) -> Result<R, String>
+pub fn with_backend<F, R>(file_path: &str, project_root: &str, f: F) -> Result<R, String>
 where
-    F: FnOnce(&mut LspClient, &str) -> Result<R, String>,
+    F: FnOnce(&mut dyn LspBackend, &str) -> Result<R, String>,
 {
     let ext = Path::new(file_path)
         .extension()
@@ -57,9 +58,9 @@ where
         )
     })?;
 
-    let mut clients = CLIENTS.lock().map_err(|e| e.to_string())?;
+    let mut backends = BACKENDS.lock().map_err(|e| e.to_string())?;
 
-    if !clients.contains_key(language) {
+    if !backends.contains_key(language) {
         let config = resolve_config_for_language(language);
 
         if super::config::find_binary_in_path(&config.command).is_none()
@@ -70,14 +71,17 @@ where
 
         let root_uri = file_path_to_uri(project_root)?;
         let client = LspClient::start(&config, &root_uri)?;
-        clients.insert(language.to_string(), client);
+        backends.insert(
+            language.to_string(),
+            Box::new(client) as Box<dyn LspBackend>,
+        );
     }
 
-    let client = clients
+    let backend = backends
         .get_mut(language)
-        .ok_or_else(|| format!("LSP client for '{language}' not available"))?;
+        .ok_or_else(|| format!("LSP backend for '{language}' not available"))?;
 
-    f(client, language)
+    f(backend.as_mut(), language)
 }
 
 pub fn open_file(file_path: &str, project_root: &str) -> Result<Uri, String> {
@@ -96,16 +100,16 @@ pub fn open_file(file_path: &str, project_root: &str) -> Result<Uri, String> {
 
     let uri = file_path_to_uri(file_path)?;
 
-    with_client(file_path, project_root, |client, language| {
-        client.did_open(&uri, language, &content)?;
+    with_backend(file_path, project_root, |backend, language| {
+        backend.open_file(&uri, language, &content)?;
         Ok(uri.clone())
     })
 }
 
 pub fn shutdown_all() {
-    if let Ok(mut clients) = CLIENTS.lock() {
-        for (_, client) in clients.drain() {
-            drop(client);
+    if let Ok(mut backends) = BACKENDS.lock() {
+        for (_, backend) in backends.drain() {
+            drop(backend);
         }
     }
 }

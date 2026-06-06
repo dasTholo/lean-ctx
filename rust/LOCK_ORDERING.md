@@ -32,7 +32,7 @@ All `std::sync::Mutex` unless noted otherwise.
 | L19 | `CACHE` (graph) | `core/graph_cache.rs:31` | `OnceLock<Mutex<HashMap<String, Entry>>>` | Property graph query result cache |
 | L20 | `RECENT` | `core/auto_findings.rs:15` | `Mutex<Vec<RecentEntry>>` | Recent auto-finding entries |
 | L21 | `LOCK` (home) | `core/home.rs:79` | `Mutex<()>` | Serialize home directory creation |
-| L22 | `CLIENTS` | `lsp/router.rs:11` | `LazyLock<Mutex<HashMap<String, LspClient>>>` | LSP client connection registry |
+| L22 | `BACKENDS` | `lsp/router.rs:12` | `LazyLock<Mutex<HashMap<String, Box<dyn LspBackend>>>>` | LSP backend connection registry |
 | L23 | `BUDGETS` | `core/agent_budget.rs:6` | `Mutex<Option<HashMap<String, AgentBudget>>>` | Per-agent token budget tracking |
 | L24 | `SHELL_ENV_LOCK` | `shell_hook.rs:928` | `Mutex<()>` | Serialize env-var access in shell hook |
 | L25 | `TRACKER` | `core/search_delta.rs:49` | `Mutex<Option<SearchDeltaTracker>>` | Tracks search result changes between calls |

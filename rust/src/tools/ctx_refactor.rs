@@ -1,29 +1,18 @@
 use lsp_types::{Location, Position};
 use serde_json::Value;
-use std::path::Path;
 
 use crate::lsp::client::uri_to_file_path;
 
-pub fn handle(args: &Value, project_root: &str) -> String {
+pub fn handle(args: &Value, project_root: &str, abs_path: &str) -> String {
     let action = args
         .get("action")
         .and_then(Value::as_str)
         .unwrap_or("references");
 
-    let Some(path) = args.get("path").and_then(Value::as_str) else {
-        return "ERROR: 'path' parameter is required.".to_string();
-    };
-
     let line = args.get("line").and_then(Value::as_u64).unwrap_or(1) as u32;
     let column = args.get("column").and_then(Value::as_u64).unwrap_or(0) as u32;
 
-    let abs_path = if Path::new(path).is_absolute() {
-        path.to_string()
-    } else {
-        format!("{project_root}/{path}")
-    };
-
-    let uri = match crate::lsp::router::open_file(&abs_path, project_root) {
+    let uri = match crate::lsp::router::open_file(abs_path, project_root) {
         Ok(u) => u,
         Err(e) => return format!("ERROR: {e}"),
     };
@@ -31,10 +20,10 @@ pub fn handle(args: &Value, project_root: &str) -> String {
     let position = Position::new(line.saturating_sub(1), column);
 
     match action {
-        "rename" => handle_rename(args, &abs_path, project_root, &uri, position),
-        "references" => handle_references(&abs_path, project_root, &uri, position),
-        "definition" => handle_definition(&abs_path, project_root, &uri, position),
-        "implementations" => handle_implementations(&abs_path, project_root, &uri, position),
+        "rename" => handle_rename(args, abs_path, project_root, &uri, position),
+        "references" => handle_references(abs_path, project_root, &uri, position),
+        "definition" => handle_definition(abs_path, project_root, &uri, position),
+        "implementations" => handle_implementations(abs_path, project_root, &uri, position),
         _ => format!(
             "ERROR: Unknown action '{action}'. Available: rename, references, definition, implementations."
         ),
@@ -52,8 +41,8 @@ fn handle_rename(
         return "ERROR: 'new_name' parameter is required for rename.".to_string();
     };
 
-    let result = crate::lsp::router::with_client(file_path, project_root, |client, _| {
-        client.rename(uri, position, new_name)
+    let result = crate::lsp::router::with_backend(file_path, project_root, |backend, _| {
+        backend.rename(uri, position, new_name)
     });
 
     match result {
@@ -69,8 +58,8 @@ fn handle_references(
     uri: &lsp_types::Uri,
     position: Position,
 ) -> String {
-    let result = crate::lsp::router::with_client(file_path, project_root, |client, _| {
-        client.references(uri, position)
+    let result = crate::lsp::router::with_backend(file_path, project_root, |backend, _| {
+        backend.references(uri, position)
     });
 
     match result {
@@ -85,8 +74,8 @@ fn handle_definition(
     uri: &lsp_types::Uri,
     position: Position,
 ) -> String {
-    let result = crate::lsp::router::with_client(file_path, project_root, |client, _| {
-        client.definition(uri, position)
+    let result = crate::lsp::router::with_backend(file_path, project_root, |backend, _| {
+        backend.definition(uri, position)
     });
 
     match result {
@@ -114,8 +103,8 @@ fn handle_implementations(
     uri: &lsp_types::Uri,
     position: Position,
 ) -> String {
-    let result = crate::lsp::router::with_client(file_path, project_root, |client, _| {
-        client.implementations(uri, position)
+    let result = crate::lsp::router::with_backend(file_path, project_root, |backend, _| {
+        backend.implementations(uri, position)
     });
 
     match result {
@@ -204,4 +193,24 @@ fn format_workspace_edit(edit: &lsp_types::WorkspaceEdit, project_root: &str) ->
         "\nTotal: {edit_count} edit(s) across {file_count} file(s)."
     ));
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    /// §4.5: inner handle MUST use the (already jailed) abs_path it is given,
+    /// never re-derive a path from raw args. A raw "../escape.rs" must never
+    /// reach the filesystem layer; only the provided abs_path does.
+    #[test]
+    fn inner_handle_uses_provided_abs_path_not_raw_args() {
+        let args = json!({"action": "references", "path": "../escape.rs", "line": 1, "column": 0});
+        let out = super::handle(&args, "/proj", "/proj/jailed.rs");
+        // open_file fails reading the (nonexistent) jailed file → error names abs_path.
+        assert!(out.contains("/proj/jailed.rs"), "abs_path not used: {out}");
+        assert!(
+            !out.contains("../escape.rs"),
+            "raw path leaked to fs layer: {out}"
+        );
+    }
 }
