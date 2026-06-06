@@ -1,6 +1,7 @@
 //! Discovery of the in-IDE JetBrains backend via a per-project port file.
 //!
-//! The plugin writes `~/.lean-ctx/jetbrains-<projecthash>.port` (JSON, 0600).
+//! The plugin writes `<data_dir>/jetbrains-<projecthash>.port` (JSON, 0600), where
+//! `<data_dir>` = core::data_dir::lean_ctx_data_dir() (LEAN_CTX_DATA_DIR → ~/.lean-ctx → XDG).
 //! `projecthash = sha256(canonical(project_root))[..16]` — Rust and Kotlin MUST
 //! canonicalize identically (symlink / trailing-slash trap, spec §5.5).
 
@@ -37,13 +38,12 @@ pub fn project_hash(project_root: &str) -> String {
     hex
 }
 
-/// `~/.lean-ctx/jetbrains-<projecthash>.port`.
+/// `<data_dir>/jetbrains-<projecthash>.port` — `<data_dir>` resolved via
+/// `core::data_dir::lean_ctx_data_dir()` (LEAN_CTX_DATA_DIR → ~/.lean-ctx → XDG),
+/// NOT a hardcoded `~/.lean-ctx` (spec §5.5 / §15.5). The Kotlin side mirrors this resolution.
 pub fn port_file_path(project_root: &str) -> Option<std::path::PathBuf> {
-    let home = dirs::home_dir()?;
-    Some(
-        home.join(".lean-ctx")
-            .join(format!("jetbrains-{}.port", project_hash(project_root))),
-    )
+    let dir = crate::core::data_dir::lean_ctx_data_dir().ok()?;
+    Some(dir.join(format!("jetbrains-{}.port", project_hash(project_root))))
 }
 
 /// Reads + parses the port file, or `None` if absent/unreadable/malformed.
@@ -97,5 +97,22 @@ mod tests {
     fn port_file_absent_for_unlikely_root() {
         // A path that has no port file → None (never panics).
         assert!(read_port_file("/nonexistent/lean-ctx/project/xyz").is_none());
+    }
+
+    #[test]
+    fn project_hash_matches_known_vector() {
+        // sha256("/some/project")[..8] — canonicalize fails (path absent) → raw fallback.
+        // Shared parity anchor with the Kotlin LeanCtxPaths test.
+        assert_eq!(project_hash("/some/project"), "a0317725f24b01df");
+    }
+
+    #[test]
+    fn port_file_path_honors_data_dir_env() {
+        let _lock = crate::core::data_dir::test_env_lock();
+        let dir = std::env::temp_dir().join("lc_jb_portfile_env");
+        std::env::set_var("LEAN_CTX_DATA_DIR", dir.to_str().unwrap());
+        let p = port_file_path("/some/project").unwrap();
+        std::env::remove_var("LEAN_CTX_DATA_DIR");
+        assert_eq!(p, dir.join("jetbrains-a0317725f24b01df.port"));
     }
 }
