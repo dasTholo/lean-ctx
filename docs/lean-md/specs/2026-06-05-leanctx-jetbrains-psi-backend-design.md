@@ -213,8 +213,19 @@ das Jail. **Diese Umstellung ist Pflicht-Bestandteil von Phase 0.**
 
 ## 5. Plugin-Seite (Kotlin) — Komponentenschnitt
 
-**Befund:** Gerüst leer. IC 2024.1, Kotlin 1.9.25, IntelliJ-Platform-Gradle 2.14.0,
-`com.leanctx`. plugin.xml deklariert `LeanCtxStartupActivity` (postStartupActivity).
+**Befund (korrigiert 2026-06-06):** `packages/jetbrains-lean-ctx` ist **nicht leer**
+(die frühere Annahme „Gerüst leer" war falsch). Es existiert bereits ein
+**Companion-Plugin** (`com.leanctx.plugin`, Version `1.0.0`) mit einem **anderen
+Concern** — Token-Ersparnis anzeigen, Binary finden: `LeanCtxStartupActivity`
+(bereits `ProjectActivity`, Coroutine-Form), Statusbar-Widget
+(`LeanCtxStatusBarFactory` + `StatsReader`), `BinaryResolver`, Tools-Menü-Actions
+(Setup/Doctor/Gain/Dashboard, `actions/`). Das PSI-HTTP-Backend wird **additiv** in
+denselben Plugin-Modul (`com.leanctx.plugin`) integriert — es **koexistiert**, ersetzt
+nichts. IC 2024.1, Kotlin 1.9.25, IntelliJ-Platform-Gradle 2.14.0. plugin.xml deklariert
+`LeanCtxStartupActivity` via `postStartupActivity`-Tag (mappt auf `ProjectActivity`) +
+`statusBarWidgetFactory`. **Konsequenz:** Startup ist schon modern (keine
+Modernisierung nötig); Phase 2 erweitert `LeanCtxStartupActivity.execute` um den
+Server-Boot und legt neue Sub-Packages `server/`, `dto/` an.
 
 ### 5.1 Packages (`com.leanctx.plugin`)
 
@@ -258,11 +269,25 @@ das Jail. **Diese Umstellung ist Pflicht-Bestandteil von Phase 0.**
 
 ### 5.5 Port/Token-Datei
 
-- Pfad: `~/.lean-ctx/jetbrains-<projecthash>.port`, Permissions `0600`, atomar.
+- Pfad: `<data_dir>/jetbrains-<projecthash>.port`, Permissions `0600`, atomar.
+- **`<data_dir>` = `lean_ctx_data_dir()`-Parität (NICHT hardcoded `~/.lean-ctx`).**
+  Rust und Kotlin MÜSSEN dieselbe Auflösungspriorität nutzen (`core/data_dir.rs`):
+    1. `LEAN_CTX_DATA_DIR` (env-Override),
+    2. `~/.lean-ctx` **nur wenn Daten vorhanden** (Marker `stats.json`/`config.toml`/`sessions`),
+    3. `$XDG_CONFIG_HOME/lean-ctx` (default `~/.config/lean-ctx`).
+  **Token bleibt inline** in der `.port`-Datei (Entscheidung 2026-06-06: 1 atomarer
+  Write, 1 Cleanup, keine Zwei-Datei-Staleness; Phase 1 `PortFile.token` liest bereits
+  inline). **⚠ Phase-1-Begleit-Fix (Pflicht):** `port_discovery.rs::port_file_path`
+  (aktuell hardcoded `dirs::home_dir().join(".lean-ctx")`, `rust/src/lsp/port_discovery.rs:41`)
+  auf `core::data_dir::lean_ctx_data_dir()` umstellen + Test — sonst divergieren Rust-
+  und Kotlin-Pfad bei XDG-/Override-Setups.
 - **`projecthash` = `sha256(canonical(projectRoot))[..16]`** — Rust und Kotlin müssen
-  identisch canonicalisieren (Symlink/Trailing-Slash-Falle).
-- Inhalt: `{port, token (32-byte hex), pid, projectRoot, ideVersion, startedAt}`.
-- Token als Header `X-LeanCtx-Token`; ohne/falsch → 401. Bei `projectClosing` löschen.
+  identisch canonicalisieren (Symlink/Trailing-Slash-Falle). Rust: `std::fs::canonicalize`
+  (Fallback = roher Pfad). Kotlin: `Path.toRealPath()` (Fallback = roher Pfad), SHA-256
+  der UTF-8-Bytes, erste 8 Bytes → 16 lowercase-hex. Naht-Test: gleicher Input → gleicher
+  16-hex-Output auf beiden Seiten.
+- Inhalt: `{port, token (32-byte hex via SecureRandom), pid, projectRoot, ideVersion, startedAt}`.
+- Token als Header `X-LeanCtx-Token`; ohne/falsch → 401. Bei `projectClosing`/`dispose` löschen.
 
 ---
 
@@ -331,23 +356,56 @@ das Jail. **Diese Umstellung ist Pflicht-Bestandteil von Phase 0.**
 
 ## 9. Implementierungs-Phasen (Grobschnitt für writing-plans)
 
+> **Serena-Referenzklassen pro Phase (dekompiliert 2026-06-06 aus
+> `tmp/serena-jetbrains-plugin/lib/serena-jetbrains-plugin-2023.2.16.jar`,
+> Paket `de.oraios.serena.*`).** Architektur-/Namens-Referenz, **keine** Code-Quelle.
+
 - **Phase 0 — Trait-Extraktion (Rust, refactor-only):** `LspBackend` +
   `impl für LspClient`; Router auf `Box<dyn LspBackend>`; **§4.5-Pfad-Fix**.
   *Gate:* bestehende ctx_refactor-Tests grün, Verhalten identisch, clippy sauber.
+  *(Serena-Ref: keine — reine Rust-Seite.)*
 - **Phase 1 — Port-Discovery + HTTP-Backend-Skeleton (Rust):** `port_discovery.rs`,
   `jetbrains_backend.rs` (refs/def/impl via ureq), `select_backend` mit Fallback.
   *Gate:* gegen Mock-Server parsebar; ohne Port-Datei deterministischer Fallback A.
+  *(Serena-Ref: Wire-Gegenstück zu `service/request/*Request` + `service/dto/*` —
+  Rust spiegelt deren JSON-Shape.)*
 - **Phase 2 — Plugin-Kern (Kotlin):** `BackendHttpServer` + `PortFileWriter` +
-  `Health` + `RequestRouter` (Token); StartupActivity bootet/stoppt pro Project.
-  *Gate:* IDE auf → Port-Datei mit Token; `/health`-Ping ok; `projectClosing` löscht.
+  `LeanCtxPaths` (data-dir/hash-Parität) + `HealthHandler` + `RequestRouter`
+  (Token-Check); `LeanCtxStartupActivity.execute` erweitert → bootet/stoppt pro Project.
+  Token inline in `.port`, `<data_dir>` = `lean_ctx_data_dir()`-Parität (§5.5).
+  *Gate:* IDE auf → Port-Datei unter korrektem Data-Dir mit Token & `0600`;
+  `/health` mit Token = 200, ohne = 401; `projectClosing`/`dispose` löscht; Kotlin-Unit
+  für Resolver-Priorität + `projectHash`==Rust; Phase-1-Begleit-Fix (`port_file_path`
+  → `lean_ctx_data_dir()`) grün via `cargo nextest`. Verifikation: manuelles `runIde`-Gate.
+  *(Serena-Ref: `SerenaBackendService` [HttpServer-Lifecycle/`startService`/`dispose`/gson],
+  `PluginStartupActivity` [`ProjectActivity.execute`], `PostRequestHandler`
+  [`handleExchange`-Dispatch-Basis], `HttpExchangeUtils`
+  [`readRequestBody`/`sendResponse`/`sendErrorResponse`], `service/HttpStatus`. **Abweichung:**
+  Serena hat **kein** Token (nur localhost) und nutzt **Range-Scan** `findFreePort` ab
+  `START_PORT` — wir: Token-Header + ephemerer OS-Port `:0` + Port-Datei-Discovery.)*
 - **Phase 3 — Nav-Endpoints PSI + E2E:** Find*-Handler + `psi/` unter ReadAction.
   *Gate:* references/definition stimmen mit IDE-„Find Usages"; 0/1-Naht getestet.
+  *(Serena-Ref: `endpoint/FindReferencesHandler`, `FindDeclarationHandler`,
+  `FindImplementationsHandler`, `FindSymbolHandler`; `symbol/SymbolFinder`, `Symbol`,
+  `util/ProjectContext` [`getAbsolutePath`/ReadAction-Smart-Mode],
+  `service/dto/SymbolDTO`/`TextRangeDTO`/`PositionDTO`.)*
 - **Phase 4 — type_hierarchy + symbols_overview (B-only):** neue Actions + Handler +
   Degradierung. *Gate:* korrekte Super/Subtypes (Java/Kotlin); rust-only → sauberer
   ERROR; unsupported → `UNSUPPORTED_LANGUAGE`.
+  *(Serena-Ref: `endpoint/TypeHierarchyHandler` + `GetSubtypesHandler`/`GetSupertypesHandler`,
+  `symbol/TypeHierarchy`(`.Node`)/`SubtypeHierarchy`/`SupertypeHierarchy`,
+  `exception/TypeHierarchyNotSupportedException`; `endpoint/GetSymbolsOverviewHandler`,
+  `symbol/FileStructure`; DTOs `TypeHierarchyNodeDTO`/`TypeHierarchyResponse`/
+  `GetSymbolsOverviewResponse`/`FileStructureDTO`.)*
 - **Phase 5 — format + inspections + Härtung:** read-only Handler; stale/PID/401/
   atomare Writes; Plugin-CI-Job. *Gate:* strukturierte Ergebnisse; stale → Fallback
   ohne Hänger; Plugin-CI grün.
+  *(Serena-Ref: `endpoint/FormatCodeHandler`/`FormatSymbolHandler`;
+  `endpoint/InspectionRunner` + `RunInspectionsOnFileHandler`/`ListInspectionsHandler`;
+  DTOs `InspectionInfoDTO`/`InspectionProblemDTO`/`InspectionsResponse`. **Nicht
+  übernommen:** Serenas Edit-/Debug-Pfade `RenameSymbolHandler`/`MoveHandler`/
+  `SafeDeleteHandler`/`InlineSymbolHandler`/`ApplyQuickFixHandler` + `debugging/*` →
+  v2-Edit-Spec bzw. out of scope.)*
 - **v2-Ausblick (eigener Spec, nicht hier):** Die **symbolischen Edit-Ops** —
   Serena-Äquivalente `replace_symbol_body`, `insert_before_symbol`,
   `insert_after_symbol`, `jet_brains_rename` (apply), `jet_brains_move`,
@@ -499,3 +557,113 @@ Sobald 12.1–12.3 (außer „out of scope") als `ctx_*`-Ops vorliegen und gegen
 Java/Kotlin-Testprojekt verifiziert sind (Abgleich mit IDE-Verhalten), können
 **Serena-MCP** und das **offizielle JetBrains-MCP** für Code-Intelligence aus der
 Agent-Konfiguration entfernt werden — lean-ctx ist dann die alleinige Schnittstelle (§7).
+
+## 14. Implementierungs-Status & Befunde — Phase 0 + 1 (2026-06-06)
+
+Phase 0 + 1 wurden via `superpowers:subagent-driven-development` umgesetzt. Branch
+`feat-jetbrains-plugin` (von `feat-lmd-v1`, §12). Drei Commits, Commit-Disziplin §12.3
+(genau ein Commit pro Phase) eingehalten:
+
+| Commit      | Inhalt                                                                          |
+|-------------|---------------------------------------------------------------------------------|
+| `6ed981da`  | lmd-Modul entfernt (lmd-freie Basis, §12.2)                                      |
+| `211e594f`  | **Phase 0**: `LspBackend`-Trait (§4.1) + `impl` für `LspClient` (§4.2) + Router auf `Box<dyn LspBackend>` (§4.3) + §4.5-PathJail-Härtung in `ctx_refactor` |
+| `3bdb5a23`  | **Phase 1**: `port_discovery.rs` (§5.5) + `jetbrains_backend.rs`-Skeleton (§6, refs/def/impl via `ureq` 3.3, ohne `json`-Feature) + B-first `select_backend` (§4.3) |
+
+**Gate (§9):** Build ok, `cargo fmt --check` clean, 5 neue Tests grün
+(`inner_handle_uses_provided_abs_path_not_raw_args`, `project_hash_is_stable_and_16_hex`,
+`port_file_absent_for_unlikely_root`, `references_parses_wire_locations`,
+`no_port_file_means_no_backing_b`), clippy 0 Errors + 0 Warnungen in allen neuen Dateien.
+Finaler Opus-Gesamt-Review (Spec + Quality): **READY TO MERGE**, 0 Critical/Important.
+
+### 14.1 Offene Follow-ups (nicht-blockierend, spätere Phasen)
+
+1. **`project_root`-Kanonisierung im HTTP-Backend (§5.5-Trap).** In
+   `jetbrains_backend.rs` leiten `position_body` (`strip_prefix(project_root)`) und
+   `rel_to_uri` (`format!("{root}/{rel}")`) relative bzw. absolute Pfade ab, **ohne**
+   `project_root` zu kanonisieren. Bei symlinktem Root oder Trailing-Slash schlägt
+   `strip_prefix` fehl → `.unwrap_or(abs)` schickt den **absoluten** Pfad als vermeintlich
+   relativen an die IDE; `rel_to_uri` kann Double-Slash erzeugen. **Fix:** `project_root`
+   einmalig in `JetBrainsHttpBackend::new` (oder in `select_backend`) kanonisieren +
+   Trailing-`/` trimmen, sodass Rust- und Kotlin-Seite **byte-identisch** kanonisieren
+   (deckt sich mit der §5.5-Forderung). Ziel: **Phase 2/3** (beim Plugin-Bau gegen
+   `project_hash` verifizieren). Kein Live-IDE in Phase 1 → derzeit latent.
+
+2. **Stale-Cache-Invalidierung in `select_backend` (§4.3).** `with_backend` cached den
+   gewählten Backend in `BACKENDS` **ohne** Stale-Re-Prüfung. Schließt die IDE nach dem
+   Cachen eines Backing-B-Eintrags, laufen Folge-Aufrufe gegen den toten HTTP-Endpoint
+   bis zum Prozess-Neustart. §4.3 fordert „Stale-Erkennung invalidiert den Cache-Eintrag" —
+   in Phase 1 (Skeleton) **noch nicht implementiert**. Ziel: **Phase 5** (PID-/Health-
+   basiertes Cache-Invalidieren).
+
+### 14.2 Prozess-Hinweis (für Phase-3+-Ausführung)
+
+Während der Phase-0-Ausführung wurden die formalen **Spec-/Quality-Subagenten-Reviews**
+pro Task (Tasks 0.3/0.4) **übersprungen** — nur Controller-Code-Verifikation + grünes
+Gate. Der finale Opus-Gesamt-Review hat beide Phasen nachträglich abgedeckt (READY TO
+MERGE). Für Folgephasen: die Zwei-Stufen-Review (Spec-Compliance **vor** Code-Quality)
+pro Task nicht überspringen — sie ist Teil des `subagent-driven-development`-Vertrags.
+
+---
+
+## 15. Phase-2-Detaildesign — Plugin-Kern (HTTP-Lifecycle) — genehmigt 2026-06-06
+
+**Ziel:** Die Kotlin-Seite startet beim Projektöffnen einen localhost-HTTP-Server **pro
+`Project`**, meldet ihn via Port-/Token-Datei an die (Phase-1-)Rust-Seite, beantwortet
+token-geschütztes `/health`, und räumt beim Schließen sauber ab. **Noch keine PSI-Logik**
+— nur die erreichbare, authentifizierte Hülle, gegen die Phase 1 bereits spricht.
+
+### 15.1 Fixierte Entscheidungen (User, 2026-06-06)
+
+| # | Entscheidung | Begründung |
+| 1 | **Scope minimal** — 5 Bausteine + `/health`, **keine** Settings-UI/Configurable | schlankster reviewbarer Phase-Commit; Settings später additiv |
+| 2 | **Token inline** in `.port` (kein separater `http-tokens`-Store) | 1 atomarer Write/Cleanup, keine Zwei-Datei-Staleness; Phase 1 liest `token` bereits inline |
+| 3 | **`<data_dir>` = `lean_ctx_data_dir()`-Parität** (nicht hardcoded `~/.lean-ctx`) | korrekt unter `LEAN_CTX_DATA_DIR`/XDG; Rust+Kotlin müssen identisch auflösen |
+| 4 | **Tests: manuelles `runIde`-Gate** + reine Kotlin-Unit (Resolver/Hash, ohne IDE) | IntelliJ-Plugin-Testframework erst ab Phase 3 (PSI-E2E) |
+| 5 | **Additive Koexistenz** im bestehenden `com.leanctx.plugin` Companion-Plugin | PSI-Backend ist anderer Concern als Statusbar/Binary — ersetzt nichts |
+
+### 15.2 Neue Komponenten (Sub-Packages in `com.leanctx.plugin`, unter
+`packages/jetbrains-lean-ctx`)
+
+| Datei (neu/~erweitert) | Aufgabe | Serena-Ref |
+| `server/BackendHttpServer.kt` | `Disposable` Project-Service; bindet `com.sun.net.httpserver.HttpServer` auf `127.0.0.1:0` (ephemerer OS-Port); off-EDT-Pool; `dispose()` → stop + Port-Datei löschen | `SerenaBackendService` |
+| `server/RequestRouter.kt` | `HttpHandler`-Dispatch + `X-LeanCtx-Token`-Check → sonst 401; Phase 2 registriert nur `/health` | `PostRequestHandler.handleExchange` + `HttpExchangeUtils` |
+| `server/PortFileWriter.kt` | `<data_dir>/jetbrains-<hash>.port` atomar (temp+rename), `0600`, JSON `{port, token, pid, projectRoot, ideVersion, startedAt}` | (Serena: Range-Scan — wir: Datei) |
+| `server/LeanCtxPaths.kt` | Data-Dir-Resolver **identisch zu Rust** (`LEAN_CTX_DATA_DIR` → `~/.lean-ctx` mit Daten → `$XDG_CONFIG_HOME/lean-ctx`) + `projectHash = sha256(realpath(root))[..16]` | — (Parität-Naht §5.5) |
+| `server/HealthHandler.kt` | `GET /health` → `{status:"ok", ideVersion, project}` | `endpoint/*Handler`-Muster |
+| `dto/Health.kt`, `dto/ErrorResponse.kt` | gson-DTOs (gson `compileOnly`) | `service/dto/*`, `ErrorResponse` |
+| `LeanCtxStartupActivity.kt` (~erweitern) | nach Binary-Check zusätzlich `BackendHttpServer` für das `Project` booten | `PluginStartupActivity.execute` |
+
+### 15.3 Lebenszyklus
+
+```
+Project open → LeanCtxStartupActivity.execute (existiert)
+   → BackendHttpServer(project) als Disposable Project-Service
+   → bind 127.0.0.1:0 ; token = SecureRandom 32-byte hex
+   → PortFileWriter.write(<data_dir>/jetbrains-<hash>.port, 0600, atomar temp+rename)
+Rust select_backend → read_port_file → pid_alive + GET /health (X-LeanCtx-Token) → Backing B
+Project close (Disposable.dispose / projectClosing) → server.stop(0) + Port-Datei delete
+```
+
+### 15.4 plugin.xml-Delta
+
+- Kein neuer `postStartupActivity` nötig — bestehende `LeanCtxStartupActivity` wird
+  erweitert. `BackendHttpServer` als **project-level service** (Disposable, an `Project`
+  gebunden → automatischer `dispose` bei `projectClosing`). Statusbar/Actions unberührt.
+
+### 15.5 Begleit-Fix Phase 1 (Pflicht-Bestandteil dieses Phasen-Commits)
+
+`rust/src/lsp/port_discovery.rs:41` `port_file_path`: hardcoded
+`dirs::home_dir().join(".lean-ctx")` → `core::data_dir::lean_ctx_data_dir()` + Test.
+(Sonst Pfad-Divergenz Rust↔Kotlin bei XDG-/Override-Setups.)
+
+### 15.6 Gate (Verifikation)
+
+1. `runIde` → Port-Datei erscheint unter korrektem `<data_dir>` mit Token & `0600`.
+2. `curl -H "X-LeanCtx-Token: <tok>" http://127.0.0.1:<port>/health` = **200**;
+   ohne/falscher Token = **401**.
+3. Projekt schließen → Port-Datei **gelöscht**.
+4. Kotlin-Unit: Resolver-Priorität (`LEAN_CTX_DATA_DIR`/XDG/legacy) + `projectHash`
+   byte-identisch zu Rust `project_hash` (gleicher Input → gleicher 16-hex-Output).
+5. `cargo nextest run` grün inkl. Phase-1-Begleit-Fix (§15.5).
+6. Companion-Plugin (Statusbar/Actions) weiterhin funktional (keine Regression).
