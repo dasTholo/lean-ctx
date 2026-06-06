@@ -8,6 +8,8 @@ use super::client::{file_path_to_uri, LspClient};
 use super::config::{
     check_server_available, default_servers, language_for_extension, LspServerConfig,
 };
+use super::jetbrains_backend::JetBrainsHttpBackend;
+use super::port_discovery;
 
 static BACKENDS: std::sync::LazyLock<Mutex<HashMap<String, Box<dyn LspBackend>>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -43,6 +45,53 @@ fn resolve_config_for_language(language: &str) -> LspServerConfig {
     })
 }
 
+/// Selects a code-intelligence backend for `language` (§4.3).
+///
+/// Config `cfg.lsp[language]` (HashMap<String,String>):
+///   - absent      → "auto" = B-first (JetBrains if reachable, else rust-analyzer)
+///   - "auto"      → same as absent
+///   - "jetbrains" → B only (error if the IDE is not reachable; no fallback)
+///   - anything else → treated as an explicit rust-analyzer binary path = A only
+///
+/// Reachability = live port file + pid alive + `/health` ping. On any miss in
+/// "auto" mode we fall back to Backing A deterministically (one ~300ms timeout max).
+fn select_backend(language: &str, project_root: &str) -> Result<Box<dyn LspBackend>, String> {
+    let cfg = crate::core::config::Config::load();
+    let mode = cfg.lsp.get(language).map(String::as_str);
+
+    let want_b = matches!(mode, None | Some("auto" | "jetbrains"));
+    let b_only = mode == Some("jetbrains");
+
+    if want_b {
+        if let Some(pf) = port_discovery::read_port_file(project_root) {
+            if port_discovery::pid_alive(pf.pid) && port_discovery::health_ok(&pf) {
+                return Ok(Box::new(JetBrainsHttpBackend::new(
+                    pf.port,
+                    pf.token,
+                    project_root.to_string(),
+                )));
+            }
+        }
+        if b_only {
+            return Err(format!(
+                "LSP backend 'jetbrains' configured for '{language}' but the IDE is not reachable \
+                 (no live port file / health check failed)"
+            ));
+        }
+    }
+
+    // Backing A: rust-analyzer (today's behavior).
+    let config = resolve_config_for_language(language);
+    if super::config::find_binary_in_path(&config.command).is_none()
+        && !Path::new(&config.command).is_file()
+    {
+        check_server_available(language)?;
+    }
+    let root_uri = file_path_to_uri(project_root)?;
+    let client = LspClient::start(&config, &root_uri)?;
+    Ok(Box::new(client) as Box<dyn LspBackend>)
+}
+
 pub fn with_backend<F, R>(file_path: &str, project_root: &str, f: F) -> Result<R, String>
 where
     F: FnOnce(&mut dyn LspBackend, &str) -> Result<R, String>,
@@ -61,20 +110,8 @@ where
     let mut backends = BACKENDS.lock().map_err(|e| e.to_string())?;
 
     if !backends.contains_key(language) {
-        let config = resolve_config_for_language(language);
-
-        if super::config::find_binary_in_path(&config.command).is_none()
-            && !Path::new(&config.command).is_file()
-        {
-            check_server_available(language)?;
-        }
-
-        let root_uri = file_path_to_uri(project_root)?;
-        let client = LspClient::start(&config, &root_uri)?;
-        backends.insert(
-            language.to_string(),
-            Box::new(client) as Box<dyn LspBackend>,
-        );
+        let backend = select_backend(language, project_root)?;
+        backends.insert(language.to_string(), backend);
     }
 
     let backend = backends
@@ -111,5 +148,18 @@ pub fn shutdown_all() {
         for (_, backend) in backends.drain() {
             drop(backend);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_port_file_means_no_backing_b() {
+        // With no IDE port file for an unlikely root, discovery yields None →
+        // select_backend would deterministically fall through to Backing A.
+        let pf = port_discovery::read_port_file("/nonexistent/leanctx/proj/xyz");
+        assert!(pf.is_none(), "unexpected port file for nonexistent root");
     }
 }
