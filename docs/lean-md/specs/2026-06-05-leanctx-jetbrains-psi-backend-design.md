@@ -221,11 +221,13 @@ Concern** — Token-Ersparnis anzeigen, Binary finden: `LeanCtxStartupActivity`
 (`LeanCtxStatusBarFactory` + `StatsReader`), `BinaryResolver`, Tools-Menü-Actions
 (Setup/Doctor/Gain/Dashboard, `actions/`). Das PSI-HTTP-Backend wird **additiv** in
 denselben Plugin-Modul (`com.leanctx.plugin`) integriert — es **koexistiert**, ersetzt
-nichts. IC 2024.1, Kotlin 1.9.25, IntelliJ-Platform-Gradle 2.14.0. plugin.xml deklariert
-`LeanCtxStartupActivity` via `postStartupActivity`-Tag (mappt auf `ProjectActivity`) +
-`statusBarWidgetFactory`. **Konsequenz:** Startup ist schon modern (keine
-Modernisierung nötig); Phase 2 erweitert `LeanCtxStartupActivity.execute` um den
-Server-Boot und legt neue Sub-Packages `server/`, `dto/` an.
+nichts. Build aktuell veraltet (IC 2024.1, Kotlin 1.9.25, IntelliJ-Platform-Gradle
+2.14.0, jvmTarget 17) → wird in Phase 2 mit auf IC 2026.1 / Kotlin 2.3.20 modernisiert
+(§15.7). plugin.xml deklariert `LeanCtxStartupActivity` via `postStartupActivity`-Tag
+(mappt auf `ProjectActivity`) + `statusBarWidgetFactory`. **Konsequenz:** Startup ist
+schon modern (keine Code-Modernisierung nötig); Phase 2 erweitert
+`LeanCtxStartupActivity.execute` um den Server-Boot und legt neue Sub-Packages
+`server/`, `dto/` an.
 
 ### 5.1 Packages (`com.leanctx.plugin`)
 
@@ -621,6 +623,7 @@ token-geschütztes `/health`, und räumt beim Schließen sauber ab. **Noch keine
 | 3 | **`<data_dir>` = `lean_ctx_data_dir()`-Parität** (nicht hardcoded `~/.lean-ctx`) | korrekt unter `LEAN_CTX_DATA_DIR`/XDG; Rust+Kotlin müssen identisch auflösen |
 | 4 | **Tests: manuelles `runIde`-Gate** + reine Kotlin-Unit (Resolver/Hash, ohne IDE) | IntelliJ-Plugin-Testframework erst ab Phase 3 (PSI-E2E) |
 | 5 | **Additive Koexistenz** im bestehenden `com.leanctx.plugin` Companion-Plugin | PSI-Backend ist anderer Concern als Statusbar/Binary — ersetzt nichts |
+| 6 | **Build-Modernisierung auf IC 2026.1 / Kotlin 2.3.20** (jvmTarget 21) gleich mitziehen (§15.7) | aktuelle IDE-Baseline; Kotlin an gebündelte Runtime gekoppelt; kein Marketplace → keine Alt-IDE-Kompat nötig |
 
 ### 15.2 Neue Komponenten (Sub-Packages in `com.leanctx.plugin`, unter
 `packages/jetbrains-lean-ctx`)
@@ -667,3 +670,34 @@ Project close (Disposable.dispose / projectClosing) → server.stop(0) + Port-Da
    byte-identisch zu Rust `project_hash` (gleicher Input → gleicher 16-hex-Output).
 5. `cargo nextest run` grün inkl. Phase-1-Begleit-Fix (§15.5).
 6. Companion-Plugin (Statusbar/Actions) weiterhin funktional (keine Regression).
+
+### 15.7 Build-Modernisierung (Teil des Phase-2-Commits)
+
+**Befund (Web-Recherche 2026-06-06):** Aktueller Plugin-Build ist veraltet. Neueste
+Stände: IntelliJ IDEA **2026.1.3** (bündelt **Kotlin 2.3.20**), IntelliJ-Platform-
+Gradle-Plugin **2.16.0**, Kotlin standalone 2.4.0. **Kopplung:** Ein JetBrains-Plugin
+läuft zur Laufzeit gegen die **IDE-gebündelte** Kotlin-Runtime → die kompilierte
+Kotlin-Version muss ≤ gebündelt sein (für IC 2026.1: Kotlin **2.3.x**, NICHT 2.4.0).
+
+**Änderungen in `packages/jetbrains-lean-ctx/build.gradle.kts` + `gradle.properties`:**
+
+| Setting | Alt | Neu |
+| `org.jetbrains.kotlin.jvm` | `1.9.25` | `2.3.20` (= gebündelt IC 2026.1) |
+| `org.jetbrains.intellij.platform` | `2.14.0` | `2.16.0` |
+| `create("IC", …)` | `2024.1` | `2026.1` |
+| `ideaVersion.sinceBuild` | `241` | `261` |
+| `ideaVersion.untilBuild` | `261.*` | **entfernen** (offen — bricht nicht bei IDE-Minor-Update; OK für Privat-Plugin ohne Marketplace) |
+| `kotlinOptions.jvmTarget` | `17` | `21` — **+ DSL-Migration:** `kotlinOptions` ist in Kotlin 2.x deprecated → auf `compilerOptions { jvmTarget = JvmTarget.JVM_21 }` umstellen (IC 2026.1 läuft auf JBR 21) |
+| `gradle.properties` | — | `kotlin.stdlib.default.dependency=false` (Stdlib NICHT bündeln — IDE liefert sie) |
+
+**Nicht in Phase 2 nötig** (erst ab Phase 3, Kotlin-PSI): `<depends>org.jetbrains.kotlin</depends>`
++ K2-/Analysis-API-Deklaration. Phase 2 nutzt nur `com.sun.net.httpserver` + reine JVM —
+keine Kotlin-Compiler-/Analysis-APIs.
+
+*Gate-Ergänzung:* `./gradlew build` + `./gradlew runIde` grün auf dem neuen Stack;
+Companion-Plugin lädt weiterhin in IC 2026.1.
+
+**Quellen:** [Kotlin 2.4.0 Released](https://blog.jetbrains.com/kotlin/2026/06/kotlin-2-4-0-released/) ·
+[IntelliJ Platform Gradle Plugin Releases](https://github.com/JetBrains/intellij-platform-gradle-plugin/releases) ·
+[IntelliJ IDEA 2026.1.3 Is Out](https://blog.jetbrains.com/idea/2026/06/intellij-idea-2026-1-3/) ·
+[Configuring Kotlin Support](https://plugins.jetbrains.com/docs/intellij/using-kotlin.html)
