@@ -166,7 +166,11 @@ stabil. Backend-Wahl ist intern und transparent. PathJail validiert vor dem Back
   `tool_profiles.rs`/`dynamic_tools.rs`/`workflow/types.rs`): `type_hierarchy`
   (`direction: subtypes|supertypes`, default supertypes), `overview`, `format`,
   `inspections`. Match-Block ctx_refactor.rs L33-46 + Hilfetext erweitern;
-  `tool_def`-Schema (registered/ctx_refactor.rs L19-24) um Actions + `direction`.
+  `tool_def`-Schema um Actions + `direction` erweitern. **Hinweis (Changelog 3.7.4 #141 —
+  Tool-Registry = single schema source):** `registered/ctx_refactor.rs` pflegt das Schema
+  nicht mehr inline (alte L19-24), sondern ruft `crate::tool_defs::tool_def(...)`; die
+  neuen Actions/`direction` werden über diese **eine** Registry ergänzt (Drift-Regression-Test),
+  nicht als zweite handgepflegte Schema-Kopie.
 - **Degradierung:** Backing A → Default-Trait-`Err` → sauberer `ERROR: …`-String
   (Muster wie heute L57), z. B. „type_hierarchy requires the JetBrains backend".
 - `ctx_symbol` bleibt **unberührt** (nutzt graph_provider, nicht LSP).
@@ -181,6 +185,16 @@ Da das Plugin bewusst **nicht** re-validiert, MUSS sichergestellt sein, dass
 `ctx_refactor` auf `ctx.resolved_path` umstellen **oder** `jail_path` explizit in
 `with_backend`/`select_backend` aufrufen. Sonst umgeht der selbstgebaute `abs_path`
 das Jail. **Diese Umstellung ist Pflicht-Bestandteil von Phase 0.**
+
+> **Re-Verifikation 2026-06-06 (Changelog 3.7.4 #145 — unified path resolution).** Der
+> `abs_path`-Selbstbau in `ctx_refactor.rs:20-23` (`format!("{project_root}/{path}")`)
+> besteht **weiterhin** — die Naht ist real noch offen, dieser §4.5-Befund bleibt gültig.
+> `jail_path` liegt unverändert in `core/pathjail.rs:88`. **Neu/zuträglich:** die
+> konsolidierte Pfadauflösung lebt jetzt zentral in `core::path_resolve::resolve_tool_path
+> (project_root, shell_cwd, raw)` (`core/path_resolve.rs:32`). Bevorzugtes Phase-0-Fix-Ziel
+> ist daher, `ctx_refactor` auf **`resolve_tool_path`** (bzw. `ctx.resolved_path` →
+> `resolve_path_sync`, `tool_trait.rs:137`) umzustellen, statt den `abs_path` weiter selbst
+> zu bauen — ein kanonischer Resolver statt einer dritten Ad-hoc-Variante.
 
 ### 4.6 Änderungsstellen
 
@@ -383,7 +397,12 @@ war falsch — die Arbeit liegt auf `feat-lmd-v1`).
 
 ### 12.1 Ausgangslage (verifiziert 2026-06-05)
 
-- **Basis = `feat-lmd-v1`** (Version `3.7.3-lmd`). Durch das Abzweigen sind **alle**
+- **Basis = `feat-lmd-v1`** (Version `3.7.3-lmd`). **Versions-Hinweis (2026-06-06):**
+  `main` steht inzwischen auf **3.7.4** (Changelog 3.7.4 gemerged) — `feat-lmd-v1`
+  basiert noch auf `3.7.3-lmd`. Vor dem finalen Squash-Merge-PR (§12.4) `feat-jetbrains-plugin`
+  auf aktuelles `main`/`3.7.4` rebasen (kosmetische Version `3.7.3` aus §12.2.4 ggf. auf
+  `3.7.4` ziehen); für die Branch-Neuanlage selbst bleibt `feat-lmd-v1` die korrekte Basis.
+  Durch das Abzweigen sind **alle**
   rust/src-Änderungen (z. B. `rust/src/graph::get_forward_deps`) **automatisch** auf dem
   Branch — kein „Übertragen" nötig.
 - **Deps bereits vorhanden:** `ureq = "3.3.0"` (`Cargo.toml:140`) + `sha2 = "0.10"`
@@ -400,9 +419,9 @@ war falsch — die Arbeit liegt auf `feat-lmd-v1`).
   sauber isoliert, einzige externe Referenz = `lib.rs:36`):
     1. `rust/src/lmd/` — gesamtes Modul löschen.
     2. `rust/src/lib.rs:36` → `pub mod lmd;` entfernen (**das** ist die „mod"-Anpassung —
-        es ist `lib.rs`, **kein** `rust/src/mod.rs`).
+       es ist `lib.rs`, **kein** `rust/src/mod.rs`).
     3. `rust/tests/lmd_phase1_gate.rs` + `rust/tests/lmd_rushdown_spike.rs` löschen
-        (beide `use lean_ctx::lmd::…` → würden den Build sonst brechen).
+       (beide `use lean_ctx::lmd::…` → würden den Build sonst brechen).
     4. *(optional, kosmetisch)* `rust/Cargo.toml:3` Version `"3.7.3-lmd"` → `"3.7.3"`.
 - **Bleibt drin (verifiziert):** `ctx_compile` (`registry.rs:175`) hat **keine**
   lmd-Abhängigkeit — die frühere Behauptung „lmd-Render-Tool" war falsch; bleibt

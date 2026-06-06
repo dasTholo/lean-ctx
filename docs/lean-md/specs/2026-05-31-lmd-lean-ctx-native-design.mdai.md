@@ -66,12 +66,12 @@ markdownai→lmd als Referenz), danach die übrigen Skills mit Hand-over auf lmd
 
 ### 2.2 Fehlt / abweichend — Risiken & Lücken
 
-| Punkt                                          | Befund                                                                                                           | Konsequenz                                                                                              |
-|------------------------------------------------|------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------|
-| `rushdown`, `evalexpr` als Deps                | `rushdown = "0.18"` jetzt in `rust/Cargo.toml` gepinnt; `evalexpr` bewusst **nicht** in Phase 0                  | Spike grün (Gate-Outcome §1); `evalexpr` erst Phase 3 (§4)                                              |
-| `tools/ctx_md.rs`, `cli/md_cmd.rs`, `src/lmd/` | `src/lmd/audit.rs` existiert (22 Einträge, 3 CI-Tests, Gate-Outcome §2); Rest noch nicht                         | Greenfield — wie erwartet                                                                               |
-| `session.files_touched` (Recent-Files)         | Feld **existiert**; `graph_neighbor_ranks_for_recent_files` verdrahtet (`ctx_semantic_search.rs:814`)            | `@graph recent-neighbors` **bleibt v1** (R-Router); kein neuer Session-API (Gate-Outcome §3 korrigiert) |
-| Node-markdownai                                | unter `markdownai/` (node_modules, MCP-Server, `MDs/`) aktiv; mdai-Skills hängen an `mcp__markdownai__read_file` | Strangler: parallel halten, pro Skill ablösen                                                           |
+| Punkt                                          | Befund                                                                                                                                | Konsequenz                                                                                              |
+|------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------|
+| `rushdown`, `evalexpr` als Deps                | `rushdown = "0.18"` jetzt in `rust/Cargo.toml` gepinnt; `evalexpr` bewusst **nicht** in Phase 0                                       | Spike grün (Gate-Outcome §1); `evalexpr` erst Phase 3 (§4)                                              |
+| `tools/ctx_md.rs`, `cli/md_cmd.rs`, `src/lmd/` | `src/lmd/audit.rs` existiert (22 Einträge, 3 CI-Tests, Gate-Outcome §2); Rest noch nicht                                              | Greenfield — wie erwartet                                                                               |
+| `session.files_touched` (Recent-Files)         | Feld **existiert**; `graph_neighbor_ranks_for_recent_files` verdrahtet (`ctx_semantic_search.rs:914`, `files_touched`-Zugriff `:897`) | `@graph recent-neighbors` **bleibt v1** (R-Router); kein neuer Session-API (Gate-Outcome §3 korrigiert) |
+| Node-markdownai                                | unter `markdownai/` (node_modules, MCP-Server, `MDs/`) aktiv; mdai-Skills hängen an `mcp__markdownai__read_file`                      | Strangler: parallel halten, pro Skill ablösen                                                           |
 
 ### 2.3 Hook-Befund — Enforcement ist bereits hart
 
@@ -162,24 +162,24 @@ lmd ist ein **dünnes Frontend**. Jede Direktive wird vor dem Bau klassifiziert:
   **kein Doppel-Tracking** sicherstellen.
 - **E (rushdown-Extension)** — echtes Engine-Konstrukt ohne lean-ctx-Äquivalent.
 
-| Direktive                               | Klasse        | Backing                                                                                                                                                                                              |
-|-----------------------------------------|---------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `@read`                                 | R             | `core::structured_read` / `ctx_read`                                                                                                                                                                 |
-| `@search`                               | R             | `ctx_search`                                                                                                                                                                                         |
-| `@list`                                 | R             | `ctx_tree`                                                                                                                                                                                           |
-| `@query` (shell)                        | R             | `shell/exec` + compress (+ Security-Gate)                                                                                                                                                            |
-| `@graph` (Datei/Symbol/Kontext)         | R             | `graph_index`/`call_graph`/`graph_context` (verifiziert, **statisch/kein LSP**); recent-neighbors via `session.files_touched` + `graph_neighbor_ranks_for_recent_files` (Gate-Outcome §3 korrigiert) |
-| `@symbol` (refs/def/impl/find/overview) | R (+Anreich.) | `ctx_refactor` (LSP) + `ctx_symbol` + Cache-Namen-Anreicherung (§4.5: Output-Veredelung, kein neuer Algo) — **Serena-frei** (§4.5, Phase 3.2); `type-hierarchy` = Nav-Lücke (opt. Serena/PSI-Plugin) |
-| `@edit` (search-replace)                | R             | **ausnahmslos `ctx_edit`** (nie native `Edit`/Serena; §4.5, Phase 3.1)                                                                                                                               |
-| `@remember`/`@recall`                   | R             | `ctx_knowledge` (`remember`/`recall_for_output`, `no_track`)                                                                                                                                         |
-| `@env`/`@date`/`@count`                 | R             | `std::env`/chrono/glob (trivial)                                                                                                                                                                     |
-| `@phase`/`@on complete`                 | R+H           | `@phase`→`add_decision` (additiv); `@on complete` defert Finding-Writes an `auto_findings`-Hook `server/mod.rs:1156` (Gate-Outcome §2)                                                               |
-| `@lean-md` Header                       | E             | Config-Parse                                                                                                                                                                                         |
-| `@include`/`@import`                    | E             | File-Inline / Definitions-Scope (fs + jail)                                                                                                                                                          |
-| `@define`/`@call`                       | E             | Macro-Engine — kein lean-ctx-Äquivalent                                                                                                                                                              |
-| `@if`/`@consumer`                       | E             | Container-Transformer (+ evalexpr, Phase 4)                                                                                                                                                          |
-| `{{ expr }}` / Pipe + `@render`         | E             | Inline-Eval / AstTransformer                                                                                                                                                                         |
-| TDD-Output                              | R+E           | `tdd_schema` (R) + Render-Hook (E)                                                                                                                                                                   |
+| Direktive                               | Klasse        | Backing                                                                                                                                                                                                                                                                 |
+|-----------------------------------------|---------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `@read`                                 | R             | `core::structured_read` / `ctx_read`                                                                                                                                                                                                                                    |
+| `@search`                               | R             | `ctx_search`                                                                                                                                                                                                                                                            |
+| `@list`                                 | R             | `ctx_tree`                                                                                                                                                                                                                                                              |
+| `@query` (shell)                        | R             | `shell/exec` + compress (+ Security-Gate)                                                                                                                                                                                                                               |
+| `@graph` (Datei/Symbol/Kontext)         | R             | `graph_index`/`call_graph`/`graph_context` (verifiziert, **statisch/kein LSP**); recent-neighbors via `session.files_touched` + `graph_neighbor_ranks_for_recent_files` (Gate-Outcome §3 korrigiert)                                                                    |
+| `@symbol` (refs/def/impl/find/overview) | R (+Anreich.) | `ctx_refactor` (LSP) + `ctx_symbol` + Cache-Namen-Anreicherung (§4.5: Output-Veredelung, kein neuer Algo) — **Serena-frei** (§4.5, Phase 3.2); `type-hierarchy` = Nav-Lücke (opt. Serena/PSI-Plugin)                                                                    |
+| `@edit` (search-replace)                | R             | **ausnahmslos `ctx_edit`** (nie native `Edit`/Serena; §4.5, Phase 3.1)                                                                                                                                                                                                  |
+| `@remember`/`@recall`                   | R             | `ctx_knowledge` (`remember`/`recall_for_output`, `no_track`)                                                                                                                                                                                                            |
+| `@env`/`@date`/`@count`                 | R             | `std::env`/chrono/glob (trivial)                                                                                                                                                                                                                                        |
+| `@phase`/`@on complete`                 | R+H           | `@phase`→`add_decision` (additiv); `@on complete` defert Finding-Writes an `core::auto_findings::extract` (aufgerufen `server/call_tool.rs:586` — war `server/mod.rs:1156`, durch den `call_tool_guarded`-Split #144 in ein eigenes Modul verschoben) (Gate-Outcome §2) |
+| `@lean-md` Header                       | E             | Config-Parse                                                                                                                                                                                                                                                            |
+| `@include`/`@import`                    | E             | File-Inline / Definitions-Scope (fs + jail)                                                                                                                                                                                                                             |
+| `@define`/`@call`                       | E             | Macro-Engine — kein lean-ctx-Äquivalent                                                                                                                                                                                                                                 |
+| `@if`/`@consumer`                       | E             | Container-Transformer (+ evalexpr, Phase 4)                                                                                                                                                                                                                             |
+| `{{ expr }}` / Pipe + `@render`         | E             | Inline-Eval / AstTransformer                                                                                                                                                                                                                                            |
+| TDD-Output                              | R+E           | `tdd_schema` (R) + Render-Hook (E)                                                                                                                                                                                                                                      |
 
 **Resultat:** Fast alle *Daten*-Direktiven sind R (Router von je wenigen Zeilen).
 Echte rushdown-Arbeit (E) reduziert sich auf **~6 Primitive** (§4). "15 Direktiven,
@@ -339,6 +339,46 @@ Grenze (`@include`). (Phase-1-Review-verifiziert sicher.)
 > läuft jetzt (kein `#[ignore]`) über `mode=full` + mehrzeilige Fixture
 > (Sentinel nicht in Zeile 1, damit die Proof-Line ihn nie leakt) + 3 Reads.
 > `@read` behält `auto` als Default.
+
+### 4.2b Verifizierte Infrastruktur-Deltas (Changelog 3.7.3/3.7.4, 2026-06-06)
+
+Code-Befunde, die §4.2a stützen/präzisieren — alle gegen den aktuellen Stand
+re-verifiziert. **Keine** ändern die lmd-Architektur; sie verschärfen nur, *welche*
+existierende Infrastruktur die R-Bridges erben.
+
+- **Shared `core::content_cache` (#148, verifiziert `core/content_cache.rs`):** ein
+  resident-bounded LRU (`Cache`, `get_or_read(path) → Arc<str>`, durch `(mtime, size)`
+  invalidiert, budget-evicted) liegt **zusätzlich** zum SessionCache. Index-Build,
+  `ctx_search` und BM25 teilen damit **eine** In-Memory-Kopie pro Datei (read-once).
+  Konsequenz für lmd: `@search`/`@graph`-Build-Reads profitieren transparent — **kein
+  eigener lmd-Cache** (§10 bleibt korrekt; der content_cache ist lean-ctx-intern, nicht
+  lmd-net-new).
+- **Lazy demand-driven index warming (#152):** der MCP-Server baut Graph + BM25 **nicht
+  mehr eager** in `initialize`; Tools sind nach Bedarf klassifiziert (`None`/`Search`/
+  `Heavy`), der erste Heavy-Call triggert einen einmaligen Hintergrund-Warm pro Root.
+  Konsequenz: `@graph` (Phase 3, `load_or_build`) ist ein **Heavy**-Pfad — der erste
+  `@graph`-Op in einem Render zahlt den Warm, danach steht der Graph (deckt sich mit der
+  „ein Build pro Render"-Memo-Annahme §4.2a). `@read`/`@search`-only-Renders zahlen **null**
+  Graph-Startkosten.
+- **Editing-Intents lesen `full` (#351) — Präzisierung zu F-1:** klassifiziert die aktive
+  Task als `refactor`/`fix-bug`/`generate`, resolved `auto`-Mode **immer zu `full`**
+  (man editiert keine teil-sichtbare Datei). Damit gilt die F-1-Aussage „`auto`
+  by-design kompakt" **nur** für Explore/Review-Intents; unter einem Editing-Intent
+  liefert `@read x` Full + Auto-Delta beim Re-Read. Die Read→Delta-Garantie bleibt — der
+  zweite Read ist Cache-Hit/Delta, nur die erste Auflösung ist `full` statt komprimiert.
+- **Tool-Registry = single schema source (#141):** granulare Per-Tool-Schemata werden aus
+  **einer** Registry generiert (verifiziert: `registered/ctx_refactor.rs` ruft
+  `crate::tool_defs::tool_def(...)`), nicht mehr parallel handgepflegt (Drift-Regression-Test).
+  Konsequenz für §4.4: die neuen `ctx_md_*`-Schemata folgen dem `tool_defs`-Registry-Muster
+  (Logik in `tools/ctx_md.rs`, Schema-Eintrag über `tool_defs`), statt ein zweites Schema
+  inline zu duplizieren.
+- **Sekundär — erbbare Schichten (nennen, kein lmd-Bau):** `permission_inheritance`
+  (#) spiegelt IDE-Permission-Regeln auf `ctx_shell`/`ctx_read` → `@query`/`@read` erben
+  das, wenn aktiv (zusätzlich zu §7). Signierter Audit-Trail (Ed25519) + `detect_injection`
+  (Bet 04) härten den bestehenden `audit_trail.rs`, auf den §7 ohnehin verweist.
+  Deterministic-HNSW (#) macht `ctx_semantic_search` reproduzierbar → **stützt** die
+  Golden-Parity (§8.2). Line-Ranges in `map`/`signatures` (`@Lstart-end`, #340) liefern
+  `@symbol overview` (§4.5) die Range gratis.
 
 ### 4.4 Neue Integrationspunkte
 
@@ -615,7 +655,7 @@ Blocklist-only) **+ `shell_strict_mode`** (`$()`/Backtick-Block),
 |------|--------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Q-05 | `@phase`-Fehlerverhalten (abort vs. continue)                                  | **deferred** — wird in der `executing-plans`-Migration (§5.2) scharf, nicht in der Engine-Spec                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | Q-06 | JetBrains-PSI-Plugin-Pfad (Serena-Ablösung inkl. Edits/`type_hierarchy`)       | **Spike-Befund 2026-06-05 (§4.5):** Serena = IntelliJ-Plugin (**PSI** + lokaler HTTP/JSON-Server), **kein LSP**; JetBrains exponiert PSI nicht extern → IDE-Genauigkeit nur via **eigenes In-IDE-Plugin**. Gerüst `packages/jetbrains-lean-ctx` (IntelliJ-Platform 2.14.0/Kotlin) existiert, **leer/unimplementiert**. Eigenes Plugin-Vorhaben (Kotlin, nicht Rust), **nicht Phase 3**; Phase-3.2-`@symbol` nutzt rust-analyzer-LSP (Backing A)                                                                                                        |
-| G-1  | `@graph recent-neighbors` — Datenquelle für Recent-Files                       | **gelöst (Gate-Outcome §3 korrigiert):** `session.files_touched` + `graph_neighbor_ranks_for_recent_files` existieren, Muster live in `ctx_semantic_search.rs:791` → recent-neighbors **bleibt v1**, kein neuer API                                                                                                                                                                                                                                                                                                                                    |
+| G-1  | `@graph recent-neighbors` — Datenquelle für Recent-Files                       | **gelöst (Gate-Outcome §3 korrigiert):** `session.files_touched` + `graph_neighbor_ranks_for_recent_files` existieren, Muster live in `ctx_semantic_search.rs:897` (`files_touched`) / `:914` (ranks) → recent-neighbors **bleibt v1**, kein neuer API                                                                                                                                                                                                                                                                                                 |
 | R-1  | rushdown-API / Version                                                         | **gelöst (Phase 0/1, integriert):** rushdown 0.18, Parser live                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | F-1  | Read→Delta-Cache-Hit über lmd nicht sauber 2-Read-beobachtbar (Phase-1-Befund) | **gelöst (2026-06-02, empirisch):** kein produktiver ctx_read-Bug — der `[unchanged]`-Stub ist ein `mode=full`-Feature und funktioniert (klein+groß ~99 %); `auto` komprimiert by-design (Auto-Re-Read groß ~50 Tok, klein trivial). F-1 war Test-Korrektheit: `reread_same_path_is_cache_hit_not_full` erwartete fälschlich einen `auto`-2-Read-Stub. Fix: Test über `mode=full` + mehrzeilige Fixture (Sentinel nicht Zeile 1 → Proof-Line leakt nicht) + 3 Reads, un-`#[ignore]`'d. `@read` bleibt `auto`. Keine `ctx_read.rs`/`cache.rs`-Änderung. |
 | F-2  | HTML-Kommentar-Injection im Render-Fallback (Phase-1-Befund)                   | **gelöst (2026-06-02):** beide Vektoren zu — Inline-Name-Charset in `parser/inline.rs::parse_inline_body` an die Block-Grammatik `[a-z0-9-]` (ascii-alpha-Start) angeglichen (invalider Name → pass-through statt Dispatch); `render.rs::dispatch` sanitisiert `name` **und** `{e:?}` via `sanitize_comment` (`-->`/`<!--` neutralisiert). Tests: `rejects_comment_injection_name`, `sanitizes_comment_breakout_sequences`, e2e `inline_comment_injection_is_inert`.                                                                                   |
@@ -636,7 +676,13 @@ Blocklist-only) **+ `shell_strict_mode`** (`$()`/Backtick-Block),
 
 ---
 
-*Status: v0.11 (2026-06-05) — §4.5 Code-Intelligence-Direktiven `@graph`/`@symbol`/`@edit`
+*Status: v0.12 (2026-06-06) — Changelog-3.7.3/3.7.4-Audit eingearbeitet: §4.2b **neu**
+(verifizierte Infrastruktur-Deltas — shared `core::content_cache` #148, lazy demand-driven
+warming #152, Editing-Intents→`full` #351 als F-1-Präzisierung, Tool-Registry-single-source
+#141, Sekundär: permission_inheritance/signierter Audit/deterministic-HNSW/map-line-ranges);
+stale Code-Anker korrigiert (`@on complete`→`core::auto_findings::extract`/`call_tool.rs:586`
+statt `server/mod.rs:1156`; `ctx_semantic_search.rs` `:814`→`:914` / `:791`→`:897/:914`).
+— v0.11 (2026-06-05) — §4.5 Code-Intelligence-Direktiven `@graph`/`@symbol`/`@edit`
 (Serena-frei) ergänzt; §6 Phase 3 aufgespalten → **3 `@graph`** (7 statische Ops, kein LSP,
 read-only) / **3.1 `@edit`** (ausnahmslos `ctx_edit`) / **3.2 `@symbol`** (LSP-Nav,
 Serena-frei) nach aufsteigendem Risiko. Empirisch (gegen realen lean-ctx+Serena-Stack):
