@@ -6,11 +6,11 @@
 
 **Architecture:** `ctx_refactor` ruft über `lsp::router::with_backend` ein `&mut dyn LspBackend`. Phase 0 extrahiert das Trait aus dem heutigen `LspClient` (verhaltensidentisch) und schließt die §4.5-Naht, sodass PathJail garantiert vor jedem Backend-Aufruf greift. Phase 1 fügt `JetBrainsHttpBackend` (synchron via `ureq`), Port-Datei-Discovery (`port_discovery.rs`) und die Factory `select_backend` (B-first, A-Fallback) hinzu. Edits/`type_hierarchy`/`format`/`inspections` sind **nicht** Teil dieser beiden Phasen (Phase 4/5 bzw. v2).
 
-**Tech Stack:** Rust, `lsp_types`, `serde_json`, `ureq = "3.3.0"` (blocking HTTP — **bereits Dependency**, `Cargo.toml:140` / auf `feat-jetbrains-plugin` `Cargo.toml:132`), `sha2 = "0.10"` (projecthash — **bereits Dependency**), `dirs` (vorhanden). **Kein `json`-Feature** (Repo-Konvention): JSON-Requests via `.send(&serde_json::to_vec(&body)?)` mit `Content-Type: application/json`, Antworten via `.into_body().read_to_string()` + `serde_json::from_str` — Vorbild `rust/src/cloud_client.rs:146-158`. Per-Request-Timeout (ureq 3.x): `.config().timeout_global(Some(dur)).build()`. Tests via `cargo nextest run` (niemals `cargo test`).
+**Tech Stack:** Rust, `lsp_types`, `serde_json`, `ureq = "3.3.0"` (blocking HTTP — **bereits Dependency** auf Basis `feat-lmd-v1`, `Cargo.toml:140`), `sha2 = "0.10"` (projecthash — **bereits Dependency**, `Cargo.toml:159`), `dirs` (vorhanden). **Kein `json`-Feature** (Repo-Konvention): JSON-Requests via `.send(&serde_json::to_vec(&body)?)` mit `Content-Type: application/json`, Antworten via `.into_body().read_to_string()` + `serde_json::from_str` — Vorbild `rust/src/cloud_client.rs:146-158`. Per-Request-Timeout (ureq 3.x): `.config().timeout_global(Some(dur)).build()`. Tests via `cargo nextest run` (niemals `cargo test`).
 
 **Spec:** `docs/lean-md/specs/2026-06-05-leanctx-jetbrains-psi-backend-design.md` — §4 (Rust-Seite), §6 (Wire-DTO), §9 (Phasen), §12 (Branch-Strategie).
 
-**Branch & Commit-Disziplin (§12):** Gesamte Arbeit auf `feat-jetbrains-plugin` (geht von `main` ab, kein worktree). **Ein Commit pro Phase** — innerhalb einer Phase NICHT pro Task committen, sondern erst im finalen Schritt der Phase. Der Spec-Sync (Task 0.0) ist ein eigener, vorgelagerter Commit.
+**Branch & Commit-Disziplin (§12):** Gesamte Arbeit auf `feat-jetbrains-plugin` (**zweigt von `feat-lmd-v1` ab**, lmd wird in Task 0.0 entfernt; kein worktree, kein `main`/`origin`-Umweg). **Ein Commit pro Phase** — innerhalb einer Phase NICHT pro Task committen, sondern erst im finalen Schritt der Phase. Die lmd-Entfernung (Task 0.0) ist ein eigener, vorgelagerter Commit.
 
 **Rust-Edit-Regel (Projekt):** `*.rs`-Änderungen ausschließlich über Serena-Tools (`mcp__serena__jet_brains_find_symbol`, `replace_symbol_body`, `insert_after_symbol`, …) — **nie** native `Edit`/`ctx_edit` auf Rust. `Cargo.toml` (kein Rust) via `ctx_edit`. Vor jedem `git add`: `mcp__jetbrains__reformat_file` auf alle geänderten Dateien.
 
@@ -36,70 +36,68 @@
 
 ---
 
-## Task 0.0: Branch-Neuanlage von `origin/main` (3.7.4) + Spec-Sync (eigener Commit)
+## Task 0.0: Branch von `feat-lmd-v1` + lmd-Entfernung (erster Commit)
 
-**Ziel:** Den stale lokalen `feat-jetbrains-plugin` (saß auf altem `main` 3.6.11, 231 Commits hinter `origin/main`) **verwerfen** und **frisch von `origin/main` (3.7.4)** neu anlegen; dann Spec + diesen Plan aus `feat-lmd-v1` als **einen** Commit obendrauf (§12.1/§12.2).
+**Ziel:** `feat-jetbrains-plugin` von `feat-lmd-v1` abzweigen (erbt **alle** rust/src-Änderungen) und lmd als **ersten Commit** entfernen → lmd-freie Basis. **Kein** `main`/`origin`-Umweg (§12.1/§12.2).
 
-**Voraussetzung:** Spec **und** Plan sind auf `feat-lmd-v1` committet (korrigierte §12 mit Basis `origin/main` 3.7.4). `origin` ist gefetcht (`git fetch origin`).
+**Voraussetzung:** Du bist auf `feat-lmd-v1`; Spec + Plan sind dort committet → wandern durch das Abzweigen automatisch mit (keine Datei-Übernahme nötig). Basis-Version = `3.7.3-lmd`, `ureq = "3.3.0"` + `sha2 = "0.10"` vorhanden.
 
 **Files:**
-- Add (auf neuem Zielbranch): `docs/lean-md/specs/2026-06-05-leanctx-jetbrains-psi-backend-design.md`
-- Add (auf neuem Zielbranch): `docs/lean-md/plans/2026-06-05-jetbrains-backend-phase-0-1.md` (dieser Plan)
+- Delete: `rust/src/lmd/` (gesamtes Modul), `rust/tests/lmd_phase1_gate.rs`, `rust/tests/lmd_rushdown_spike.rs`
+- Modify: `rust/src/lib.rs` (Zeile `pub mod lmd;` entfernen), optional `rust/Cargo.toml` (Version)
 
-- [ ] **Step 1: origin fetchen + Stand prüfen**
+- [ ] **Step 1: Stale Branch löschen + neu von `feat-lmd-v1` anlegen**
 
-Run:
-```bash
-git fetch origin
-git rev-list --left-right --count origin/main...feat-jetbrains-plugin
-```
-Expected: linke Zahl groß (≈231 = `feat-jetbrains-plugin` hinter `origin/main`), rechte = 1 → bestätigt stale Basis. `git show origin/main:rust/Cargo.toml` zeigt `version = "3.7.4"`.
-
-- [ ] **Step 2: Lokales `main` auf `origin/main` aktualisieren**
-
-Untracked Working-Tree-Dateien (`markdownai/`, `.serena/project.yml`) stören den Branch-Wechsel nicht (bleiben liegen). Lokales `main` ist nur ein stale Pointer ohne eigene Arbeit.
-Run:
-```bash
-git switch main
-git merge --ff-only origin/main
-```
-Expected: fast-forward auf 3.7.4. Falls `--ff-only` fehlschlägt (divergiert), `git reset --hard origin/main` (kein lokaler `main`-Verlust erwartet).
-
-- [ ] **Step 3: Stale Branch löschen + frisch von `origin/main` anlegen**
-
+Du stehst auf `feat-lmd-v1` (`git rev-parse --abbrev-ref HEAD` → `feat-lmd-v1`). Untracked Dateien (`markdownai/`, `.serena/project.yml`) stören nicht.
 Run:
 ```bash
 git branch -D feat-jetbrains-plugin
-git switch -c feat-jetbrains-plugin origin/main
+git switch -c feat-jetbrains-plugin
 ```
-Expected: neuer `feat-jetbrains-plugin` auf 3.7.4; `git show HEAD:rust/Cargo.toml` → `version = "3.7.4"`, enthält `ureq = "3.3.0"` + `sha2 = "0.10"`.
+Expected: neuer `feat-jetbrains-plugin` auf `feat-lmd-v1`-HEAD. `git show HEAD:rust/Cargo.toml` → `version = "3.7.3-lmd"`, enthält `ureq = "3.3.0"` + `sha2 = "0.10"`.
 
-- [ ] **Step 4: Spec + Plan aus `feat-lmd-v1` übernehmen (Datei-Inhalt)**
+- [ ] **Step 2: lmd-Modul + Tests löschen**
+
+`git rm` ist der korrekte Weg, getrackte Dateien zu entfernen (keine Symbol-Edits).
+Run:
+```bash
+git rm -r rust/src/lmd
+git rm rust/tests/lmd_phase1_gate.rs rust/tests/lmd_rushdown_spike.rs
+```
+Expected: Dateien aus Index + Working-Tree entfernt.
+
+- [ ] **Step 3: `pub mod lmd;` aus `lib.rs` entfernen (Serena)**
+
+`lib.rs` ist `.rs` → Serena. Entferne die Modul-Deklaration via `mcp__serena__replace_content`:
+- old: `pub mod lmd;\n`
+- new: `` (leer)
+
+Verifizieren: `mcp__lean-ctx__ctx_search(pattern="pub mod lmd|crate::lmd|lean_ctx::lmd", path="rust")`
+Expected: **0 Treffer** (kein dangling lmd-Verweis mehr; `ctx_compile` bleibt — hat keine lmd-Abhängigkeit).
+
+- [ ] **Step 4: (Optional) Version entschärfen**
+
+Via `mcp__lean-ctx__ctx_edit` (TOML): `rust/Cargo.toml:3` `version = "3.7.3-lmd"` → `version = "3.7.3"`. (Kosmetisch; kann auch bleiben.)
+
+- [ ] **Step 5: Gate — Build, Tests, clippy**
 
 Run:
 ```bash
-git checkout feat-lmd-v1 -- docs/lean-md/specs/2026-06-05-leanctx-jetbrains-psi-backend-design.md docs/lean-md/plans/2026-06-05-jetbrains-backend-phase-0-1.md
+cargo build -p lean-ctx --lib 2>&1 | tail -10
+cargo nextest run -p lean-ctx 2>&1 | tail -25
+cargo clippy -p lean-ctx --lib --tests 2>&1 | tail -20
 ```
-Expected: beide Dateien im Index (neu hinzugefügt, da `docs/lean-md/` auf frischem `origin/main` sonst leer/anders ist).
+Expected: alles grün/sauber (kein `unresolved import crate::lmd`, keine fehlende-Datei-Fehler). Falls ein Build-Fehler einen weiteren lmd-Verweis aufdeckt → dort ebenfalls entfernen (Footprint war als minimal verifiziert: nur `lib.rs:36` extern).
 
-- [ ] **Step 5: Korrigierte §12 verifizieren**
+- [ ] **Step 6: Reformat + Commit (lmd-Entfernung)**
 
-Run: `mcp__lean-ctx__ctx_search(pattern="origin/main. = .v3.7.4|neu von .origin/main", path="docs/lean-md/specs/2026-06-05-leanctx-jetbrains-psi-backend-design.md")`
-Expected: Treffer in §12.1/§12.2 (korrigierte Basis übernommen).
-
-- [ ] **Step 6: (Optional) Projekt-Rules übernehmen**
-
-Falls die allgemeinen Rules (`CLAUDE.md`, `rust/CLAUDE.md`, `.claude/rules/…`) auf `origin/main` fehlen/älter sind, selektiv aus `feat-lmd-v1` holen und **lmd-Referenzen bereinigen** (§12.2). Sonst überspringen.
-
-- [ ] **Step 7: Reformat + Commit (Spec-Sync)**
-
-`mcp__jetbrains__reformat_file` für `.md` optional, aber Projekt-Rule — ausführen.
+`mcp__jetbrains__reformat_file` auf `rust/src/lib.rs`.
 Run:
 ```bash
-git add docs/lean-md/specs/2026-06-05-leanctx-jetbrains-psi-backend-design.md docs/lean-md/plans/2026-06-05-jetbrains-backend-phase-0-1.md
-git commit -m "docs(jetbrains): design spec (§12 base=origin/main 3.7.4) + phase-0/1 plan"
+git add -A
+git commit -m "chore(jetbrains): branch from feat-lmd-v1, remove lmd module (lmd-free base)"
 ```
-Expected: ein Commit auf frischem `feat-jetbrains-plugin` (Basis 3.7.4).
+Expected: ein Commit auf `feat-jetbrains-plugin`; `git status` sauber (außer untracked Nicht-Footprint-Dateien).
 
 ---
 
@@ -1064,6 +1062,6 @@ Expected: ein Commit; `git status` sauber (außer untracked Nicht-Phase-Dateien)
 
 **Typ-Konsistenz:** Trait-Methodennamen (`open_file/references/definition/implementations/rename`) identisch in `backend.rs`, `client.rs`-Impl, `jetbrains_backend.rs`-Impl und Router-Closures. `with_backend` (nicht `with_client`) durchgängig. `JetBrainsHttpBackend::new(port, token, project_root)` einheitlich in `select_backend` und Test. `PortFile`-Felder (`port/token/pid`) konsistent zwischen `read_port_file`, `health_ok`, `select_backend`.
 
-**Offene Punkte (in späteren Phasen zu prüfen):** (1) Plugin und Rust müssen `projecthash` **byte-identisch** canonicalisieren (§5.5) — beim Plugin-Bau (Phase 2) gegen `project_hash` hier verifizieren. (2) `ureq`-API: Plan nutzt **3.x** (`origin/main` 3.7.4 = `ureq "3.3.0"`), **ohne** `json`-Feature → JSON via `serde_json` + `.send(bytes)`/`.into_body().read_to_string()`, Per-Request-Timeout via `.config().timeout_global(..).build()` (verifiziert gegen docs.rs/ureq 3.3 + Repo-Muster `cloud_client.rs`).
+**Offene Punkte (in späteren Phasen zu prüfen):** (1) Plugin und Rust müssen `projecthash` **byte-identisch** canonicalisieren (§5.5) — beim Plugin-Bau (Phase 2) gegen `project_hash` hier verifizieren. (2) `ureq`-API: Plan nutzt **3.x** (Basis `feat-lmd-v1` = `ureq "3.3.0"`), **ohne** `json`-Feature → JSON via `serde_json` + `.send(bytes)`/`.into_body().read_to_string()`, Per-Request-Timeout via `.config().timeout_global(..).build()` (verifiziert gegen docs.rs/ureq 3.3 + Repo-Muster `cloud_client.rs`).
 
-**Commit-Disziplin (§12):** Drei Commits gesamt — Spec-Sync (0.0), Phase 0 (0.4 Step 9), Phase 1 (1.5 Step 2). Finaler Squash erst beim PR-Merge nach `main`.
+**Commit-Disziplin (§12):** Drei Commits gesamt — lmd-Entfernung (0.0, Branch von `feat-lmd-v1`), Phase 0 (0.4 Step 9), Phase 1 (1.5 Step 2). Finaler Squash erst beim PR-Merge.

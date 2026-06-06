@@ -373,39 +373,44 @@ das Jail. **Diese Umstellung ist Pflicht-Bestandteil von Phase 0.**
 
 ---
 
-## 12. Branch- & Release-Strategie (worktree-frei, sauber von `main`)
+## 12. Branch- & Release-Strategie (von `feat-lmd-v1`, lmd-frei)
 
-**Anforderung:** Ein eigener Branch `feat-jetbrains-plugin`, der **von `main` abgeht**
-und **ausschließlich** JetBrains-Plugin-Arbeit trägt — **kein** lmd, **keine**
-Baum-Übernahme aus `feat-lmd-v1`, **kein** worktree (Projekt-Rule „No worktrees").
+**Anforderung:** Ein eigener Branch `feat-jetbrains-plugin`, der **von `feat-lmd-v1`
+abzweigt** und damit **alle** dort gemachten rust/src-Änderungen erbt — **außer** dem
+lmd-Modul, das entfernt wird. **Kein** worktree (Projekt-Rule „No worktrees"),
+**kein** `main`/`origin`-Umweg (der frühere Plan, von `origin/main` neu aufzusetzen,
+war falsch — die Arbeit liegt auf `feat-lmd-v1`).
 
-### 12.1 Ausgangslage (verifiziert + korrigiert 2026-06-05)
+### 12.1 Ausgangslage (verifiziert 2026-06-05)
 
-- **Korrektur:** Der lokale `feat-jetbrains-plugin` saß auf einem **veralteten lokalen
-  `main` (v3.6.11)** und lag **231 Commits hinter `origin/main`** (nur 1 voraus =
-  alter Spec-Commit). „Sauber von main" war damit faktisch falsch → dieser Branch wird
-  **verworfen und neu angelegt**.
-- **Korrekte Basis = `origin/main` = `v3.7.4`** (Fork `dasTholo/lean-ctx` ist auf
-  Upstream `yvgude/lean-ctx` gesynct; beide 3.7.4). `feat-jetbrains-plugin` wird **frisch
-  von `origin/main` (3.7.4)** erstellt; späteres Merge-Ziel = `origin/main`.
-- **Deps bereits vorhanden:** `ureq = "3.3.0"` und `sha2 = "0.10"` sind auf
-  `origin/main` (3.7.4) vorhanden → keine `Cargo.toml`-Dependency-Änderung in Phase 1.
-- **Kein lmd, keine Baum-Übernahme:** Phasen 0–5 (§9) werden frisch implementiert;
-  `feat-lmd-v1` (393 Commits, vermischt CI/Docs/lmd) wird **nicht** als Baum übernommen.
-  Aus `feat-lmd-v1` wandert **nur** dieses Spec (+ Phase-0/1-Plan) als Datei-Inhalt mit.
+- **Basis = `feat-lmd-v1`** (Version `3.7.3-lmd`). Durch das Abzweigen sind **alle**
+  rust/src-Änderungen (z. B. `rust/src/graph::get_forward_deps`) **automatisch** auf dem
+  Branch — kein „Übertragen" nötig.
+- **Deps bereits vorhanden:** `ureq = "3.3.0"` (`Cargo.toml:140`) + `sha2 = "0.10"`
+  (`Cargo.toml:159`) → keine `Cargo.toml`-Dependency-Änderung in Phase 1. (ureq **3.x**;
+  kein `json`-Feature — JSON via `serde_json` + `ureq`-Body-API, Muster `cloud_client.rs`.)
+- **Stale-Branch:** Der alte lokale `feat-jetbrains-plugin` saß auf veraltetem `main`
+  (3.6.11, 231 Commits zurück) und wird **gelöscht** und neu von `feat-lmd-v1` angelegt.
 
-### 12.2 Branch-Neuanlage + Spec-Sync (einmalig)
+### 12.2 Branch-Neuanlage + lmd-Entfernung (erster Commit)
 
-- **`feat-jetbrains-plugin` neu von `origin/main` (3.7.4)** anlegen (alten lokalen
-  Branch löschen). Lokales `main` zuvor auf `origin/main` aktualisieren (fast-forward),
-  damit „from main" wieder stimmt.
-- Dieses Spec (inkl. korrigierter §12/§13) **und** der Phase-0/1-Plan sind die **einzigen**
-  mitwandernden Dokumente — als **ein** Commit (Datei-Inhalt aus `feat-lmd-v1`, kein
-  Cherry-pick der Historie) auf den frischen Branch.
-- Allgemeine Projekt-Rules (`CLAUDE.md`, `rust/CLAUDE.md`, lean-ctx-/Serena-Tool-
-  Discipline) wandern mit, **lmd-spezifische Referenzen dabei bereinigen** (z. B.
-  lmd-Spec-Verweise in `.claude/rules/subagent-multi-agent.md`). lmd-Specs/-Pläne unter
-  `docs/lean-md/` bleiben auf `feat-lmd-v1`.
+- **`feat-jetbrains-plugin` neu von `feat-lmd-v1` (HEAD)** anlegen (alten stale Branch
+  vorher löschen): `git branch -D feat-jetbrains-plugin` → `git switch -c feat-jetbrains-plugin`.
+- **lmd als erster Commit entfernen** (vollständiger, verifizierter Footprint — lmd ist
+  sauber isoliert, einzige externe Referenz = `lib.rs:36`):
+    1. `rust/src/lmd/` — gesamtes Modul löschen.
+    2. `rust/src/lib.rs:36` → `pub mod lmd;` entfernen (**das** ist die „mod"-Anpassung —
+        es ist `lib.rs`, **kein** `rust/src/mod.rs`).
+    3. `rust/tests/lmd_phase1_gate.rs` + `rust/tests/lmd_rushdown_spike.rs` löschen
+        (beide `use lean_ctx::lmd::…` → würden den Build sonst brechen).
+    4. *(optional, kosmetisch)* `rust/Cargo.toml:3` Version `"3.7.3-lmd"` → `"3.7.3"`.
+- **Bleibt drin (verifiziert):** `ctx_compile` (`registry.rs:175`) hat **keine**
+  lmd-Abhängigkeit — die frühere Behauptung „lmd-Render-Tool" war falsch; bleibt
+  registriert. Alle übrigen rust/src-Änderungen bleiben.
+- *Gate:* nach der Entfernung `cargo build` + `cargo nextest run` grün (kein dangling
+  `lmd`-Verweis), clippy sauber.
+- Dieses Spec + der Phase-0/1-Plan liegen bereits auf `feat-lmd-v1` und wandern damit
+  automatisch mit (keine separate Datei-Übernahme nötig).
 
 ### 12.3 Implementierung — ein Commit pro Phase
 
