@@ -145,6 +145,24 @@ impl LeanCtxServer {
                 session.project_root.clone().unwrap_or_default()
             };
 
+            // Lazy, demand-driven index warming (#152): only tools that actually
+            // need a prebuilt index trigger a (background, once-per-root) scan.
+            // The first heavy pre-warm also warms any configured extra roots once.
+            if !project_root.is_empty()
+                && crate::core::index_orchestrator::ensure_warm_for_tool(&project_root, name)
+            {
+                let extra_roots = self.session.read().await.extra_roots.clone();
+                if !extra_roots.is_empty() {
+                    let primary = project_root.clone();
+                    std::thread::spawn(move || {
+                        crate::core::index_orchestrator::ensure_extra_roots_background(
+                            &primary,
+                            &extra_roots,
+                        );
+                    });
+                }
+            }
+
             let mut resolved_paths = std::collections::HashMap::new();
             let mut path_errors: std::collections::HashMap<String, String> =
                 std::collections::HashMap::new();
@@ -264,22 +282,22 @@ impl LeanCtxServer {
                 .await;
             }
 
+            let agent_id = self
+                .agent_id
+                .read()
+                .await
+                .clone()
+                .unwrap_or_else(|| "unknown".into());
+            let role = crate::core::roles::active_role_name();
             {
-                let agent_id = self
-                    .agent_id
-                    .read()
-                    .await
-                    .clone()
-                    .unwrap_or_else(|| "unknown".into());
                 let input_hash = crate::core::audit_trail::hash_input(args_map);
-                let role = crate::core::roles::active_role_name();
                 crate::core::audit_trail::record(crate::core::audit_trail::AuditEntryData {
-                    agent_id,
+                    agent_id: agent_id.clone(),
                     tool: name.to_string(),
                     action: None,
                     input_hash,
                     output_tokens: output_token_estimate,
-                    role,
+                    role: role.clone(),
                     event_type: crate::core::audit_trail::AuditEventType::ToolCall,
                 });
             }
@@ -287,6 +305,25 @@ impl LeanCtxServer {
             let saved = output.saved_tokens;
             let raw_text = header_line.unwrap_or(output.text);
             let final_text = crate::core::output_sanitizer::sanitize(&raw_text);
+
+            // Context immune system: scan for prompt-injection patterns in tool output.
+            let injection_signals = crate::core::output_sanitizer::detect_injection(&final_text);
+            if !injection_signals.is_empty() {
+                tracing::warn!(
+                    tool = name,
+                    signals = injection_signals.len(),
+                    "prompt-injection patterns detected in tool output"
+                );
+                crate::core::audit_trail::record(crate::core::audit_trail::AuditEntryData {
+                    agent_id: agent_id.clone(),
+                    tool: name.to_string(),
+                    action: None,
+                    input_hash: String::new(),
+                    output_tokens: 0,
+                    role: role.clone(),
+                    event_type: crate::core::audit_trail::AuditEventType::SecurityViolation,
+                });
+            }
 
             let reference_enabled = std::env::var("LEAN_CTX_REFERENCE_RESULTS").map_or_else(
                 |_| crate::core::config::Config::load().reference_results,

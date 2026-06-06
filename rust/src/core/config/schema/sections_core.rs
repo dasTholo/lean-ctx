@@ -156,6 +156,26 @@ pub(super) fn build(sections: &mut BTreeMap<String, SectionSchema>) {
         ),
     );
     root.insert(
+        "rules_injection".into(),
+        key_enum(
+            &["shared", "dedicated"],
+            "shared",
+            "How rules load for CLAUDE.md/AGENTS.md/GEMINI.md agents: shared block, or \
+             dedicated (no shared-file edits; SessionStart hook / instructions[] / \
+             context.fileName). Override via LEAN_CTX_RULES_INJECTION",
+        ),
+    );
+    root.insert(
+        "permission_inheritance".into(),
+        key_enum(
+            &["off", "on"],
+            "off",
+            "Mirror the host IDE's permission rules onto lean-ctx tools (v1: \
+             OpenCode). When on, ctx_shell honors your bash/rm * rules instead of \
+             bypassing them. Override via LEAN_CTX_PERMISSION_INHERITANCE",
+        ),
+    );
+    root.insert(
         "extra_ignore_patterns".into(),
         key(
             "string[]",

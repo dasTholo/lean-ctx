@@ -263,3 +263,35 @@ pub enum RulesScope {
     Global,
     Project,
 }
+
+/// How agent rules are injected for AGENTS.md/CLAUDE.md/GEMINI.md consumers.
+///
+/// - `Shared` (default): write a marker-delimited block into the user's shared
+///   instruction file (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`) — zero-config
+///   discoverability, but touches a file the user also authors.
+/// - `Dedicated`: never write into those shared files. Instead use each agent's
+///   config-driven, fully-removable auto-load path (Claude/Codex `SessionStart`
+///   hook `additionalContext`, OpenCode `instructions[]`, Gemini
+///   `context.fileName`) plus a lean-ctx-owned rules file. See issue #343.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RulesInjection {
+    Shared,
+    Dedicated,
+}
+
+/// Whether lean-ctx mirrors the host IDE's tool-permission rules onto its own
+/// MCP tools ("permission inheritance").
+///
+/// - `Off` (default): lean-ctx tools are governed only by lean-ctx's own layers
+///   (role policy, shell allowlist). lean-ctx's `ctx_shell` therefore runs
+///   independently of the IDE's `bash`/`rm *` permission rules.
+/// - `On`: before dispatching, lean-ctx reads the active IDE's permission config
+///   (v1: OpenCode `opencode.json[c]`) and applies the equivalent decision to
+///   the matching lean-ctx tool — `deny` blocks, `ask` is held back (MCP cannot
+///   prompt for these tools), `allow` proceeds. Read-only; lean-ctx never writes
+///   the IDE's `permission` block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PermissionInheritance {
+    Off,
+    On,
+}

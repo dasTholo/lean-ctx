@@ -68,48 +68,58 @@ pub mod ctx_workflow;
 pub mod shell_alias;
 
 /// Resolve a relative path against session state (sync version).
-/// Replicates the core logic of `LeanCtxServer::resolve_path` without
-/// the re-rooting fallback (which needs `startup_project_root`).
+/// Thin wrapper over [`crate::core::path_resolve::resolve_tool_path`].
 /// Must be called within `tokio::task::block_in_place`.
 pub(crate) fn resolve_path_sync(
     session: &crate::core::session::SessionState,
     raw: &str,
 ) -> Result<String, String> {
-    let normalized = crate::core::pathutil::normalize_tool_path(raw);
-    if normalized.is_empty() || normalized == "." {
-        return Ok(normalized);
-    }
-    let p = std::path::Path::new(&normalized);
+    crate::core::path_resolve::resolve_tool_path(
+        session.project_root.as_deref(),
+        session.shell_cwd.as_deref(),
+        raw,
+    )
+}
 
-    let jail_root = session
-        .project_root
-        .as_deref()
-        .or(session.shell_cwd.as_deref())
-        .unwrap_or(".")
-        .to_string();
+#[cfg(test)]
+mod adoption_tests {
+    use super::*;
+    use crate::core::terse::mcp_compress::{compress_description, DescriptionMode};
+    use crate::server::tool_trait::McpTool;
 
-    let resolved = if p.is_absolute() || p.exists() {
-        std::path::PathBuf::from(&normalized)
-    } else if let Some(ref root) = session.project_root {
-        let joined = std::path::Path::new(root).join(&normalized);
-        if joined.exists() {
-            joined
-        } else if let Some(ref cwd) = session.shell_cwd {
-            std::path::Path::new(cwd).join(&normalized)
-        } else {
-            std::path::Path::new(&jail_root).join(&normalized)
+    /// Tools that compete with native harness tools must steer the agent toward
+    /// the ctx_* equivalent in the FIRST line of their description: under Max
+    /// compression (Lazy mode) only the first line survives, so steering placed
+    /// later would be dropped and adoption suffers (#168).
+    #[test]
+    fn native_competing_tools_steer_in_first_line() {
+        let tools: Vec<(&str, Box<dyn McpTool>)> = vec![
+            ("ctx_read", Box::new(ctx_read::CtxReadTool)),
+            ("ctx_search", Box::new(ctx_search::CtxSearchTool)),
+            ("ctx_shell", Box::new(ctx_shell::CtxShellTool)),
+            ("ctx_tree", Box::new(ctx_tree::CtxTreeTool)),
+        ];
+        for (name, tool) in tools {
+            let def = tool.tool_def();
+            let desc = def.description.as_deref().unwrap_or("");
+            let first = desc.lines().next().unwrap_or("");
+
+            assert!(
+                first.contains("Prefer over native"),
+                "{name}: first line must steer toward ctx_* over native: {first:?}"
+            );
+            assert!(
+                first.len() <= 80,
+                "{name}: first line is {} bytes (>80 truncates under Lazy mode): {first:?}",
+                first.len()
+            );
+
+            // Steering must survive Max-compression (Lazy keeps only line 1).
+            let lazy = compress_description(name, desc, DescriptionMode::Lazy);
+            assert!(
+                lazy.contains("native"),
+                "{name}: steering lost under Lazy compression: {lazy:?}"
+            );
         }
-    } else if let Some(ref cwd) = session.shell_cwd {
-        std::path::Path::new(cwd).join(&normalized)
-    } else {
-        std::path::Path::new(&jail_root).join(&normalized)
-    };
-
-    let jail_root_path = std::path::Path::new(&jail_root);
-    let jailed = crate::core::pathjail::jail_path(&resolved, jail_root_path)?;
-    crate::core::io_boundary::check_secret_path_for_tool("resolve_path", &jailed)?;
-
-    Ok(crate::core::pathutil::normalize_tool_path(
-        &jailed.to_string_lossy().replace('\\', "/"),
-    ))
+    }
 }

@@ -90,6 +90,82 @@ pub fn handle(
     }
 }
 
+/// Structured single-root search used by the `semantic-search` CLI (`--json`)
+/// and any programmatic caller (editor extensions). Mirrors `handle`'s
+/// single-root logic but returns the ranked [`HybridResult`]s instead of a
+/// formatted report, so callers control their own serialization. Reuses the
+/// exact same hybrid/dense/BM25 ranking as the `ctx_semantic_search` MCP tool —
+/// no second code path to drift.
+pub fn search_hits(
+    query: &str,
+    path: &str,
+    top_k: usize,
+    mode: &str,
+    languages: Option<&[String]>,
+    path_glob: Option<&str>,
+) -> Result<Vec<HybridResult>, String> {
+    let root = Path::new(path);
+    if !root.exists() {
+        return Err(format!("path does not exist: {path}"));
+    }
+    let root = if root.is_file() {
+        root.parent().unwrap_or(root)
+    } else {
+        root
+    };
+
+    let filter =
+        SearchFilter::new(languages, path_glob).map_err(|e| format!("invalid filter: {e}"))?;
+
+    let index = BM25Index::load_or_build(root);
+    if index.doc_count == 0 {
+        return Ok(Vec::new());
+    }
+
+    let results = match mode.to_lowercase().as_str() {
+        "bm25" => bm25_hits(&index, query, top_k, &filter),
+        "dense" => {
+            #[cfg(feature = "embeddings")]
+            {
+                dense_results_for_root(query, root, &index, top_k, &filter).map(|(v, _)| v)?
+            }
+            #[cfg(not(feature = "embeddings"))]
+            {
+                return Err("dense mode requires the embeddings feature".to_string());
+            }
+        }
+        _ => {
+            #[cfg(feature = "embeddings")]
+            {
+                hybrid_results_for_root(query, root, &index, top_k, &filter).map(|(v, _)| v)?
+            }
+            #[cfg(not(feature = "embeddings"))]
+            {
+                bm25_hits(&index, query, top_k, &filter)
+            }
+        }
+    };
+
+    Ok(results)
+}
+
+fn bm25_hits(
+    index: &BM25Index,
+    query: &str,
+    top_k: usize,
+    filter: &SearchFilter,
+) -> Vec<HybridResult> {
+    let mut results = index.search(query, filtered_candidate_k(top_k, filter.is_active()));
+    if filter.is_active() {
+        results.retain(|x| filter.matches(&x.file_path));
+    }
+    results.truncate(top_k);
+    results
+        .into_iter()
+        .map(HybridResult::from_bm25_public)
+        .collect()
+}
+
 /// Rebuilds the BM25 search index for the given directory from scratch.
 pub fn handle_reindex(path: &str) -> String {
     let root = Path::new(path);
@@ -280,11 +356,35 @@ fn load_or_refresh_bm25(root: &Path) -> Bm25LoadResult {
         return Bm25LoadResult::Building;
     }
 
+    // Cold path: kick off the background build (which persists the index to
+    // disk) instead of doing an unbounded synchronous build in the MCP handler.
+    // Wait briefly so small/medium repos still return Ready on the first call;
+    // larger repos return Building and the agent retries against the warm cache
+    // once the worker has persisted the index (#150).
     crate::core::index_orchestrator::ensure_all_background(&root_str);
 
-    let idx = std::sync::Arc::new(BM25Index::load_or_build(root));
-    store_in_thread_cache(root, &idx);
-    Bm25LoadResult::Ready(idx)
+    let deadline = std::time::Instant::now() + bm25_cold_build_budget();
+    loop {
+        if let Some(idx) = crate::core::index_orchestrator::try_load_bm25_index(&root_str) {
+            let idx = std::sync::Arc::new(idx);
+            store_in_thread_cache(root, &idx);
+            return Bm25LoadResult::Ready(idx);
+        }
+        if std::time::Instant::now() >= deadline {
+            return Bm25LoadResult::Building;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+/// Time budget for waiting on a cold BM25 build in the MCP handler before
+/// returning `Building`. Overridable via `LEAN_CTX_BM25_COLD_BUDGET_MS`.
+fn bm25_cold_build_budget() -> std::time::Duration {
+    let ms = std::env::var("LEAN_CTX_BM25_COLD_BUDGET_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(3000);
+    std::time::Duration::from_millis(ms)
 }
 
 fn store_in_thread_cache(root: &Path, idx: &std::sync::Arc<BM25Index>) {

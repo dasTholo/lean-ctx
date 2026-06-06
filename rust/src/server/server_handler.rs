@@ -116,19 +116,10 @@ impl ServerHandler for LeanCtxServer {
             }
         }
 
-        let extra_roots_snapshot = self.session.read().await.extra_roots.clone();
-        if let Some(ref root) = effective_root {
-            crate::core::index_orchestrator::ensure_all_background(root);
-            if !extra_roots_snapshot.is_empty() {
-                let r = root.clone();
-                std::thread::spawn(move || {
-                    crate::core::index_orchestrator::ensure_extra_roots_background(
-                        &r,
-                        &extra_roots_snapshot,
-                    );
-                });
-            }
-        }
+        // Indices are warmed lazily on first use of a tool that needs them
+        // (issue #152), not eagerly here — a session that only uses
+        // ctx_read/ctx_shell/ctx_tree must not pay a full graph + BM25 scan.
+        // See `index_orchestrator::ensure_warm_for_tool`, driven from dispatch.
 
         let agent_name = name.clone();
         let agent_root = effective_root.clone().unwrap_or_default();
@@ -329,7 +320,17 @@ impl ServerHandler for LeanCtxServer {
                     ..Default::default()
                 });
             };
-            if dyn_state.supports_list_changed() {
+            // The lazy category gate (load tools on demand for dynamic_tools
+            // clients) only applies to the *default* lean-core surface. When the
+            // user opted into an explicit profile, that profile IS the
+            // authoritative surface — gating it by category would silently drop
+            // profile-enabled tools like Standard's ctx_architecture /
+            // ctx_semantic_search for Codex et al. (#358), so the advertised set
+            // would no longer match `lean-ctx tools show`.
+            if crate::server::tool_visibility::category_gate_applies(
+                dyn_state.supports_list_changed(),
+                explicit_profile,
+            ) {
                 tools
                     .into_iter()
                     .filter(|t| dyn_state.is_tool_active(t.name.as_ref()))

@@ -345,6 +345,138 @@ mod rules_scope_tests {
 }
 
 #[cfg(test)]
+mod rules_injection_tests {
+    use super::super::*;
+
+    #[test]
+    fn default_is_shared() {
+        let cfg = Config::default();
+        assert_eq!(cfg.rules_injection_effective(), RulesInjection::Shared);
+    }
+
+    #[test]
+    fn config_dedicated() {
+        let cfg = Config {
+            rules_injection: Some("dedicated".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(cfg.rules_injection_effective(), RulesInjection::Dedicated);
+    }
+
+    #[test]
+    fn unknown_value_falls_back_to_shared() {
+        let cfg = Config {
+            rules_injection: Some("nonsense".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(cfg.rules_injection_effective(), RulesInjection::Shared);
+    }
+
+    #[test]
+    fn deserialization_from_toml() {
+        let cfg: Config = toml::from_str(r#"rules_injection = "dedicated""#).unwrap();
+        assert_eq!(cfg.rules_injection.as_deref(), Some("dedicated"));
+        assert_eq!(cfg.rules_injection_effective(), RulesInjection::Dedicated);
+    }
+
+    #[test]
+    fn dedicated_session_context_gated_by_scope() {
+        // Dedicated + non-project scope → SessionStart summary active.
+        let cfg = Config {
+            rules_injection: Some("dedicated".to_string()),
+            ..Default::default()
+        };
+        assert!(cfg.dedicated_session_context_active());
+
+        // Dedicated + project scope → global summary suppressed (project files only).
+        let cfg = Config {
+            rules_injection: Some("dedicated".to_string()),
+            rules_scope: Some("project".to_string()),
+            ..Default::default()
+        };
+        assert!(!cfg.dedicated_session_context_active());
+
+        // Shared (default) → never the SessionStart summary path.
+        let cfg = Config::default();
+        assert!(!cfg.dedicated_session_context_active());
+    }
+
+    #[test]
+    fn local_override_merges() {
+        let mut base = Config::default();
+        base.merge_local(r#"rules_injection = "dedicated""#);
+        assert_eq!(base.rules_injection_effective(), RulesInjection::Dedicated);
+    }
+}
+
+#[cfg(test)]
+mod permission_inheritance_tests {
+    use super::super::*;
+
+    #[test]
+    fn default_is_off() {
+        // Guard against a stray env var leaking into the test process.
+        if std::env::var("LEAN_CTX_PERMISSION_INHERITANCE").is_ok() {
+            return;
+        }
+        let cfg = Config::default();
+        assert_eq!(
+            cfg.permission_inheritance_effective(),
+            PermissionInheritance::Off
+        );
+    }
+
+    #[test]
+    fn config_on() {
+        if std::env::var("LEAN_CTX_PERMISSION_INHERITANCE").is_ok() {
+            return;
+        }
+        let cfg = Config {
+            permission_inheritance: Some("on".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            cfg.permission_inheritance_effective(),
+            PermissionInheritance::On
+        );
+    }
+
+    #[test]
+    fn unknown_value_falls_back_to_off() {
+        if std::env::var("LEAN_CTX_PERMISSION_INHERITANCE").is_ok() {
+            return;
+        }
+        let cfg = Config {
+            permission_inheritance: Some("nonsense".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            cfg.permission_inheritance_effective(),
+            PermissionInheritance::Off
+        );
+    }
+
+    #[test]
+    fn deserialization_from_toml() {
+        let cfg: Config = toml::from_str(r#"permission_inheritance = "on""#).unwrap();
+        assert_eq!(cfg.permission_inheritance.as_deref(), Some("on"));
+    }
+
+    #[test]
+    fn local_override_merges() {
+        if std::env::var("LEAN_CTX_PERMISSION_INHERITANCE").is_ok() {
+            return;
+        }
+        let mut base = Config::default();
+        base.merge_local(r#"permission_inheritance = "on""#);
+        assert_eq!(
+            base.permission_inheritance_effective(),
+            PermissionInheritance::On
+        );
+    }
+}
+
+#[cfg(test)]
 mod loop_detection_config_tests {
     use super::super::*;
 

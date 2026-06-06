@@ -111,8 +111,8 @@ impl AnnIndex {
     }
 
     fn insert(&mut self, vec: Vec<f32>) {
-        let level = Self::random_level();
         let new_id = self.vectors.len();
+        let level = Self::level_for(new_id);
 
         self.vectors.push(vec);
         self.nodes.push(Node {
@@ -259,10 +259,23 @@ impl AnnIndex {
             .collect()
     }
 
-    fn random_level() -> usize {
-        let mut buf = [0u8; 4];
-        let _ = getrandom::fill(&mut buf);
-        let r = f64::from(u32::from_le_bytes(buf)) / f64::from(u32::MAX);
+    /// Deterministic geometric level draw seeded by the node's insertion index.
+    ///
+    /// HNSW only requires the per-node level to follow a geometric distribution
+    /// (mean `ML`); it does not require OS entropy. Deriving the draw from the
+    /// node id via splitmix64 keeps that distribution while making index
+    /// construction **fully reproducible** — the same corpus always yields the
+    /// same graph and therefore the same search results. The previous
+    /// `getrandom`-seeded draw rebuilt a different graph on every run, which made
+    /// approximate recall (and the recall tests) non-deterministic and flaky.
+    fn level_for(node_id: usize) -> usize {
+        // splitmix64: a single id → a well-distributed u64.
+        let mut z = (node_id as u64).wrapping_add(0x9E37_79B9_7F4A_7C15);
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^= z >> 31;
+        // Map the top 53 bits to (0,1); +1 keeps r > 0 so -ln(r) stays finite.
+        let r = (((z >> 11) as f64) + 1.0) / ((1u64 << 53) as f64 + 1.0);
         (-r.ln() * ML).floor() as usize
     }
 
@@ -311,25 +324,17 @@ pub fn brute_force_topk(vectors: &[Vec<f32>], query: &[f32], top_k: usize) -> Ve
     results
 }
 
+/// Cosine similarity via the shared SIMD-friendly dot product (turbovec-derived,
+/// autovectorized chunked accumulators) rather than a scalar triple-accumulate
+/// loop. This is the hot path for every brute-force and HNSW comparison, so the
+/// vectorized kernel matters: each query touches the distance fn O(n) (brute) or
+/// O(ef·log n) (HNSW) times.
 #[inline]
 fn cosine_sim(a: &[f32], b: &[f32]) -> f32 {
     if a.len() != b.len() {
         return 0.0;
     }
-    let mut dot = 0.0f32;
-    let mut norm_a = 0.0f32;
-    let mut norm_b = 0.0f32;
-    for i in 0..a.len() {
-        dot += a[i] * b[i];
-        norm_a += a[i] * a[i];
-        norm_b += b[i] * b[i];
-    }
-    let denom = (norm_a * norm_b).sqrt();
-    if denom < 1e-10 {
-        0.0
-    } else {
-        dot / denom
-    }
+    crate::core::embeddings::cosine_similarity_raw(a, b)
 }
 
 #[cfg(test)]

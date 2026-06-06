@@ -137,6 +137,7 @@ pub mod context {
 // ---------------------------------------------------------------------------
 pub mod claim_extractor;
 pub mod cognition_loop;
+pub mod cognition_scheduler;
 pub mod knowledge;
 pub mod knowledge_bootstrap;
 pub mod knowledge_bridge;
@@ -160,6 +161,7 @@ pub mod knowledge_domain {
 // ---------------------------------------------------------------------------
 pub mod bm25_cache;
 pub mod bm25_index;
+pub mod content_cache;
 pub mod content_chunk;
 pub mod context_packing;
 pub mod cooccurrence;
@@ -282,6 +284,7 @@ pub mod verification_observability;
 // ---------------------------------------------------------------------------
 pub mod active_inference;
 pub mod agent_budget;
+pub mod ann_cache;
 pub mod audit_trail;
 pub mod binary_detect;
 pub mod bounce_tracker;
@@ -315,6 +318,7 @@ pub mod home;
 pub mod homeostasis;
 
 pub mod graph_cache;
+pub mod ide_permissions;
 pub mod import_resolver;
 pub mod index_namespace;
 pub mod index_orchestrator;
@@ -339,6 +343,7 @@ pub mod mdl_selector;
 pub mod multi_repo;
 pub mod owasp_alignment;
 pub mod path_locks;
+pub mod path_resolve;
 pub mod pathutil;
 pub mod pipeline;
 pub mod plugins;
