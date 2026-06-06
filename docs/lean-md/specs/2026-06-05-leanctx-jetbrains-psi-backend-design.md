@@ -397,11 +397,11 @@ war falsch — die Arbeit liegt auf `feat-lmd-v1`).
 
 ### 12.1 Ausgangslage (verifiziert 2026-06-05)
 
-- **Basis = `feat-lmd-v1`** (Version `3.7.3-lmd`). **Versions-Hinweis (2026-06-06):**
-  `main` steht inzwischen auf **3.7.4** (Changelog 3.7.4 gemerged) — `feat-lmd-v1`
-  basiert noch auf `3.7.3-lmd`. Vor dem finalen Squash-Merge-PR (§12.4) `feat-jetbrains-plugin`
-  auf aktuelles `main`/`3.7.4` rebasen (kosmetische Version `3.7.3` aus §12.2.4 ggf. auf
-  `3.7.4` ziehen); für die Branch-Neuanlage selbst bleibt `feat-lmd-v1` die korrekte Basis.
+- **Basis = `feat-lmd-v1`** (Version `3.7.4-lmd`, Stand 2026-06-06 — der **Changelog-3.7.4-
+  Stand inkl. #141** (`tool_def`-Registry) **und #145** (`resolve_tool_path`) ist damit
+  **bereits in der Branch-Basis**; ein 3.7.4-Rebase entfällt). Sollte `main` bis zum finalen
+  Squash-Merge-PR (§12.4) noch weiter vorausgelaufen sein, vor dem PR darauf rebasen; für die
+  Branch-Neuanlage selbst bleibt `feat-lmd-v1` die korrekte Basis.
   Durch das Abzweigen sind **alle**
   rust/src-Änderungen (z. B. `rust/src/graph::get_forward_deps`) **automatisch** auf dem
   Branch — kein „Übertragen" nötig.
@@ -422,7 +422,7 @@ war falsch — die Arbeit liegt auf `feat-lmd-v1`).
        es ist `lib.rs`, **kein** `rust/src/mod.rs`).
     3. `rust/tests/lmd_phase1_gate.rs` + `rust/tests/lmd_rushdown_spike.rs` löschen
        (beide `use lean_ctx::lmd::…` → würden den Build sonst brechen).
-    4. *(optional, kosmetisch)* `rust/Cargo.toml:3` Version `"3.7.3-lmd"` → `"3.7.3"`.
+    4. *(optional, kosmetisch)* `rust/Cargo.toml:3` Version `"3.7.4-lmd"` → `"3.7.4"`.
 - **Bleibt drin (verifiziert):** `ctx_compile` (`registry.rs:175`) hat **keine**
   lmd-Abhängigkeit — die frühere Behauptung „lmd-Render-Tool" war falsch; bleibt
   registriert. Alle übrigen rust/src-Änderungen bleiben.

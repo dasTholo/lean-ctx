@@ -24,7 +24,7 @@
 - Modify: `rust/src/lsp/client.rs` — `impl LspBackend for LspClient` (delegiert 5 vorhandene Methoden).
 - Modify: `rust/src/lsp/router.rs` — `BACKENDS: HashMap<String, Box<dyn LspBackend>>`, `with_client` → `with_backend`.
 - Modify: `rust/src/tools/ctx_refactor.rs` — innere `handle` nimmt gejailten `abs_path`; `with_client` → `with_backend`.
-- Modify: `rust/src/tools/registered/ctx_refactor.rs` — §4.5: Pfad via `require_resolved_path` (jailt vor Backend).
+- Modify: `rust/src/tools/registered/ctx_refactor.rs` — §4.5: Pfad via `require_resolved_path` (jailt vor Backend). **#145-konform:** `require_resolved_path` → `ctx.resolved_path` → `resolve_path_sync` (`tool_trait.rs:137`) → kanonischer `resolve_tool_path` (`core/path_resolve.rs:32`) — kein dritter Ad-hoc-Resolver, genau das von Spec §4.5/#145 bevorzugte Ziel.
 - Modify: `rust/tests/lsp_integration.rs` — Test-Helper auf neue innere `handle`-Signatur.
 
 **Phase 1 (Backing B Skeleton):**
@@ -40,7 +40,7 @@
 
 **Ziel:** `feat-jetbrains-plugin` von `feat-lmd-v1` abzweigen (erbt **alle** rust/src-Änderungen) und lmd als **ersten Commit** entfernen → lmd-freie Basis. **Kein** `main`/`origin`-Umweg (§12.1/§12.2).
 
-**Voraussetzung:** Du bist auf `feat-lmd-v1`; Spec + Plan sind dort committet → wandern durch das Abzweigen automatisch mit (keine Datei-Übernahme nötig). Basis-Version = `3.7.3-lmd`, `ureq = "3.3.0"` + `sha2 = "0.10"` vorhanden.
+**Voraussetzung:** Du bist auf `feat-lmd-v1`; Spec + Plan sind dort committet → wandern durch das Abzweigen automatisch mit (keine Datei-Übernahme nötig). Basis-Version = `3.7.4-lmd` (Changelog 3.7.4 inkl. #141/#145 bereits in der Basis), `ureq = "3.3.0"` + `sha2 = "0.10"` vorhanden.
 
 **Files:**
 - Delete: `rust/src/lmd/` (gesamtes Modul), `rust/tests/lmd_phase1_gate.rs`, `rust/tests/lmd_rushdown_spike.rs`
@@ -54,7 +54,7 @@ Run:
 git branch -D feat-jetbrains-plugin
 git switch -c feat-jetbrains-plugin
 ```
-Expected: neuer `feat-jetbrains-plugin` auf `feat-lmd-v1`-HEAD. `git show HEAD:rust/Cargo.toml` → `version = "3.7.3-lmd"`, enthält `ureq = "3.3.0"` + `sha2 = "0.10"`.
+Expected: neuer `feat-jetbrains-plugin` auf `feat-lmd-v1`-HEAD. `git show HEAD:rust/Cargo.toml` → `version = "3.7.4-lmd"`, enthält `ureq = "3.3.0"` + `sha2 = "0.10"`.
 
 - [ ] **Step 2: lmd-Modul + Tests löschen**
 
@@ -77,7 +77,7 @@ Expected: **0 Treffer** (kein dangling lmd-Verweis mehr; `ctx_compile` bleibt �
 
 - [ ] **Step 4: (Optional) Version entschärfen**
 
-Via `mcp__lean-ctx__ctx_edit` (TOML): `rust/Cargo.toml:3` `version = "3.7.3-lmd"` → `version = "3.7.3"`. (Kosmetisch; kann auch bleiben.)
+Via `mcp__lean-ctx__ctx_edit` (TOML): `rust/Cargo.toml:3` `version = "3.7.4-lmd"` → `version = "3.7.4"`. (Kosmetisch; kann auch bleiben.)
 
 - [ ] **Step 5: Gate — Build, Tests, clippy**
 
@@ -396,6 +396,8 @@ Expected: Fehler NUR noch in `ctx_refactor.rs` (Call-Sites `with_client`) — wi
 - Modify: `rust/tests/lsp_integration.rs`
 
 > **§4.5-Kern:** Der Dispatcher jailt `path` bereits **vor** `handle` (PATH_LIKE_KEYS, `dispatch/mod.rs:151,324`) → Ergebnis steht in `ctx.resolved_path("path")` bzw. der Fehler in `ctx.path_error("path")`. Die heutige innere `handle` ignoriert das und baut `abs_path` selbst aus rohem `project_root + path` (Jail-Umgehung). Fix: Wrapper reicht den **gejailten** Pfad über `require_resolved_path` durch; innere `handle` nimmt ihn als Parameter und baut **nichts** mehr selbst.
+>
+> **Spec §4.5/#145 (Changelog 3.7.4 — unified path resolution):** Der hier gewählte `require_resolved_path`-Pfad **ist** genau das von #145 bevorzugte Ziel — er fußt auf dem konsolidierten Resolver (`require_resolved_path` → `ctx.resolved_path` → `resolve_path_sync`, `tool_trait.rs:137` → `core::path_resolve::resolve_tool_path`, `path_resolve.rs:32`). Es entsteht **kein** dritter Ad-hoc-`abs_path`-Selbstbau. (Beide Symbole sind auf der `3.7.4-lmd`-Basis bereits vorhanden — verifiziert.)
 
 - [ ] **Step 1: Charakterisierungs-Test schreiben (failing)**
 
@@ -1058,7 +1060,7 @@ Expected: ein Commit; `git status` sauber (außer untracked Nicht-Phase-Dateien)
 
 **Spec-Abdeckung Phase 1 (§9):** `port_discovery.rs` (1.2) ✓; `jetbrains_backend.rs` refs/def/impl via `ureq` (1.3) ✓; `select_backend` mit Fallback (1.4) ✓; Gate „gegen Mock parsebar / ohne Port-Datei Fallback A" (1.3 Step 2, 1.4 Step 3) ✓.
 
-**Bewusst NICHT in Phase 0/1 (spätere Phasen):** `type_hierarchy`/`overview`/`format`/`inspections`-Actions + Schema-Erweiterung in `registered/ctx_refactor.rs` (Phase 4/5); `rename`-apply über Backing B (v2); Kotlin-Plugin (Phase 2/3). Die Default-degradierenden Trait-Methoden sind bereits angelegt (additiv, kein Breaking Change).
+**Bewusst NICHT in Phase 0/1 (spätere Phasen):** `type_hierarchy`/`overview`/`format`/`inspections`-Actions + Schema-Erweiterung in `registered/ctx_refactor.rs` (Phase 4/5); `rename`-apply über Backing B (v2); Kotlin-Plugin (Phase 2/3). Die Default-degradierenden Trait-Methoden sind bereits angelegt (additiv, kein Breaking Change). **Vormerkung Spec §4.4/#141 (Changelog 3.7.4 — Tool-Registry = single schema source):** Die Schema-Erweiterung in Phase 4/5 läuft über die **eine** `tool_def`-Registry (`tool_defs/mod.rs:9` `tool_def(...)`) — `registered/ctx_refactor.rs` pflegt **kein** Inline-Schema mehr (alte L19-24 entfallen); neue Actions/`direction` werden dort ergänzt und vom Drift-Regressions-Test abgedeckt, **nicht** als zweite handgepflegte Kopie. Phase 0/1 berührt das Schema nicht.
 
 **Typ-Konsistenz:** Trait-Methodennamen (`open_file/references/definition/implementations/rename`) identisch in `backend.rs`, `client.rs`-Impl, `jetbrains_backend.rs`-Impl und Router-Closures. `with_backend` (nicht `with_client`) durchgängig. `JetBrainsHttpBackend::new(port, token, project_root)` einheitlich in `select_backend` und Test. `PortFile`-Felder (`port/token/pid`) konsistent zwischen `read_port_file`, `health_ok`, `select_backend`.
 
