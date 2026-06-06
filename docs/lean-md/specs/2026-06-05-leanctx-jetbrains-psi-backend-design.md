@@ -673,31 +673,51 @@ Project close (Disposable.dispose / projectClosing) → server.stop(0) + Port-Da
 
 ### 15.7 Build-Modernisierung (Teil des Phase-2-Commits)
 
-**Befund (Web-Recherche 2026-06-06):** Aktueller Plugin-Build ist veraltet. Neueste
-Stände: IntelliJ IDEA **2026.1.3** (bündelt **Kotlin 2.3.20**), IntelliJ-Platform-
-Gradle-Plugin **2.16.0**, Kotlin standalone 2.4.0. **Kopplung:** Ein JetBrains-Plugin
-läuft zur Laufzeit gegen die **IDE-gebündelte** Kotlin-Runtime → die kompilierte
-Kotlin-Version muss ≤ gebündelt sein (für IC 2026.1: Kotlin **2.3.x**, NICHT 2.4.0).
+**Befund (Web-Recherche 2026-06-06):** Aktueller Plugin-Build ist veraltet **und nutzt
+die alte DSL**. Maßgeblich = offizielle JetBrains-Vorlage
+[`intellij-platform-plugin-template`](https://github.com/JetBrains/intellij-platform-plugin-template)
+(Stand `main`): Kotlin **2.1.20**, IntelliJ-Platform-Gradle **2.16.0**, Ziel
+`intellijIdea("2025.2.6.2")` via **neuer Dependency-DSL**, Changelog-Plugin 2.5.0,
+`pluginManagement` in `settings.gradle.kts`, Config-/Build-Cache an. **Kopplung:** Ein
+JetBrains-Plugin läuft zur Laufzeit gegen die **IDE-gebündelte** Kotlin-Runtime → die
+kompilierte Kotlin-Version muss ≤ gebündelt sein. Das Template zielt 2025.2.6.2 →
+Kotlin 2.1.20; **wir** zielen (User-Entscheidung) auf **IC 2026.1** (bündelt
+**Kotlin 2.3.20**) → Kotlin **2.3.20**, NICHT 2.4.0. **Vorgehen: bestehendes Plugin
+retrofitten** (nicht neu scaffolden) — Build-Dateien an die Template-Konventionen
+angleichen, Companion-Code behalten.
 
-**Änderungen in `packages/jetbrains-lean-ctx/build.gradle.kts` + `gradle.properties`:**
+**Versions-Änderungen:**
 
 | Setting | Alt | Neu |
-| `org.jetbrains.kotlin.jvm` | `1.9.25` | `2.3.20` (= gebündelt IC 2026.1) |
-| `org.jetbrains.intellij.platform` | `2.14.0` | `2.16.0` |
-| `create("IC", …)` | `2024.1` | `2026.1` |
+| Kotlin (`org.jetbrains.kotlin.jvm`) | `1.9.25` | `2.3.20` (= gebündelt IC 2026.1) |
+| IntelliJ-Platform-Gradle | `2.14.0` | `2.16.0` |
+| Ziel-IDE | `create("IC", "2024.1")` (alte DSL) | `intellijIdea("2026.1.3")` (**neue Dependency-DSL**) |
 | `ideaVersion.sinceBuild` | `241` | `261` |
 | `ideaVersion.untilBuild` | `261.*` | **entfernen** (offen — bricht nicht bei IDE-Minor-Update; OK für Privat-Plugin ohne Marketplace) |
-| `kotlinOptions.jvmTarget` | `17` | `21` — **+ DSL-Migration:** `kotlinOptions` ist in Kotlin 2.x deprecated → auf `compilerOptions { jvmTarget = JvmTarget.JVM_21 }` umstellen (IC 2026.1 läuft auf JBR 21) |
-| `gradle.properties` | — | `kotlin.stdlib.default.dependency=false` (Stdlib NICHT bündeln — IDE liefert sie) |
+| JVM-Target | `kotlinOptions.jvmTarget = "17"` | `compilerOptions { jvmTarget = JvmTarget.JVM_21 }` (`kotlinOptions` in Kotlin 2.x deprecated; IC 2026.1 läuft auf JBR 21) |
+
+**Struktur-Angleichung an die Vorlage (Retrofit der Build-Dateien):**
+
+- `settings.gradle.kts`: `pluginManagement { plugins { kotlin.jvm 2.3.20; changelog 2.5.0 } }`
+  + `plugins { foojay-resolver-convention 1.0.0; org.jetbrains.intellij.platform.settings 2.16.0 }`
+  + `dependencyResolutionManagement { repositories { mavenCentral(); intellijPlatform { defaultRepositories() } } }`.
+- `build.gradle.kts`: `plugins {}` ohne Versions-Literale (Versionen aus `pluginManagement`);
+  `intellijPlatform { intellijIdea("2026.1.3"); testFramework(TestFrameworkType.Platform) }`.
+- `gradle.properties`: `kotlin.stdlib.default.dependency=false` +
+  `org.gradle.configuration-cache=true` + `org.gradle.caching=true`.
+- Gradle-Wrapper auf aktuelle Version anheben (vom Template übernehmen).
 
 **Nicht in Phase 2 nötig** (erst ab Phase 3, Kotlin-PSI): `<depends>org.jetbrains.kotlin</depends>`
 + K2-/Analysis-API-Deklaration. Phase 2 nutzt nur `com.sun.net.httpserver` + reine JVM —
-keine Kotlin-Compiler-/Analysis-APIs.
+keine Kotlin-Compiler-/Analysis-APIs. Changelog-/Qodana-/Kover-/Verifier-CI aus dem
+Template sind **optional** und gehören frühestens in die Phase-5-Härtung (CI-Job), nicht
+in den minimalen Phase-2-Schnitt.
 
-*Gate-Ergänzung:* `./gradlew build` + `./gradlew runIde` grün auf dem neuen Stack;
-Companion-Plugin lädt weiterhin in IC 2026.1.
+*Gate-Ergänzung:* `./gradlew build` + `./gradlew runIde` grün auf dem neuen Stack
+(Config-Cache aktiv); Companion-Plugin lädt weiterhin in IC 2026.1.
 
-**Quellen:** [Kotlin 2.4.0 Released](https://blog.jetbrains.com/kotlin/2026/06/kotlin-2-4-0-released/) ·
+**Quellen:** [intellij-platform-plugin-template](https://github.com/JetBrains/intellij-platform-plugin-template) ·
+[Kotlin 2.4.0 Released](https://blog.jetbrains.com/kotlin/2026/06/kotlin-2-4-0-released/) ·
 [IntelliJ Platform Gradle Plugin Releases](https://github.com/JetBrains/intellij-platform-gradle-plugin/releases) ·
 [IntelliJ IDEA 2026.1.3 Is Out](https://blog.jetbrains.com/idea/2026/06/intellij-idea-2026-1-3/) ·
 [Configuring Kotlin Support](https://plugins.jetbrains.com/docs/intellij/using-kotlin.html)
