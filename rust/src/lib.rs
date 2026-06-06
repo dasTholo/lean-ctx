@@ -33,7 +33,6 @@ pub mod hooks;
 pub mod http_server;
 pub mod instructions;
 pub mod ipc;
-pub mod lmd;
 pub mod lsp;
 pub mod marked_block;
 pub mod mcp_stdio;

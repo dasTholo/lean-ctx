@@ -1,74 +1,111 @@
 # JetBrains-PSI-Backend — Phase 0 + 1 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:
+> executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Den Rust-Kern von lean-ctx auf ein austauschbares `LspBackend`-Trait umstellen (Phase 0, refactor-only inkl. PathJail-Härtung §4.5) und ein zweites Backend (JetBrains-HTTP, Backing B) mit Port-Datei-Discovery + B-first-Selektion und deterministischem Fallback auf rust-analyzer (Backing A) als Skeleton anlegen (Phase 1).
+**Goal:** Den Rust-Kern von lean-ctx auf ein austauschbares `LspBackend`-Trait umstellen (Phase 0, refactor-only inkl.
+PathJail-Härtung §4.5) und ein zweites Backend (JetBrains-HTTP, Backing B) mit Port-Datei-Discovery + B-first-Selektion
+und deterministischem Fallback auf rust-analyzer (Backing A) als Skeleton anlegen (Phase 1).
 
-**Architecture:** `ctx_refactor` ruft über `lsp::router::with_backend` ein `&mut dyn LspBackend`. Phase 0 extrahiert das Trait aus dem heutigen `LspClient` (verhaltensidentisch) und schließt die §4.5-Naht, sodass PathJail garantiert vor jedem Backend-Aufruf greift. Phase 1 fügt `JetBrainsHttpBackend` (synchron via `ureq`), Port-Datei-Discovery (`port_discovery.rs`) und die Factory `select_backend` (B-first, A-Fallback) hinzu. Edits/`type_hierarchy`/`format`/`inspections` sind **nicht** Teil dieser beiden Phasen (Phase 4/5 bzw. v2).
+**Architecture:** `ctx_refactor` ruft über `lsp::router::with_backend` ein `&mut dyn LspBackend`. Phase 0 extrahiert das
+Trait aus dem heutigen `LspClient` (verhaltensidentisch) und schließt die §4.5-Naht, sodass PathJail garantiert vor
+jedem Backend-Aufruf greift. Phase 1 fügt `JetBrainsHttpBackend` (synchron via `ureq`), Port-Datei-Discovery (
+`port_discovery.rs`) und die Factory `select_backend` (B-first, A-Fallback) hinzu. Edits/`type_hierarchy`/`format`/
+`inspections` sind **nicht** Teil dieser beiden Phasen (Phase 4/5 bzw. v2).
 
-**Tech Stack:** Rust, `lsp_types`, `serde_json`, `ureq = "3.3.0"` (blocking HTTP — **bereits Dependency** auf Basis `feat-lmd-v1`, `Cargo.toml:140`), `sha2 = "0.10"` (projecthash — **bereits Dependency**, `Cargo.toml:159`), `dirs` (vorhanden). **Kein `json`-Feature** (Repo-Konvention): JSON-Requests via `.send(&serde_json::to_vec(&body)?)` mit `Content-Type: application/json`, Antworten via `.into_body().read_to_string()` + `serde_json::from_str` — Vorbild `rust/src/cloud_client.rs:146-158`. Per-Request-Timeout (ureq 3.x): `.config().timeout_global(Some(dur)).build()`. Tests via `cargo nextest run` (niemals `cargo test`).
+**Tech Stack:** Rust, `lsp_types`, `serde_json`, `ureq = "3.3.0"` (blocking HTTP — **bereits Dependency** auf Basis
+`feat-lmd-v1`, `Cargo.toml:140`), `sha2 = "0.10"` (projecthash — **bereits Dependency**, `Cargo.toml:159`), `dirs` (
+vorhanden). **Kein `json`-Feature** (Repo-Konvention): JSON-Requests via `.send(&serde_json::to_vec(&body)?)` mit
+`Content-Type: application/json`, Antworten via `.into_body().read_to_string()` + `serde_json::from_str` — Vorbild
+`rust/src/cloud_client.rs:146-158`. Per-Request-Timeout (ureq 3.x): `.config().timeout_global(Some(dur)).build()`. Tests
+via `cargo nextest run` (niemals `cargo test`).
 
-**Spec:** `docs/lean-md/specs/2026-06-05-leanctx-jetbrains-psi-backend-design.md` — §4 (Rust-Seite), §6 (Wire-DTO), §9 (Phasen), §12 (Branch-Strategie).
+**Spec:** `docs/lean-md/specs/2026-06-05-leanctx-jetbrains-psi-backend-design.md` — §4 (Rust-Seite), §6 (Wire-DTO), §9 (
+Phasen), §12 (Branch-Strategie).
 
-**Branch & Commit-Disziplin (§12):** Gesamte Arbeit auf `feat-jetbrains-plugin` (**zweigt von `feat-lmd-v1` ab**, lmd wird in Task 0.0 entfernt; kein worktree, kein `main`/`origin`-Umweg). **Ein Commit pro Phase** — innerhalb einer Phase NICHT pro Task committen, sondern erst im finalen Schritt der Phase. Die lmd-Entfernung (Task 0.0) ist ein eigener, vorgelagerter Commit.
+**Branch & Commit-Disziplin (§12):** Gesamte Arbeit auf `feat-jetbrains-plugin` (**zweigt von `feat-lmd-v1` ab**, lmd
+wird in Task 0.0 entfernt; kein worktree, kein `main`/`origin`-Umweg). **Ein Commit pro Phase** — innerhalb einer Phase
+NICHT pro Task committen, sondern erst im finalen Schritt der Phase. Die lmd-Entfernung (Task 0.0) ist ein eigener,
+vorgelagerter Commit.
 
-**Rust-Edit-Regel (Projekt):** `*.rs`-Änderungen ausschließlich über Serena-Tools (`mcp__serena__jet_brains_find_symbol`, `replace_symbol_body`, `insert_after_symbol`, …) — **nie** native `Edit`/`ctx_edit` auf Rust. `Cargo.toml` (kein Rust) via `ctx_edit`. Vor jedem `git add`: `mcp__jetbrains__reformat_file` auf alle geänderten Dateien.
+**Rust-Edit-Regel (Projekt):** `*.rs`-Änderungen ausschließlich über Serena-Tools (
+`mcp__serena__jet_brains_find_symbol`, `replace_symbol_body`, `insert_after_symbol`, …) — **nie** native `Edit`/
+`ctx_edit` auf Rust. `Cargo.toml` (kein Rust) via `ctx_edit`. Vor jedem `git add`: `mcp__jetbrains__reformat_file` auf
+alle geänderten Dateien.
 
 ---
 
 ## File Structure
 
 **Phase 0 (refactor-only):**
-- Create: `rust/src/lsp/backend.rs` — `LspBackend`-Trait + Begleittypen (`HierarchyDirection`, `TypeHierarchyNode`, `SymbolOverviewItem`, `InspectionDiag`).
+
+- Create: `rust/src/lsp/backend.rs` — `LspBackend`-Trait + Begleittypen (`HierarchyDirection`, `TypeHierarchyNode`,
+  `SymbolOverviewItem`, `InspectionDiag`).
 - Modify: `rust/src/lsp/mod.rs` — `pub mod backend;`.
 - Modify: `rust/src/lsp/client.rs` — `impl LspBackend for LspClient` (delegiert 5 vorhandene Methoden).
 - Modify: `rust/src/lsp/router.rs` — `BACKENDS: HashMap<String, Box<dyn LspBackend>>`, `with_client` → `with_backend`.
 - Modify: `rust/src/tools/ctx_refactor.rs` — innere `handle` nimmt gejailten `abs_path`; `with_client` → `with_backend`.
-- Modify: `rust/src/tools/registered/ctx_refactor.rs` — §4.5: Pfad via `require_resolved_path` (jailt vor Backend). **#145-konform:** `require_resolved_path` → `ctx.resolved_path` → `resolve_path_sync` (`tool_trait.rs:137`) → kanonischer `resolve_tool_path` (`core/path_resolve.rs:32`) — kein dritter Ad-hoc-Resolver, genau das von Spec §4.5/#145 bevorzugte Ziel.
+- Modify: `rust/src/tools/registered/ctx_refactor.rs` — §4.5: Pfad via `require_resolved_path` (jailt vor Backend). *
+  *#145-konform:** `require_resolved_path` → `ctx.resolved_path` → `resolve_path_sync` (`tool_trait.rs:137`) →
+  kanonischer `resolve_tool_path` (`core/path_resolve.rs:32`) — kein dritter Ad-hoc-Resolver, genau das von Spec
+  §4.5/#145 bevorzugte Ziel.
 - Modify: `rust/tests/lsp_integration.rs` — Test-Helper auf neue innere `handle`-Signatur.
 
 **Phase 1 (Backing B Skeleton):**
+
 - Create: `rust/src/lsp/port_discovery.rs` — `project_hash`, `PortFile`, `read_port_file`, `pid_alive`, `health_ok`.
 - Create: `rust/src/lsp/jetbrains_backend.rs` — `JetBrainsHttpBackend` (`impl LspBackend` für refs/def/impl via `ureq`).
 - Modify: `rust/src/lsp/mod.rs` — `pub mod port_discovery; pub mod jetbrains_backend;`.
 - Modify: `rust/src/lsp/router.rs` — Factory `select_backend(language, project_root)`; `with_backend` nutzt sie.
-- **Keine `Cargo.toml`-Änderung** — `ureq = "3.3.0"` und `sha2 = "0.10"` sind bereits Dependencies (verifiziert auf `feat-jetbrains-plugin`); `json`-Feature wird bewusst nicht verwendet.
+- **Keine `Cargo.toml`-Änderung** — `ureq = "3.3.0"` und `sha2 = "0.10"` sind bereits Dependencies (verifiziert auf
+  `feat-jetbrains-plugin`); `json`-Feature wird bewusst nicht verwendet.
 
 ---
 
 ## Task 0.0: Branch von `feat-lmd-v1` + lmd-Entfernung (erster Commit)
 
-**Ziel:** `feat-jetbrains-plugin` von `feat-lmd-v1` abzweigen (erbt **alle** rust/src-Änderungen) und lmd als **ersten Commit** entfernen → lmd-freie Basis. **Kein** `main`/`origin`-Umweg (§12.1/§12.2).
+**Ziel:** `feat-jetbrains-plugin` von `feat-lmd-v1` abzweigen (erbt **alle** rust/src-Änderungen) und lmd als **ersten
+Commit** entfernen → lmd-freie Basis. **Kein** `main`/`origin`-Umweg (§12.1/§12.2).
 
-**Voraussetzung:** Du bist auf `feat-lmd-v1`; Spec + Plan sind dort committet → wandern durch das Abzweigen automatisch mit (keine Datei-Übernahme nötig). Basis-Version = `3.7.4-lmd` (Changelog 3.7.4 inkl. #141/#145 bereits in der Basis), `ureq = "3.3.0"` + `sha2 = "0.10"` vorhanden.
+**Voraussetzung:** Du bist auf `feat-lmd-v1`; Spec + Plan sind dort committet → wandern durch das Abzweigen automatisch
+mit (keine Datei-Übernahme nötig). Basis-Version = `3.7.4-lmd` (Changelog 3.7.4 inkl. #141/#145 bereits in der Basis),
+`ureq = "3.3.0"` + `sha2 = "0.10"` vorhanden.
 
 **Files:**
+
 - Delete: `rust/src/lmd/` (gesamtes Modul), `rust/tests/lmd_phase1_gate.rs`, `rust/tests/lmd_rushdown_spike.rs`
 - Modify: `rust/src/lib.rs` (Zeile `pub mod lmd;` entfernen), optional `rust/Cargo.toml` (Version)
 
 - [ ] **Step 1: Stale Branch löschen + neu von `feat-lmd-v1` anlegen**
 
-Du stehst auf `feat-lmd-v1` (`git rev-parse --abbrev-ref HEAD` → `feat-lmd-v1`). Untracked Dateien (`markdownai/`, `.serena/project.yml`) stören nicht.
+Du stehst auf `feat-lmd-v1` (`git rev-parse --abbrev-ref HEAD` → `feat-lmd-v1`). Untracked Dateien (`markdownai/`,
+`.serena/project.yml`) stören nicht.
 Run:
+
 ```bash
 git branch -D feat-jetbrains-plugin
 git switch -c feat-jetbrains-plugin
 ```
-Expected: neuer `feat-jetbrains-plugin` auf `feat-lmd-v1`-HEAD. `git show HEAD:rust/Cargo.toml` → `version = "3.7.4-lmd"`, enthält `ureq = "3.3.0"` + `sha2 = "0.10"`.
+
+Expected: neuer `feat-jetbrains-plugin` auf `feat-lmd-v1`-HEAD. `git show HEAD:rust/Cargo.toml` →
+`version = "3.7.4-lmd"`, enthält `ureq = "3.3.0"` + `sha2 = "0.10"`.
 
 - [ ] **Step 2: lmd-Modul + Tests löschen**
 
 `git rm` ist der korrekte Weg, getrackte Dateien zu entfernen (keine Symbol-Edits).
 Run:
+
 ```bash
 git rm -r rust/src/lmd
 git rm rust/tests/lmd_phase1_gate.rs rust/tests/lmd_rushdown_spike.rs
 ```
+
 Expected: Dateien aus Index + Working-Tree entfernt.
 
 - [ ] **Step 3: `pub mod lmd;` aus `lib.rs` entfernen (Serena)**
 
 `lib.rs` ist `.rs` → Serena. Entferne die Modul-Deklaration via `mcp__serena__replace_content`:
+
 - old: `pub mod lmd;\n`
 - new: `` (leer)
 
@@ -77,37 +114,46 @@ Expected: **0 Treffer** (kein dangling lmd-Verweis mehr; `ctx_compile` bleibt �
 
 - [ ] **Step 4: (Optional) Version entschärfen**
 
-Via `mcp__lean-ctx__ctx_edit` (TOML): `rust/Cargo.toml:3` `version = "3.7.4-lmd"` → `version = "3.7.4"`. (Kosmetisch; kann auch bleiben.)
+Via `mcp__lean-ctx__ctx_edit` (TOML): `rust/Cargo.toml:3` `version = "3.7.4-lmd"` → `version = "3.7.4"`. (Kosmetisch;
+kann auch bleiben.)
 
 - [ ] **Step 5: Gate — Build, Tests, clippy**
 
 Run:
+
 ```bash
 cargo build -p lean-ctx --lib 2>&1 | tail -10
 cargo nextest run -p lean-ctx 2>&1 | tail -25
 cargo clippy -p lean-ctx --lib --tests 2>&1 | tail -20
 ```
-Expected: alles grün/sauber (kein `unresolved import crate::lmd`, keine fehlende-Datei-Fehler). Falls ein Build-Fehler einen weiteren lmd-Verweis aufdeckt → dort ebenfalls entfernen (Footprint war als minimal verifiziert: nur `lib.rs:36` extern).
+
+Expected: alles grün/sauber (kein `unresolved import crate::lmd`, keine fehlende-Datei-Fehler). Falls ein Build-Fehler
+einen weiteren lmd-Verweis aufdeckt → dort ebenfalls entfernen (Footprint war als minimal verifiziert: nur `lib.rs:36`
+extern).
 
 - [ ] **Step 6: Reformat + Commit (lmd-Entfernung)**
 
 `mcp__jetbrains__reformat_file` auf `rust/src/lib.rs`.
 Run:
+
 ```bash
 git add -A
 git commit -m "chore(jetbrains): branch from feat-lmd-v1, remove lmd module (lmd-free base)"
 ```
+
 Expected: ein Commit auf `feat-jetbrains-plugin`; `git status` sauber (außer untracked Nicht-Footprint-Dateien).
 
 ---
 
 ## Phase 0 — `LspBackend`-Trait-Extraktion (refactor-only, ein Commit)
 
-> Gate (§9): bestehende `ctx_refactor`-Tests grün, Verhalten identisch, clippy sauber. §4.5-Pfad-Fix Pflicht. **Erst im letzten Schritt der Phase committen.**
+> Gate (§9): bestehende `ctx_refactor`-Tests grün, Verhalten identisch, clippy sauber. §4.5-Pfad-Fix Pflicht. **Erst im
+letzten Schritt der Phase committen.**
 
 ### Task 0.1: Trait + Begleittypen anlegen
 
 **Files:**
+
 - Create: `rust/src/lsp/backend.rs`
 - Modify: `rust/src/lsp/mod.rs`
 
@@ -178,7 +224,7 @@ pub trait LspBackend: Send {
         position: Position,
     ) -> Result<GotoDefinitionResponse, String>;
     fn implementations(&mut self, uri: &Uri, position: Position)
-        -> Result<Vec<Location>, String>;
+                       -> Result<Vec<Location>, String>;
     fn rename(
         &mut self,
         uri: &Uri,
@@ -212,7 +258,8 @@ pub trait LspBackend: Send {
 
 - [ ] **Step 2: Modul registrieren**
 
-In `rust/src/lsp/mod.rs` via Serena `insert_before_symbol` (vor `pub mod client;`) die Zeile einfügen, sodass die Datei lautet:
+In `rust/src/lsp/mod.rs` via Serena `insert_before_symbol` (vor `pub mod client;`) die Zeile einfügen, sodass die Datei
+lautet:
 
 ```rust
 pub mod backend;
@@ -224,16 +271,20 @@ pub mod router;
 - [ ] **Step 3: Kompiliert (Trait isoliert)**
 
 Run: `mcp__lean-ctx__ctx_shell(command="cargo build -p lean-ctx --lib 2>&1 | tail -20")`
-Expected: kompiliert (Trait noch ungenutzt → evtl. `dead_code`-Warnung auf Default-Methoden, akzeptabel; wird in Task 0.2/0.4 genutzt).
+Expected: kompiliert (Trait noch ungenutzt → evtl. `dead_code`-Warnung auf Default-Methoden, akzeptabel; wird in Task
+0.2/0.4 genutzt).
 
 ### Task 0.2: `impl LspBackend for LspClient`
 
 **Files:**
+
 - Modify: `rust/src/lsp/client.rs`
 
 - [ ] **Step 1: Trait-Impl anfügen**
 
-`LspClient` hat bereits inhärente `did_open/references/definition/implementations/rename`. Die Trait-Impl delegiert explizit (vollqualifiziert, um Methoden-Namensgleichheit eindeutig zu lösen). Via Serena `insert_after_symbol` nach dem `impl Drop for LspClient`-Block in `client.rs` einfügen:
+`LspClient` hat bereits inhärente `did_open/references/definition/implementations/rename`. Die Trait-Impl delegiert
+explizit (vollqualifiziert, um Methoden-Namensgleichheit eindeutig zu lösen). Via Serena `insert_after_symbol` nach dem
+`impl Drop for LspClient`-Block in `client.rs` einfügen:
 
 ```rust
 impl crate::lsp::backend::LspBackend for LspClient {
@@ -281,11 +332,13 @@ Expected: kompiliert. `LspClient` selbst unverändert.
 ### Task 0.3: Router auf `Box<dyn LspBackend>`
 
 **Files:**
+
 - Modify: `rust/src/lsp/router.rs`
 
 - [ ] **Step 1: Cache-Typ + Import umstellen**
 
-In `router.rs`: Import um `use super::backend::LspBackend;` ergänzen (via Serena `replace_content` der Import-Zeile `use super::client::{file_path_to_uri, LspClient};` → zwei Zeilen):
+In `router.rs`: Import um `use super::backend::LspBackend;` ergänzen (via Serena `replace_content` der Import-Zeile
+`use super::client::{file_path_to_uri, LspClient};` → zwei Zeilen):
 
 ```rust
 use super::backend::LspBackend;
@@ -301,7 +354,9 @@ static BACKENDS: std::sync::LazyLock<Mutex<HashMap<String, Box<dyn LspBackend>>>
 
 - [ ] **Step 2: `with_client` → `with_backend`**
 
-`with_client` ersetzen durch `with_backend` (Serena `replace_symbol_body` auf `with_client`, plus Umbenennung des Symbols — falls Serena `rename` einfacher: erst `rename` `with_client`→`with_backend`, dann Body ersetzen). Neuer Body (Phase 0: konstruiert weiterhin `LspClient`, boxt ihn — `select_backend` kommt erst in Phase 1):
+`with_client` ersetzen durch `with_backend` (Serena `replace_symbol_body` auf `with_client`, plus Umbenennung des
+Symbols — falls Serena `rename` einfacher: erst `rename` `with_client`→`with_backend`, dann Body ersetzen). Neuer Body (
+Phase 0: konstruiert weiterhin `LspClient`, boxt ihn — `select_backend` kommt erst in Phase 1):
 
 ```rust
 pub fn with_backend<F, R>(file_path: &str, project_root: &str, f: F) -> Result<R, String>
@@ -345,7 +400,8 @@ where
 
 - [ ] **Step 3: `open_file` + `shutdown_all` anpassen**
 
-In `open_file` (router.rs): `with_client(...)` → `with_backend(...)` und `client.did_open(...)` → `backend.open_file(...)`. Via Serena `replace_symbol_body` auf `open_file`:
+In `open_file` (router.rs): `with_client(...)` → `with_backend(...)` und `client.did_open(...)` →
+`backend.open_file(...)`. Via Serena `replace_symbol_body` auf `open_file`:
 
 ```rust
 pub fn open_file(file_path: &str, project_root: &str) -> Result<Uri, String> {
@@ -391,13 +447,22 @@ Expected: Fehler NUR noch in `ctx_refactor.rs` (Call-Sites `with_client`) — wi
 ### Task 0.4: §4.5-PathJail-Fix + Call-Sites umstellen
 
 **Files:**
+
 - Modify: `rust/src/tools/ctx_refactor.rs`
 - Modify: `rust/src/tools/registered/ctx_refactor.rs`
 - Modify: `rust/tests/lsp_integration.rs`
 
-> **§4.5-Kern:** Der Dispatcher jailt `path` bereits **vor** `handle` (PATH_LIKE_KEYS, `dispatch/mod.rs:151,324`) → Ergebnis steht in `ctx.resolved_path("path")` bzw. der Fehler in `ctx.path_error("path")`. Die heutige innere `handle` ignoriert das und baut `abs_path` selbst aus rohem `project_root + path` (Jail-Umgehung). Fix: Wrapper reicht den **gejailten** Pfad über `require_resolved_path` durch; innere `handle` nimmt ihn als Parameter und baut **nichts** mehr selbst.
+> **§4.5-Kern:** Der Dispatcher jailt `path` bereits **vor** `handle` (PATH_LIKE_KEYS, `dispatch/mod.rs:151,324`) →
+> Ergebnis steht in `ctx.resolved_path("path")` bzw. der Fehler in `ctx.path_error("path")`. Die heutige innere `handle`
+> ignoriert das und baut `abs_path` selbst aus rohem `project_root + path` (Jail-Umgehung). Fix: Wrapper reicht den *
+*gejailten** Pfad über `require_resolved_path` durch; innere `handle` nimmt ihn als Parameter und baut **nichts** mehr
+> selbst.
 >
-> **Spec §4.5/#145 (Changelog 3.7.4 — unified path resolution):** Der hier gewählte `require_resolved_path`-Pfad **ist** genau das von #145 bevorzugte Ziel — er fußt auf dem konsolidierten Resolver (`require_resolved_path` → `ctx.resolved_path` → `resolve_path_sync`, `tool_trait.rs:137` → `core::path_resolve::resolve_tool_path`, `path_resolve.rs:32`). Es entsteht **kein** dritter Ad-hoc-`abs_path`-Selbstbau. (Beide Symbole sind auf der `3.7.4-lmd`-Basis bereits vorhanden — verifiziert.)
+> **Spec §4.5/#145 (Changelog 3.7.4 — unified path resolution):** Der hier gewählte `require_resolved_path`-Pfad **ist**
+> genau das von #145 bevorzugte Ziel — er fußt auf dem konsolidierten Resolver (`require_resolved_path` →
+`ctx.resolved_path` → `resolve_path_sync`, `tool_trait.rs:137` → `core::path_resolve::resolve_tool_path`,
+`path_resolve.rs:32`). Es entsteht **kein** dritter Ad-hoc-`abs_path`-Selbstbau. (Beide Symbole sind auf der `3.7.4-lmd`
+> -Basis bereits vorhanden — verifiziert.)
 
 - [ ] **Step 1: Charakterisierungs-Test schreiben (failing)**
 
@@ -424,12 +489,14 @@ mod tests {
 
 - [ ] **Step 2: Test ausführen → MUSS fehlschlagen (Signatur)**
 
-Run: `mcp__lean-ctx__ctx_shell(command="cargo nextest run -p lean-ctx inner_handle_uses_provided_abs_path 2>&1 | tail -20")`
+Run:
+`mcp__lean-ctx__ctx_shell(command="cargo nextest run -p lean-ctx inner_handle_uses_provided_abs_path 2>&1 | tail -20")`
 Expected: Compile-FAIL — `super::handle` nimmt aktuell nur 2 Argumente.
 
 - [ ] **Step 3: Innere `handle`-Signatur ändern (abs_path-Parameter)**
 
-Via Serena `replace_symbol_body` auf `handle` in `ctx_refactor.rs` — neuer Body ohne Selbstbau von `abs_path`, Presence-Check entfällt (Wrapper garantiert ihn):
+Via Serena `replace_symbol_body` auf `handle` in `ctx_refactor.rs` — neuer Body ohne Selbstbau von `abs_path`,
+Presence-Check entfällt (Wrapper garantiert ihn):
 
 ```rust
 pub fn handle(args: &Value, project_root: &str, abs_path: &str) -> String {
@@ -460,11 +527,17 @@ pub fn handle(args: &Value, project_root: &str, abs_path: &str) -> String {
 }
 ```
 
-Die `Path`-Nutzung für den entfallenen `abs_path`-Aufbau wird damit ungenutzt → unbenutzten Import `use std::path::Path;` via Serena `replace_content` entfernen, falls sonst nirgends genutzt (clippy-Gate). (Prüfen: `mcp__lean-ctx__ctx_search(pattern="Path::", path="rust/src/tools/ctx_refactor.rs")` — falls 0 weitere Treffer, Import streichen.)
+Die `Path`-Nutzung für den entfallenen `abs_path`-Aufbau wird damit ungenutzt → unbenutzten Import
+`use std::path::Path;` via Serena `replace_content` entfernen, falls sonst nirgends genutzt (clippy-Gate). (Prüfen:
+`mcp__lean-ctx__ctx_search(pattern="Path::", path="rust/src/tools/ctx_refactor.rs")` — falls 0 weitere Treffer, Import
+streichen.)
 
 - [ ] **Step 4: `with_client` → `with_backend` in allen 4 Call-Sites**
 
-In `ctx_refactor.rs` rufen `handle_rename/handle_references/handle_definition/handle_implementations` je `crate::lsp::router::with_client(...)` mit Closure `|client, _|`. Jeweils via Serena `replace_symbol_body` auf `with_backend(...)` und Closure-Param `|backend, _|` umstellen; Methodenaufrufe bleiben gleich (`backend.references(uri, position)` etc.). Beispiel `handle_references`:
+In `ctx_refactor.rs` rufen `handle_rename/handle_references/handle_definition/handle_implementations` je
+`crate::lsp::router::with_client(...)` mit Closure `|client, _|`. Jeweils via Serena `replace_symbol_body` auf
+`with_backend(...)` und Closure-Param `|backend, _|` umstellen; Methodenaufrufe bleiben gleich (
+`backend.references(uri, position)` etc.). Beispiel `handle_references`:
 
 ```rust
 fn handle_references(
@@ -484,11 +557,13 @@ fn handle_references(
 }
 ```
 
-Analog für `handle_definition` (`backend.definition(uri, position)`), `handle_implementations` (`backend.implementations(uri, position)`), `handle_rename` (`backend.rename(uri, position, new_name)`).
+Analog für `handle_definition` (`backend.definition(uri, position)`), `handle_implementations` (
+`backend.implementations(uri, position)`), `handle_rename` (`backend.rename(uri, position, new_name)`).
 
 - [ ] **Step 5: Wrapper §4.5 — gejailten Pfad durchreichen**
 
-In `rust/src/tools/registered/ctx_refactor.rs` den Import um `require_resolved_path` ergänzen und `handle` umstellen. Import (Serena `replace_content`):
+In `rust/src/tools/registered/ctx_refactor.rs` den Import um `require_resolved_path` ergänzen und `handle` umstellen.
+Import (Serena `replace_content`):
 
 ```rust
 use crate::server::tool_trait::{get_str, require_resolved_path, McpTool, ToolContext, ToolOutput};
@@ -498,33 +573,35 @@ use crate::server::tool_trait::{get_str, require_resolved_path, McpTool, ToolCon
 
 ```rust
     fn handle(
-        &self,
-        args: &Map<String, Value>,
-        ctx: &ToolContext,
-    ) -> Result<ToolOutput, ErrorData> {
-        // §4.5: PathJail runs in the dispatcher BEFORE this handle. require_resolved_path
-        // surfaces a jail rejection / missing / non-string `path` as an MCP error here,
-        // so no relative/escaping path is ever rebuilt or sent to a backend.
-        let abs_path = require_resolved_path(ctx, args, "path")?.to_string();
+    &self,
+    args: &Map<String, Value>,
+    ctx: &ToolContext,
+) -> Result<ToolOutput, ErrorData> {
+    // §4.5: PathJail runs in the dispatcher BEFORE this handle. require_resolved_path
+    // surfaces a jail rejection / missing / non-string `path` as an MCP error here,
+    // so no relative/escaping path is ever rebuilt or sent to a backend.
+    let abs_path = require_resolved_path(ctx, args, "path")?.to_string();
 
-        let args_value = Value::Object(args.clone());
-        let result = crate::tools::ctx_refactor::handle(&args_value, &ctx.project_root, &abs_path);
+    let args_value = Value::Object(args.clone());
+    let result = crate::tools::ctx_refactor::handle(&args_value, &ctx.project_root, &abs_path);
 
-        let action = get_str(args, "action").unwrap_or_default();
-        Ok(ToolOutput {
-            text: result,
-            original_tokens: 0,
-            saved_tokens: 0,
-            mode: Some(action),
-            path: get_str(args, "path"),
-            changed: false,
-        })
-    }
+    let action = get_str(args, "action").unwrap_or_default();
+    Ok(ToolOutput {
+        text: result,
+        original_tokens: 0,
+        saved_tokens: 0,
+        mode: Some(action),
+        path: get_str(args, "path"),
+        changed: false,
+    })
+}
 ```
 
 - [ ] **Step 6: Integrationstest-Helper anpassen**
 
-In `rust/tests/lsp_integration.rs` ruft `call_refactor` die innere `handle` mit 2 Args. Da die Tests bereits **absolute** Pfade in `args["path"]` übergeben, den Helper via `mcp__lean-ctx__ctx_edit` (Test-Datei, aber `.rs` → Serena bevorzugt; nutze Serena `replace_symbol_body` auf `call_refactor`):
+In `rust/tests/lsp_integration.rs` ruft `call_refactor` die innere `handle` mit 2 Args. Da die Tests bereits **absolute
+** Pfade in `args["path"]` übergeben, den Helper via `mcp__lean-ctx__ctx_edit` (Test-Datei, aber `.rs` → Serena
+bevorzugt; nutze Serena `replace_symbol_body` auf `call_refactor`):
 
 ```rust
 fn call_refactor(args: &serde_json::Value, root: &str) -> String {
@@ -535,44 +612,56 @@ fn call_refactor(args: &serde_json::Value, root: &str) -> String {
 
 - [ ] **Step 7: Charakterisierungs-Test grün**
 
-Run: `mcp__lean-ctx__ctx_shell(command="cargo nextest run -p lean-ctx inner_handle_uses_provided_abs_path 2>&1 | tail -20")`
+Run:
+`mcp__lean-ctx__ctx_shell(command="cargo nextest run -p lean-ctx inner_handle_uses_provided_abs_path 2>&1 | tail -20")`
 Expected: PASS.
 
 - [ ] **Step 8: Volles Phasen-Gate — Build, Tests, clippy**
 
 Run:
+
 ```bash
 cargo build -p lean-ctx --lib 2>&1 | tail -10
 cargo nextest run -p lean-ctx 2>&1 | tail -25
 cargo clippy -p lean-ctx --lib --tests 2>&1 | tail -25
 ```
-Expected: Build ok; alle Tests grün (LSP-Integrationstests sind `#[ignore]`, kompilieren aber); clippy ohne Warnungen. (Verhalten identisch zu vorher; einzige bewusste Änderung: Jail-Rejection liefert jetzt sauberen Fehler vor Backend-Aufruf.)
+
+Expected: Build ok; alle Tests grün (LSP-Integrationstests sind `#[ignore]`, kompilieren aber); clippy ohne Warnungen. (
+Verhalten identisch zu vorher; einzige bewusste Änderung: Jail-Rejection liefert jetzt sauberen Fehler vor
+Backend-Aufruf.)
 
 - [ ] **Step 9: Reformat + Phase-0-Commit (EINZIGER Commit der Phase)**
 
 `mcp__jetbrains__reformat_file` auf alle geänderten `.rs`-Dateien:
-`rust/src/lsp/backend.rs`, `rust/src/lsp/mod.rs`, `rust/src/lsp/client.rs`, `rust/src/lsp/router.rs`, `rust/src/tools/ctx_refactor.rs`, `rust/src/tools/registered/ctx_refactor.rs`, `rust/tests/lsp_integration.rs`.
+`rust/src/lsp/backend.rs`, `rust/src/lsp/mod.rs`, `rust/src/lsp/client.rs`, `rust/src/lsp/router.rs`,
+`rust/src/tools/ctx_refactor.rs`, `rust/src/tools/registered/ctx_refactor.rs`, `rust/tests/lsp_integration.rs`.
 
 Run:
+
 ```bash
 git add rust/src/lsp/backend.rs rust/src/lsp/mod.rs rust/src/lsp/client.rs rust/src/lsp/router.rs rust/src/tools/ctx_refactor.rs rust/src/tools/registered/ctx_refactor.rs rust/tests/lsp_integration.rs
 git commit -m "feat(lsp): extract LspBackend trait + harden ctx_refactor PathJail (§4.5) [Phase 0]"
 ```
+
 Expected: ein Commit; `git status` sauber (außer untracked Nicht-Phase-Dateien).
 
 ---
 
 ## Phase 1 — Port-Discovery + HTTP-Backend-Skeleton (ein Commit)
 
-> Gate (§9): gegen Mock-Server parsebar; ohne Port-Datei deterministischer Fallback A. **Erst im letzten Schritt der Phase committen.**
+> Gate (§9): gegen Mock-Server parsebar; ohne Port-Datei deterministischer Fallback A. **Erst im letzten Schritt der
+Phase committen.**
 
 ### Task 1.1: ~~Dependencies hinzufügen~~ — ENTFÄLLT
 
-`ureq = "3.3.0"` und `sha2 = "0.10"` sind **bereits** Dependencies auf `feat-jetbrains-plugin`. Keine `Cargo.toml`-Änderung. Das `json`-Feature wird **nicht** aktiviert — JSON läuft über `serde_json` + `ureq`-Body-API (Repo-Konvention, siehe Tech-Stack-Notiz). Direkt mit Task 1.2 fortfahren.
+`ureq = "3.3.0"` und `sha2 = "0.10"` sind **bereits** Dependencies auf `feat-jetbrains-plugin`. Keine `Cargo.toml`
+-Änderung. Das `json`-Feature wird **nicht** aktiviert — JSON läuft über `serde_json` + `ureq`-Body-API (
+Repo-Konvention, siehe Tech-Stack-Notiz). Direkt mit Task 1.2 fortfahren.
 
 ### Task 1.2: `port_discovery.rs`
 
 **Files:**
+
 - Create: `rust/src/lsp/port_discovery.rs`
 - Modify: `rust/src/lsp/mod.rs`
 
@@ -689,7 +778,9 @@ pub mod jetbrains_backend;
 pub mod port_discovery;
 pub mod router;
 ```
-(`jetbrains_backend` wird in Task 1.3 erstellt — Reihenfolge egal; falls Build vor Task 1.3 nötig, diese Zeile erst dort hinzufügen.)
+
+(`jetbrains_backend` wird in Task 1.3 erstellt — Reihenfolge egal; falls Build vor Task 1.3 nötig, diese Zeile erst dort
+hinzufügen.)
 
 - [ ] **Step 3: Tests grün**
 
@@ -699,13 +790,17 @@ Expected: `project_hash_is_stable_and_16_hex` + `port_file_absent_for_unlikely_r
 ### Task 1.3: `jetbrains_backend.rs` (refs/def/impl via `ureq`)
 
 **Files:**
+
 - Create: `rust/src/lsp/jetbrains_backend.rs`
 
-> Wire-DTO (§6): Request `{path, line, character}` (Pfad **relativ** zu project_root, Position **0-basiert**); Response `{locations:[{path, range:{start:{line,character}, end:{...}}}]}`. Rust joint relative Pfade zurück zu absoluten file-URIs.
+> Wire-DTO (§6): Request `{path, line, character}` (Pfad **relativ** zu project_root, Position **0-basiert**); Response
+`{locations:[{path, range:{start:{line,character}, end:{...}}}]}`. Rust joint relative Pfade zurück zu absoluten
+> file-URIs.
 
 - [ ] **Step 1: Test zuerst — Mock-Server-Parsing (failing)**
 
-Neue Datei `rust/src/lsp/jetbrains_backend.rs` mit Implementierung **und** Test (native `Write` ok — neue Datei). Inhalt:
+Neue Datei `rust/src/lsp/jetbrains_backend.rs` mit Implementierung **und** Test (native `Write` ok — neue Datei).
+Inhalt:
 
 ```rust
 //! Backing B: in-IDE JetBrains PSI backend over HTTP/JSON (127.0.0.1).
@@ -896,17 +991,21 @@ mod tests {
 
 - [ ] **Step 2: Test → erst rot, dann grün**
 
-Run: `mcp__lean-ctx__ctx_shell(command="cargo nextest run -p lean-ctx references_parses_wire_locations 2>&1 | tail -25")`
-Expected: kompiliert und PASS. (Falls `mod.rs` `jetbrains_backend` noch nicht eingetragen ist → erst Task 1.2 Step 2 abschließen.)
+Run:
+`mcp__lean-ctx__ctx_shell(command="cargo nextest run -p lean-ctx references_parses_wire_locations 2>&1 | tail -25")`
+Expected: kompiliert und PASS. (Falls `mod.rs` `jetbrains_backend` noch nicht eingetragen ist → erst Task 1.2 Step 2
+abschließen.)
 
 ### Task 1.4: `select_backend`-Factory (B-first, A-Fallback)
 
 **Files:**
+
 - Modify: `rust/src/lsp/router.rs`
 
 - [ ] **Step 1: Factory einfügen**
 
-Via Serena `insert_before_symbol` vor `with_backend` in `router.rs`. Importe um die neuen Module ergänzen (Serena `replace_content` der `use super::backend::LspBackend;`-Zeile → mehrere Zeilen):
+Via Serena `insert_before_symbol` vor `with_backend` in `router.rs`. Importe um die neuen Module ergänzen (Serena
+`replace_content` der `use super::backend::LspBackend;`-Zeile → mehrere Zeilen):
 
 ```rust
 use super::backend::LspBackend;
@@ -1003,7 +1102,9 @@ where
 
 - [ ] **Step 3: Determinismus-Test — ohne Port-Datei kein B**
 
-Da ein Volltest von `with_backend` einen echten rust-analyzer bräuchte, testen wir die Selektions-**Vorentscheidung** isoliert: ohne Port-Datei liefert die Discovery `None`. Via Serena `insert_after_symbol` ein `#[cfg(test)] mod tests` ans Ende von `router.rs`:
+Da ein Volltest von `with_backend` einen echten rust-analyzer bräuchte, testen wir die Selektions-**Vorentscheidung**
+isoliert: ohne Port-Datei liefert die Discovery `None`. Via Serena `insert_after_symbol` ein `#[cfg(test)] mod tests`
+ans Ende von `router.rs`:
 
 ```rust
 #[cfg(test)]
@@ -1023,47 +1124,74 @@ mod tests {
 - [ ] **Step 4: Tests + clippy**
 
 Run:
+
 ```bash
 cargo nextest run -p lean-ctx 2>&1 | tail -25
 cargo clippy -p lean-ctx --lib --tests 2>&1 | tail -25
 ```
-Expected: alle Tests grün (inkl. `references_parses_wire_locations`, `project_hash_*`, `no_port_file_means_no_backing_b`); clippy sauber.
+
+Expected: alle Tests grün (inkl. `references_parses_wire_locations`, `project_hash_*`,
+`no_port_file_means_no_backing_b`); clippy sauber.
 
 ### Task 1.5: Phasen-Gate + Phase-1-Commit (EINZIGER Commit der Phase)
 
 - [ ] **Step 1: Voller Build + Test + clippy**
 
 Run:
+
 ```bash
 cargo build -p lean-ctx --lib 2>&1 | tail -10
 cargo nextest run -p lean-ctx 2>&1 | tail -25
 cargo clippy -p lean-ctx --lib --tests 2>&1 | tail -20
 ```
-Expected: alles grün/sauber. Ohne laufende IDE wählt `select_backend` deterministisch Backing A (Regressionsschutz; LSP-Integrationstests bleiben `#[ignore]`).
+
+Expected: alles grün/sauber. Ohne laufende IDE wählt `select_backend` deterministisch Backing A (Regressionsschutz;
+LSP-Integrationstests bleiben `#[ignore]`).
 
 - [ ] **Step 2: Reformat + Commit**
 
-`mcp__jetbrains__reformat_file` auf: `rust/src/lsp/port_discovery.rs`, `rust/src/lsp/jetbrains_backend.rs`, `rust/src/lsp/mod.rs`, `rust/src/lsp/router.rs`. (`Cargo.toml` braucht kein reformat.)
+`mcp__jetbrains__reformat_file` auf: `rust/src/lsp/port_discovery.rs`, `rust/src/lsp/jetbrains_backend.rs`,
+`rust/src/lsp/mod.rs`, `rust/src/lsp/router.rs`. (`Cargo.toml` braucht kein reformat.)
 
 Run:
+
 ```bash
 git add rust/Cargo.toml rust/src/lsp/port_discovery.rs rust/src/lsp/jetbrains_backend.rs rust/src/lsp/mod.rs rust/src/lsp/router.rs
 git commit -m "feat(lsp): JetBrains HTTP backend skeleton + port discovery + B-first select_backend [Phase 1]"
 ```
-Expected: ein Commit; `git status` sauber (außer untracked Nicht-Phase-Dateien). `Cargo.lock` ggf. mitcommitten, falls vom Repo getrackt (`git status` prüfen).
+
+Expected: ein Commit; `git status` sauber (außer untracked Nicht-Phase-Dateien). `Cargo.lock` ggf. mitcommitten, falls
+vom Repo getrackt (`git status` prüfen).
 
 ---
 
 ## Self-Review (gegen Spec)
 
-**Spec-Abdeckung Phase 0 (§9):** Trait-Extraktion (Task 0.1) ✓; `impl für LspClient` (0.2) ✓; Router auf `Box<dyn LspBackend>` (0.3) ✓; §4.5-Pfad-Fix (0.4) ✓; Gate „Tests grün/Verhalten identisch/clippy" (0.4 Step 8) ✓.
+**Spec-Abdeckung Phase 0 (§9):** Trait-Extraktion (Task 0.1) ✓; `impl für LspClient` (0.2) ✓; Router auf
+`Box<dyn LspBackend>` (0.3) ✓; §4.5-Pfad-Fix (0.4) ✓; Gate „Tests grün/Verhalten identisch/clippy" (0.4 Step 8) ✓.
 
-**Spec-Abdeckung Phase 1 (§9):** `port_discovery.rs` (1.2) ✓; `jetbrains_backend.rs` refs/def/impl via `ureq` (1.3) ✓; `select_backend` mit Fallback (1.4) ✓; Gate „gegen Mock parsebar / ohne Port-Datei Fallback A" (1.3 Step 2, 1.4 Step 3) ✓.
+**Spec-Abdeckung Phase 1 (§9):** `port_discovery.rs` (1.2) ✓; `jetbrains_backend.rs` refs/def/impl via `ureq` (1.3) ✓;
+`select_backend` mit Fallback (1.4) ✓; Gate „gegen Mock parsebar / ohne Port-Datei Fallback A" (1.3 Step 2, 1.4 Step 3)
+✓.
 
-**Bewusst NICHT in Phase 0/1 (spätere Phasen):** `type_hierarchy`/`overview`/`format`/`inspections`-Actions + Schema-Erweiterung in `registered/ctx_refactor.rs` (Phase 4/5); `rename`-apply über Backing B (v2); Kotlin-Plugin (Phase 2/3). Die Default-degradierenden Trait-Methoden sind bereits angelegt (additiv, kein Breaking Change). **Vormerkung Spec §4.4/#141 (Changelog 3.7.4 — Tool-Registry = single schema source):** Die Schema-Erweiterung in Phase 4/5 läuft über die **eine** `tool_def`-Registry (`tool_defs/mod.rs:9` `tool_def(...)`) — `registered/ctx_refactor.rs` pflegt **kein** Inline-Schema mehr (alte L19-24 entfallen); neue Actions/`direction` werden dort ergänzt und vom Drift-Regressions-Test abgedeckt, **nicht** als zweite handgepflegte Kopie. Phase 0/1 berührt das Schema nicht.
+**Bewusst NICHT in Phase 0/1 (spätere Phasen):** `type_hierarchy`/`overview`/`format`/`inspections`-Actions +
+Schema-Erweiterung in `registered/ctx_refactor.rs` (Phase 4/5); `rename`-apply über Backing B (v2); Kotlin-Plugin (Phase
+2/3). Die Default-degradierenden Trait-Methoden sind bereits angelegt (additiv, kein Breaking Change). **Vormerkung Spec
+§4.4/#141 (Changelog 3.7.4 — Tool-Registry = single schema source):** Die Schema-Erweiterung in Phase 4/5 läuft über die
+**eine** `tool_def`-Registry (`tool_defs/mod.rs:9` `tool_def(...)`) — `registered/ctx_refactor.rs` pflegt **kein**
+Inline-Schema mehr (alte L19-24 entfallen); neue Actions/`direction` werden dort ergänzt und vom Drift-Regressions-Test
+abgedeckt, **nicht** als zweite handgepflegte Kopie. Phase 0/1 berührt das Schema nicht.
 
-**Typ-Konsistenz:** Trait-Methodennamen (`open_file/references/definition/implementations/rename`) identisch in `backend.rs`, `client.rs`-Impl, `jetbrains_backend.rs`-Impl und Router-Closures. `with_backend` (nicht `with_client`) durchgängig. `JetBrainsHttpBackend::new(port, token, project_root)` einheitlich in `select_backend` und Test. `PortFile`-Felder (`port/token/pid`) konsistent zwischen `read_port_file`, `health_ok`, `select_backend`.
+**Typ-Konsistenz:** Trait-Methodennamen (`open_file/references/definition/implementations/rename`) identisch in
+`backend.rs`, `client.rs`-Impl, `jetbrains_backend.rs`-Impl und Router-Closures. `with_backend` (nicht `with_client`)
+durchgängig. `JetBrainsHttpBackend::new(port, token, project_root)` einheitlich in `select_backend` und Test. `PortFile`
+-Felder (`port/token/pid`) konsistent zwischen `read_port_file`, `health_ok`, `select_backend`.
 
-**Offene Punkte (in späteren Phasen zu prüfen):** (1) Plugin und Rust müssen `projecthash` **byte-identisch** canonicalisieren (§5.5) — beim Plugin-Bau (Phase 2) gegen `project_hash` hier verifizieren. (2) `ureq`-API: Plan nutzt **3.x** (Basis `feat-lmd-v1` = `ureq "3.3.0"`), **ohne** `json`-Feature → JSON via `serde_json` + `.send(bytes)`/`.into_body().read_to_string()`, Per-Request-Timeout via `.config().timeout_global(..).build()` (verifiziert gegen docs.rs/ureq 3.3 + Repo-Muster `cloud_client.rs`).
+**Offene Punkte (in späteren Phasen zu prüfen):** (1) Plugin und Rust müssen `projecthash` **byte-identisch**
+canonicalisieren (§5.5) — beim Plugin-Bau (Phase 2) gegen `project_hash` hier verifizieren. (2) `ureq`-API: Plan nutzt *
+*3.x** (Basis `feat-lmd-v1` = `ureq "3.3.0"`), **ohne** `json`-Feature → JSON via `serde_json` + `.send(bytes)`/
+`.into_body().read_to_string()`, Per-Request-Timeout via `.config().timeout_global(..).build()` (verifiziert gegen
+docs.rs/ureq 3.3 + Repo-Muster `cloud_client.rs`).
 
-**Commit-Disziplin (§12):** Drei Commits gesamt — lmd-Entfernung (0.0, Branch von `feat-lmd-v1`), Phase 0 (0.4 Step 9), Phase 1 (1.5 Step 2). Finaler Squash erst beim PR-Merge.
+**Commit-Disziplin (§12):** Drei Commits gesamt — lmd-Entfernung (0.0, Branch von `feat-lmd-v1`), Phase 0 (0.4 Step 9),
+Phase 1 (1.5 Step 2). Finaler Squash erst beim PR-Merge.
