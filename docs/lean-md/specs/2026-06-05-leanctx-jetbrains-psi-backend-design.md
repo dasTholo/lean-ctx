@@ -721,3 +721,32 @@ in den minimalen Phase-2-Schnitt.
 [IntelliJ Platform Gradle Plugin Releases](https://github.com/JetBrains/intellij-platform-gradle-plugin/releases) ·
 [IntelliJ IDEA 2026.1.3 Is Out](https://blog.jetbrains.com/idea/2026/06/intellij-idea-2026-1-3/) ·
 [Configuring Kotlin Support](https://plugins.jetbrains.com/docs/intellij/using-kotlin.html)
+
+---
+
+## 16. Companion-Track (Issue #246) — Abgrenzung
+
+[Issue #246](https://github.com/yvgude/lean-ctx/issues/246) ("Integration: JetBrains
+native plugin for lean-ctx") ist der **Ursprung** des Plugin-Vorhabens und beschreibt
+einen **UX/Companion-Track**, der vom PSI-Backend-Track **dieses** Specs zu trennen ist.
+Beide teilen sich **ein** Plugin-Modul (`com.leanctx.plugin`, `packages/jetbrains-lean-ctx`),
+verfolgen aber **verschiedene Zwecke** und **entgegengesetzte Kommunikationsrichtungen**.
+
+| | **Companion/UX-Track (#246)** | **PSI-Backend-Track (dieser Spec)** |
+| Zweck | Ersparnis anzeigen, Auto-Setup, read-mode Hints, Settings-UI, One-Click-Toggle | Serena-Ablösung: `ctx_refactor`-Backend B (refs/def/impl, type_hierarchy, …) |
+| Plugin-Rolle | **Host/Client** — ruft das lean-ctx-Binary (`BinaryResolver.runCommand`) bzw. liest `stats.json` | **HTTP-Server** — lean-ctx Rust ruft das Plugin auf (`X-LeanCtx-Token`) |
+| Bestehender Code | `StatsReader`, `LeanCtxStatusBarFactory`, `BinaryResolver`, `actions/` | NEU ab Phase 2 (`server/`, `dto/`) |
+| Status | tracked (#246), teilweise vorhanden | Phase 0+1 fertig, Phase 2 in Arbeit |
+
+**#246-Companion-Features** (eigener späterer Mini-Spec, **nicht** Teil von Phase 0–5):
+Statusbar-„wrapped"-Card via `lean-ctx gain --wrapped`/`--json` (on-demand, nicht im
+30s-Timer; `gain --json` als stabiler Parsing-Contract statt Text-Scraping; reiche Card
+via `--svg`/`--html` in JCEF-Panel), per-File read-mode Hints, Settings-UI für
+`config.toml`, One-Click-Enable/Disable pro Projekt, Auto-Setup.
+
+**Überholt aus #246** (Architektur seither weiterentwickelt): Der #246-Design-Kommentar
+empfiehlt ein **separates Repo** `lean-ctx-jetbrains` + **MCP über stdio** (Plugin spawnt
+lean-ctx als Child) bzw. Proxy-Routing auf Port 4444. **Dieser Spec überschreibt das:**
+**in-repo** `packages/jetbrains-lean-ctx` (der Companion-Code liegt bereits dort) und für
+den PSI-Track ist das Plugin ein **HTTP-Server**, den lean-ctx Rust aufruft (umgekehrte
+Richtung). Die beiden Richtungen koexistieren konfliktfrei im selben Modul.
