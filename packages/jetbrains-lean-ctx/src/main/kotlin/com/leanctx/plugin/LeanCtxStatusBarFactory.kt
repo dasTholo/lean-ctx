@@ -50,12 +50,7 @@ class LeanCtxStatusBarWidget : StatusBarWidget, StatusBarWidget.TextPresentation
     override fun getText(): String = currentText
     override fun getTooltipText(): String {
         val stats = StatsReader.read() ?: return "lean-ctx: No stats yet"
-        return buildString {
-            appendLine("lean-ctx Token Savings")
-            appendLine("────────────────────────")
-            appendLine("Tokens saved: ${stats.tokensSaved}")
-            appendLine("Commands: ${stats.totalCommands}")
-        }
+        return "lean-ctx: ${stats.formattedSavings()} tokens saved · ${stats.totalCommands} commands"
     }
     override fun getAlignment(): Float = 0f
 
