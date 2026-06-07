@@ -90,8 +90,15 @@ Global in `~/.claude/settings.json` (PreToolUse):
 **Dispatch-Grenze** bricht die Kette: (a) der Subagent-Prompt trägt die Disziplin
 nicht zwingend mit; (b) lean-ctx-MCP-Tools sind im Subagent oft *deferred* — er
 bekommt einen Deny, hat das Ersatz-Tool aber nicht geladen und ruft kein
-`ToolSearch(select:…)`; (c) ob PreToolUse-Hooks im Subagent-Loop des Ziel-Harness
-feuern, ist unverifiziert.
+`ToolSearch(select:…)`; (c) ~~ob PreToolUse-Hooks im Subagent-Loop des Ziel-Harness
+feuern, ist unverifiziert~~ → **VERIFIZIERT (2026-06-07, Probe-Subagent, Claude
+Code):** PreToolUse-Hooks feuern auch im Subagent-Kontext, identisch zum Haupt-Agent.
+Probe: native `grep` → `[bash-enforce-ctx-shell] 'grep' is denied` (Kategorie
+search/list/pipe), native `cat` → Deny (file-read-misuse), `echo` → EXECUTED
+(keine Drift-Kategorie). Der Hook wertet pro Kommando aus, kein Agent-ID-Filter.
+∴ Der Drift-Restpunkt ist nicht „feuert der Hook", sondern (a)+(b): der Deny kommt
+an, aber ohne `ToolSearch(select:…)`-Reflex bleibt der Subagent ohne Ersatz-Tool
+stecken. Hook erzwingt das *Verbot*, nicht die *Ersatzfähigkeit*.
 
 ### 2.4 Regel-/Macro-Bibliothek heute (`mdai/core`, `mdai/tooling`)
 

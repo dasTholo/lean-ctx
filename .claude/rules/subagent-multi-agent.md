@@ -76,7 +76,10 @@ exposes them directly but bloats the tool catalog.)
    `ctx_search`, not `grep`/`rg` inside `ctx_shell`; read files with `ctx_read`,
    not `cat`. Batch files with `ctx_multi_read`; re-read after your own edits with
    `ctx_delta` (changed lines only — that is what `ctx_delta` is for, not a `fresh`
-   full re-read).
+   full re-read). **`ctx_shell`: bare command + `cwd=` — never `cd <path> &&`**
+   (the pattern router matches on prefix, `mod.rs:140-145` `starts_with("git ")`/
+   `cargo `/`npm `; a `cd … &&` wrapper kills git/cargo/npm compression) and **no
+   `2>&1`** (stderr is already captured; the redirect breaks pattern matching).
 3. **Rust (`*.rs`) edits via Serena only** (`replace_symbol_body`, `insert_*`,
    `rename`/`move`/`safe_delete`) — never native `Edit`/`ctx_edit` on Rust.
 4. **During work:** `ctx_agent action=diary category=<discovery|decision|blocker|progress|insight>`
@@ -107,6 +110,11 @@ Tool discipline:
   ToolSearch(query="select:<tool>") FIRST, then call it. NEVER wrap a standard
   tool in ctx_call (no ctx_call name=ctx_read / name=ctx_shell — pure overhead).
 - NEVER fresh, NEVER raw (mtime auto-validates; fresh after a cache read is forbidden)
+- ctx_shell: bare command + cwd= — NEVER cd <path> && (prefix router, starts_with("git ")
+  /cargo /npm ; a cd … && wrapper kills git/cargo/npm compression); and NO 2>&1
+- Test runners (cargo nextest/cargo test/pytest/…): bare command, NO | tail/| grep/| head
+  (output is kept verbatim w/ failures preserved; cd … && or | tail discards the Summary
+  line before lean-ctx sees it). Shrink at source: cargo nextest run --status-level fail
 - Search → ctx_search (never grep/rg in ctx_shell); read files → ctx_read (never cat)
 - Batch reads → ctx_multi_read ; re-read after your edit → ctx_delta (changed lines)
 - Rust (*.rs) edits → Serena tools only (never native Edit / ctx_edit)

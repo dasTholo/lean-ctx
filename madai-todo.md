@@ -1,5 +1,8 @@
 # MDAi Todos
-
+- wieso macht ein agent 
+  - lean-ctx - ctx_read (MCP)(path: "/home/tholo/Scripts/lean-ctx/rust/src/tools/registered/ctx_refactor.rs")
+    danach lean-ctx - ctx_read (MCP)(path: "/home/tholo/Scripts/lean-ctx/rust/src/tools/registered/ctx_refactor.rs", mode: "full")
+  Hier sollte der Cache doch greifen
 - set `ctx_delta` if file cached, no fresh read in claude und für agents
 - set path damit Pläne src path immer referzieren können
 - muss in Macro alles aufgezählt sein? die calls passieren ja "einfach" so

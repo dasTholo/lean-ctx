@@ -29,6 +29,25 @@
   `ToolSearch(query="select:...")` before any Bash workaround.
 - **Before `git add`**: run `mcp__jetbrains__reformat_file` on every changed file
 - **No worktrees** — work directly on the current branch
+- **`ctx_shell` — bare command + `cwd=`, never `cd <path> &&`** (defeats output
+  compression): the pattern router matches on the command **prefix**
+  (`rust/src/core/patterns/mod.rs:140-145` → `c.starts_with("git ")`, same for
+  `cargo `/`npm `/…). A `cd <path> && git …` wrapper makes the command start with
+  `cd`, so `git::compress()` never runs and only weak generic fallbacks apply — the
+  git-status / diff / log savings are lost. Therefore:
+  - Run the **bare** command (`git diff --name-only HEAD`, `cargo nextest run`, …)
+    and pass the directory via the `ctx_shell` **`cwd`** parameter (it persists
+    across calls). **Never** prefix with `cd <path> &&`.
+  - **No `2>&1`** — `ctx_shell` already captures stderr; the redirect only pollutes
+    the pattern input and can break matching.
+  - **Test runners (`cargo nextest`/`cargo test`/`pytest`/…): bare command, no
+    `| tail`/`| grep`/`| head`.** Test output is kept **verbatim** by design
+    (`rust/src/shell/compress/engine.rs:49-55`, `is_test_runner_command` Z. 292-330)
+    — only head/tail-truncated when huge, with failure/summary lines preserved.
+    A `cd … &&` prefix makes `is_test_runner_command` miss (it splits only on `|`,
+    strips only `ENV=` prefixes), and an external `| tail`/`| grep` discards the
+    `Summary […] N tests run: …` line *before* lean-ctx sees it. To shrink large
+    green runs, do it at the source: `cargo nextest run --status-level fail`.
 
 ## Subagent-Driven Execution
 
