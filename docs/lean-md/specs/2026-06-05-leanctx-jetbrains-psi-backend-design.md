@@ -753,3 +753,106 @@ lean-ctx als Child) bzw. Proxy-Routing auf Port 4444. **Dieser Spec überschreib
 **in-repo** `packages/jetbrains-lean-ctx` (der Companion-Code liegt bereits dort) und für
 den PSI-Track ist das Plugin ein **HTTP-Server**, den lean-ctx Rust aufruft (umgekehrte
 Richtung). Die beiden Richtungen koexistieren konfliktfrei im selben Modul.
+
+---
+
+## 17. Phase-3-Detaildesign — PSI-Nav-Endpoints + E2E — genehmigt 2026-06-07
+
+Phase 3 ist die **erste Phase mit echter PSI-Logik** im Plugin: sie füllt die in
+Phase 2 gebaute, authentifizierte Hülle (`BackendHttpServer`/`RequestRouter`/`/health`)
+mit den vier Navigations-Endpoints, gegen die die Phase-1-Rust-Seite
+(`jetbrains_backend.rs`) bereits spricht. **Schnitt: nav-only** — `type_hierarchy`/
+`overview` bleiben Phase 4, `format`/`inspections` Phase 5.
+
+### 17.1 Fixierte Entscheidungen (User, 2026-06-07)
+
+| # | Entscheidung | Begründung |
+| 1 | **Schnitt nav-only** (§9 Phase 3): `references`/`definition`/`implementations`/`declaration` + `psi/` + `dto/` + E2E. Kein `overview`/`type_hierarchy` vorziehen. | `scope`-Param + `truncated/total` ziehen bereits Rust-Wire-Arbeit nach; Phase-4-Ops zusätzlich würden den Commit aufblähen. Sauberer reviewbarer Schnitt. |
+| 2 | **Teststrategie: Kotlin-Fixtures + manuelles `runIde`.** | In-Process-Fixtures = reproduzierbare CI-Regression; `runIde`-Smoke = echter HTTP-Stack + Port-Datei E2E. Beides zusammen = robustestes Gate. |
+| 3 | **Sprachabdeckung: nur Kotlin** (Fixtures + Smoke). | Nächster am typischen JetBrains-Nutzer. ⚠ K2-/Analysis-API-gekoppelt an IC 2026.1 (Risiko, §17.7). Java-Abdeckung erst Phase 4. |
+| 4 | **Such-Scope konfigurierbar, Default `project`.** Wire-Param `scope ∈ {project, all}`. | `projectScope` = token-effizient + deckt Agent-Use-Case (Navigation im eigenen Code). `all` (inkl. Bibliotheken/SDK) opt-in. |
+| 5 | **Ergebnis-Cap 500 + `truncated`-Flag.** Response `{locations, truncated, total}`. | Token-Sicherheit bei zentralen Symbolen; Agent erkennt unvollständige Liste. |
+| 6 | **gson-Umstieg** für die DTO-Schicht (weg vom Hand-JSON aus Phase 2). gson `compileOnly`. | Verschachtelte DTOs (locations/range/positions) sind mit String-Escaping nicht mehr wartbar. |
+| 7 | **`declaration ≡ definition`** in Kotlin/Java, by design — beide via einheitlichem Resolver `findReferenceAt → resolve() → navigationElement`. | Echter decl/def-Split existiert nur bei Header/Impl-Sprachen (C/C++/ObjC), nicht Kotlin. Roh-`resolve()` ohne `navigationElement` zeigt bei Bibliotheks-/kompilierten Zielen in **dekompilierte Stubs** statt echte Source → schlechtere Locations. Ein Code-Pfad = weniger 0/1-Nahtfehler. `declaration` bleibt nur wegen Tool-Parität (§13.1) als eigener Endpoint. **v-future:** echter Split via `TargetElementUtil`-Flags (eigener Spec, nicht Phase 3). |
+
+### 17.2 Neue Komponenten (`com.leanctx.plugin`, `packages/jetbrains-lean-ctx`)
+
+| Datei (neu / ~erweitert) | Aufgabe |
+| `dto/Position.kt`, `dto/TextRange.kt`, `dto/Location.kt` | gson-DTOs für die Wire-Shapes (§6). |
+| `dto/NavRequest.kt` | `{path, line, character, scope?}` (scope optional, Default `project`). |
+| `dto/LocationsResponse.kt` | `{locations:[Location], truncated:Boolean, total:Int}`. |
+| `dto/ErrorResponse.kt` | `{error:{code, message}}` (gson statt Hand-JSON). |
+| `psi/PsiLocator.kt` | `path → VirtualFile → PsiFile`; `(line,char) → offset` via `Document`; `DumbService`-Smart-Mode-Guard → sonst `INDEXING`. |
+| `psi/DefinitionResolver.kt` | `findReferenceAt(offset) → resolve() → navigationElement` (definition + declaration). |
+| `psi/ReferenceFinder.kt` | Ziel-Declaration auflösen → `ReferencesSearch.search(decl, scope)`. |
+| `psi/ImplementationFinder.kt` | `DefinitionsScopedSearch` / `ClassInheritorsSearch` / `OverridingMethodsSearch`. |
+| `endpoint/FindReferencesHandler.kt`, `DefinitionHandler.kt`, `ImplementationsHandler.kt`, `DeclarationHandler.kt` | je Op ein Handler: Body-Parse → PSI unter `ReadAction` → `LocationsResponse`. |
+| `server/RequestRouter.kt` (~erweitern) | POST-Dispatch + Request-Body-Reading + gson-Parse; Token-Check (401) bleibt; `/health` unverändert. |
+| `server/BackendHttpServer.kt` (~ggf.) | sicherstellen, dass POST-Bodies an den Router gereicht werden (Phase 2 nur GET). |
+
+### 17.3 PSI-Auflösung (editor-los — HTTP-Handler laufen off-EDT)
+
+- Offset → `psiFile.findReferenceAt(offset)`; sonst `findElementAt(offset)` + Hochlaufen
+  zum benannten Element. Kein Symbol → `error:{code: NO_SYMBOL_AT_POSITION}` (HTTP 200).
+- `references`: Ziel-Declaration auflösen → `ReferencesSearch.search(decl, scope)` →
+  Treffer auf `LocationDTO` mappen.
+- `definition` / `declaration`: `reference.resolve()?.navigationElement` (§17.1 #7).
+- `implementations`: `DefinitionsScopedSearch` (sprachneutral) bzw. JVM
+  `OverridingMethodsSearch` / `ClassInheritorsSearch`.
+- **Scope:** `scope=project` → `GlobalSearchScope.projectScope(project)`;
+  `scope=all` → `GlobalSearchScope.allScope(project)`. Default `project`.
+- **Cap:** Suche bei 500 Treffern abbrechen (Processor-Early-Exit), `total` separat
+  zählen falls praktikabel, sonst `total = locations.size` bei `truncated=false` /
+  `total ≥ 500` bei `truncated=true`.
+
+### 17.4 Wire-Deltas (gegen §6)
+
+- **Request** +optional `scope: "project"|"all"` (Default `project`).
+- **Response** `{locations, truncated: bool, total: int}` statt nacktem `{locations}`.
+  Rust `parse_locations` (`jetbrains_backend.rs:65`) liest **nur** `locations` →
+  vorwärtskompatibel; `truncated/total` werden in Phase 3 Rust-seitig **noch nicht**
+  ausgewertet (→ §17.6 Follow-up), nur toleriert.
+- Threading/Fehlercodes wie §5.3/§6 (alle Reads `ReadAction.nonBlocking{}
+  .executeSynchronously()`; `runReadActionInSmartMode` → sonst `INDEXING`).
+
+### 17.5 Rust-Deltas (Phase-3-Bestandteil)
+
+- `scope` durch `ctx_refactor` → `JetBrainsHttpBackend` durchreichen; `position_body`
+  (`jetbrains_backend.rs:88`) um `scope` ergänzen. Backing A (rust-analyzer) **ignoriert**
+  `scope` (kein Verhalten).
+- `tool_def`-Registry (§4.4, single schema source seit #141) um optionalen `scope`-Param
+  erweitern — **nicht** als zweite Schema-Kopie; Drift-Regression-Test grün halten.
+- *Gate:* `cargo nextest run` grün (Wire-/scope-Durchreichung; Backing-A-Regressionsschutz).
+
+### 17.6 Offene Follow-ups (in Phase 3 angelegt, später)
+
+1. **`truncated/total` Rust-seitig auswerten.** Phase 3 reicht die Felder nur durch;
+   `ctx_refactor`-Ausgabe sollte „… (truncated, total N)" surfacen, damit der Agent die
+   Unvollständigkeit sieht. Ziel: Phase 5 (Härtung) oder Begleit-Commit.
+2. **`scope=all` Token-Volumen.** Bibliotheks-weite Suchen können trotz Cap groß sein;
+   ggf. niedrigeres Cap oder Aggregation pro Datei. Beobachten, nicht vorab optimieren.
+3. **Java-Fixtures nachziehen** (Phase 4, wo `type_hierarchy` ohnehin Java/Kotlin braucht).
+4. Carry-over aus §14.1 bleibt offen: (1) `project_root`-Kanonisierung im HTTP-Backend
+   (§5.5-Trap) — **jetzt relevant**, da Phase 3 erstmals echte Pfade über die Wire
+   schickt; (2) Stale-Cache-Invalidierung in `select_backend` (Ziel Phase 5).
+
+### 17.7 Build-Deltas + Risiken
+
+- `build.gradle.kts`: +`bundledPlugin("org.jetbrains.kotlin")` (für Kotlin-PSI in
+  Fixtures + Runtime), gson `compileOnly`, ggf. `TestFrameworkType.Plugin` ergänzend
+  zu `Platform`. Aktuell vorhanden: `testFramework(Platform)` + junit4 + IC 2026.1.3.
+- **Risiko (Entscheidung #3):** Kotlin-Fixture-Tests sind K2-/Analysis-API-gekoppelt an
+  IC 2026.1 — fragiler als Java-Fixtures. Falls das In-Process-Test-Setup für Kotlin-PSI
+  blockiert, ist der Fallback **Java-Fixtures für die automatisierte Regression** +
+  Kotlin nur im manuellen `runIde`-Smoke (Entscheidung #3 dann revidieren, hier festhalten).
+
+### 17.8 Gate (Verifikation)
+
+1. Kotlin-Fixtures (`BasePlatformTestCase`): pro Op ein `.kt`-Fixture, Soll-Locations
+   abgeglichen; Fälle `NO_SYMBOL_AT_POSITION`, `INDEXING`, `scope=project` vs `scope=all`,
+   Cap/`truncated`; explizite 0/1-Naht (Wire 0-basiert ↔ PSI-offset).
+2. Manuelles `runIde`: curl `/references|/definition|/implementations|/declaration`
+   gegen Kotlin-Testprojekt, Abgleich mit IDE-„Find Usages"/„Go to Declaration".
+3. `cargo nextest run` grün (Rust-Wire + `scope`-Durchreichung).
+4. Fallback ohne IDE → Backing A unverändert (Regressionsschutz).
+5. Companion-Plugin (Statusbar/Actions) weiterhin funktional (keine Regression).
