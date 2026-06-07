@@ -15,23 +15,29 @@ impl McpTool for CtxRefactorTool {
     fn tool_def(&self) -> Tool {
         tool_def(
             "ctx_refactor",
-            "LSP-powered refactoring. Actions: rename, references, definition, implementations. \
-             Requires a running language server (rust-analyzer, typescript-language-server, pylsp, gopls).",
+            "LSP-powered refactoring. Actions: rename, references, definition, implementations, declaration. \
+             Requires a running language server (rust-analyzer, typescript-language-server, pylsp, gopls) \
+             or the JetBrains backend (declaration is JetBrains-only).",
             json!({
-                "type": "object",
-                "properties": {
-                    "action": {
-                        "type": "string",
-                        "enum": ["rename", "references", "definition", "implementations"],
-                        "description": "Refactoring action"
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["rename", "references", "definition", "implementations", "declaration"],
+                            "description": "Refactoring action"
+                        },
+                        "path": { "type": "string", "description": "File path" },
+                        "line": { "type": "integer", "description": "1-indexed line number" },
+                        "column": { "type": "integer", "description": "0-indexed character offset" },
+                        "new_name": { "type": "string", "description": "New name (only for rename action)" },
+                        "scope": {
+                            "type": "string",
+                            "enum": ["project", "all"],
+                            "description": "Search scope for references/implementations (JetBrains backend). 'project' = project sources only (default); 'all' = include libraries/SDK."
+                        }
                     },
-                    "path": { "type": "string", "description": "File path" },
-                    "line": { "type": "integer", "description": "1-indexed line number" },
-                    "column": { "type": "integer", "description": "0-indexed character offset" },
-                    "new_name": { "type": "string", "description": "New name (only for rename action)" }
-                },
-                "required": ["action", "path", "line"]
-            }),
+                    "required": ["action", "path", "line"]
+                }),
         )
     }
 
@@ -57,5 +63,20 @@ impl McpTool for CtxRefactorTool {
             path: get_str(args, "path"),
             changed: false,
         })
+    }
+}
+
+#[cfg(test)]
+mod schema_tests {
+    use super::*;
+    use crate::server::tool_trait::McpTool;
+
+    #[test]
+    fn schema_advertises_declaration_and_scope() {
+        let tool = CtxRefactorTool;
+        let def = tool.tool_def();
+        let schema = serde_json::to_string(&def).unwrap();
+        assert!(schema.contains("declaration"), "enum missing declaration: {schema}");
+        assert!(schema.contains("\"scope\""), "missing scope property: {schema}");
     }
 }

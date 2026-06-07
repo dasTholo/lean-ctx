@@ -18,10 +18,12 @@ repositories {
 }
 
 dependencies {
+    compileOnly("com.google.code.gson:gson:2.11.0")
+    testImplementation("com.google.code.gson:gson:2.11.0")
     testImplementation("junit:junit:4.13.2")
-
     intellijPlatform {
         intellijIdea("2026.1.3")
+        bundledPlugin("org.jetbrains.kotlin")
         testFramework(TestFrameworkType.Platform)
     }
 }

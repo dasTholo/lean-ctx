@@ -53,13 +53,23 @@ pub struct InspectionDiag {
 pub trait LspBackend: Send {
     // ── Mandatory (both backings) ──
     fn open_file(&mut self, uri: &Uri, language_id: &str, text: &str) -> Result<(), String>;
-    fn references(&mut self, uri: &Uri, position: Position) -> Result<Vec<Location>, String>;
+    fn references(
+        &mut self,
+        uri: &Uri,
+        position: Position,
+        scope: &str,
+    ) -> Result<Vec<Location>, String>;
     fn definition(
         &mut self,
         uri: &Uri,
         position: Position,
     ) -> Result<GotoDefinitionResponse, String>;
-    fn implementations(&mut self, uri: &Uri, position: Position) -> Result<Vec<Location>, String>;
+    fn implementations(
+        &mut self,
+        uri: &Uri,
+        position: Position,
+        scope: &str,
+    ) -> Result<Vec<Location>, String>;
     fn rename(
         &mut self,
         uri: &Uri,

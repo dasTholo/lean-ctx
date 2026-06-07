@@ -15,6 +15,7 @@ import java.util.concurrent.Executors
  */
 class BackendHttpServer(
     private val dataDir: Path,
+    private val project: com.intellij.openapi.project.Project,
     private val projectRoot: String,
     private val ideVersion: String,
     private val projectName: String,
@@ -31,14 +32,15 @@ class BackendHttpServer(
     fun start() {
         check(server == null) { "BackendHttpServer already started" }
         val http = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-        val router = RequestRouter(token, ideVersion, projectName)
+        val router = RequestRouter(token, ideVersion, projectName, project)
         val exec = Executors.newCachedThreadPool()
         http.executor = exec
         executor = exec
         http.createContext("/") { exchange ->
             try {
                 val headerToken = exchange.requestHeaders.getFirst("X-LeanCtx-Token")
-                val result = router.route(exchange.requestMethod, exchange.requestURI.path, headerToken)
+                val body = exchange.requestBody.readBytes().toString(StandardCharsets.UTF_8)
+                val result = router.route(exchange.requestMethod, exchange.requestURI.path, headerToken, body)
                 val bytes = result.body.toByteArray(StandardCharsets.UTF_8)
                 exchange.responseHeaders.add("Content-Type", "application/json")
                 exchange.sendResponseHeaders(result.status, bytes.size.toLong())

@@ -152,6 +152,13 @@ pub fn shutdown_all() {
 }
 
 #[cfg(test)]
+pub(crate) fn seed_stub_backend(language: &str, backend: Box<dyn LspBackend>) {
+    if let Ok(mut backends) = BACKENDS.lock() {
+        backends.insert(language.to_string(), backend);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

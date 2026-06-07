@@ -11,6 +11,10 @@ pub fn handle(args: &Value, project_root: &str, abs_path: &str) -> String {
 
     let line = args.get("line").and_then(Value::as_u64).unwrap_or(1) as u32;
     let column = args.get("column").and_then(Value::as_u64).unwrap_or(0) as u32;
+    let scope = args
+        .get("scope")
+        .and_then(Value::as_str)
+        .unwrap_or("project");
 
     let uri = match crate::lsp::router::open_file(abs_path, project_root) {
         Ok(u) => u,
@@ -21,11 +25,14 @@ pub fn handle(args: &Value, project_root: &str, abs_path: &str) -> String {
 
     match action {
         "rename" => handle_rename(args, abs_path, project_root, &uri, position),
-        "references" => handle_references(abs_path, project_root, &uri, position),
+        "references" => handle_references(abs_path, project_root, &uri, position, scope),
         "definition" => handle_definition(abs_path, project_root, &uri, position),
-        "implementations" => handle_implementations(abs_path, project_root, &uri, position),
+        "implementations" => {
+            handle_implementations(abs_path, project_root, &uri, position, scope)
+        }
+        "declaration" => handle_declaration(abs_path, project_root, &uri, position),
         _ => format!(
-            "ERROR: Unknown action '{action}'. Available: rename, references, definition, implementations."
+            "ERROR: Unknown action '{action}'. Available: rename, references, definition, implementations, declaration."
         ),
     }
 }
@@ -57,9 +64,10 @@ fn handle_references(
     project_root: &str,
     uri: &lsp_types::Uri,
     position: Position,
+    scope: &str,
 ) -> String {
     let result = crate::lsp::router::with_backend(file_path, project_root, |backend, _| {
-        backend.references(uri, position)
+        backend.references(uri, position, scope)
     });
 
     match result {
@@ -102,9 +110,26 @@ fn handle_implementations(
     project_root: &str,
     uri: &lsp_types::Uri,
     position: Position,
+    scope: &str,
 ) -> String {
     let result = crate::lsp::router::with_backend(file_path, project_root, |backend, _| {
-        backend.implementations(uri, position)
+        backend.implementations(uri, position, scope)
+    });
+
+    match result {
+        Ok(locations) => format_locations(&locations, project_root),
+        Err(e) => format!("ERROR: {e}"),
+    }
+}
+
+fn handle_declaration(
+    file_path: &str,
+    project_root: &str,
+    uri: &lsp_types::Uri,
+    position: Position,
+) -> String {
+    let result = crate::lsp::router::with_backend(file_path, project_root, |backend, _| {
+        backend.declaration(uri, position)
     });
 
     match result {
@@ -212,5 +237,77 @@ mod tests {
             !out.contains("../escape.rs"),
             "raw path leaked to fs layer: {out}"
         );
+    }
+
+    /// `declaration` is a known action: the unknown-action arm must not fire for it,
+    /// and its help text now advertises `declaration`.
+    ///
+    /// NOTE (adaptation): the real `handle` opens the file *before* the action
+    /// match, so reaching the unknown-action help arm requires a backend. We seed
+    /// a no-op stub backend for `rust` and point at a real temp `.rs` file so
+    /// dispatch deterministically reaches the help text, offline, without
+    /// starting rust-analyzer.
+    #[test]
+    fn unknown_action_help_lists_declaration() {
+        struct StubBackend;
+        impl crate::lsp::backend::LspBackend for StubBackend {
+            fn open_file(
+                &mut self,
+                _uri: &lsp_types::Uri,
+                _language_id: &str,
+                _text: &str,
+            ) -> Result<(), String> {
+                Ok(())
+            }
+            fn references(
+                &mut self,
+                _uri: &lsp_types::Uri,
+                _position: lsp_types::Position,
+                _scope: &str,
+            ) -> Result<Vec<lsp_types::Location>, String> {
+                Ok(vec![])
+            }
+            fn definition(
+                &mut self,
+                _uri: &lsp_types::Uri,
+                _position: lsp_types::Position,
+            ) -> Result<lsp_types::GotoDefinitionResponse, String> {
+                Ok(lsp_types::GotoDefinitionResponse::Array(vec![]))
+            }
+            fn implementations(
+                &mut self,
+                _uri: &lsp_types::Uri,
+                _position: lsp_types::Position,
+                _scope: &str,
+            ) -> Result<Vec<lsp_types::Location>, String> {
+                Ok(vec![])
+            }
+            fn rename(
+                &mut self,
+                _uri: &lsp_types::Uri,
+                _position: lsp_types::Position,
+                _new_name: &str,
+            ) -> Result<Option<lsp_types::WorkspaceEdit>, String> {
+                Ok(None)
+            }
+        }
+
+        let dir = std::env::temp_dir().join(format!("leanctx_r1_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("x.rs");
+        std::fs::write(&file, "fn x() {}\n").unwrap();
+        let root = dir.to_string_lossy().to_string();
+        let abs = file.to_string_lossy().to_string();
+
+        crate::lsp::router::seed_stub_backend("rust", Box::new(StubBackend));
+
+        let args = json!({"action": "definitely_bogus", "path": "x.rs", "line": 1});
+        let out = super::handle(&args, &root, &abs);
+        assert!(
+            out.contains("declaration"),
+            "help text missing declaration: {out}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

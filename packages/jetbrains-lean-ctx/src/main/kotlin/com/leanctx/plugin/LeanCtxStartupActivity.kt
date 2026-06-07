@@ -34,6 +34,7 @@ class LeanCtxStartupActivity : ProjectActivity {
         try {
             val server = BackendHttpServer(
                 dataDir = LeanCtxPaths.dataDir(),
+                project = project,
                 projectRoot = root,
                 ideVersion = ApplicationInfo.getInstance().fullVersion,
                 projectName = project.name,
