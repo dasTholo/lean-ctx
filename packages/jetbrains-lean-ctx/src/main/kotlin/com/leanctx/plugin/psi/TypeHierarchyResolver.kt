@@ -74,6 +74,8 @@ class TypeHierarchyResolver(private val locator: PsiLocator) {
                 b.nodes++
                 children.add(buildMethodNode(n, sub, scope, depth + 1, b))
             }
+        } else if ((if (sub) directOverriders(m, scope) else m.findSuperMethods().toList()).isNotEmpty()) {
+            b.truncated = true
         }
         return nodeOf(m, children)
     }
