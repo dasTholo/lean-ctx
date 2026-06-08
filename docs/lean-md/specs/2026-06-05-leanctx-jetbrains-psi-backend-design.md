@@ -277,12 +277,12 @@ schon modern (keine Code-Modernisierung nötig); Phase 2 erweitert
     1. `LEAN_CTX_DATA_DIR` (env-Override),
     2. `~/.lean-ctx` **nur wenn Daten vorhanden** (Marker `stats.json`/`config.toml`/`sessions`),
     3. `$XDG_CONFIG_HOME/lean-ctx` (default `~/.config/lean-ctx`).
-  **Token bleibt inline** in der `.port`-Datei (Entscheidung 2026-06-06: 1 atomarer
-  Write, 1 Cleanup, keine Zwei-Datei-Staleness; Phase 1 `PortFile.token` liest bereits
-  inline). **⚠ Phase-1-Begleit-Fix (Pflicht):** `port_discovery.rs::port_file_path`
-  (aktuell hardcoded `dirs::home_dir().join(".lean-ctx")`, `rust/src/lsp/port_discovery.rs:41`)
-  auf `core::data_dir::lean_ctx_data_dir()` umstellen + Test — sonst divergieren Rust-
-  und Kotlin-Pfad bei XDG-/Override-Setups.
+       **Token bleibt inline** in der `.port`-Datei (Entscheidung 2026-06-06: 1 atomarer
+       Write, 1 Cleanup, keine Zwei-Datei-Staleness; Phase 1 `PortFile.token` liest bereits
+       inline). **⚠ Phase-1-Begleit-Fix (Pflicht):** `port_discovery.rs::port_file_path`
+       (aktuell hardcoded `dirs::home_dir().join(".lean-ctx")`, `rust/src/lsp/port_discovery.rs:41`)
+       auf `core::data_dir::lean_ctx_data_dir()` umstellen + Test — sonst divergieren Rust-
+       und Kotlin-Pfad bei XDG-/Override-Setups.
 - **`projecthash` = `sha256(canonical(projectRoot))[..16]`** — Rust und Kotlin müssen
   identisch canonicalisieren (Symlink/Trailing-Slash-Falle). Rust: `std::fs::canonicalize`
   (Fallback = roher Pfad). Kotlin: `Path.toRealPath()` (Fallback = roher Pfad), SHA-256
@@ -569,11 +569,11 @@ Phase 0 + 1 wurden via `superpowers:subagent-driven-development` umgesetzt. Bran
 `feat-jetbrains-plugin` (von `feat-lmd-v1`, §12). Drei Commits, Commit-Disziplin §12.3
 (genau ein Commit pro Phase) eingehalten:
 
-| Commit      | Inhalt                                                                          |
-|-------------|---------------------------------------------------------------------------------|
-| `6ed981da`  | lmd-Modul entfernt (lmd-freie Basis, §12.2)                                      |
-| `211e594f`  | **Phase 0**: `LspBackend`-Trait (§4.1) + `impl` für `LspClient` (§4.2) + Router auf `Box<dyn LspBackend>` (§4.3) + §4.5-PathJail-Härtung in `ctx_refactor` |
-| `3bdb5a23`  | **Phase 1**: `port_discovery.rs` (§5.5) + `jetbrains_backend.rs`-Skeleton (§6, refs/def/impl via `ureq` 3.3, ohne `json`-Feature) + B-first `select_backend` (§4.3) |
+| Commit     | Inhalt                                                                                                                                                              |
+|------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `6ed981da` | lmd-Modul entfernt (lmd-freie Basis, §12.2)                                                                                                                         |
+| `211e594f` | **Phase 0**: `LspBackend`-Trait (§4.1) + `impl` für `LspClient` (§4.2) + Router auf `Box<dyn LspBackend>` (§4.3) + §4.5-PathJail-Härtung in `ctx_refactor`          |
+| `3bdb5a23` | **Phase 1**: `port_discovery.rs` (§5.5) + `jetbrains_backend.rs`-Skeleton (§6, refs/def/impl via `ureq` 3.3, ohne `json`-Feature) + B-first `select_backend` (§4.3) |
 
 **Gate (§9):** Build ok, `cargo fmt --check` clean, 5 neue Tests grün
 (`inner_handle_uses_provided_abs_path_not_raw_args`, `project_hash_is_stable_and_16_hex`,
@@ -621,24 +621,37 @@ token-geschütztes `/health`, und räumt beim Schließen sauber ab. **Noch keine
 ### 15.1 Fixierte Entscheidungen (User, 2026-06-06)
 
 | # | Entscheidung | Begründung |
-| 1 | **Scope minimal** — 5 Bausteine + `/health`, **keine** Settings-UI/Configurable | schlankster reviewbarer Phase-Commit; Settings später additiv |
-| 2 | **Token inline** in `.port` (kein separater `http-tokens`-Store) | 1 atomarer Write/Cleanup, keine Zwei-Datei-Staleness; Phase 1 liest `token` bereits inline |
-| 3 | **`<data_dir>` = `lean_ctx_data_dir()`-Parität** (nicht hardcoded `~/.lean-ctx`) | korrekt unter `LEAN_CTX_DATA_DIR`/XDG; Rust+Kotlin müssen identisch auflösen |
-| 4 | **Tests: manuelles `runIde`-Gate** + reine Kotlin-Unit (Resolver/Hash, ohne IDE) | IntelliJ-Plugin-Testframework erst ab Phase 3 (PSI-E2E) |
-| 5 | **Additive Koexistenz** im bestehenden `com.leanctx.plugin` Companion-Plugin | PSI-Backend ist anderer Concern als Statusbar/Binary — ersetzt nichts |
-| 6 | **Build-Modernisierung auf IC 2026.1 / Kotlin 2.3.20** (jvmTarget 21) gleich mitziehen (§15.7) | aktuelle IDE-Baseline; Kotlin an gebündelte Runtime gekoppelt; kein Marketplace → keine Alt-IDE-Kompat nötig |
+| 1 | **Scope minimal** — 5 Bausteine + `/health`, **keine** Settings-UI/Configurable | schlankster reviewbarer
+Phase-Commit; Settings später additiv |
+| 2 | **Token inline** in `.port` (kein separater `http-tokens`-Store) | 1 atomarer Write/Cleanup, keine
+Zwei-Datei-Staleness; Phase 1 liest `token` bereits inline |
+| 3 | **`<data_dir>` = `lean_ctx_data_dir()`-Parität** (nicht hardcoded `~/.lean-ctx`) | korrekt unter
+`LEAN_CTX_DATA_DIR`/XDG; Rust+Kotlin müssen identisch auflösen |
+| 4 | **Tests: manuelles `runIde`-Gate** + reine Kotlin-Unit (Resolver/Hash, ohne IDE) | IntelliJ-Plugin-Testframework
+erst ab Phase 3 (PSI-E2E) |
+| 5 | **Additive Koexistenz** im bestehenden `com.leanctx.plugin` Companion-Plugin | PSI-Backend ist anderer Concern als
+Statusbar/Binary — ersetzt nichts |
+| 6 | **Build-Modernisierung auf IC 2026.1 / Kotlin 2.3.20** (jvmTarget 21) gleich mitziehen (§15.7) | aktuelle
+IDE-Baseline; Kotlin an gebündelte Runtime gekoppelt; kein Marketplace → keine Alt-IDE-Kompat nötig |
 
 ### 15.2 Neue Komponenten (Sub-Packages in `com.leanctx.plugin`, unter
+
 `packages/jetbrains-lean-ctx`)
 
 | Datei (neu/~erweitert) | Aufgabe | Serena-Ref |
-| `server/BackendHttpServer.kt` | `Disposable` Project-Service; bindet `com.sun.net.httpserver.HttpServer` auf `127.0.0.1:0` (ephemerer OS-Port); off-EDT-Pool; `dispose()` → stop + Port-Datei löschen | `SerenaBackendService` |
-| `server/RequestRouter.kt` | `HttpHandler`-Dispatch + `X-LeanCtx-Token`-Check → sonst 401; Phase 2 registriert nur `/health` | `PostRequestHandler.handleExchange` + `HttpExchangeUtils` |
-| `server/PortFileWriter.kt` | `<data_dir>/jetbrains-<hash>.port` atomar (temp+rename), `0600`, JSON snake_case `{port, token, pid, project_root, ide_version, started_at}` (= Rust `PortFile`-serde) | (Serena: Range-Scan — wir: Datei) |
-| `server/LeanCtxPaths.kt` | Data-Dir-Resolver **identisch zu Rust** (`LEAN_CTX_DATA_DIR` → `~/.lean-ctx` mit Daten → `$XDG_CONFIG_HOME/lean-ctx`) + `projectHash = sha256(realpath(root))[..16]` | — (Parität-Naht §5.5) |
+| `server/BackendHttpServer.kt` | `Disposable` Project-Service; bindet `com.sun.net.httpserver.HttpServer` auf
+`127.0.0.1:0` (ephemerer OS-Port); off-EDT-Pool; `dispose()` → stop + Port-Datei löschen | `SerenaBackendService` |
+| `server/RequestRouter.kt` | `HttpHandler`-Dispatch + `X-LeanCtx-Token`-Check → sonst 401; Phase 2 registriert nur
+`/health` | `PostRequestHandler.handleExchange` + `HttpExchangeUtils` |
+| `server/PortFileWriter.kt` | `<data_dir>/jetbrains-<hash>.port` atomar (temp+rename), `0600`, JSON snake_case
+`{port, token, pid, project_root, ide_version, started_at}` (= Rust `PortFile`-serde) | (Serena: Range-Scan — wir:
+Datei) |
+| `server/LeanCtxPaths.kt` | Data-Dir-Resolver **identisch zu Rust** (`LEAN_CTX_DATA_DIR` → `~/.lean-ctx` mit Daten →
+`$XDG_CONFIG_HOME/lean-ctx`) + `projectHash = sha256(realpath(root))[..16]` | — (Parität-Naht §5.5) |
 | `server/HealthHandler.kt` | `GET /health` → `{status:"ok", ideVersion, project}` | `endpoint/*Handler`-Muster |
 | `dto/Health.kt`, `dto/ErrorResponse.kt` | gson-DTOs (gson `compileOnly`) | `service/dto/*`, `ErrorResponse` |
-| `LeanCtxStartupActivity.kt` (~erweitern) | nach Binary-Check zusätzlich `BackendHttpServer` für das `Project` booten | `PluginStartupActivity.execute` |
+| `LeanCtxStartupActivity.kt` (~erweitern) | nach Binary-Check zusätzlich `BackendHttpServer` für das `Project` booten |
+`PluginStartupActivity.execute` |
 
 ### 15.3 Lebenszyklus
 
@@ -696,14 +709,16 @@ angleichen, Companion-Code behalten.
 | IntelliJ-Platform-Gradle | `2.14.0` | `2.16.0` |
 | Ziel-IDE | `create("IC", "2024.1")` (alte DSL) | `intellijIdea("2026.1.3")` (**neue Dependency-DSL**) |
 | `ideaVersion.sinceBuild` | `241` | `261` |
-| `ideaVersion.untilBuild` | `261.*` | **entfernen** (offen — bricht nicht bei IDE-Minor-Update; OK für Privat-Plugin ohne Marketplace) |
-| JVM-Target | `kotlinOptions.jvmTarget = "17"` | `compilerOptions { jvmTarget = JvmTarget.JVM_21 }` (`kotlinOptions` in Kotlin 2.x deprecated; IC 2026.1 läuft auf JBR 21) |
+| `ideaVersion.untilBuild` | `261.*` | **entfernen** (offen — bricht nicht bei IDE-Minor-Update; OK für Privat-Plugin
+ohne Marketplace) |
+| JVM-Target | `kotlinOptions.jvmTarget = "17"` | `compilerOptions { jvmTarget = JvmTarget.JVM_21 }` (`kotlinOptions` in
+Kotlin 2.x deprecated; IC 2026.1 läuft auf JBR 21) |
 
 **Struktur-Angleichung an die Vorlage (Retrofit der Build-Dateien):**
 
 - `settings.gradle.kts`: `pluginManagement { plugins { kotlin.jvm 2.3.20; changelog 2.5.0 } }`
-  + `plugins { foojay-resolver-convention 1.0.0; org.jetbrains.intellij.platform.settings 2.16.0 }`
-  + `dependencyResolutionManagement { repositories { mavenCentral(); intellijPlatform { defaultRepositories() } } }`.
+    + `plugins { foojay-resolver-convention 1.0.0; org.jetbrains.intellij.platform.settings 2.16.0 }`
+    + `dependencyResolutionManagement { repositories { mavenCentral(); intellijPlatform { defaultRepositories() } } }`.
 - `build.gradle.kts`: `plugins {}` ohne Versions-Literale (Versionen aus `pluginManagement`);
   `intellijPlatform { intellijIdea("2026.1.3"); testFramework(TestFrameworkType.Platform) }`.
 - `gradle.properties`: `kotlin.stdlib.default.dependency=false` +
@@ -711,10 +726,11 @@ angleichen, Companion-Code behalten.
 - Gradle-Wrapper auf aktuelle Version anheben (vom Template übernehmen).
 
 **Nicht in Phase 2 nötig** (erst ab Phase 3, Kotlin-PSI): `<depends>org.jetbrains.kotlin</depends>`
+
 + K2-/Analysis-API-Deklaration. Phase 2 nutzt nur `com.sun.net.httpserver` + reine JVM —
-keine Kotlin-Compiler-/Analysis-APIs. Changelog-/Qodana-/Kover-/Verifier-CI aus dem
-Template sind **optional** und gehören frühestens in die Phase-5-Härtung (CI-Job), nicht
-in den minimalen Phase-2-Schnitt.
+  keine Kotlin-Compiler-/Analysis-APIs. Changelog-/Qodana-/Kover-/Verifier-CI aus dem
+  Template sind **optional** und gehören frühestens in die Phase-5-Härtung (CI-Job), nicht
+  in den minimalen Phase-2-Schnitt.
 
 *Gate-Ergänzung:* `./gradlew build` + `./gradlew runIde` grün auf dem neuen Stack
 (Config-Cache aktiv); Companion-Plugin lädt weiterhin in IC 2026.1.
@@ -736,9 +752,12 @@ Beide teilen sich **ein** Plugin-Modul (`com.leanctx.plugin`, `packages/jetbrain
 verfolgen aber **verschiedene Zwecke** und **entgegengesetzte Kommunikationsrichtungen**.
 
 | | **Companion/UX-Track (#246)** | **PSI-Backend-Track (dieser Spec)** |
-| Zweck | Ersparnis anzeigen, Auto-Setup, read-mode Hints, Settings-UI, One-Click-Toggle | Serena-Ablösung: `ctx_refactor`-Backend B (refs/def/impl, type_hierarchy, …) |
-| Plugin-Rolle | **Host/Client** — ruft das lean-ctx-Binary (`BinaryResolver.runCommand`) bzw. liest `stats.json` | **HTTP-Server** — lean-ctx Rust ruft das Plugin auf (`X-LeanCtx-Token`) |
-| Bestehender Code | `StatsReader`, `LeanCtxStatusBarFactory`, `BinaryResolver`, `actions/` | NEU ab Phase 2 (`server/`, `dto/`) |
+| Zweck | Ersparnis anzeigen, Auto-Setup, read-mode Hints, Settings-UI, One-Click-Toggle | Serena-Ablösung:
+`ctx_refactor`-Backend B (refs/def/impl, type_hierarchy, …) |
+| Plugin-Rolle | **Host/Client** — ruft das lean-ctx-Binary (`BinaryResolver.runCommand`) bzw. liest `stats.json` | *
+*HTTP-Server** — lean-ctx Rust ruft das Plugin auf (`X-LeanCtx-Token`) |
+| Bestehender Code | `StatsReader`, `LeanCtxStatusBarFactory`, `BinaryResolver`, `actions/` | NEU ab Phase 2 (`server/`,
+`dto/`) |
 | Status | tracked (#246), teilweise vorhanden | Phase 0+1 fertig, Phase 2 in Arbeit |
 
 **#246-Companion-Features** (eigener späterer Mini-Spec, **nicht** Teil von Phase 0–5):
@@ -767,13 +786,25 @@ mit den vier Navigations-Endpoints, gegen die die Phase-1-Rust-Seite
 ### 17.1 Fixierte Entscheidungen (User, 2026-06-07)
 
 | # | Entscheidung | Begründung |
-| 1 | **Schnitt nav-only** (§9 Phase 3): `references`/`definition`/`implementations`/`declaration` + `psi/` + `dto/` + E2E. Kein `overview`/`type_hierarchy` vorziehen. | `scope`-Param + `truncated/total` ziehen bereits Rust-Wire-Arbeit nach; Phase-4-Ops zusätzlich würden den Commit aufblähen. Sauberer reviewbarer Schnitt. |
-| 2 | **Teststrategie: Kotlin-Fixtures + manuelles `runIde`.** | In-Process-Fixtures = reproduzierbare CI-Regression; `runIde`-Smoke = echter HTTP-Stack + Port-Datei E2E. Beides zusammen = robustestes Gate. |
-| 3 | **Sprachabdeckung: nur Kotlin** (Fixtures + Smoke). | Nächster am typischen JetBrains-Nutzer. ⚠ K2-/Analysis-API-gekoppelt an IC 2026.1 (Risiko, §17.7). Java-Abdeckung erst Phase 4. |
-| 4 | **Such-Scope konfigurierbar, Default `project`.** Wire-Param `scope ∈ {project, all}`. | `projectScope` = token-effizient + deckt Agent-Use-Case (Navigation im eigenen Code). `all` (inkl. Bibliotheken/SDK) opt-in. |
-| 5 | **Ergebnis-Cap 500 + `truncated`-Flag.** Response `{locations, truncated, total}`. | Token-Sicherheit bei zentralen Symbolen; Agent erkennt unvollständige Liste. |
-| 6 | **gson-Umstieg** für die DTO-Schicht (weg vom Hand-JSON aus Phase 2). gson `compileOnly`. | Verschachtelte DTOs (locations/range/positions) sind mit String-Escaping nicht mehr wartbar. |
-| 7 | **`declaration ≡ definition`** in Kotlin/Java, by design — beide via einheitlichem Resolver `findReferenceAt → resolve() → navigationElement`. | Echter decl/def-Split existiert nur bei Header/Impl-Sprachen (C/C++/ObjC), nicht Kotlin. Roh-`resolve()` ohne `navigationElement` zeigt bei Bibliotheks-/kompilierten Zielen in **dekompilierte Stubs** statt echte Source → schlechtere Locations. Ein Code-Pfad = weniger 0/1-Nahtfehler. `declaration` bleibt nur wegen Tool-Parität (§13.1) als eigener Endpoint. **v-future:** echter Split via `TargetElementUtil`-Flags (eigener Spec, nicht Phase 3). |
+| 1 | **Schnitt nav-only** (§9 Phase 3): `references`/`definition`/`implementations`/`declaration` + `psi/` + `dto/` +
+E2E. Kein `overview`/`type_hierarchy` vorziehen. | `scope`-Param + `truncated/total` ziehen bereits Rust-Wire-Arbeit
+nach; Phase-4-Ops zusätzlich würden den Commit aufblähen. Sauberer reviewbarer Schnitt. |
+| 2 | **Teststrategie: Kotlin-Fixtures + manuelles `runIde`.** | In-Process-Fixtures = reproduzierbare CI-Regression;
+`runIde`-Smoke = echter HTTP-Stack + Port-Datei E2E. Beides zusammen = robustestes Gate. |
+| 3 | **Sprachabdeckung: nur Kotlin** (Fixtures + Smoke). | Nächster am typischen JetBrains-Nutzer. ⚠
+K2-/Analysis-API-gekoppelt an IC 2026.1 (Risiko, §17.7). Java-Abdeckung erst Phase 4. |
+| 4 | **Such-Scope konfigurierbar, Default `project`.** Wire-Param `scope ∈ {project, all}`. | `projectScope` =
+token-effizient + deckt Agent-Use-Case (Navigation im eigenen Code). `all` (inkl. Bibliotheken/SDK) opt-in. |
+| 5 | **Ergebnis-Cap 500 + `truncated`-Flag.** Response `{locations, truncated, total}`. | Token-Sicherheit bei
+zentralen Symbolen; Agent erkennt unvollständige Liste. |
+| 6 | **gson-Umstieg** für die DTO-Schicht (weg vom Hand-JSON aus Phase 2). gson `compileOnly`. | Verschachtelte DTOs (
+locations/range/positions) sind mit String-Escaping nicht mehr wartbar. |
+| 7 | **`declaration ≡ definition`** in Kotlin/Java, by design — beide via einheitlichem Resolver
+`findReferenceAt → resolve() → navigationElement`. | Echter decl/def-Split existiert nur bei Header/Impl-Sprachen (
+C/C++/ObjC), nicht Kotlin. Roh-`resolve()` ohne `navigationElement` zeigt bei Bibliotheks-/kompilierten Zielen in *
+*dekompilierte Stubs** statt echte Source → schlechtere Locations. Ein Code-Pfad = weniger 0/1-Nahtfehler. `declaration`
+bleibt nur wegen Tool-Parität (§13.1) als eigener Endpoint. **v-future:** echter Split via `TargetElementUtil`-Flags (
+eigener Spec, nicht Phase 3). |
 
 ### 17.2 Neue Komponenten (`com.leanctx.plugin`, `packages/jetbrains-lean-ctx`)
 
@@ -782,13 +813,17 @@ mit den vier Navigations-Endpoints, gegen die die Phase-1-Rust-Seite
 | `dto/NavRequest.kt` | `{path, line, character, scope?}` (scope optional, Default `project`). |
 | `dto/LocationsResponse.kt` | `{locations:[Location], truncated:Boolean, total:Int}`. |
 | `dto/ErrorResponse.kt` | `{error:{code, message}}` (gson statt Hand-JSON). |
-| `psi/PsiLocator.kt` | `path → VirtualFile → PsiFile`; `(line,char) → offset` via `Document`; `DumbService`-Smart-Mode-Guard → sonst `INDEXING`. |
+| `psi/PsiLocator.kt` | `path → VirtualFile → PsiFile`; `(line,char) → offset` via `Document`; `DumbService`
+-Smart-Mode-Guard → sonst `INDEXING`. |
 | `psi/DefinitionResolver.kt` | `findReferenceAt(offset) → resolve() → navigationElement` (definition + declaration). |
 | `psi/ReferenceFinder.kt` | Ziel-Declaration auflösen → `ReferencesSearch.search(decl, scope)`. |
 | `psi/ImplementationFinder.kt` | `DefinitionsScopedSearch` / `ClassInheritorsSearch` / `OverridingMethodsSearch`. |
-| `endpoint/FindReferencesHandler.kt`, `DefinitionHandler.kt`, `ImplementationsHandler.kt`, `DeclarationHandler.kt` | je Op ein Handler: Body-Parse → PSI unter `ReadAction` → `LocationsResponse`. |
-| `server/RequestRouter.kt` (~erweitern) | POST-Dispatch + Request-Body-Reading + gson-Parse; Token-Check (401) bleibt; `/health` unverändert. |
-| `server/BackendHttpServer.kt` (~ggf.) | sicherstellen, dass POST-Bodies an den Router gereicht werden (Phase 2 nur GET). |
+| `endpoint/FindReferencesHandler.kt`, `DefinitionHandler.kt`, `ImplementationsHandler.kt`, `DeclarationHandler.kt` | je
+Op ein Handler: Body-Parse → PSI unter `ReadAction` → `LocationsResponse`. |
+| `server/RequestRouter.kt` (~erweitern) | POST-Dispatch + Request-Body-Reading + gson-Parse; Token-Check (401) bleibt;
+`/health` unverändert. |
+| `server/BackendHttpServer.kt` (~ggf.) | sicherstellen, dass POST-Bodies an den Router gereicht werden (Phase 2 nur
+GET). |
 
 ### 17.3 PSI-Auflösung (editor-los — HTTP-Handler laufen off-EDT)
 
