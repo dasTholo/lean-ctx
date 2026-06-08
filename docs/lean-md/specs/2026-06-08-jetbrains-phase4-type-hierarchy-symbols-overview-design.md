@@ -200,3 +200,45 @@ Error   : { error: { code, message } }   // FILE_NOT_FOUND | INDEXING | UNSUPPOR
   `exception/TypeHierarchyNotSupportedException`; `endpoint/GetSymbolsOverviewHandler`,
   `symbol/FileStructure`; DTOs `TypeHierarchyNodeDTO`/`TypeHierarchyResponse`/
   `GetSymbolsOverviewResponse`/`FileStructureDTO`.
+
+---
+
+## 10. Gate-Protokoll Phase 4 (2026-06-08)
+
+**Implementierung** (subagent-driven-development, je Task spec+quality-reviewed) — 9 Task-Commits
+`6228d88e`→`4a6fde2d` (R1 Schema, R2 Dispatch/Format, R3 `JetBrainsHttpBackend`-Overrides,
+K1 Wire-DTOs, K2 `TypeHierarchyResolver` +Fix `b35d073c`, K3 `FileStructureScanner`,
+K4 `StructureHandlers`, K5 `RequestRouter`-Routen) + Doc-Regen `1a9687df` + E1-Fix `d1d73c14`.
+
+**Automatisierte Gates:** Kotlin `./gradlew test` **54/54 grün**; Rust `cargo nextest run` grün
+(2 vorbestehende, unabhängige Fails: `hn_hardening_scenarios` Shell-Compression-Cluster);
+`cargo clippy --all-targets` ohne neue Lints; Drift-Gate `generated/mcp-tools.md` grün.
+Finaler Rust↔Kotlin-Paritäts-Review: alle 7 Punkte ✅ (Wire-Keys, **1-based-line-Seam ohne
+Doppel-+1**, `direction`-Default, Error-Envelope, Degradation).
+
+**E1 `runIde`-Gate (manuell, IC2026.1.3, Projekt `packages/jetbrains-lean-ctx`):**
+Direkte HTTP-Verifikation aller Endpoints **bestanden**:
+- `symbols_overview` → `{symbols[],truncated,total}`, **1-basierte Zeilen** bestätigt.
+- `type_hierarchy` `supertypes` (`scope=all`) → volle transitive Kette inkl. Plattform-/JDK-Typen
+  (`BackendException`→`RuntimeException`→`Exception`→`Throwable`→`Object`/`Serializable`;
+  `LeanCtxStatusBarFactory`→`StatusBarWidgetFactory`).
+- `type_hierarchy` `subtypes` → Root mit leeren `children` (final), `truncated:false`.
+- Falscher Token → **401**; unbekannter Pfad → `FILE_NOT_FOUND`-Envelope (HTTP 200).
+
+**Zwei E1-Funde (nur via runIde sichtbar — Tests grün) → gefixt in `d1d73c14`:**
+1. **KRITISCH:** Plugin nutzt `org.jetbrains.kotlin.psi.*` (`KtFile`/`KtClassOrObject`/…) zur
+   Laufzeit → `NoClassDefFoundError` (Handler-Crash, curl `exit 52`). `bundledPlugin(...)` in
+   `build.gradle.kts` deckt nur Compile/Sandbox; die **Laufzeit-Classloader-Bindung** fehlte.
+   Fix in `plugin.xml`: `<depends>org.jetbrains.kotlin>` + `<supportsKotlinPluginMode supportsK2="true"/>`
+   (K2-Pflicht-Deklaration ab IC2026.1). Latent seit Phase 2/3 — Tests grün, weil
+   `BasePlatformTestCase` das Kotlin-Plugin im Test-Classpath führt, der Laufzeit-Plugin-Classloader
+   aber nicht.
+2. `rust/src/lsp/config.rs::language_for_extension` mappte `.kt`/`.kts` nicht → `ctx_refactor`
+   erreichte den JetBrains-Backend für Kotlin-Dateien nie (Gate in `router.rs` vor `select_backend`).
+   Fix: `"kt" | "kts" => Some("kotlin")`.
+
+**Env-gebundene Restpunkte (deferred):** Live-`ctx_refactor`-für-`.kt`-E2E (§8 Step 4) setzt
+voraus, dass die MCP-Server-Projektwurzel mit dem in der Sandbox geöffneten Projekt übereinstimmt
+(Port-Discovery über `project_hash`); separat vom hier bestätigten direkten HTTP-Pfad. Backing-A-
+Degradation (§8 Step 5, `.rs`/kein IDE → `ERROR: … requires the JetBrains backend`) strukturell
+über Trait-Default-`Err` abgedeckt.
