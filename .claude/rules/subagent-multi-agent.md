@@ -111,10 +111,11 @@ You run in an isolated context. Before any other action:
 1. ctx_agent action=register agent_type=subagent role=<dev|review>
    (controller's cache is already shared — no ctx_share pull, just ctx_read)
 Tool discipline:
-- ctx_read / ctx_search / ctx_shell / ctx_tree / ctx_multi_read / ctx_delta are
-  DIRECT standard tools — call them DIRECTLY. If one shows up deferred, run
-  ToolSearch(query="select:<tool>") FIRST, then call it. NEVER wrap a standard
-  tool in ctx_call (no ctx_call name=ctx_read / name=ctx_shell — pure overhead).
+- Under tool_profile=power ALL lean-ctx tools are DIRECT — call them DIRECTLY
+  (ctx_read / ctx_search / ctx_shell / ctx_tree / ctx_multi_read / ctx_delta /
+  ctx_task / ctx_handoff / ctx_workflow / ctx_share / ctx_rules / …). If one shows
+  up deferred, run ToolSearch(query="select:<tool>") FIRST, then call it. NEVER
+  wrap a tool in ctx_call (no ctx_call name=ctx_read / name=ctx_task — pure overhead).
 - NEVER fresh, NEVER raw (mtime auto-validates; fresh after a cache read is forbidden)
 - ctx_shell: bare command + cwd= — NEVER cd <path> && (prefix router, starts_with("git ")
   /cargo /npm ; a cd … && wrapper kills git/cargo/npm compression); and NO 2>&1
@@ -124,7 +125,8 @@ Tool discipline:
 - Search → ctx_search (never grep/rg in ctx_shell); read files → ctx_read (never cat)
 - Batch reads → ctx_multi_read ; re-read after your edit → ctx_delta (changed lines)
 - Rust (*.rs) edits → Serena tools only (never native Edit / ctx_edit)
-- Power tools ONLY (ctx_task, ctx_handoff, ctx_workflow) → via ctx_call name=<tool>
+- ctx_call is ONLY a deferred-fallback (after ToolSearch); ctx_task / ctx_handoff /
+  ctx_workflow / ctx_share / ctx_rules are called DIRECTLY under power
 - Tool params/signatures → authoritative in docs/reference/appendix-mcp-tools.md
   (generated/mcp-tools.md also valid IF freshly generated; ctx_read on demand, not memory)
 During work: ctx_agent action=diary category=<discovery|decision|blocker|progress>
