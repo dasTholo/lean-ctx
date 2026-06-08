@@ -323,9 +323,9 @@ Parameters: `fresh`, `mode`, `path`*, `start_line`
 
 ## `ctx_refactor`
 
-LSP-powered refactoring. Actions: rename, references, definition, implementations, declaration. Requires a running language server (rust-analyzer, typescript-language-server, pylsp, gopls) or the JetBrains backend (declaration is JetBrains-only).
+LSP-powered refactoring. Actions: rename, references, definition, implementations, declaration, type_hierarchy, symbols_overview. Requires a running language server (rust-analyzer, typescript-language-server, pylsp, gopls) or the JetBrains backend (declaration, type_hierarchy, symbols_overview are JetBrains-only).
 
-Parameters: `action`*, `column`, `line`*, `new_name`, `path`*, `scope`
+Parameters: `action`*, `column`, `direction`, `line`, `new_name`, `path`*, `scope`
 
 ## `ctx_repomap`
 
