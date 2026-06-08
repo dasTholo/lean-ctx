@@ -6,6 +6,7 @@ import com.leanctx.plugin.dto.JsonCodec
 import com.leanctx.plugin.dto.LocationsResponse
 import com.leanctx.plugin.dto.NavRequest
 import com.leanctx.plugin.endpoint.NavHandlers
+import com.leanctx.plugin.endpoint.StructureHandlers
 
 data class HttpResult(val status: Int, val body: String)
 
@@ -21,6 +22,7 @@ class RequestRouter(
 ) {
     private val log = Logger.getInstance(RequestRouter::class.java)
     private val handlers = NavHandlers(project)
+    private val structureHandlers = StructureHandlers(project)
 
     fun route(method: String, path: String, headerToken: String?, body: String): HttpResult {
         if (headerToken != token) {
@@ -30,6 +32,8 @@ class RequestRouter(
             return HttpResult(200, "{\"status\":\"ok\",\"ideVersion\":${q(ideVersion)},\"project\":${q(projectName)}}")
         }
         if (method == "POST") {
+            if (path == "/type_hierarchy") return dispatchHierarchy(body)
+            if (path == "/symbols_overview") return dispatchOverview(body)
             val handler: ((NavRequest) -> LocationsResponse)? = when (path) {
                 "/references" -> handlers::references
                 "/definition" -> handlers::definition
@@ -57,6 +61,30 @@ class RequestRouter(
     } catch (e: Exception) {
         log.warn("nav endpoint failed", e)
         HttpResult(500, JsonCodec.error("INTERNAL", e.message ?: "internal error")) // 500 = echte Exception
+    }
+
+    private fun dispatchHierarchy(body: String): HttpResult = try {
+        val req = JsonCodec.parseHierarchyRequest(body)
+        HttpResult(200, JsonCodec.toJson(structureHandlers.typeHierarchy(req)))
+    } catch (e: BackendException) {
+        HttpResult(200, JsonCodec.error(e.code, e.message ?: e.code))
+    } catch (e: IllegalArgumentException) {
+        HttpResult(200, JsonCodec.error("INTERNAL", e.message ?: "bad request"))
+    } catch (e: Exception) {
+        log.warn("type_hierarchy endpoint failed", e)
+        HttpResult(500, JsonCodec.error("INTERNAL", e.message ?: "internal error"))
+    }
+
+    private fun dispatchOverview(body: String): HttpResult = try {
+        val req = JsonCodec.parseFileRequest(body)
+        HttpResult(200, JsonCodec.toJson(structureHandlers.symbolsOverview(req)))
+    } catch (e: BackendException) {
+        HttpResult(200, JsonCodec.error(e.code, e.message ?: e.code))
+    } catch (e: IllegalArgumentException) {
+        HttpResult(200, JsonCodec.error("INTERNAL", e.message ?: "bad request"))
+    } catch (e: Exception) {
+        log.warn("symbols_overview endpoint failed", e)
+        HttpResult(500, JsonCodec.error("INTERNAL", e.message ?: "internal error"))
     }
 
     private fun q(s: String) = "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
