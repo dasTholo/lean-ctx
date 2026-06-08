@@ -48,6 +48,14 @@ pub struct InspectionDiag {
     pub message: String,
 }
 
+/// Truncation metadata for capped result sets (Backing B caps; spec Phase 3/4).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Truncation {
+    pub truncated: bool,
+    /// Total available matches/items (≥ returned count when truncated).
+    pub total: u32,
+}
+
 /// Code-intelligence backend. `Send` so instances can live in the global
 /// `BACKENDS` cache (`Mutex<HashMap<String, Box<dyn LspBackend>>>`).
 pub trait LspBackend: Send {
@@ -105,5 +113,10 @@ pub trait LspBackend: Send {
     /// Backing B overrides: the IDE may have closed/restarted since caching.
     fn is_stale(&self, _project_root: &str) -> bool {
         false
+    }
+    /// Truncation metadata of the most recent capped call, or `None` (Backing A,
+    /// or no capped call yet). Lets `ctx_refactor` surface "(truncated …)".
+    fn last_truncation(&self) -> Option<Truncation> {
+        None
     }
 }

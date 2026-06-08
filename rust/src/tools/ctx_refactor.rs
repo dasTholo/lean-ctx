@@ -68,11 +68,16 @@ fn handle_references(
     scope: &str,
 ) -> String {
     let result = crate::lsp::router::with_backend(file_path, project_root, |backend, _| {
-        backend.references(uri, position, scope)
+        let locs = backend.references(uri, position, scope)?;
+        Ok((locs, backend.last_truncation()))
     });
 
     match result {
-        Ok(locations) => format_locations(&locations, project_root),
+        Ok((locations, meta)) => {
+            let mut out = format_locations(&locations, project_root);
+            out.push_str(&truncation_note(locations.len(), meta));
+            out
+        }
         Err(e) => format!("ERROR: {e}"),
     }
 }
@@ -114,11 +119,16 @@ fn handle_implementations(
     scope: &str,
 ) -> String {
     let result = crate::lsp::router::with_backend(file_path, project_root, |backend, _| {
-        backend.implementations(uri, position, scope)
+        let locs = backend.implementations(uri, position, scope)?;
+        Ok((locs, backend.last_truncation()))
     });
 
     match result {
-        Ok(locations) => format_locations(&locations, project_root),
+        Ok((locations, meta)) => {
+            let mut out = format_locations(&locations, project_root);
+            out.push_str(&truncation_note(locations.len(), meta));
+            out
+        }
         Err(e) => format!("ERROR: {e}"),
     }
 }
@@ -157,21 +167,42 @@ fn handle_type_hierarchy(
 ) -> String {
     let direction = parse_direction(args);
     let result = crate::lsp::router::with_backend(file_path, project_root, |backend, _| {
-        backend.type_hierarchy(uri, position, direction)
+        let tree = backend.type_hierarchy(uri, position, direction)?;
+        Ok((tree, backend.last_truncation()))
     });
     match result {
-        Ok(tree) => format_type_hierarchy(&tree),
+        Ok((tree, meta)) => {
+            let mut out = format_type_hierarchy(&tree);
+            if matches!(meta, Some(m) if m.truncated) {
+                out.push_str("\n(truncated — depth/node cap reached)\n");
+            }
+            out
+        }
         Err(e) => format!("ERROR: {e}"),
     }
 }
 
 fn handle_symbols_overview(file_path: &str, project_root: &str, uri: &lsp_types::Uri) -> String {
     let result = crate::lsp::router::with_backend(file_path, project_root, |backend, _| {
-        backend.symbols_overview(uri)
+        let items = backend.symbols_overview(uri)?;
+        Ok((items, backend.last_truncation()))
     });
     match result {
-        Ok(items) => format_symbols_overview(&items),
+        Ok((items, meta)) => {
+            let mut out = format_symbols_overview(&items);
+            out.push_str(&truncation_note(items.len(), meta));
+            out
+        }
         Err(e) => format!("ERROR: {e}"),
+    }
+}
+
+fn truncation_note(shown: usize, meta: Option<crate::lsp::backend::Truncation>) -> String {
+    match meta {
+        Some(m) if m.truncated => {
+            format!("\n(truncated — showing {shown} of {})\n", m.total)
+        }
+        _ => String::new(),
     }
 }
 
@@ -484,5 +515,65 @@ mod tests {
             super::parse_direction(&json!({"direction": "supertypes"})),
             HierarchyDirection::Supertypes
         );
+    }
+
+    #[test]
+    fn references_output_surfaces_truncation_note() {
+        use lsp_types::Position;
+        struct TruncBackend;
+        impl crate::lsp::backend::LspBackend for TruncBackend {
+            fn open_file(&mut self, _u: &lsp_types::Uri, _l: &str, _t: &str) -> Result<(), String> {
+                Ok(())
+            }
+            fn references(
+                &mut self,
+                _u: &lsp_types::Uri,
+                _p: lsp_types::Position,
+                _s: &str,
+            ) -> Result<Vec<lsp_types::Location>, String> {
+                let uri = crate::lsp::client::file_path_to_uri("/proj/a.rs").unwrap();
+                Ok(vec![lsp_types::Location {
+                    uri,
+                    range: lsp_types::Range::default(),
+                }])
+            }
+            fn definition(
+                &mut self,
+                _u: &lsp_types::Uri,
+                _p: lsp_types::Position,
+            ) -> Result<lsp_types::GotoDefinitionResponse, String> {
+                Ok(lsp_types::GotoDefinitionResponse::Array(vec![]))
+            }
+            fn implementations(
+                &mut self,
+                _u: &lsp_types::Uri,
+                _p: lsp_types::Position,
+                _s: &str,
+            ) -> Result<Vec<lsp_types::Location>, String> {
+                Ok(vec![])
+            }
+            fn rename(
+                &mut self,
+                _u: &lsp_types::Uri,
+                _p: lsp_types::Position,
+                _n: &str,
+            ) -> Result<Option<lsp_types::WorkspaceEdit>, String> {
+                Ok(None)
+            }
+            fn last_truncation(&self) -> Option<crate::lsp::backend::Truncation> {
+                Some(crate::lsp::backend::Truncation { truncated: true, total: 742 })
+            }
+        }
+        crate::lsp::router::seed_stub_backend("rust", Box::new(TruncBackend));
+        let uri = crate::lsp::client::file_path_to_uri("/proj/a.rs").unwrap();
+        let out = super::handle_references(
+            "/proj/a.rs",
+            "/proj",
+            &uri,
+            Position { line: 0, character: 0 },
+            "project",
+        );
+        assert!(out.contains("truncated"), "expected truncation note, got: {out}");
+        assert!(out.contains("742"), "expected total in note, got: {out}");
     }
 }

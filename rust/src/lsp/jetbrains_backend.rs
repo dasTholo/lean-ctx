@@ -22,6 +22,9 @@ pub struct JetBrainsHttpBackend {
     pid: u32,
     /// IDE listen port — re-compared against the port file to detect restarts.
     port: u16,
+    /// Truncation meta of the most recent capped call (references/implementations/
+    /// type_hierarchy/symbols_overview), surfaced by ctx_refactor.
+    last_meta: Option<crate::lsp::backend::Truncation>,
 }
 
 impl JetBrainsHttpBackend {
@@ -30,9 +33,14 @@ impl JetBrainsHttpBackend {
     /// Mirrors `port_discovery::project_hash` canonicalization. On error (e.g. path
     /// does not exist), fall back to the raw root with a trailing-slash trim.
     fn canonical_root(project_root: &str) -> String {
-        let canonical = std::fs::canonicalize(project_root)
-            .map_or_else(|_| project_root.to_string(), |p| p.to_string_lossy().to_string());
-        canonical.strip_suffix('/').unwrap_or(&canonical).to_string()
+        let canonical = std::fs::canonicalize(project_root).map_or_else(
+            |_| project_root.to_string(),
+            |p| p.to_string_lossy().to_string(),
+        );
+        canonical
+            .strip_suffix('/')
+            .unwrap_or(&canonical)
+            .to_string()
     }
 
     #[allow(clippy::needless_pass_by_value)] // public ctor; callers own String
@@ -43,6 +51,7 @@ impl JetBrainsHttpBackend {
             project_root: Self::canonical_root(&project_root),
             pid,
             port,
+            last_meta: None,
         }
     }
 
@@ -154,6 +163,15 @@ impl JetBrainsHttpBackend {
             .unwrap_or_default()
     }
 
+    fn parse_truncation(v: &Value, shown: u32) -> Option<crate::lsp::backend::Truncation> {
+        let truncated = v.get("truncated").and_then(Value::as_bool)?;
+        let total = v
+            .get("total")
+            .and_then(Value::as_u64)
+            .map_or(shown, |n| n as u32);
+        Some(crate::lsp::backend::Truncation { truncated, total })
+    }
+
     /// `{path}` request body (file-level ops, no position).
     fn path_body(&self, uri: &Uri) -> Value {
         let abs = crate::lsp::client::uri_to_file_path(uri).unwrap_or_default();
@@ -195,7 +213,9 @@ impl LspBackend for JetBrainsHttpBackend {
         let mut body = self.position_body(uri, position);
         body["scope"] = serde_json::json!(scope);
         let resp = self.post("/references", &body)?;
-        Ok(self.parse_locations(&resp))
+        let locs = self.parse_locations(&resp);
+        self.last_meta = Self::parse_truncation(&resp, locs.len() as u32);
+        Ok(locs)
     }
 
     fn definition(
@@ -217,7 +237,9 @@ impl LspBackend for JetBrainsHttpBackend {
         let mut body = self.position_body(uri, position);
         body["scope"] = serde_json::json!(scope);
         let resp = self.post("/implementations", &body)?;
-        Ok(self.parse_locations(&resp))
+        let locs = self.parse_locations(&resp);
+        self.last_meta = Self::parse_truncation(&resp, locs.len() as u32);
+        Ok(locs)
     }
 
     fn declaration(&mut self, uri: &Uri, position: Position) -> Result<Vec<Location>, String> {
@@ -245,6 +267,7 @@ impl LspBackend for JetBrainsHttpBackend {
                 .unwrap_or("INTERNAL")
                 .to_string());
         }
+        self.last_meta = Self::parse_truncation(&resp, 0);
         Ok(Self::parse_type_hierarchy(&resp))
     }
 
@@ -258,7 +281,9 @@ impl LspBackend for JetBrainsHttpBackend {
                 .unwrap_or("INTERNAL")
                 .to_string());
         }
-        Ok(Self::parse_symbols(&resp))
+        let items = Self::parse_symbols(&resp);
+        self.last_meta = Self::parse_truncation(&resp, items.len() as u32);
+        Ok(items)
     }
 
     fn rename(
@@ -282,6 +307,10 @@ impl LspBackend for JetBrainsHttpBackend {
             }
             None => true,
         }
+    }
+
+    fn last_truncation(&self) -> Option<crate::lsp::backend::Truncation> {
+        self.last_meta
     }
 }
 
@@ -386,6 +415,21 @@ mod tests {
     }
 
     #[test]
+    fn references_records_truncation_meta() {
+        let body = r#"{"locations":[{"path":"a.rs","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":1}}}],"truncated":true,"total":742}"#;
+        let port = mock_once(body);
+        let mut backend =
+            JetBrainsHttpBackend::new(port, "tok".to_string(), "/proj".to_string(), std::process::id());
+        let uri = file_path_to_uri("/proj/a.rs").unwrap();
+        let _ = backend
+            .references(&uri, Position { line: 0, character: 0 }, "project")
+            .unwrap();
+        let meta = backend.last_truncation().expect("meta recorded");
+        assert!(meta.truncated);
+        assert_eq!(meta.total, 742);
+    }
+
+    #[test]
     fn is_stale_true_when_no_port_file() {
         // Unlikely root → no port file → cached backend is stale.
         let backend = JetBrainsHttpBackend::new(
@@ -436,7 +480,10 @@ mod tests {
         let with_slash = format!("{}/", tmp.to_string_lossy());
         let backend =
             JetBrainsHttpBackend::new(1, "t".to_string(), with_slash.clone(), std::process::id());
-        let expected = std::fs::canonicalize(&tmp).unwrap().to_string_lossy().to_string();
+        let expected = std::fs::canonicalize(&tmp)
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
         assert_eq!(backend.project_root_for_test(), expected);
         assert!(!backend.project_root_for_test().ends_with('/'));
     }
