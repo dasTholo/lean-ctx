@@ -48,7 +48,9 @@ after `ToolSearch`. (Profiles for reference — `minimal` = 6 tools, `standard` 
 | Warm cache for a subagent         | (automatic — shared MCP cache) | no `ctx_share`; subagent just `ctx_read`, never `fresh`                                |
 | Team coordination / diaries       | `ctx_agent`                    | register/post/read/diary/sync/handoff/share_knowledge                                  |
 | Blast radius (risk gate)          | `ctx_impact`, `ctx_callgraph`  | standard — direct                                                                      |
-| Task Liste                        | `ctx_task`                     | task create need: to_agent, States: "working,input-required,completed,failed,canceled" | 
+| A2A task board                    | `ctx_task`       | actions: create(needs `to_agent`)/update(needs `task_id`+`state`)/list/get/message/cancel/info. State machine: created(implicit)→working→{input-required↔working}→completed\|failed\|canceled (last 3 terminal). NOTE: `in_progress` is NOT valid (08-multi-agent.md §6 typo) |
+| Shadow-git of own edits           | `ctx_checkpoint` | snapshot/log/diff/restore — separate from the user's `.git`; snapshot before+after a change to capture exactly what you modified |
+| Rule consistency across agents    | `ctx_rules`      | sync (distribute rules) / diff (drift) / lint (consistency) / status / init |
 
 ## Controller contract (main agent, drives the plan)
 
