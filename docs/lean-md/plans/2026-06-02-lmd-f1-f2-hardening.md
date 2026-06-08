@@ -461,7 +461,7 @@ and replace with
 - [ ] **Step 6: Commit the spec update**
 
 ```bash
-git add docs/lean-md/specs/2026-05-31-lmd-lean-ctx-native-design.mdai.md docs/lean-md/plans/2026-06-02-lmd-f1-f2-hardening.md
+git add docs/lean-md/specs/2026-05-31-lmd-lean-ctx-native-design.md docs/lean-md/plans/2026-06-02-lmd-f1-f2-hardening.md
 git commit -m "docs(lmd): record F-1/F-2 resolution in design spec §4.2a/§6/§9"
 ```
 

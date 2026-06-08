@@ -768,7 +768,7 @@ In `docs/lean-md/specs/2026-05-31-lmd-lean-ctx-native-design.mdai.md` die §6-Ze
 
 reformat etwaiger `*.rs`, `cargo fmt`, dann:
 ```bash
-git add rust/src/lmd/engine.rs docs/lean-md/specs/2026-05-31-lmd-lean-ctx-native-design.mdai.md
+git add rust/src/lmd/engine.rs docs/lean-md/specs/2026-05-31-lmd-lean-ctx-native-design.md
 git commit -m "feat(lmd): @graph e2e render test; mark Phase-3 gate passed"
 ```
 
