@@ -600,8 +600,8 @@ mod contracts_integrity {
             "ARCHITECTURE.md should reference IR recording in flow"
         );
         assert!(
-            content.contains("69 trait-based tools"),
-            "ARCHITECTURE.md should reference the current registry count (69 trait-based tools)"
+            content.contains("72 trait-based tools"),
+            "ARCHITECTURE.md should reference the current registry count (72 trait-based tools)"
         );
         assert!(
             !content.contains("pipeline_stages.rs"),
