@@ -76,6 +76,6 @@ class PsiLocator(private val project: Project) {
         if (DumbService.getInstance(project).isDumb) {
             throw BackendException("INDEXING", "IDE is indexing; retry shortly")
         }
-        return ReadAction.compute<T, RuntimeException> { body() }
+        return ReadAction.nonBlocking<T> { body() }.executeSynchronously()
     }
 }
