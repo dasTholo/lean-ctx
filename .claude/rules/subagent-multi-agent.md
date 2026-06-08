@@ -34,8 +34,10 @@ after `ToolSearch`. (Profiles for reference — `minimal` = 6 tools, `standard` 
 > **No `ctx_share`:** the lean-ctx file cache is shared across all agents in the
 > session (one MCP process). A subagent's first `ctx_read` is already warm, so
 > warm-cache push/pull via `ctx_share` is redundant ceremony and is intentionally
-> NOT part of this contract. Subagents just `ctx_read` — **never `fresh`**
-> (mtime auto-validation keeps cached entries current), **never `raw`**.
+> NOT part of this contract. (`ctx_share` from Journey 8 §7 targets the
+> **cross-process** case — separate Cursor/Claude/Codex processes — which does not
+> apply to subagent-driven-development.) Subagents just `ctx_read` — **never
+> `fresh`** (mtime auto-validation keeps cached entries current), **never `raw`**.
 
 | Need                              | Tool                           | Note                                                                                   |
 |-----------------------------------|--------------------------------|----------------------------------------------------------------------------------------|
