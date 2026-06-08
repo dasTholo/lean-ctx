@@ -321,6 +321,15 @@ pub struct Config {
     pub boundary_policy: crate::core::memory_boundary::BoundaryPolicy,
     #[serde(default)]
     pub secret_detection: SecretDetectionConfig,
+    /// Per-item sensitivity model with a uniform policy floor (#212).
+    /// Disabled by default → fully no-op until `sensitivity.enabled = true`.
+    #[serde(default)]
+    pub sensitivity: crate::core::sensitivity::SensitivityConfig,
+    /// MCP Tool-Catalog Gateway (#210): aggregate + query-route downstream MCP
+    /// servers. Global-only (never merged from project-local config) and a full
+    /// no-op until `gateway.enabled = true`.
+    #[serde(default)]
+    pub gateway: crate::core::gateway::GatewayConfig,
     /// Allow automatic project-root re-rooting when absolute paths outside the jail are seen.
     /// When false (default), absolute paths outside the jail are rejected without re-rooting.
     /// Override via LEAN_CTX_ALLOW_REROOT env var.
@@ -440,6 +449,8 @@ impl Default for Config {
             cache_policy: None,
             boundary_policy: crate::core::memory_boundary::BoundaryPolicy::default(),
             secret_detection: SecretDetectionConfig::default(),
+            sensitivity: crate::core::sensitivity::SensitivityConfig::default(),
+            gateway: crate::core::gateway::GatewayConfig::default(),
             allow_auto_reroot: false,
             path_jail: None,
             sandbox_level: 0,
@@ -1023,6 +1034,9 @@ impl Config {
         }
         if !local.archive.ephemeral {
             self.archive.ephemeral = false;
+        }
+        if local.archive.ephemeral_min_tokens != ArchiveConfig::default().ephemeral_min_tokens {
+            self.archive.ephemeral_min_tokens = local.archive.ephemeral_min_tokens;
         }
         let mem_def = MemoryPolicy::default();
         if local.memory.knowledge.max_facts != mem_def.knowledge.max_facts {
