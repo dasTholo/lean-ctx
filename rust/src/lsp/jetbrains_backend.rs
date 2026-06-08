@@ -25,14 +25,30 @@ pub struct JetBrainsHttpBackend {
 }
 
 impl JetBrainsHttpBackend {
+    /// Canonicalize the project root ONCE so project-relative wire paths rejoin
+    /// byte-identically with the Kotlin side (port-file key = sha256(realpath)[..16]).
+    /// Mirrors `port_discovery::project_hash` canonicalization. On error (e.g. path
+    /// does not exist), fall back to the raw root with a trailing-slash trim.
+    fn canonical_root(project_root: &str) -> String {
+        let canonical = std::fs::canonicalize(project_root)
+            .map_or_else(|_| project_root.to_string(), |p| p.to_string_lossy().to_string());
+        canonical.strip_suffix('/').unwrap_or(&canonical).to_string()
+    }
+
+    #[allow(clippy::needless_pass_by_value)] // public ctor; callers own String
     pub fn new(port: u16, token: String, project_root: String, pid: u32) -> Self {
         Self {
             base_url: format!("http://127.0.0.1:{port}"),
             token,
-            project_root,
+            project_root: Self::canonical_root(&project_root),
             pid,
             port,
         }
+    }
+
+    #[cfg(test)]
+    fn project_root_for_test(&self) -> &str {
+        &self.project_root
     }
 
     fn post(&self, endpoint: &str, body: &Value) -> Result<Value, String> {
@@ -410,5 +426,26 @@ mod tests {
         assert!(other.is_stale(&root), "pid mismatch must be stale");
         std::env::remove_var("LEAN_CTX_DATA_DIR");
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn canonical_root_strips_trailing_slash_and_resolves_realpath() {
+        // Existing dir with a trailing slash → canonical form has no trailing slash
+        // and matches sha2's canonicalize (port_discovery::project_hash parity).
+        let tmp = std::env::temp_dir();
+        let with_slash = format!("{}/", tmp.to_string_lossy());
+        let backend =
+            JetBrainsHttpBackend::new(1, "t".to_string(), with_slash.clone(), std::process::id());
+        let expected = std::fs::canonicalize(&tmp).unwrap().to_string_lossy().to_string();
+        assert_eq!(backend.project_root_for_test(), expected);
+        assert!(!backend.project_root_for_test().ends_with('/'));
+    }
+
+    #[test]
+    fn canonical_root_falls_back_to_raw_for_nonexistent() {
+        let raw = "/nonexistent/leanctx/xyz";
+        let backend =
+            JetBrainsHttpBackend::new(1, "t".to_string(), raw.to_string(), std::process::id());
+        assert_eq!(backend.project_root_for_test(), raw);
     }
 }
