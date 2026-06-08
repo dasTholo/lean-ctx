@@ -23,8 +23,15 @@ object LeanCtxPaths {
         return if (legacy.toFile().exists()) legacy else xdg
     }
 
-    /** Production resolver using the real process environment + user.home. */
-    fun dataDir(): Path = resolveDataDir(System.getenv(), Paths.get(System.getProperty("user.home")))
+    /**
+     * Production resolver: system property LEAN_CTX_DATA_DIR overrides env (test-injectable);
+     * falls back to resolveDataDir with the real process environment.
+     */
+    fun dataDir(): Path {
+        System.getProperty("LEAN_CTX_DATA_DIR")?.trim()?.takeIf { it.isNotEmpty() }
+            ?.let { return Paths.get(it) }
+        return resolveDataDir(System.getenv(), Paths.get(System.getProperty("user.home")))
+    }
 
     private fun hasDataFiles(dir: Path): Boolean = DATA_MARKERS.any { dir.resolve(it).toFile().exists() }
 
