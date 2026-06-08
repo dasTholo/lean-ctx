@@ -24,7 +24,15 @@ class BackendHttpServer(
     private val token: String = newToken()
     private var server: HttpServer? = null
     private var executor: ExecutorService? = null
+    @Volatile
     private var portFile: Path? = null
+    @Volatile
+    private var portFileData: PortFileData? = null
+    private var watcher: PortFileWatcher? = null
+    private var heartbeat: PortFileHeartbeat? = null
+
+    @Volatile
+    private var disposed = false
 
     val port: Int get() = server?.address?.port ?: -1
     val tokenForTest: String get() = token
@@ -53,21 +61,44 @@ class BackendHttpServer(
         server = http
 
         val pf = LeanCtxPaths.portFile(dataDir, projectRoot)
-        PortFileWriter.write(
-            pf,
-            PortFileData(
-                port = http.address.port,
-                token = token,
-                pid = ProcessHandle.current().pid(),
-                projectRoot = projectRoot,
-                ideVersion = ideVersion,
-                startedAt = startedAt,
-            )
+        // 2. Stale-cleanup at boot, before writing our own file.
+        val reaper = StalePortFileReaper(dataDir, pf)
+        reaper.reap()
+
+        // 3. Write our own port file. Re-writes reuse this exact identity.
+        val data = PortFileData(
+            port = http.address.port,
+            token = token,
+            pid = ProcessHandle.current().pid(),
+            projectRoot = projectRoot,
+            ideVersion = ideVersion,
+            startedAt = startedAt,
         )
+        PortFileWriter.write(pf, data)
         portFile = pf
+        portFileData = data
+
+        // 4. Watcher: immediate re-write if our file is deleted at runtime.
+        watcher = PortFileWatcher(dataDir, pf, ::reWritePortFile)
+
+        // 5. Heartbeat: periodic reap + self-heal fallback (30s).
+        heartbeat = PortFileHeartbeat(reaper, pf, ::reWritePortFile).also { it.start() }
+    }
+
+    /** Re-write our port file with the stable identity (socket lives on). Atomic + idempotent. */
+    private fun reWritePortFile() {
+        if (disposed) return
+        val pf = portFile ?: return
+        val data = portFileData ?: return
+        PortFileWriter.write(pf, data)
     }
 
     override fun dispose() {
+        disposed = true
+        heartbeat?.cancel()
+        heartbeat = null
+        watcher?.close()
+        watcher = null
         server?.stop(0)
         server = null
         // HttpServer.stop() does not close a user-supplied executor; reclaim its threads now.
@@ -75,6 +106,7 @@ class BackendHttpServer(
         executor = null
         portFile?.let { PortFileWriter.delete(it) }
         portFile = null
+        portFileData = null
     }
 
     private fun newToken(): String {
