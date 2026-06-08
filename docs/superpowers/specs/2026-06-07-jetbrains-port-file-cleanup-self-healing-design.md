@@ -37,6 +37,7 @@ Beobachtung: 16 `jetbrains-*.port`-Dateien in `~/.lean-ctx/`. Erklärung: eine D
 mit installiertem Plugin geöffnet wurde (inkl. `runIde`-Sandboxes).
 
 Lebenszyklus heute (`BackendHttpServer.kt`):
+
 - **Geschrieben:** genau **einmal** in `start()` beim Projekt-Öffnen
   (`LeanCtxStartupActivity`, `ProjectActivity`). Kein Timer, kein Heartbeat.
 - **Gelöscht:** in `dispose()` via `Disposer.register(project, server)` — nur bei
@@ -57,6 +58,7 @@ Daraus zwei Lücken:
 ## 2. Ziel
 
 Beide Lücken plugin-seitig schließen, ohne Rust anzufassen:
+
 - Stale-Port-Dateien toter IDEs automatisch entfernen.
 - Eigene Port-Datei robust wiederherstellen, falls sie zur Laufzeit verschwindet.
 
@@ -69,27 +71,30 @@ Beide Lücken plugin-seitig schließen, ohne Rust anzufassen:
 
 ## 4. Architektur-Entscheidungen
 
-| # | Entscheidung | Begründung |
-|---|--------------|-----------|
-| D1 | **Watcher + Heartbeat** für Self-Healing | Watcher: sofortige Reaktion auf Löschung; Heartbeat: Fallback (verpasste Events) + Cleanup-Tick. Höchste Robustheit. |
-| D2 | **pid-only** Liveness fürs Cleanup (kein HTTP-`/health`) | Billig, kein Netzwerk, kein Token-Lesen fremder Dateien. Rust macht ohnehin finalen `health_ok`. pid-Recycling vernachlässigbar & harmlos. |
-| D3 | **30s** Heartbeat-Intervall | Balance aus Reaktionszeit (Fallback) und IO-Last. |
-| D4 | Logik im **`BackendHttpServer`** gebündelt (Owner von token/port/portFile/Lifecycle) | Natürlicher Owner; Disposable-Lifecycle vorhanden. |
-| D5 | `ProcessHandle.of(pid)` statt Linux-`/proc` | Cross-platform; robuster als Rusts plattformspezifischer Check. |
+| #  | Entscheidung                                                                         | Begründung                                                                                                                                 |
+|----|--------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------|
+| D1 | **Watcher + Heartbeat** für Self-Healing                                             | Watcher: sofortige Reaktion auf Löschung; Heartbeat: Fallback (verpasste Events) + Cleanup-Tick. Höchste Robustheit.                       |
+| D2 | **pid-only** Liveness fürs Cleanup (kein HTTP-`/health`)                             | Billig, kein Netzwerk, kein Token-Lesen fremder Dateien. Rust macht ohnehin finalen `health_ok`. pid-Recycling vernachlässigbar & harmlos. |
+| D3 | **30s** Heartbeat-Intervall                                                          | Balance aus Reaktionszeit (Fallback) und IO-Last.                                                                                          |
+| D4 | Logik im **`BackendHttpServer`** gebündelt (Owner von token/port/portFile/Lifecycle) | Natürlicher Owner; Disposable-Lifecycle vorhanden.                                                                                         |
+| D5 | `ProcessHandle.of(pid)` statt Linux-`/proc`                                          | Cross-platform; robuster als Rusts plattformspezifischer Check.                                                                            |
 
 ## 5. Komponenten (klein, isoliert, je testbar)
 
 ### 5.1 `ProcessLiveness`
+
 `isAlive(pid: Long): Boolean` via `ProcessHandle.of(pid).isPresent`. Einziger
 Liveness-Helfer; von Reaper genutzt.
 
 ### 5.2 `PortFileReader`
+
 Gegenstück zu `PortFileWriter`. Extrahiert mindestens `pid` (bei Bedarf weitere
 Felder) aus einer Port-Datei. Round-trip-kompatibel zum manuellen snake_case-JSON
 des Writers. Fehlertolerant: unlesbare/kaputte Datei → `null` (nie Exception nach
 außen).
 
 ### 5.3 `StalePortFileReaper`
+
 - Scannt `dataDir/jetbrains-*.port`.
 - Liest `pid` via `PortFileReader`, löscht Datei wo `!ProcessLiveness.isAlive(pid)`.
 - Lässt die **eigene** Datei explizit aus — doppelt geschützt: (a) eigener pid lebt,
@@ -99,19 +104,23 @@ außen).
 - Best-effort: einzelne Lösch-/Lesefehler brechen den Scan nicht ab.
 
 ### 5.4 `PortFileWatcher` (`Closeable`)
+
 - `WatchService` auf `dataDir`, registriert `ENTRY_DELETE`.
 - Bei Delete-Event der **eigenen** Datei → sofortiges Re-Write (Callback auf den
   Server bzw. übergebenes Re-Write-Lambda).
 - Eigener Lifecycle/Thread; `close()` beendet sauber.
 
 ### 5.5 `PortFileHeartbeat`
+
 - Scheduled über `AppExecutorUtil` (Plattform-Scheduler), Intervall 30s (D3).
 - Tick: `reaper.reap()` **und** eigene Datei wiederherstellen, falls fehlend.
 - Fallback zum Watcher (deckt verpasste Events ab).
 - `cancel()` stoppt den ScheduledFuture.
 
 ### 5.6 Integration in `BackendHttpServer`
+
 `start()`-Reihenfolge:
+
 1. `http.start()`, `server` gesetzt.
 2. **reap einmal** (Stale-Cleanup beim Boot).
 3. eigene Port-Datei schreiben (wie heute).
@@ -119,6 +128,7 @@ außen).
 5. `PortFileHeartbeat` schedulen.
 
 `dispose()`-Reihenfolge (zusätzlich zu heute):
+
 1. Heartbeat `cancel()`.
 2. Watcher `close()`.
 3. `server.stop(0)` + `executor.shutdownNow()` (wie heute).
@@ -139,18 +149,19 @@ Watcher und Heartbeat können gefahrlos gleichzeitig schreiben (idempotent).
 
 ## 7. Tests (JUnit, wie Bestand in `src/test/kotlin/.../server/`)
 
-| Test | Prüft |
-|------|-------|
-| `ProcessLivenessTest` | aktueller pid lebt; absurd hoher pid tot |
-| `PortFileReaderTest` | pid-Round-trip mit `PortFileWriter`; kaputte Datei → `null` |
-| `StalePortFileReaperTest` | tote Datei gelöscht; lebende (self) + Nicht-Port-Dateien unberührt; kaputte Datei bleibt |
-| `PortFileWatcherTest` | Delete der eigenen Datei → wiederhergestellt |
-| `PortFileHeartbeatTest` | fehlende Datei → wiederhergestellt; Tick reapt Stale |
-| `BackendHttpServerTest` (erweitern) | `dispose()` stoppt Watcher+Heartbeat ohne Leaks; Datei gelöscht |
+| Test                                | Prüft                                                                                    |
+|-------------------------------------|------------------------------------------------------------------------------------------|
+| `ProcessLivenessTest`               | aktueller pid lebt; absurd hoher pid tot                                                 |
+| `PortFileReaderTest`                | pid-Round-trip mit `PortFileWriter`; kaputte Datei → `null`                              |
+| `StalePortFileReaperTest`           | tote Datei gelöscht; lebende (self) + Nicht-Port-Dateien unberührt; kaputte Datei bleibt |
+| `PortFileWatcherTest`               | Delete der eigenen Datei → wiederhergestellt                                             |
+| `PortFileHeartbeatTest`             | fehlende Datei → wiederhergestellt; Tick reapt Stale                                     |
+| `BackendHttpServerTest` (erweitern) | `dispose()` stoppt Watcher+Heartbeat ohne Leaks; Datei gelöscht                          |
 
 ## 8. Betroffene Dateien
 
 **Neu (main):**
+
 - `.../server/ProcessLiveness.kt`
 - `.../server/PortFileReader.kt`
 - `.../server/StalePortFileReaper.kt`
@@ -158,6 +169,7 @@ Watcher und Heartbeat können gefahrlos gleichzeitig schreiben (idempotent).
 - `.../server/PortFileHeartbeat.kt`
 
 **Geändert (main):**
+
 - `.../server/BackendHttpServer.kt` (Integration, §5.6)
 
 **Neu/geändert (test):** entsprechend §7.

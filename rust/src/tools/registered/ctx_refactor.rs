@@ -76,7 +76,13 @@ mod schema_tests {
         let tool = CtxRefactorTool;
         let def = tool.tool_def();
         let schema = serde_json::to_string(&def).unwrap();
-        assert!(schema.contains("declaration"), "enum missing declaration: {schema}");
-        assert!(schema.contains("\"scope\""), "missing scope property: {schema}");
+        assert!(
+            schema.contains("declaration"),
+            "enum missing declaration: {schema}"
+        );
+        assert!(
+            schema.contains("\"scope\""),
+            "missing scope property: {schema}"
+        );
     }
 }

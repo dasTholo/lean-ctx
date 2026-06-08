@@ -105,7 +105,12 @@ impl LspBackend for JetBrainsHttpBackend {
         Ok(())
     }
 
-    fn references(&mut self, uri: &Uri, position: Position, scope: &str) -> Result<Vec<Location>, String> {
+    fn references(
+        &mut self,
+        uri: &Uri,
+        position: Position,
+        scope: &str,
+    ) -> Result<Vec<Location>, String> {
         let mut body = self.position_body(uri, position);
         body["scope"] = serde_json::json!(scope);
         let resp = self.post("/references", &body)?;
@@ -122,7 +127,12 @@ impl LspBackend for JetBrainsHttpBackend {
         Ok(GotoDefinitionResponse::Array(self.parse_locations(&resp)))
     }
 
-    fn implementations(&mut self, uri: &Uri, position: Position, scope: &str) -> Result<Vec<Location>, String> {
+    fn implementations(
+        &mut self,
+        uri: &Uri,
+        position: Position,
+        scope: &str,
+    ) -> Result<Vec<Location>, String> {
         let mut body = self.position_body(uri, position);
         body["scope"] = serde_json::json!(scope);
         let resp = self.post("/implementations", &body)?;

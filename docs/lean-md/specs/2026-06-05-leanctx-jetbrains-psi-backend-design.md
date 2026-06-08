@@ -856,3 +856,37 @@ mit den vier Navigations-Endpoints, gegen die die Phase-1-Rust-Seite
 3. `cargo nextest run` grün (Rust-Wire + `scope`-Durchreichung).
 4. Fallback ohne IDE → Backing A unverändert (Regressionsschutz).
 5. Companion-Plugin (Statusbar/Actions) weiterhin funktional (keine Regression).
+
+#### Gate-Protokoll Phase 3 (Stand 2026-06-07)
+
+Implementierung **komplett** (R1–R2 Rust, K1–K8 Kotlin), je spec- + quality-reviewed.
+Ein Commit `4d139ce0` auf `feat-jetbrains-plugin` (26 Dateien, §12.3). Automatisierte
+Gates **grün**: Rust `cargo nextest` 4943 passed; `cargo clippy` nur 3 vorbestehende
+Baseline-Lints (unberührte Dateien — keine Regression); Kotlin `./gradlew test` 26 passed.
+
+Manuelles `runIde`-Gate (IDE IU-2026.1.3) — **teilweise verifiziert (live, direkte curls
+gegen die Sandbox):**
+
+- ✅ Plugin ist Phase 3: alle vier Nav-Routen `/references|/definition|/implementations|
+  /declaration` erreichbar (kein `NOT_FOUND`), gültige `{locations,truncated,total}`-Serialisierung.
+- ✅ `/health` ok; Token-Guard (falscher Token) → **HTTP 401 UNAUTHORIZED**.
+- ✅ Fachliche Negativfälle als HTTP-200-Envelope: `FILE_NOT_FOUND` (unbekannter Pfad),
+  `NO_SYMBOL_AT_POSITION` (Cursor ohne auflösbares Symbol).
+
+**Offen (umgebungsbedingt, keine Plugin-Bugs) — später fortzusetzen:**
+
+1. **Nicht-leere, IDE-deckungsgleiche Treffer** noch nicht live gezeigt: die Sandbox hat das
+   Repo als *Ordner* geöffnet, das Gradle-Subprojekt `packages/jetbrains-lean-ctx` ist **nicht
+   als Kotlin-Modul importiert** → `resolve()`/`ReferencesSearch` ohne Index liefern `total:0`
+   bzw. „reference did not resolve". Die PSI-Auflösung selbst ist durch die grünen
+   `BasePlatformTestCase`-Fixtures (references=2, implementations=2, definition=1) bereits bewiesen.
+   → Nachzuholen: im Sandbox-Fenster ein konfiguriertes Kotlin-Projekt öffnen (oder Gradle-Import),
+   dann curls wiederholen (Soll-Abgleich mit IDE „Find Usages"/„Go to Declaration").
+2. **End-to-end über `ctx_refactor` (Backing B) + PathJail-Test** noch offen: das **installierte**
+   `lean-ctx`-Binary (laufender MCP-Server) ist älter als die JetBrains-Backend-Integration und
+   routet `.kt` nicht zu Backing B (`No LSP server configured for extension '.kt'`). R1/R2 sind
+   committet, aber noch **nicht gebaut/installiert**. → Nachzuholen: Binary-Rebuild + Install
+   (`cargo install --path rust`), MCP-Neustart, dann `ctx_refactor(action=references|declaration)`
+   end-to-end + `path="../escape.kt"` für den PathJail-Reject.
+
+Fallback ohne IDE (Backing-A-Regression) + Companion-Plugin-Regression: noch zu prüfen.
