@@ -16,7 +16,7 @@ import java.nio.file.Paths
 
 /**
  * Maps wire coordinates (project-relative path + 0-based line/character) to PSI and back.
- * All PSI access must run inside ReadAction (callers use [inSmartReadAction]).
+ * All PSI access must run inside a (non-blocking) read action (callers use [inSmartReadAction]).
  */
 class PsiLocator(private val project: Project) {
 
@@ -69,8 +69,12 @@ class PsiLocator(private val project: Project) {
     }
 
     /**
-     * Run [body] in a smart-mode ReadAction. If the IDE is indexing, fail fast with INDEXING
-     * instead of blocking the HTTP handler (spec §5.3).
+     * Run [body] in a smart-mode read action via [ReadAction.nonBlocking], executed synchronously
+     * on the calling (HTTP handler) thread. If the IDE is indexing, fail fast with INDEXING
+     * instead of blocking the handler (spec §5.3).
+     *
+     * Note: a non-blocking read action may be cancelled and re-run if a write action intervenes,
+     * so [body] must be idempotent (all current callers are pure PSI reads).
      */
     fun <T> inSmartReadAction(body: () -> T): T {
         if (DumbService.getInstance(project).isDumb) {

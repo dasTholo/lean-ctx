@@ -20,7 +20,7 @@ import com.leanctx.plugin.server.BackendException
 /**
  * Runs / lists inspections from the current project InspectionProfile (spec §3.2, §6).
  * Read-only: never writes the file. Caps results at MAX_* with `truncated`/`total`.
- * Must be invoked inside a smart-mode ReadAction (handlers use PsiLocator.inSmartReadAction).
+ * Must be invoked inside a smart-mode read action (handlers use PsiLocator.inSmartReadAction).
  */
 class InspectionRunner(private val locator: PsiLocator) {
 

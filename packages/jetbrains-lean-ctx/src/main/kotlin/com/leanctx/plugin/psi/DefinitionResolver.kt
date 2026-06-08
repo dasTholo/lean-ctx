@@ -7,7 +7,7 @@ import com.leanctx.plugin.server.BackendException
 /**
  * definition + declaration. Both go through the same resolver and normalize via
  * navigationElement (spec §17.1 #7: declaration ≡ definition in Kotlin/Java, by design).
- * Must be called inside a ReadAction (use PsiLocator.inSmartReadAction).
+ * Must be called inside a read action (use PsiLocator.inSmartReadAction).
  */
 class DefinitionResolver(private val locator: PsiLocator) {
 
