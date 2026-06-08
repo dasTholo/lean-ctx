@@ -8,7 +8,7 @@ use std::time::Duration;
 use lsp_types::{GotoDefinitionResponse, Location, Position, Range, Uri, WorkspaceEdit};
 use serde_json::Value;
 
-use crate::lsp::backend::LspBackend;
+use crate::lsp::backend::{HierarchyDirection, LspBackend, SymbolOverviewItem, TypeHierarchyNode};
 use crate::lsp::client::file_path_to_uri;
 
 const REQUEST_TIMEOUT_SECS: u64 = 30;
@@ -83,6 +83,57 @@ impl JetBrainsHttpBackend {
             .unwrap_or_default()
     }
 
+    fn parse_type_hierarchy(v: &Value) -> TypeHierarchyNode {
+        fn node(v: &Value) -> TypeHierarchyNode {
+            TypeHierarchyNode {
+                name: v.get("name").and_then(Value::as_str).unwrap_or("?").to_string(),
+                path: v.get("path").and_then(Value::as_str).unwrap_or_default().to_string(),
+                line: v.get("line").and_then(Value::as_u64).unwrap_or(0) as u32,
+                children: v
+                    .get("children")
+                    .and_then(Value::as_array)
+                    .map(|arr| arr.iter().map(node).collect())
+                    .unwrap_or_default(),
+            }
+        }
+        v.get("tree").map_or_else(
+            || TypeHierarchyNode {
+                name: String::new(),
+                path: String::new(),
+                line: 0,
+                children: vec![],
+            },
+            node,
+        )
+    }
+
+    fn parse_symbols(v: &Value) -> Vec<SymbolOverviewItem> {
+        v.get("symbols")
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|s| {
+                        Some(SymbolOverviewItem {
+                            name: s.get("name")?.as_str()?.to_string(),
+                            kind: s.get("kind")?.as_str()?.to_string(),
+                            line: s.get("line")?.as_u64()? as u32,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// `{path}` request body (file-level ops, no position).
+    fn path_body(&self, uri: &Uri) -> Value {
+        let abs = crate::lsp::client::uri_to_file_path(uri).unwrap_or_default();
+        let rel = abs
+            .strip_prefix(&self.project_root)
+            .map(|s| s.strip_prefix('/').unwrap_or(s).to_string())
+            .unwrap_or(abs);
+        serde_json::json!({ "path": rel })
+    }
+
     /// Build the `{path, line, character}` request body. `position` is already
     /// 0-based (LSP convention) — sent verbatim. `uri` → project-relative path.
     fn position_body(&self, uri: &Uri, position: Position) -> Value {
@@ -145,6 +196,33 @@ impl LspBackend for JetBrainsHttpBackend {
         Ok(self.parse_locations(&resp))
     }
 
+    fn type_hierarchy(
+        &mut self,
+        uri: &Uri,
+        position: Position,
+        direction: HierarchyDirection,
+    ) -> Result<TypeHierarchyNode, String> {
+        let mut body = self.position_body(uri, position);
+        body["direction"] = serde_json::json!(match direction {
+            HierarchyDirection::Supertypes => "supertypes",
+            HierarchyDirection::Subtypes => "subtypes",
+        });
+        let resp = self.post("/type_hierarchy", &body)?;
+        if let Some(err) = resp.get("error") {
+            return Err(err.get("code").and_then(Value::as_str).unwrap_or("INTERNAL").to_string());
+        }
+        Ok(Self::parse_type_hierarchy(&resp))
+    }
+
+    fn symbols_overview(&mut self, uri: &Uri) -> Result<Vec<SymbolOverviewItem>, String> {
+        let body = self.path_body(uri);
+        let resp = self.post("/symbols_overview", &body)?;
+        if let Some(err) = resp.get("error") {
+            return Err(err.get("code").and_then(Value::as_str).unwrap_or("INTERNAL").to_string());
+        }
+        Ok(Self::parse_symbols(&resp))
+    }
+
     fn rename(
         &mut self,
         _uri: &Uri,
@@ -202,5 +280,35 @@ mod tests {
         assert_eq!(locs[0].range.start.line, 5);
         assert_eq!(locs[0].range.start.character, 13);
         assert!(locs[0].uri.as_str().ends_with("/proj/src/main.rs"));
+    }
+
+    #[test]
+    fn type_hierarchy_parses_wire_tree() {
+        use crate::lsp::backend::HierarchyDirection;
+        let body = r#"{"tree":{"name":"Animal","path":"A.kt","line":1,"children":[{"name":"Dog","path":"A.kt","line":2,"children":[]}]},"truncated":false}"#;
+        let port = mock_once(body);
+        let mut backend = JetBrainsHttpBackend::new(port, "tok".to_string(), "/proj".to_string());
+        let uri = file_path_to_uri("/proj/A.kt").unwrap();
+        let tree = backend
+            .type_hierarchy(&uri, Position { line: 0, character: 0 }, HierarchyDirection::Subtypes)
+            .expect("should parse");
+        assert_eq!(tree.name, "Animal");
+        assert_eq!(tree.line, 1);
+        assert_eq!(tree.children.len(), 1);
+        assert_eq!(tree.children[0].name, "Dog");
+        assert_eq!(tree.children[0].path, "A.kt");
+    }
+
+    #[test]
+    fn symbols_overview_parses_wire_items() {
+        let body = r#"{"symbols":[{"name":"Animal","kind":"interface","line":1},{"name":"main","kind":"function","line":9}],"truncated":false,"total":2}"#;
+        let port = mock_once(body);
+        let mut backend = JetBrainsHttpBackend::new(port, "tok".to_string(), "/proj".to_string());
+        let uri = file_path_to_uri("/proj/A.kt").unwrap();
+        let items = backend.symbols_overview(&uri).expect("should parse");
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].kind, "interface");
+        assert_eq!(items[1].name, "main");
+        assert_eq!(items[1].line, 9);
     }
 }
