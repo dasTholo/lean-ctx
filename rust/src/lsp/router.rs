@@ -69,6 +69,7 @@ fn select_backend(language: &str, project_root: &str) -> Result<Box<dyn LspBacke
                     pf.port,
                     pf.token,
                     project_root.to_string(),
+                    pf.pid,
                 )));
             }
         }

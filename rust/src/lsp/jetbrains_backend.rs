@@ -18,14 +18,20 @@ pub struct JetBrainsHttpBackend {
     token: String,
     /// Absolute project root, to rejoin project-relative wire paths.
     project_root: String,
+    /// IDE process id from the discovered port file — for cheap staleness checks.
+    pid: u32,
+    /// IDE listen port — re-compared against the port file to detect restarts.
+    port: u16,
 }
 
 impl JetBrainsHttpBackend {
-    pub fn new(port: u16, token: String, project_root: String) -> Self {
+    pub fn new(port: u16, token: String, project_root: String, pid: u32) -> Self {
         Self {
             base_url: format!("http://127.0.0.1:{port}"),
             token,
             project_root,
+            pid,
+            port,
         }
     }
 
@@ -248,6 +254,19 @@ impl LspBackend for JetBrainsHttpBackend {
         // Symbolic edits are v2 (spec §9 v2-Ausblick). Phase 1 skeleton: not yet.
         Err("rename via JetBrains backend is not implemented yet (v2 edit spec)".to_string())
     }
+
+    fn is_stale(&self, project_root: &str) -> bool {
+        // Cheap re-check: port file gone, or pid/port changed (IDE restarted),
+        // or our cached pid is dead → stale. NO HTTP (health is not pinged per call).
+        match crate::lsp::port_discovery::read_port_file(project_root) {
+            Some(pf) => {
+                pf.pid != self.pid
+                    || pf.port != self.port
+                    || !crate::lsp::port_discovery::pid_alive(self.pid)
+            }
+            None => true,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -280,7 +299,12 @@ mod tests {
     fn references_parses_wire_locations() {
         let body = r#"{"locations":[{"path":"src/main.rs","range":{"start":{"line":5,"character":13},"end":{"line":5,"character":18}}}]}"#;
         let port = mock_once(body);
-        let mut backend = JetBrainsHttpBackend::new(port, "tok".to_string(), "/proj".to_string());
+        let mut backend = JetBrainsHttpBackend::new(
+            port,
+            "tok".to_string(),
+            "/proj".to_string(),
+            std::process::id(),
+        );
         let uri = file_path_to_uri("/proj/src/main.rs").unwrap();
         let locs = backend
             .references(
@@ -303,7 +327,12 @@ mod tests {
         use crate::lsp::backend::HierarchyDirection;
         let body = r#"{"tree":{"name":"Animal","path":"A.kt","line":1,"children":[{"name":"Dog","path":"A.kt","line":2,"children":[]}]},"truncated":false}"#;
         let port = mock_once(body);
-        let mut backend = JetBrainsHttpBackend::new(port, "tok".to_string(), "/proj".to_string());
+        let mut backend = JetBrainsHttpBackend::new(
+            port,
+            "tok".to_string(),
+            "/proj".to_string(),
+            std::process::id(),
+        );
         let uri = file_path_to_uri("/proj/A.kt").unwrap();
         let tree = backend
             .type_hierarchy(
@@ -326,12 +355,60 @@ mod tests {
     fn symbols_overview_parses_wire_items() {
         let body = r#"{"symbols":[{"name":"Animal","kind":"interface","line":1},{"name":"main","kind":"function","line":9}],"truncated":false,"total":2}"#;
         let port = mock_once(body);
-        let mut backend = JetBrainsHttpBackend::new(port, "tok".to_string(), "/proj".to_string());
+        let mut backend = JetBrainsHttpBackend::new(
+            port,
+            "tok".to_string(),
+            "/proj".to_string(),
+            std::process::id(),
+        );
         let uri = file_path_to_uri("/proj/A.kt").unwrap();
         let items = backend.symbols_overview(&uri).expect("should parse");
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].kind, "interface");
         assert_eq!(items[1].name, "main");
         assert_eq!(items[1].line, 9);
+    }
+
+    #[test]
+    fn is_stale_true_when_no_port_file() {
+        // Unlikely root → no port file → cached backend is stale.
+        let backend = JetBrainsHttpBackend::new(
+            12345,
+            "tok".to_string(),
+            "/nonexistent/leanctx/proj/xyz".to_string(),
+            999_999_999,
+        );
+        assert!(backend.is_stale("/nonexistent/leanctx/proj/xyz"));
+    }
+
+    #[test]
+    fn is_stale_false_for_matching_live_pid() {
+        let _lock = crate::core::data_dir::test_env_lock();
+        // A port file describing THIS process (pid alive) + matching port/token
+        // must be considered fresh. We stage a port file via the data-dir env.
+        let tmp = std::env::temp_dir().join(format!("leanctx-stale-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let root = tmp.to_string_lossy().to_string();
+        // Write a port file at the discovery path for `root`.
+        std::env::set_var("LEAN_CTX_DATA_DIR", &tmp);
+        let pf_path = crate::lsp::port_discovery::port_file_path(&root).unwrap();
+        let pid = std::process::id();
+        std::fs::write(
+            &pf_path,
+            format!(
+                r#"{{"port":4567,"token":"tok","pid":{pid},"project_root":"{root}","ide_version":"x"}}"#
+            ),
+        )
+        .unwrap();
+        let backend = JetBrainsHttpBackend::new(4567, "tok".to_string(), root.clone(), pid);
+        assert!(
+            !backend.is_stale(&root),
+            "matching live pid+port must be fresh"
+        );
+        // Different cached pid → stale even though the file is live.
+        let other = JetBrainsHttpBackend::new(4567, "tok".to_string(), root.clone(), pid + 1);
+        assert!(other.is_stale(&root), "pid mismatch must be stale");
+        std::env::remove_var("LEAN_CTX_DATA_DIR");
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

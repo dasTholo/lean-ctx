@@ -98,4 +98,12 @@ pub trait LspBackend: Send {
     fn inspections(&mut self, _uri: &Uri) -> Result<Vec<InspectionDiag>, String> {
         Err("inspections requires the JetBrains backend".to_string())
     }
+
+    // ── Self-management (liveness) ──
+    /// Whether a cached instance of this backend is no longer valid and must be
+    /// evicted + re-selected. Backing A (in-process LSP) is never stale → default `false`.
+    /// Backing B overrides: the IDE may have closed/restarted since caching.
+    fn is_stale(&self, _project_root: &str) -> bool {
+        false
+    }
 }
