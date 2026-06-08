@@ -93,6 +93,21 @@ fn select_backend(language: &str, project_root: &str) -> Result<Box<dyn LspBacke
     Ok(Box::new(client) as Box<dyn LspBackend>)
 }
 
+/// Evicts a cached backend whose liveness check (`is_stale`) failed, so the next
+/// lookup re-selects (auto → Backing A fallback; b_only → Err). Backing A never stale.
+fn evict_if_stale(
+    backends: &mut HashMap<String, Box<dyn LspBackend>>,
+    language: &str,
+    project_root: &str,
+) {
+    if backends
+        .get(language)
+        .is_some_and(|b| b.is_stale(project_root))
+    {
+        backends.remove(language);
+    }
+}
+
 pub fn with_backend<F, R>(file_path: &str, project_root: &str, f: F) -> Result<R, String>
 where
     F: FnOnce(&mut dyn LspBackend, &str) -> Result<R, String>,
@@ -109,6 +124,9 @@ where
     })?;
 
     let mut backends = BACKENDS.lock().map_err(|e| e.to_string())?;
+
+    // Drop a cached entry whose IDE went away / restarted before reusing it.
+    evict_if_stale(&mut backends, language, project_root);
 
     if !backends.contains_key(language) {
         let backend = select_backend(language, project_root)?;
@@ -169,5 +187,57 @@ mod tests {
         // select_backend would deterministically fall through to Backing A.
         let pf = port_discovery::read_port_file("/nonexistent/leanctx/proj/xyz");
         assert!(pf.is_none(), "unexpected port file for nonexistent root");
+    }
+
+    struct StaleStub(bool);
+    impl LspBackend for StaleStub {
+        fn open_file(&mut self, _u: &Uri, _l: &str, _t: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn references(
+            &mut self,
+            _u: &Uri,
+            _p: lsp_types::Position,
+            _s: &str,
+        ) -> Result<Vec<lsp_types::Location>, String> {
+            Ok(vec![])
+        }
+        fn definition(
+            &mut self,
+            _u: &Uri,
+            _p: lsp_types::Position,
+        ) -> Result<lsp_types::GotoDefinitionResponse, String> {
+            Ok(lsp_types::GotoDefinitionResponse::Array(vec![]))
+        }
+        fn implementations(
+            &mut self,
+            _u: &Uri,
+            _p: lsp_types::Position,
+            _s: &str,
+        ) -> Result<Vec<lsp_types::Location>, String> {
+            Ok(vec![])
+        }
+        fn rename(
+            &mut self,
+            _u: &Uri,
+            _p: lsp_types::Position,
+            _n: &str,
+        ) -> Result<Option<lsp_types::WorkspaceEdit>, String> {
+            Ok(None)
+        }
+        fn is_stale(&self, _project_root: &str) -> bool {
+            self.0
+        }
+    }
+
+    #[test]
+    fn evict_if_stale_removes_stale_keeps_fresh() {
+        let mut map: HashMap<String, Box<dyn LspBackend>> = HashMap::new();
+        map.insert("stale".to_string(), Box::new(StaleStub(true)));
+        map.insert("fresh".to_string(), Box::new(StaleStub(false)));
+        evict_if_stale(&mut map, "stale", "/any");
+        evict_if_stale(&mut map, "fresh", "/any");
+        assert!(!map.contains_key("stale"), "stale entry must be evicted");
+        assert!(map.contains_key("fresh"), "fresh entry must remain");
     }
 }
