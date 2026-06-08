@@ -30,6 +30,40 @@ data class LocationsResponse(
 data class ErrorBody(val code: String, val message: String)
 data class ErrorResponse(val error: ErrorBody)
 
+/** Request body for /type_hierarchy. direction ∈ {supertypes, subtypes}. */
+data class HierarchyRequest(
+    val path: String,
+    val line: Int,
+    val character: Int,
+    val direction: String = "supertypes",
+    val scope: String = "project",
+)
+
+/** Request body for /symbols_overview (file-level). */
+data class FileRequest(val path: String)
+
+/**
+ * A node in a super/subtype tree. `line` is 1-BASED (matches Rust TypeHierarchyNode.line),
+ * unlike the 0-based PositionDTO used by nav endpoints.
+ */
+data class TypeHierarchyNodeDTO(
+    val name: String,
+    val path: String,
+    val line: Int,
+    val children: List<TypeHierarchyNodeDTO>,
+)
+
+data class TypeHierarchyResponse(val tree: TypeHierarchyNodeDTO, val truncated: Boolean)
+
+/** A single top-level symbol. `line` is 1-BASED (matches Rust SymbolOverviewItem.line). */
+data class SymbolOverviewItemDTO(val name: String, val kind: String, val line: Int)
+
+data class SymbolsOverviewResponse(
+    val symbols: List<SymbolOverviewItemDTO>,
+    val truncated: Boolean,
+    val total: Int,
+)
+
 object JsonCodec {
     private val gson: Gson = GsonBuilder().disableHtmlEscaping().create()
 
@@ -39,6 +73,18 @@ object JsonCodec {
         // gson leaves scope null when the key is absent → apply the default.
         return if (parsed.scope.isNullOrBlank()) parsed.copy(scope = "project") else parsed
     }
+
+    fun parseHierarchyRequest(body: String): HierarchyRequest {
+        val parsed = gson.fromJson(body, HierarchyRequest::class.java)
+            ?: throw IllegalArgumentException("empty request body")
+        val direction = if (parsed.direction.isNullOrBlank()) "supertypes" else parsed.direction
+        val scope = if (parsed.scope.isNullOrBlank()) "project" else parsed.scope
+        return parsed.copy(direction = direction, scope = scope)
+    }
+
+    fun parseFileRequest(body: String): FileRequest =
+        gson.fromJson(body, FileRequest::class.java)
+            ?: throw IllegalArgumentException("empty request body")
 
     fun toJson(value: Any): String = gson.toJson(value)
 

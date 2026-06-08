@@ -35,4 +35,36 @@ class JsonCodecTest {
         assertTrue(json.contains("\"truncated\":false"))
         assertTrue(json.contains("\"total\":1"))
     }
+
+    @Test
+    fun parseHierarchyRequestDefaultsDirectionAndScope() {
+        val req = JsonCodec.parseHierarchyRequest("""{"path":"A.kt","line":0,"character":4}""")
+        assertEquals("A.kt", req.path)
+        assertEquals(0, req.line)
+        assertEquals(4, req.character)
+        assertEquals("supertypes", req.direction)
+        assertEquals("project", req.scope)
+    }
+
+    @Test
+    fun parseHierarchyRequestHonorsExplicitValues() {
+        val req = JsonCodec.parseHierarchyRequest("""{"path":"A.kt","line":1,"character":0,"direction":"subtypes","scope":"all"}""")
+        assertEquals("subtypes", req.direction)
+        assertEquals("all", req.scope)
+    }
+
+    @Test
+    fun parseFileRequest() {
+        val req = JsonCodec.parseFileRequest("""{"path":"A.kt"}""")
+        assertEquals("A.kt", req.path)
+    }
+
+    @Test
+    fun typeHierarchyResponseRoundTrips() {
+        val node = TypeHierarchyNodeDTO("Animal", "A.kt", 1, listOf(TypeHierarchyNodeDTO("Dog", "A.kt", 2, emptyList())))
+        val json = JsonCodec.toJson(TypeHierarchyResponse(node, truncated = false))
+        assertTrue(json.contains("\"tree\""))
+        assertTrue(json.contains("\"children\""))
+        assertTrue(json.contains("Dog"))
+    }
 }
