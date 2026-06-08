@@ -27,9 +27,7 @@ pub fn handle(args: &Value, project_root: &str, abs_path: &str) -> String {
         "rename" => handle_rename(args, abs_path, project_root, &uri, position),
         "references" => handle_references(abs_path, project_root, &uri, position, scope),
         "definition" => handle_definition(abs_path, project_root, &uri, position),
-        "implementations" => {
-            handle_implementations(abs_path, project_root, &uri, position, scope)
-        }
+        "implementations" => handle_implementations(abs_path, project_root, &uri, position, scope),
         "declaration" => handle_declaration(abs_path, project_root, &uri, position),
         "type_hierarchy" => handle_type_hierarchy(args, abs_path, project_root, &uri, position),
         "symbols_overview" => handle_symbols_overview(abs_path, project_root, &uri),
@@ -167,11 +165,7 @@ fn handle_type_hierarchy(
     }
 }
 
-fn handle_symbols_overview(
-    file_path: &str,
-    project_root: &str,
-    uri: &lsp_types::Uri,
-) -> String {
+fn handle_symbols_overview(file_path: &str, project_root: &str, uri: &lsp_types::Uri) -> String {
     let result = crate::lsp::router::with_backend(file_path, project_root, |backend, _| {
         backend.symbols_overview(uri)
     });
@@ -184,7 +178,10 @@ fn handle_symbols_overview(
 fn format_type_hierarchy(root: &TypeHierarchyNode) -> String {
     fn walk(node: &TypeHierarchyNode, depth: usize, out: &mut String) {
         let indent = "  ".repeat(depth);
-        out.push_str(&format!("{indent}{} ({}:{})\n", node.name, node.path, node.line));
+        out.push_str(&format!(
+            "{indent}{} ({}:{})\n",
+            node.name, node.path, node.line
+        ));
         for child in &node.children {
             walk(child, depth + 1, out);
         }
@@ -200,7 +197,10 @@ fn format_symbols_overview(items: &[SymbolOverviewItem]) -> String {
     }
     let mut out = format!("{} symbol(s):\n", items.len());
     for item in items {
-        out.push_str(&format!("  {} {} (line {})\n", item.kind, item.name, item.line));
+        out.push_str(&format!(
+            "  {} {} (line {})\n",
+            item.kind, item.name, item.line
+        ));
     }
     out
 }
@@ -380,39 +380,91 @@ mod tests {
 
     #[test]
     fn type_hierarchy_formats_indented_tree() {
-        use crate::lsp::backend::{HierarchyDirection, LspBackend, SymbolOverviewItem, TypeHierarchyNode};
+        use crate::lsp::backend::{
+            HierarchyDirection, LspBackend, SymbolOverviewItem, TypeHierarchyNode,
+        };
 
         struct HierBackend;
         impl LspBackend for HierBackend {
-            fn open_file(&mut self, _u: &lsp_types::Uri, _l: &str, _t: &str) -> Result<(), String> { Ok(()) }
-            fn references(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position, _s: &str) -> Result<Vec<lsp_types::Location>, String> { Ok(vec![]) }
-            fn definition(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position) -> Result<lsp_types::GotoDefinitionResponse, String> { Ok(lsp_types::GotoDefinitionResponse::Array(vec![])) }
-            fn implementations(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position, _s: &str) -> Result<Vec<lsp_types::Location>, String> { Ok(vec![]) }
-            fn rename(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position, _n: &str) -> Result<Option<lsp_types::WorkspaceEdit>, String> { Ok(None) }
-            fn type_hierarchy(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position, dir: HierarchyDirection) -> Result<TypeHierarchyNode, String> {
+            fn open_file(&mut self, _u: &lsp_types::Uri, _l: &str, _t: &str) -> Result<(), String> {
+                Ok(())
+            }
+            fn references(
+                &mut self,
+                _u: &lsp_types::Uri,
+                _p: lsp_types::Position,
+                _s: &str,
+            ) -> Result<Vec<lsp_types::Location>, String> {
+                Ok(vec![])
+            }
+            fn definition(
+                &mut self,
+                _u: &lsp_types::Uri,
+                _p: lsp_types::Position,
+            ) -> Result<lsp_types::GotoDefinitionResponse, String> {
+                Ok(lsp_types::GotoDefinitionResponse::Array(vec![]))
+            }
+            fn implementations(
+                &mut self,
+                _u: &lsp_types::Uri,
+                _p: lsp_types::Position,
+                _s: &str,
+            ) -> Result<Vec<lsp_types::Location>, String> {
+                Ok(vec![])
+            }
+            fn rename(
+                &mut self,
+                _u: &lsp_types::Uri,
+                _p: lsp_types::Position,
+                _n: &str,
+            ) -> Result<Option<lsp_types::WorkspaceEdit>, String> {
+                Ok(None)
+            }
+            fn type_hierarchy(
+                &mut self,
+                _u: &lsp_types::Uri,
+                _p: lsp_types::Position,
+                dir: HierarchyDirection,
+            ) -> Result<TypeHierarchyNode, String> {
                 assert_eq!(dir, HierarchyDirection::Subtypes);
                 Ok(TypeHierarchyNode {
-                    name: "Animal".into(), path: "A.kt".into(), line: 1,
-                    children: vec![TypeHierarchyNode { name: "Dog".into(), path: "A.kt".into(), line: 2, children: vec![] }],
+                    name: "Animal".into(),
+                    path: "A.kt".into(),
+                    line: 1,
+                    children: vec![TypeHierarchyNode {
+                        name: "Dog".into(),
+                        path: "A.kt".into(),
+                        line: 2,
+                        children: vec![],
+                    }],
                 })
             }
-            fn symbols_overview(&mut self, _u: &lsp_types::Uri) -> Result<Vec<SymbolOverviewItem>, String> {
-                Ok(vec![SymbolOverviewItem { name: "Animal".into(), kind: "interface".into(), line: 1 }])
+            fn symbols_overview(
+                &mut self,
+                _u: &lsp_types::Uri,
+            ) -> Result<Vec<SymbolOverviewItem>, String> {
+                Ok(vec![SymbolOverviewItem {
+                    name: "Animal".into(),
+                    kind: "interface".into(),
+                    line: 1,
+                }])
             }
         }
 
-        let tree = HierBackend.type_hierarchy(
-            &crate::lsp::client::file_path_to_uri("/p/A.kt").unwrap(),
-            lsp_types::Position::new(0, 0),
-            HierarchyDirection::Subtypes,
-        ).unwrap();
+        let tree = HierBackend
+            .type_hierarchy(
+                &crate::lsp::client::file_path_to_uri("/p/A.kt").unwrap(),
+                lsp_types::Position::new(0, 0),
+                HierarchyDirection::Subtypes,
+            )
+            .unwrap();
         let out = super::format_type_hierarchy(&tree);
         assert!(out.contains("Animal (A.kt:1)"), "{out}");
         assert!(out.contains("  Dog (A.kt:2)"), "{out}"); // child indented
 
-        let items = HierBackend.symbols_overview(
-            &crate::lsp::client::file_path_to_uri("/p/A.kt").unwrap(),
-        ).unwrap();
+        let items = HierBackend
+            .symbols_overview(&crate::lsp::client::file_path_to_uri("/p/A.kt").unwrap())
+            .unwrap();
         let out2 = super::format_symbols_overview(&items);
         assert!(out2.contains("interface Animal (line 1)"), "{out2}");
     }
@@ -420,8 +472,17 @@ mod tests {
     #[test]
     fn parse_direction_defaults_to_supertypes() {
         use crate::lsp::backend::HierarchyDirection;
-        assert_eq!(super::parse_direction(&json!({})), HierarchyDirection::Supertypes);
-        assert_eq!(super::parse_direction(&json!({"direction": "subtypes"})), HierarchyDirection::Subtypes);
-        assert_eq!(super::parse_direction(&json!({"direction": "supertypes"})), HierarchyDirection::Supertypes);
+        assert_eq!(
+            super::parse_direction(&json!({})),
+            HierarchyDirection::Supertypes
+        );
+        assert_eq!(
+            super::parse_direction(&json!({"direction": "subtypes"})),
+            HierarchyDirection::Subtypes
+        );
+        assert_eq!(
+            super::parse_direction(&json!({"direction": "supertypes"})),
+            HierarchyDirection::Supertypes
+        );
     }
 }

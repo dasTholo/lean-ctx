@@ -86,8 +86,16 @@ impl JetBrainsHttpBackend {
     fn parse_type_hierarchy(v: &Value) -> TypeHierarchyNode {
         fn node(v: &Value) -> TypeHierarchyNode {
             TypeHierarchyNode {
-                name: v.get("name").and_then(Value::as_str).unwrap_or("?").to_string(),
-                path: v.get("path").and_then(Value::as_str).unwrap_or_default().to_string(),
+                name: v
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("?")
+                    .to_string(),
+                path: v
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
                 line: v.get("line").and_then(Value::as_u64).unwrap_or(0) as u32,
                 children: v
                     .get("children")
@@ -209,7 +217,11 @@ impl LspBackend for JetBrainsHttpBackend {
         });
         let resp = self.post("/type_hierarchy", &body)?;
         if let Some(err) = resp.get("error") {
-            return Err(err.get("code").and_then(Value::as_str).unwrap_or("INTERNAL").to_string());
+            return Err(err
+                .get("code")
+                .and_then(Value::as_str)
+                .unwrap_or("INTERNAL")
+                .to_string());
         }
         Ok(Self::parse_type_hierarchy(&resp))
     }
@@ -218,7 +230,11 @@ impl LspBackend for JetBrainsHttpBackend {
         let body = self.path_body(uri);
         let resp = self.post("/symbols_overview", &body)?;
         if let Some(err) = resp.get("error") {
-            return Err(err.get("code").and_then(Value::as_str).unwrap_or("INTERNAL").to_string());
+            return Err(err
+                .get("code")
+                .and_then(Value::as_str)
+                .unwrap_or("INTERNAL")
+                .to_string());
         }
         Ok(Self::parse_symbols(&resp))
     }
@@ -290,7 +306,14 @@ mod tests {
         let mut backend = JetBrainsHttpBackend::new(port, "tok".to_string(), "/proj".to_string());
         let uri = file_path_to_uri("/proj/A.kt").unwrap();
         let tree = backend
-            .type_hierarchy(&uri, Position { line: 0, character: 0 }, HierarchyDirection::Subtypes)
+            .type_hierarchy(
+                &uri,
+                Position {
+                    line: 0,
+                    character: 0,
+                },
+                HierarchyDirection::Subtypes,
+            )
             .expect("should parse");
         assert_eq!(tree.name, "Animal");
         assert_eq!(tree.line, 1);
