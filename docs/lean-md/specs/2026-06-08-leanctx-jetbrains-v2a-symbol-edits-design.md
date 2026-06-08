@@ -1,14 +1,14 @@
 # Design-Spec: lean-ctx JetBrains v2a — Symbolische Body-Edits (Serena-Ablösung, Edit-Klasse A)
 
-| Feld             | Wert                                                                                      |
-| ---------------- | ----------------------------------------------------------------------------------------- |
-| Status           | Draft (Design genehmigt 2026-06-08)                                                        |
-| Datum            | 2026-06-08                                                                                 |
-| Vorhaben         | Symbol-Body-Edits über das JetBrains-Plugin + lean-ctx (v2 der PSI-Backend-Strategie)      |
-| Scope            | `replace_symbol_body`, `insert_before_symbol`, `insert_after_symbol` + `overview`-Fallback |
+| Feld             | Wert                                                                                         |
+|------------------|----------------------------------------------------------------------------------------------|
+| Status           | Draft (Design genehmigt 2026-06-08)                                                          |
+| Datum            | 2026-06-08                                                                                   |
+| Vorhaben         | Symbol-Body-Edits über das JetBrains-Plugin + lean-ctx (v2 der PSI-Backend-Strategie)        |
+| Scope            | `replace_symbol_body`, `insert_before_symbol`, `insert_after_symbol` + `overview`-Fallback   |
 | Basis-Spec       | `docs/lean-md/specs/2026-06-05-leanctx-jetbrains-psi-backend-design.md` (v1, §9 v2-Ausblick) |
-| Branch           | `feat-jetbrains-plugin` (Fortführung, Muster §12.3 — ein Commit pro Phase)                  |
-| Nächster Schritt | `superpowers:writing-plans` (Implementierungsplan)                                          |
+| Branch           | `feat-jetbrains-plugin` (Fortführung, Muster §12.3 — ein Commit pro Phase)                   |
+| Nächster Schritt | `superpowers:writing-plans` (Implementierungsplan)                                           |
 
 ---
 
@@ -42,14 +42,14 @@ geschlossene IDE) zu editieren, was Serena prinzipiell nicht kann.
 
 ## 2. Getroffene Entscheidungen (User, 2026-06-08)
 
-| # | Frage                  | Entscheidung                                                                                                                                                                  |
-| - | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1 | v2-Zuschnitt           | **v2a (Klasse A) jetzt**; v2b (Refactoring-Engine) folgt als **eigener Spec** nach v2a-Abschluss. Forward-Pointer in §11.                                                     |
-| 2 | Symbol-Adressierung    | **`name_path` primär**, auf der **lean-ctx-Rust-Seite** über den bestehenden Symbol-Index aufgelöst. **Position** `(path, line, character)` als Low-Level-Fallback.          |
-| 3 | Apply-Modell           | **Direkt anwenden + Diff/Delta zurück** (kein Preview/Two-Phase). Optionaler `expected_hash`-Guard → `CONFLICT` statt Blind-Überschreiben.                                   |
+| # | Frage                  | Entscheidung                                                                                                                                                                   |
+|---|------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 1 | v2-Zuschnitt           | **v2a (Klasse A) jetzt**; v2b (Refactoring-Engine) folgt als **eigener Spec** nach v2a-Abschluss. Forward-Pointer in §11.                                                      |
+| 2 | Symbol-Adressierung    | **`name_path` primär**, auf der **lean-ctx-Rust-Seite** über den bestehenden Symbol-Index aufgelöst. **Position** `(path, line, character)` als Low-Level-Fallback.            |
+| 3 | Apply-Modell           | **Direkt anwenden + Diff/Delta zurück** (kein Preview/Two-Phase). Optionaler `expected_hash`-Guard → `CONFLICT` statt Blind-Überschreiben.                                     |
 | 4 | IDE vs. headless       | **IDE-first + Headless-Fallback**, gesteuert über `select_backend`. Kanonische Edit-Grenze = **tree-sitter-Range in beiden Pfaden** → IDE-Pfad ≡ Headless-Pfad byte-identisch. |
-| 5 | Headless-Apply-Schicht | **Default-Impl direkt im `LspBackend`-Trait** (lokaler Range-Write); `JetBrainsHttpBackend` **overridet** mit dem HTTP/PSI-Pfad.                                              |
-| 6 | Read-Fallback          | **Nur `overview`** bekommt einen tree-sitter-Default-Impl (strukturell, verlustfrei, headless). Semantische Reads (refs/def/impl/type_hierarchy) bleiben unangetastet.       |
+| 5 | Headless-Apply-Schicht | **Default-Impl direkt im `LspBackend`-Trait** (lokaler Range-Write); `JetBrainsHttpBackend` **overridet** mit dem HTTP/PSI-Pfad.                                               |
+| 6 | Read-Fallback          | **Nur `overview`** bekommt einen tree-sitter-Default-Impl (strukturell, verlustfrei, headless). Semantische Reads (refs/def/impl/type_hierarchy) bleiben unangetastet.         |
 
 ---
 
@@ -61,8 +61,8 @@ lean-ctx den Symbol-Index bereits besitzt.
 
 - `ctx_symbol action=find name=…` löst **Klassen und Methoden** (auch per Bare-Name) auf
   **exakte Zeilen-Ranges** auf — aus dem tree-sitter-Index (18 Sprachen, ~17.780 Symbole):
-  - `InspectionRunner → (class, L25-89)`
-  - `runOnFile → (method, L33-63)`
+    - `InspectionRunner → (class, L25-89)`
+    - `runOnFile → (method, L33-63)`
 - **Mehrdeutigkeit ist schon abgedeckt:** Bare `runOnFile` liefert mehrere Treffer
   (`InspectionRunner` + `InspectionHandlers`) → ein qualifizierter `name_path`
   (`InspectionRunner/runOnFile`) disambiguiert.
@@ -114,7 +114,7 @@ fn replace_symbol_body(&mut self, edit: RangeEdit) -> Result<EditResult, Backend
     local_range_write(edit)
 }
 fn insert_before_symbol(&mut self, edit: RangeEdit) -> Result<EditResult, BackendError> { … }
-fn insert_after_symbol(&mut self,  edit: RangeEdit) -> Result<EditResult, BackendError> { … }
+fn insert_after_symbol(&mut self, edit: RangeEdit) -> Result<EditResult, BackendError> { … }
 ```
 
 - **`RangeEdit`** (Begleittyp): `{ abs_path, range: TextRange0Based, text, expected_hash: Option<String> }`.
@@ -147,25 +147,25 @@ fn insert_after_symbol(&mut self,  edit: RangeEdit) -> Result<EditResult, Backen
 - **Eingabe-Parameter:** `name_path` (primär) **oder** `path`+`line`+`character` (Fallback);
   `new_body`/`text`; optional `expected_hash`.
 - **Auflösungsschritt (vor dem Backend-Dispatch):**
-  1. `name_path` → Kandidaten über den Symbol-Index (graph_provider, dieselbe Quelle wie
-     `ctx_symbol`). Genau 1 Treffer → `(path, range)`. >1 → `AMBIGUOUS_SYMBOL` mit
-     Kandidatenliste (qualifizierte name_paths). 0 → `NO_SYMBOL`.
-  2. **PathJail:** den aufgelösten Pfad durch `core::path_resolve::resolve_tool_path` →
-     `jail_path` schicken (v1-§4.5-Naht — bei Writes doppelt kritisch). Außerhalb
-     `project_root` → Fehler **vor** jedem Apply.
-  3. **Einrück-/Anker-Berechnung** für `insert_before/after` in Rust (führende Einrückung
-     des Anker-Symbols) → beide Apply-Pfade byte-identisch.
+    1. `name_path` → Kandidaten über den Symbol-Index (graph_provider, dieselbe Quelle wie
+       `ctx_symbol`). Genau 1 Treffer → `(path, range)`. >1 → `AMBIGUOUS_SYMBOL` mit
+       Kandidatenliste (qualifizierte name_paths). 0 → `NO_SYMBOL`.
+    2. **PathJail:** den aufgelösten Pfad durch `core::path_resolve::resolve_tool_path` →
+       `jail_path` schicken (v1-§4.5-Naht — bei Writes doppelt kritisch). Außerhalb
+       `project_root` → Fehler **vor** jedem Apply.
+    3. **Einrück-/Anker-Berechnung** für `insert_before/after` in Rust (führende Einrückung
+       des Anker-Symbols) → beide Apply-Pfade byte-identisch.
 
 ### 5.4 Änderungsstellen (Rust)
 
-| Datei                                       | Änderung                                                              |
-| ------------------------------------------- | -------------------------------------------------------------------- |
+| Datei                                       | Änderung                                                                              |
+|---------------------------------------------|---------------------------------------------------------------------------------------|
 | `rust/src/lsp/backend.rs`                   | +3 Edit-Methoden (Default-Apply) + `RangeEdit`/`EditResult` + `overview`-Default-Impl |
-| `rust/src/lsp/edit_apply.rs`                | NEU: `local_range_write` (gemeinsamer headless-Range-Write)          |
-| `rust/src/lsp/jetbrains_backend.rs`         | Override der 3 Edit-Methoden (HTTP), `overview`-Override bleibt       |
-| `rust/src/lsp/client.rs`                    | erbt Default-Apply (keine Änderung außer ggf. Trait-Re-Export)       |
-| `rust/src/tools/ctx_refactor.rs`            | +3 Actions, name_path-Auflösung, PathJail-Naht, Einrück-Berechnung   |
-| `rust/src/tools/registered/ctx_refactor.rs` | Schema-Erweiterung über `tool_def(...)`                              |
+| `rust/src/lsp/edit_apply.rs`                | NEU: `local_range_write` (gemeinsamer headless-Range-Write)                           |
+| `rust/src/lsp/jetbrains_backend.rs`         | Override der 3 Edit-Methoden (HTTP), `overview`-Override bleibt                       |
+| `rust/src/lsp/client.rs`                    | erbt Default-Apply (keine Änderung außer ggf. Trait-Re-Export)                        |
+| `rust/src/tools/ctx_refactor.rs`            | +3 Actions, name_path-Auflösung, PathJail-Naht, Einrück-Berechnung                    |
+| `rust/src/tools/registered/ctx_refactor.rs` | Schema-Erweiterung über `tool_def(...)`                                               |
 
 ---
 
@@ -174,13 +174,13 @@ fn insert_after_symbol(&mut self,  edit: RangeEdit) -> Result<EditResult, Backen
 Integriert additiv in `com.leanctx.plugin` (koexistiert mit v1, ersetzt nichts).
 
 - **`psi/SymbolEditor.kt`** (neu): kapselt den Write.
-  - `WriteCommandAction.runWriteCommandAction(project) { … }` auf EDT.
-  - `Document.replaceString(startOffset, endOffset, text)` (Offsets aus der Wire-Range via
-    `PsiLocator`/`Document` umgerechnet — dieselbe 0-basiert↔offset-Logik wie v1).
-  - `PsiDocumentManager.getInstance(project).commitDocument(doc)`.
-  - `FileDocumentManager.getInstance().saveDocument(doc)` → **schreibt auf Platte**, damit
-    lean-ctx (liest von Platte) das Ergebnis sieht.
-  - **Kein Auto-Reformat** im Edit (entkoppelt) — siehe §6.1.
+    - `WriteCommandAction.runWriteCommandAction(project) { … }` auf EDT.
+    - `Document.replaceString(startOffset, endOffset, text)` (Offsets aus der Wire-Range via
+      `PsiLocator`/`Document` umgerechnet — dieselbe 0-basiert↔offset-Logik wie v1).
+    - `PsiDocumentManager.getInstance(project).commitDocument(doc)`.
+    - `FileDocumentManager.getInstance().saveDocument(doc)` → **schreibt auf Platte**, damit
+      lean-ctx (liest von Platte) das Ergebnis sieht.
+    - **Kein Auto-Reformat** im Edit (entkoppelt) — siehe §6.1.
 - **`endpoint/EditHandlers.kt`** (neu): `replaceSymbolBody` / `insertBeforeSymbol` /
   `insertAfterSymbol`, registriert im `RequestRouter` (Token-Check wie v1).
 - **Threading:** Reads in v1 laufen off-EDT unter `ReadAction`; Writes brauchen EDT
@@ -205,31 +205,31 @@ Das hält IDE- und Headless-Pfad konsistent (kein Format-Divergenz-Risiko) und v
 - **0-basiert** auf der Wire (Zeile + Spalte), wie v1 (`ctx_refactor` rechnet die
   1-basierte Tool-Eingabe genau einmal um). Pfade relativ zu `project_root`.
 - **Neue Endpoints** (POST, Token-Header `X-LeanCtx-Token` wie v1):
-  - `POST /replaceSymbolBody`
-  - `POST /insertBeforeSymbol`
-  - `POST /insertAfterSymbol`
+    - `POST /replaceSymbolBody`
+    - `POST /insertBeforeSymbol`
+    - `POST /insertAfterSymbol`
 - **Request:** `{ path, range: { start:{line,character}, end:{line,character} }, text, expected_hash? }`
   (name_path erscheint **nicht** auf der Wire — bereits in Rust zu `range` aufgelöst).
 - **Response:** `{ applied: true, new_range: {start,end}, edited_text }` → Rust baut den Diff
   und wärmt den Cache aus `edited_text`.
 - **Fehler** (additiv zum v1-Code-Set `{UNSUPPORTED_LANGUAGE, INDEXING, FILE_NOT_FOUND,
   POSITION_OUT_OF_RANGE, NO_SYMBOL_AT_POSITION, UNAUTHORIZED, INTERNAL}`):
-  - `+CONFLICT` (expected_hash ≠ aktueller Range-Inhalt)
-  - `+AMBIGUOUS_SYMBOL` (Rust-seitig vor dem HTTP-Call; trägt Kandidatenliste)
-  - `+NO_SYMBOL` (Rust-seitig: name_path löst auf 0 Treffer auf — distinkt vom
-    positions-basierten v1-`NO_SYMBOL_AT_POSITION`)
-  - HTTP 200 für fachliche Negativfälle, 401 nur Token, 500 nur echte Exceptions. Rust mappt
-    `code` → `ERROR: …`-String.
+    - `+CONFLICT` (expected_hash ≠ aktueller Range-Inhalt)
+    - `+AMBIGUOUS_SYMBOL` (Rust-seitig vor dem HTTP-Call; trägt Kandidatenliste)
+    - `+NO_SYMBOL` (Rust-seitig: name_path löst auf 0 Treffer auf — distinkt vom
+      positions-basierten v1-`NO_SYMBOL_AT_POSITION`)
+    - HTTP 200 für fachliche Negativfälle, 401 nur Token, 500 nur echte Exceptions. Rust mappt
+      `code` → `ERROR: …`-String.
 
 ---
 
 ## 8. Body-Semantik (Serena-Parität)
 
-| Action                 | Range / Insert-Punkt                                  | `text`-Semantik                                |
-| ---------------------- | ----------------------------------------------------- | ---------------------------------------------- |
-| `replace_symbol_body`  | **volle Declaration-Range** L_start–L_end (inkl. Signaturzeile) | kompletter Ersatztext der Declaration |
-| `insert_before_symbol` | Insert-Punkt = Zeilenanfang L_start                   | neuer Sibling, Einrückung = Anker-Einrückung   |
-| `insert_after_symbol`  | Insert-Punkt = Zeilenende L_end (Folgezeile)          | neuer Sibling, Einrückung = Anker-Einrückung   |
+| Action                 | Range / Insert-Punkt                                            | `text`-Semantik                              |
+|------------------------|-----------------------------------------------------------------|----------------------------------------------|
+| `replace_symbol_body`  | **volle Declaration-Range** L_start–L_end (inkl. Signaturzeile) | kompletter Ersatztext der Declaration        |
+| `insert_before_symbol` | Insert-Punkt = Zeilenanfang L_start                             | neuer Sibling, Einrückung = Anker-Einrückung |
+| `insert_after_symbol`  | Insert-Punkt = Zeilenende L_end (Folgezeile)                    | neuer Sibling, Einrückung = Anker-Einrückung |
 
 - Die Declaration-Range stammt aus `ctx_symbol` (tree-sitter). Einrückung wird in Rust aus
   der führenden Whitespace-Sequenz der Anker-Start-Zeile abgeleitet (§5.3 Schritt 3).
@@ -256,17 +256,17 @@ Das hält IDE- und Headless-Pfad konsistent (kein Format-Divergenz-Risiko) und v
 ## 10. Verifikation (End-to-End)
 
 - **Rust-Einheit (`cargo nextest run`, nie `cargo test`):**
-  - name_path-Auflösung: eindeutig → `(path,range)`; mehrdeutig → `AMBIGUOUS_SYMBOL`+Kandidaten; 0 → `NO_SYMBOL`.
-  - Range-/Einrück-Berechnung für insert_before/after.
-  - `local_range_write`: replace + insert, `expected_hash`-Match/Mismatch (`CONFLICT`).
-  - `overview`-Default-Impl liefert ohne IDE Struktur.
-  - 0/1-Basierungs-Naht (Tool-Eingabe 1-basiert ↔ Wire 0-basiert ↔ Offset).
-  - PathJail: name_path/Position außerhalb `project_root` → Fehler **vor** Apply.
+    - name_path-Auflösung: eindeutig → `(path,range)`; mehrdeutig → `AMBIGUOUS_SYMBOL`+Kandidaten; 0 → `NO_SYMBOL`.
+    - Range-/Einrück-Berechnung für insert_before/after.
+    - `local_range_write`: replace + insert, `expected_hash`-Match/Mismatch (`CONFLICT`).
+    - `overview`-Default-Impl liefert ohne IDE Struktur.
+    - 0/1-Basierungs-Naht (Tool-Eingabe 1-basiert ↔ Wire 0-basiert ↔ Offset).
+    - PathJail: name_path/Position außerhalb `project_root` → Fehler **vor** Apply.
 - **Plugin (Kotlin-Unit + manuelles `runIde`-Gate, wie v1):**
-  - Edit gegen Java/Kotlin-Testprojekt; Ergebnisdatei prüfen.
-  - **IDE-Pfad ≡ Headless-Pfad byte-identisch** für dieselbe Eingabe (Kern-Gate der
-    Konsistenz-Garantie aus §2-Entscheidung 4).
-  - WriteCommandAction erzeugt **einen** Undo-Eintrag; `saveDocument` persistiert.
+    - Edit gegen Java/Kotlin-Testprojekt; Ergebnisdatei prüfen.
+    - **IDE-Pfad ≡ Headless-Pfad byte-identisch** für dieselbe Eingabe (Kern-Gate der
+      Konsistenz-Garantie aus §2-Entscheidung 4).
+    - WriteCommandAction erzeugt **einen** Undo-Eintrag; `saveDocument` persistiert.
 - **Fallback:** ohne laufende IDE → Edits über Default-Impl, kein Hänger, kein Backend-Call.
 
 ---

@@ -1,15 +1,15 @@
 # Design-Spec: JetBrains-Plugin Phase 5b — `inspections` (run + list) + CI-Härtung
 
-| Feld             | Wert                                                                                               |
-| ---------------- | -------------------------------------------------------------------------------------------------- |
-| Status           | Genehmigt (Design), bereit für `writing-plans`                                                      |
-| Datum            | 2026-06-08                                                                                          |
-| Branch           | `feat-jetbrains-plugin`                                                                             |
-| Vorgänger        | Phase 5a (Commits `4b60d3fa`→`ddd51dcb`) — Härtung H1–H5a, abgeschlossen                            |
-| Eltern-Spec      | `docs/lean-md/specs/2026-06-05-leanctx-jetbrains-psi-backend-design.md` (§9 Phase 5, §13.3)         |
-| Schwester-Spec   | Phase 5a — `docs/lean-md/specs/2026-06-08-jetbrains-phase5a-hardening-design.md`                    |
-| Nächster Schritt | `superpowers:writing-plans` (Implementierungsplan)                                                  |
-| Sprache          | Code/Kommentare Englisch; Spec Deutsch                                                              |
+| Feld             | Wert                                                                                        |
+|------------------|---------------------------------------------------------------------------------------------|
+| Status           | Genehmigt (Design), bereit für `writing-plans`                                              |
+| Datum            | 2026-06-08                                                                                  |
+| Branch           | `feat-jetbrains-plugin`                                                                     |
+| Vorgänger        | Phase 5a (Commits `4b60d3fa`→`ddd51dcb`) — Härtung H1–H5a, abgeschlossen                    |
+| Eltern-Spec      | `docs/lean-md/specs/2026-06-05-leanctx-jetbrains-psi-backend-design.md` (§9 Phase 5, §13.3) |
+| Schwester-Spec   | Phase 5a — `docs/lean-md/specs/2026-06-08-jetbrains-phase5a-hardening-design.md`            |
+| Nächster Schritt | `superpowers:writing-plans` (Implementierungsplan)                                          |
+| Sprache          | Code/Kommentare Englisch; Spec Deutsch                                                      |
 
 ---
 
@@ -32,25 +32,25 @@ Härtung ist als **Phase 5a** gelandet (H1–H5a, automatisierte Gates grün). �
 
 ### Offener Rest (Feature)
 
-| #  | Item                                                              | Quelle                          |
-| -- | ---------------------------------------------------------------- | ------------------------------- |
-| F1 | `ctx_refactor action=inspections mode=run`  (run-on-file)        | §9 Phase 5 / §13.3 / Serena-Ref |
-| F2 | `ctx_refactor action=inspections mode=list` (verfügbare)         | §9 Phase 5 / §13.3 / Serena-Ref |
-| F3 | CI-Härtung: `concurrency` + `timeout-minutes` + Action-SHA-Pin   | Phase-5a §9.5 (out-of-scope)    |
-| F4 | `actionlint`-Gate (leichter YAML-Lint)                           | User-Vorschlag 2026-06-08       |
+| #  | Item                                                           | Quelle                          |
+|----|----------------------------------------------------------------|---------------------------------|
+| F1 | `ctx_refactor action=inspections mode=run`  (run-on-file)      | §9 Phase 5 / §13.3 / Serena-Ref |
+| F2 | `ctx_refactor action=inspections mode=list` (verfügbare)       | §9 Phase 5 / §13.3 / Serena-Ref |
+| F3 | CI-Härtung: `concurrency` + `timeout-minutes` + Action-SHA-Pin | Phase-5a §9.5 (out-of-scope)    |
+| F4 | `actionlint`-Gate (leichter YAML-Lint)                         | User-Vorschlag 2026-06-08       |
 
 ---
 
 ## 2. Fixierte Entscheidungen (User, 2026-06-08)
 
-| # | Entscheidung                                                                                       | Begründung                                                                                                                                                                                                                          |
-| - | ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1 | **`format` → v2-Edit-Spec, nicht 5b.**                                                             | Inhärente Edit-Op (EDT/`WriteCommandAction`/Undo). Eltern-Spec §3 verortet Edits in v2. „Liefern-nicht-anwenden" wäre halbgar. Der bestehende `format`-Trait-Stub (`backend.rs:103`, default-`Err`) **bleibt** für v2 liegen.        |
-| 2 | **`inspections` deckt `run` + `list` ab, Dispatch über `mode`-Param (Variante A).**               | Konsistent mit dem Phase-4-`type_hierarchy`-`direction`-Param-Idiom. Kompakte Action-Oberfläche (ein Action-Eintrag, ein Hilfetext). Rust dispatcht intern auf zwei Trait-Methoden + zwei Wire-Endpoints.                            |
-| 3 | **Test-Sprachabdeckung: Kotlin-only.**                                                             | Bleibt beim Phase-3/4-Muster. Java-Fixture (Eltern-Spec §17.6 #3 / 5a-Follow-up #4) wird **eigener** Follow-up — bläht 5b nicht auf.                                                                                                 |
-| 4 | **CI-Härtung (5a §9.5) in 5b mitnehmen.**                                                          | 5b fasst den Plugin-CI-Test-Job ohnehin an (neuer `inspections`-Test). `concurrency` + `timeout-minutes` + SHA-Pinning als kleiner Block schließt den bewusst ausgelagerten 5a-Rest sauber ab.                                       |
-| 5 | **`actionlint` als Gate, `act` nur dokumentiert.**                                                 | `github/local-action` passt nicht (wir haben keine Custom-JS-Action). `actionlint` ist leichtgewichtig (kein Docker), validiert YAML/Expressions/SHA-Pins. `nektos/act` (voller Workflow lokal, ~1 GB IC-Image) bleibt manuell.      |
-| 6 | **`list_inspections` listet nur das *enabled* Projekt-Profil, nicht alle registrierten Tools.**   | Alle registrierten IntelliJ-Inspektionen sind Hunderte → Token-Explosion. Das aktuelle `InspectionProfile` des Projekts ist der relevante, gebundene Use-Case. Zusätzlich Cap + `truncated`/`total`.                                 |
+| # | Entscheidung                                                                                    | Begründung                                                                                                                                                                                                                      |
+|---|-------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 1 | **`format` → v2-Edit-Spec, nicht 5b.**                                                          | Inhärente Edit-Op (EDT/`WriteCommandAction`/Undo). Eltern-Spec §3 verortet Edits in v2. „Liefern-nicht-anwenden" wäre halbgar. Der bestehende `format`-Trait-Stub (`backend.rs:103`, default-`Err`) **bleibt** für v2 liegen.   |
+| 2 | **`inspections` deckt `run` + `list` ab, Dispatch über `mode`-Param (Variante A).**             | Konsistent mit dem Phase-4-`type_hierarchy`-`direction`-Param-Idiom. Kompakte Action-Oberfläche (ein Action-Eintrag, ein Hilfetext). Rust dispatcht intern auf zwei Trait-Methoden + zwei Wire-Endpoints.                       |
+| 3 | **Test-Sprachabdeckung: Kotlin-only.**                                                          | Bleibt beim Phase-3/4-Muster. Java-Fixture (Eltern-Spec §17.6 #3 / 5a-Follow-up #4) wird **eigener** Follow-up — bläht 5b nicht auf.                                                                                            |
+| 4 | **CI-Härtung (5a §9.5) in 5b mitnehmen.**                                                       | 5b fasst den Plugin-CI-Test-Job ohnehin an (neuer `inspections`-Test). `concurrency` + `timeout-minutes` + SHA-Pinning als kleiner Block schließt den bewusst ausgelagerten 5a-Rest sauber ab.                                  |
+| 5 | **`actionlint` als Gate, `act` nur dokumentiert.**                                              | `github/local-action` passt nicht (wir haben keine Custom-JS-Action). `actionlint` ist leichtgewichtig (kein Docker), validiert YAML/Expressions/SHA-Pins. `nektos/act` (voller Workflow lokal, ~1 GB IC-Image) bleibt manuell. |
+| 6 | **`list_inspections` listet nur das *enabled* Projekt-Profil, nicht alle registrierten Tools.** | Alle registrierten IntelliJ-Inspektionen sind Hunderte → Token-Explosion. Das aktuelle `InspectionProfile` des Projekts ist der relevante, gebundene Use-Case. Zusätzlich Cap + `truncated`/`total`.                            |
 
 ---
 
@@ -62,11 +62,11 @@ Rust-PathJail (`jail_path`) bleibt der **alleinige** Validierungspunkt, läuft V
 
 ### 3.1 Rust-Seite
 
-| Datei (~erweitert)                      | Aufgabe                                                                                                                                                                                                                                                                                  |
-| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `rust/src/lsp/backend.rs` (~)           | Neuer Typ `InspectionInfo { id: String, name: String, severity: String }`. Neue **Default-degrading** Trait-Methode `fn list_inspections(&mut self) -> Result<Vec<InspectionInfo>, String>` (default-`Err`, im Default-degrading-Block). `inspections(uri) -> Vec<InspectionDiag>` existiert bereits (`backend.rs:106`), `InspectionDiag` bereits definiert (`backend.rs:42`). |
-| `rust/src/lsp/jetbrains_backend.rs` (~) | Beide Methoden implementieren: `inspections` → `path_body(uri)` → `post("/inspections")` → neuer Parser `parse_inspections` (Muster `parse_symbols` `:149`) + `self.last_meta = Self::parse_truncation(...)`. `list_inspections` → `path_body`-artiger `{path}`-Body → `post("/list_inspections")` → neuer Parser `parse_inspection_list` + `last_meta`. Error-Envelope-Mapping wie `:263-269`. |
-| `rust/src/tools/ctx_refactor.rs` (~)    | Action `"inspections"` in den Match-Block (`:26-38`) + Hilfetext (`:35-36`). Neuer `handle_inspections`: `mode = args.mode` (default `run`); `run` → `with_backend(file, root, |b,_| b.inspections(uri))`; `list` → `with_backend(file, root, |b,_| b.list_inspections())`. Output kompakte Zeilenliste; `truncated`-Suffix via bestehendem H3-Pfad (`backend.last_truncation()`). |
+| Datei (~erweitert)                      | Aufgabe                                                                                                                                                                                                                                                                                                                                                                                        |
+|-----------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `rust/src/lsp/backend.rs` (~)           | Neuer Typ `InspectionInfo { id: String, name: String, severity: String }`. Neue **Default-degrading** Trait-Methode `fn list_inspections(&mut self) -> Result<Vec<InspectionInfo>, String>` (default-`Err`, im Default-degrading-Block). `inspections(uri) -> Vec<InspectionDiag>` existiert bereits (`backend.rs:106`), `InspectionDiag` bereits definiert (`backend.rs:42`).                 |
+| `rust/src/lsp/jetbrains_backend.rs` (~) | Beide Methoden implementieren: `inspections` → `path_body(uri)` → `post("/inspections")` → neuer Parser `parse_inspections` (Muster `parse_symbols` `:149`) + `self.last_meta = Self::parse_truncation(...)`. `list_inspections` → `path_body`-artiger `{path}`-Body → `post("/list_inspections")` → neuer Parser `parse_inspection_list` + `last_meta`. Error-Envelope-Mapping wie `:263-269`.|
+| `rust/src/tools/ctx_refactor.rs` (~)    | Action `"inspections"` in den Match-Block (`:26-38`) + Hilfetext (`:35-36`). Neuer `handle_inspections`: `mode = args.mode` (default `run`); `run` → `with_backend(file, root,|b,_| b.inspections(uri))`; `list` → `with_backend(file, root, |b,_| b.list_inspections())`. Output kompakte Zeilenliste; `truncated`-Suffix via bestehendem H3-Pfad (`backend.last_truncation()`).              |
 
 **`mode`-Dispatch (Variante A):** `run` (default) braucht eine Datei (Position irrelevant —
 file-level); `list` braucht den `path` nur zur **Backend-/Projekt-Wahl** (`with_backend` selektiert
@@ -76,16 +76,17 @@ der Plan; minimal-invasiv ist die Wiederverwendung des bestehenden Pfads, da der
 realen Projekt-Pfad übergibt).
 
 **Output-Format (Vorschlag, Detail im Plan):**
+
 - `run`: je Zeile `path:line  SEVERITY  message`; bei Cap Suffix `… (truncated — N von M)`.
 - `list`: je Zeile `id  name  severity`; bei Cap analoges Suffix.
 
 ### 3.2 Kotlin-Seite
 
-| Datei (neu/~)                                                  | Aufgabe                                                                                                                                                                                                                                                              |
-| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `dto/Wire.kt` (~)                                             | Neue DTOs: `InspectionDiagDTO { path, line, severity, message }`, `InspectionsResponse { diagnostics, truncated, total }`, `InspectionInfoDTO { id, name, severity }`, `ListInspectionsResponse { inspections, truncated, total }`. `line` **1-basiert** (wie `SymbolOverviewItemDTO`). `JsonCodec.parseFileRequest` wird für beide Endpoints wiederverwendet (Body = `{path}`). |
-| `endpoint/InspectionHandlers.kt` (neu)                        | `class InspectionHandlers(project)` analog `StructureHandlers`. `runOnFile(req: FileRequest): InspectionsResponse` — `inSmartReadAction`; `InspectionManager` + enabled Tools des Projekt-`InspectionProfile` auf das `PsiFile`; `ProblemDescriptor` → DTO (`Document` für 1-basierte Zeile; `HighlightSeverity` → String). `listAvailable(req: FileRequest): ListInspectionsResponse` — enabled Tools des Projekt-Profils → `{ id = shortName, name = displayName, severity }`. Beide mit Cap + `truncated`/`total`. |
-| `server/RequestRouter.kt` (~)                                 | Zwei POST-Routen (`:39-41`-Muster): `/inspections` → `dispatchInspections`, `/list_inspections` → `dispatchListInspections`. Je ein `try/catch`-Dispatcher wie `dispatchOverview` (`:79`): `BackendException` → 200 mit Error-Envelope, `IllegalArgumentException` → 200 `INTERNAL`, `Exception` → 500. `InspectionHandlers` als Feld instanziieren. |
+| Datei (neu/~)                          | Aufgabe                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+|----------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `dto/Wire.kt` (~)                      | Neue DTOs: `InspectionDiagDTO { path, line, severity, message }`, `InspectionsResponse { diagnostics, truncated, total }`, `InspectionInfoDTO { id, name, severity }`, `ListInspectionsResponse { inspections, truncated, total }`. `line` **1-basiert** (wie `SymbolOverviewItemDTO`). `JsonCodec.parseFileRequest` wird für beide Endpoints wiederverwendet (Body = `{path}`).                                                                                                                                      |
+| `endpoint/InspectionHandlers.kt` (neu) | `class InspectionHandlers(project)` analog `StructureHandlers`. `runOnFile(req: FileRequest): InspectionsResponse` — `inSmartReadAction`; `InspectionManager` + enabled Tools des Projekt-`InspectionProfile` auf das `PsiFile`; `ProblemDescriptor` → DTO (`Document` für 1-basierte Zeile; `HighlightSeverity` → String). `listAvailable(req: FileRequest): ListInspectionsResponse` — enabled Tools des Projekt-Profils → `{ id = shortName, name = displayName, severity }`. Beide mit Cap + `truncated`/`total`. |
+| `server/RequestRouter.kt` (~)          | Zwei POST-Routen (`:39-41`-Muster): `/inspections` → `dispatchInspections`, `/list_inspections` → `dispatchListInspections`. Je ein `try/catch`-Dispatcher wie `dispatchOverview` (`:79`): `BackendException` → 200 mit Error-Envelope, `IllegalArgumentException` → 200 `INTERNAL`, `Exception` → 500. `InspectionHandlers` als Feld instanziieren.                                                                                                                                                                  |
 
 ### 3.3 CI-Härtung (`.github/workflows/jetbrains-plugin.yml`)
 
@@ -93,12 +94,12 @@ Stand vor 5b (geprüft 2026-06-08): bereits gehärtet (5a) — `persist-credenti
 `permissions: contents: read` (Release-Job eskaliert gezielt auf `contents: write`),
 `gradle/actions/wrapper-validation`. **Offen (5a §9.5):**
 
-| Item                  | Aufgabe                                                                                                                                                              |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `concurrency`-Group   | Workflow-Ebene: `group: ${{ github.workflow }}-${{ github.ref }}`, `cancel-in-progress: true` (parallele Läufe pro Ref canceln).                                    |
-| `timeout-minutes`     | An allen 3 Jobs (build/test/release). Richtwert: build/release 20, test 30 (IC-Download ~1 GB).                                                                     |
-| Action-SHA-Pinning    | Alle `uses:` auf Commit-SHA + `# vX.Y.Z`-Kommentar pinnen (checkout, setup-java, gradle/actions/setup-gradle, gradle/actions/wrapper-validation, upload-artifact). |
-| `actionlint`-Gate     | Leichter Lint-Step (kein Docker) validiert YAML/Expressions/SHA-Pins. Als eigener kurzer Job oder lokaler Pre-Commit-Lauf (Detail im Plan).                          |
+| Item                | Aufgabe                                                                                                                                                            |
+|---------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `concurrency`-Group | Workflow-Ebene: `group: ${{ github.workflow }}-${{ github.ref }}`, `cancel-in-progress: true` (parallele Läufe pro Ref canceln).                                   |
+| `timeout-minutes`   | An allen 3 Jobs (build/test/release). Richtwert: build/release 20, test 30 (IC-Download ~1 GB).                                                                    |
+| Action-SHA-Pinning  | Alle `uses:` auf Commit-SHA + `# vX.Y.Z`-Kommentar pinnen (checkout, setup-java, gradle/actions/setup-gradle, gradle/actions/wrapper-validation, upload-artifact). |
+| `actionlint`-Gate   | Leichter Lint-Step (kein Docker) validiert YAML/Expressions/SHA-Pins. Als eigener kurzer Job oder lokaler Pre-Commit-Lauf (Detail im Plan).                        |
 
 ---
 
@@ -109,6 +110,7 @@ mit `{error:{code,message}}`, 401 nur Token, 500 nur echte Exception. Pfade **sn
 camelCase aus Eltern-Spec §6 — der reale Router nutzt snake_case).
 
 **`POST /inspections`** (run-on-file)
+
 - Req: `{ path }` (projekt-relativ, wie `/symbols_overview`).
 - Resp: `{ diagnostics: [{ path, line, severity, message }], truncated, total }`.
   `line` 1-basiert; `severity ∈ {ERROR, WARNING, WEAK_WARNING, INFO}` (IntelliJ-`HighlightSeverity`
@@ -116,6 +118,7 @@ camelCase aus Eltern-Spec §6 — der reale Router nutzt snake_case).
 - Cap analog Phase 3/4 (z. B. 500 Diagnostics) → `truncated`/`total`.
 
 **`POST /list_inspections`** (verfügbare Inspektionen)
+
 - Req: `{ path }` (nur Backend-/Projekt-Wahl; Liste ist projektweit).
 - Resp: `{ inspections: [{ id, name, severity }], truncated, total }`.
   **enabled** Tools des aktuellen Projekt-`InspectionProfile` (nicht alle registrierten), gecappt.
@@ -161,11 +164,11 @@ Bestehendes Muster: Handler werden **router-getrieben** getestet (`RequestRouter
 `RequestRouterStructureTest` = BasePlatformTestCase mit echtem PSI), **nicht** über dedizierte
 `*HandlersTest`. DTOs separat via `JsonCodecTest`. Generisches Auth/404 in `RequestRouterTest`.
 
-| Datei (neu/~)                                            | Abdeckung                                                                                                                                                                                                                |
-| -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `server/RequestRouterInspectionTest.kt` (neu)           | Spiegelt `RequestRouterStructureTest`. Treibt den Router mit Kotlin-Fixture über `POST /inspections` (run → erwartete Diagnostics auf Datei mit bekanntem Problem) + `POST /list_inspections` (Liste nicht-leer, enthält erwartete Inspektion). Deckt **`InspectionHandlers` + Router-Routing** zusammen ab. |
-| `dto/JsonCodecTest.kt` (~)                               | Round-Trip-Fälle für `InspectionsResponse`, `ListInspectionsResponse`, `InspectionInfoDTO`/`InspectionDiagDTO`; `parseFileRequest`-Wiederverwendung bestätigt.                                                            |
-| `server/RequestRouterTest.kt` (~, optional)             | 401/404 ist generisch bereits abgedeckt; ein 404-Negativfall für einen unbekannten Inspektions-Pfad nur falls sinnvoll.                                                                                                  |
+| Datei (neu/~)                                 | Abdeckung                                                                                                                                                                                                                                                                                                    |
+|-----------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `server/RequestRouterInspectionTest.kt` (neu) | Spiegelt `RequestRouterStructureTest`. Treibt den Router mit Kotlin-Fixture über `POST /inspections` (run → erwartete Diagnostics auf Datei mit bekanntem Problem) + `POST /list_inspections` (Liste nicht-leer, enthält erwartete Inspektion). Deckt **`InspectionHandlers` + Router-Routing** zusammen ab. |
+| `dto/JsonCodecTest.kt` (~)                    | Round-Trip-Fälle für `InspectionsResponse`, `ListInspectionsResponse`, `InspectionInfoDTO`/`InspectionDiagDTO`; `parseFileRequest`-Wiederverwendung bestätigt.                                                                                                                                               |
+| `server/RequestRouterTest.kt` (~, optional)   | 401/404 ist generisch bereits abgedeckt; ein 404-Negativfall für einen unbekannten Inspektions-Pfad nur falls sinnvoll.                                                                                                                                                                                      |
 
 **Coverage-Matrix:** `InspectionHandlers.kt` → `RequestRouterInspectionTest`; `Wire.kt`-DTOs →
 `JsonCodecTest`; `RequestRouter.kt`-Routen → `RequestRouterInspectionTest`. Rust-Seite über

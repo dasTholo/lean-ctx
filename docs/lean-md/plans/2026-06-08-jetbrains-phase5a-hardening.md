@@ -1,22 +1,29 @@
 # JetBrains Phase 5a — Härtung Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:
+> executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 >
 > **lean-ctx project rules (MANDATORY):**
 > - **Rust (`*.rs`) edits → Serena symbolic tools only** (`mcp__serena__jet_brains_find_symbol`,
->   `replace_symbol_body`, `insert_after_symbol`/`insert_before_symbol`, `replace_content`) —
->   **never** native `Edit`/`ctx_edit` on Rust files.
+    > `replace_symbol_body`, `insert_after_symbol`/`insert_before_symbol`, `replace_content`) —
+    > **never** native `Edit`/`ctx_edit` on Rust files.
 > - **Tests: `cargo nextest run`** (never `cargo test`); Kotlin: `./gradlew test`.
 > - **`ctx_shell`: bare command + `cwd=`** — never `cd <path> &&`; no `2>&1`; no `| tail`/`| grep` on test runners.
 > - **Before `git add`:** `mcp__jetbrains__reformat_file` on every changed file.
 > - **Deferred tool?** `ToolSearch(query="select:<tool>")` FIRST, never a Bash workaround.
-> - One commit per task here; final squash to a single phase-commit is **optional** (§12.3 Eltern-Spec — Phase 4 kept per-task commits).
+> - One commit per task here; final squash to a single phase-commit is **optional** (§12.3 Eltern-Spec — Phase 4 kept
+    per-task commits).
 
-**Goal:** Härte die JetBrains-Backend-Integration Rust-seitig (Stale-Cache-Eviction, `project_root`-Kanonisierung, `truncated`/`total`-Surfacing) und füge einen Plugin-CI-Job + Test-Hygiene hinzu — **keine** neuen Wire-Endpoints.
+**Goal:** Härte die JetBrains-Backend-Integration Rust-seitig (Stale-Cache-Eviction, `project_root`-Kanonisierung,
+`truncated`/`total`-Surfacing) und füge einen Plugin-CI-Job + Test-Hygiene hinzu — **keine** neuen Wire-Endpoints.
 
-**Architecture:** Rein additive Härtung auf der bestehenden `LspBackend`-Trait-Architektur. Zwei neue Default-Trait-Methoden (`is_stale`, `last_truncation`) lassen Backing A (`LspClient`) unberührt (Defaults), nur `JetBrainsHttpBackend` überschreibt sie. Der Router evictet stale Cache-Einträge vor Nutzung; `ctx_refactor` hängt einen Truncation-Hinweis an. CI läuft den bestehenden Gradle-Test-Stack headless.
+**Architecture:** Rein additive Härtung auf der bestehenden `LspBackend`-Trait-Architektur. Zwei neue
+Default-Trait-Methoden (`is_stale`, `last_truncation`) lassen Backing A (`LspClient`) unberührt (Defaults), nur
+`JetBrainsHttpBackend` überschreibt sie. Der Router evictet stale Cache-Einträge vor Nutzung; `ctx_refactor` hängt einen
+Truncation-Hinweis an. CI läuft den bestehenden Gradle-Test-Stack headless.
 
-**Tech Stack:** Rust (`lsp_types`, `ureq` 3.x, `serde_json`, `sha2`), Kotlin/IntelliJ-Platform-Plugin (IC 2026.1.3, Gradle, JVM 21, `BasePlatformTestCase`), GitHub Actions.
+**Tech Stack:** Rust (`lsp_types`, `ureq` 3.x, `serde_json`, `sha2`), Kotlin/IntelliJ-Platform-Plugin (IC 2026.1.3,
+Gradle, JVM 21, `BasePlatformTestCase`), GitHub Actions.
 
 **Spec:** `docs/lean-md/specs/2026-06-08-jetbrains-phase5a-hardening-design.md` (H1–H5).
 
@@ -24,24 +31,27 @@
 
 ## File Structure
 
-| Datei | Verantwortung | Tasks |
-| ----- | ------------- | ----- |
-| `rust/src/lsp/backend.rs` | `LspBackend`-Trait: +`is_stale` (H1) +`Truncation`/`last_truncation` (H3) | 1, 4 |
-| `rust/src/lsp/jetbrains_backend.rs` | B-Backend: pid/port-Felder + `is_stale`-Impl (H1), `project_root`-Kanonisierung (H2), `last_meta` + Truncation-Parsing (H3) | 1, 3, 4 |
-| `rust/src/lsp/router.rs` | `with_backend`: Stale-Eviction vor Cache-Nutzung (H1) + `select_backend`-Call-Site (pid) | 2 |
-| `rust/src/tools/ctx_refactor.rs` | Handler hängen Truncation-Hinweis an Output (H3) | 4 |
-| `.github/workflows/jetbrains-plugin.yml` | Plugin-CI: build + test headless (H4) | 5 |
-| `packages/jetbrains-lean-ctx/src/test/kotlin/.../PortFileTestEnv.kt` (o. ä.) | Test-Hygiene: `LEAN_CTX_DATA_DIR`→Temp + Cleanup-Assert (H5a) | 6 |
+| Datei                                                                        | Verantwortung                                                                                                               | Tasks   |
+|------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------|---------|
+| `rust/src/lsp/backend.rs`                                                    | `LspBackend`-Trait: +`is_stale` (H1) +`Truncation`/`last_truncation` (H3)                                                   | 1, 4    |
+| `rust/src/lsp/jetbrains_backend.rs`                                          | B-Backend: pid/port-Felder + `is_stale`-Impl (H1), `project_root`-Kanonisierung (H2), `last_meta` + Truncation-Parsing (H3) | 1, 3, 4 |
+| `rust/src/lsp/router.rs`                                                     | `with_backend`: Stale-Eviction vor Cache-Nutzung (H1) + `select_backend`-Call-Site (pid)                                    | 2       |
+| `rust/src/tools/ctx_refactor.rs`                                             | Handler hängen Truncation-Hinweis an Output (H3)                                                                            | 4       |
+| `.github/workflows/jetbrains-plugin.yml`                                     | Plugin-CI: build + test headless (H4)                                                                                       | 5       |
+| `packages/jetbrains-lean-ctx/src/test/kotlin/.../PortFileTestEnv.kt` (o. ä.) | Test-Hygiene: `LEAN_CTX_DATA_DIR`→Temp + Cleanup-Assert (H5a)                                                               | 6       |
 
-**Reihenfolge-Begründung:** H1 (Task 1+2) zuerst — Kern der Phase. H2 (Task 3) und H3 (Task 4) editieren beide `jetbrains_backend.rs::new`/Methoden, daher nach H1. H4/H5 (Task 5+6) sind unabhängig (Infra/Kotlin).
+**Reihenfolge-Begründung:** H1 (Task 1+2) zuerst — Kern der Phase. H2 (Task 3) und H3 (Task 4) editieren beide
+`jetbrains_backend.rs::new`/Methoden, daher nach H1. H4/H5 (Task 5+6) sind unabhängig (Infra/Kotlin).
 
 ---
 
 ## Task 1: H1 — `is_stale`-Trait-Methode + `JetBrainsHttpBackend`-Liveness-Selbstcheck
 
-Fügt die Trait-Default-Methode `is_stale` hinzu (Backing A erbt `false`) und implementiert sie im B-Backend über einen günstigen `pid`+Port-Datei-Vergleich (kein HTTP). Erweitert Struct + Konstruktor um `pid`/`port`.
+Fügt die Trait-Default-Methode `is_stale` hinzu (Backing A erbt `false`) und implementiert sie im B-Backend über einen
+günstigen `pid`+Port-Datei-Vergleich (kein HTTP). Erweitert Struct + Konstruktor um `pid`/`port`.
 
 **Files:**
+
 - Modify: `rust/src/lsp/backend.rs:80-101` (Trait — neue Methode nach den Default-degrading-Methoden)
 - Modify: `rust/src/lsp/jetbrains_backend.rs:16-30` (Struct + `new`), `:161-251` (Impl-Block — `is_stale` override)
 - Modify: `rust/src/lsp/jetbrains_backend.rs:283,306,329` (3 bestehende Tests: `new`-Aufruf)
@@ -50,7 +60,8 @@ Fügt die Trait-Default-Methode `is_stale` hinzu (Backing A erbt `false`) und im
 
 - [ ] **Step 1: Failing test für `is_stale` schreiben**
 
-In `rust/src/lsp/jetbrains_backend.rs`, im `mod tests` (nach `symbols_overview_parses_wire_items`, vor der schließenden `}` bei L337), via Serena `insert_after_symbol` (Anker: `symbols_overview_parses_wire_items`):
+In `rust/src/lsp/jetbrains_backend.rs`, im `mod tests` (nach `symbols_overview_parses_wire_items`, vor der schließenden
+`}` bei L337), via Serena `insert_after_symbol` (Anker: `symbols_overview_parses_wire_items`):
 
 ```rust
     #[test]
@@ -100,7 +111,8 @@ Expected: FAIL — `new` erwartet 3 Argumente / Methode `is_stale` nicht gefunde
 
 - [ ] **Step 3: Trait-Default `is_stale` ergänzen**
 
-In `rust/src/lsp/backend.rs`, via Serena `replace_symbol_body` auf das Trait `LspBackend` ODER `insert`-Edit: direkt vor der schließenden `}` des Traits (nach `inspections`, L100) einfügen:
+In `rust/src/lsp/backend.rs`, via Serena `replace_symbol_body` auf das Trait `LspBackend` ODER `insert`-Edit: direkt vor
+der schließenden `}` des Traits (nach `inspections`, L100) einfügen:
 
 ```rust
     // ── Self-management (liveness) ──
@@ -114,7 +126,8 @@ In `rust/src/lsp/backend.rs`, via Serena `replace_symbol_body` auf das Trait `Ls
 
 - [ ] **Step 4: Struct + `new` um `pid`/`port` erweitern**
 
-In `rust/src/lsp/jetbrains_backend.rs`, via Serena `replace_symbol_body` auf `JetBrainsHttpBackend` (Struct) — Felder ergänzen:
+In `rust/src/lsp/jetbrains_backend.rs`, via Serena `replace_symbol_body` auf `JetBrainsHttpBackend` (Struct) — Felder
+ergänzen:
 
 ```rust
 pub struct JetBrainsHttpBackend {
@@ -145,7 +158,8 @@ Dann via Serena `replace_symbol_body` auf `new`:
 
 - [ ] **Step 5: `is_stale`-Override im Impl-Block ergänzen**
 
-In `rust/src/lsp/jetbrains_backend.rs`, via Serena `insert_after_symbol` (Anker: `rename` im `impl LspBackend for JetBrainsHttpBackend`-Block, L242-250) — neue Methode innerhalb des Impl-Blocks:
+In `rust/src/lsp/jetbrains_backend.rs`, via Serena `insert_after_symbol` (Anker: `rename` im
+`impl LspBackend for JetBrainsHttpBackend`-Block, L242-250) — neue Methode innerhalb des Impl-Blocks:
 
 ```rust
     fn is_stale(&self, project_root: &str) -> bool {
@@ -164,12 +178,14 @@ In `rust/src/lsp/jetbrains_backend.rs`, via Serena `insert_after_symbol` (Anker:
 
 - [ ] **Step 6: 3 bestehende Tests + Router-Call-Site an die neue `new`-Signatur anpassen**
 
-In `rust/src/lsp/jetbrains_backend.rs` (tests-mod), via Serena `replace_content` die 3 Vorkommen anpassen — jeweils `, std::process::id()` als 4. Argument:
+In `rust/src/lsp/jetbrains_backend.rs` (tests-mod), via Serena `replace_content` die 3 Vorkommen anpassen — jeweils
+`, std::process::id()` als 4. Argument:
 
 ```rust
         let mut backend =
             JetBrainsHttpBackend::new(port, "tok".to_string(), "/proj".to_string(), std::process::id());
 ```
+
 (in `references_parses_wire_locations`, `type_hierarchy_parses_wire_tree`, `symbols_overview_parses_wire_items`)
 
 In `rust/src/lsp/router.rs`, via Serena `replace_content` die `select_backend`-Konstruktion (L68-72):
@@ -205,9 +221,11 @@ git commit -m "feat(lsp): is_stale trait method + JetBrains pid/port liveness se
 
 ## Task 2: H1 — Router-Eviction stale Cache-Einträge
 
-Verdrahtet `is_stale` in `with_backend`: ein gecachter Backend wird **vor** Nutzung auf Staleness geprüft und ggf. evictet, sodass der bestehende `!contains_key`-Pfad ihn neu selektiert (auto → Fallback A; b_only → `Err`).
+Verdrahtet `is_stale` in `with_backend`: ein gecachter Backend wird **vor** Nutzung auf Staleness geprüft und ggf.
+evictet, sodass der bestehende `!contains_key`-Pfad ihn neu selektiert (auto → Fallback A; b_only → `Err`).
 
 **Files:**
+
 - Modify: `rust/src/lsp/router.rs:95-122` (`with_backend` + neuer Helper `evict_if_stale`)
 - Test: `rust/src/lsp/router.rs` (tests-mod)
 
@@ -350,15 +368,20 @@ git commit -m "feat(lsp): evict stale Backing-B cache entries before reuse (H1)"
 
 ## Task 3: H2 — `project_root`-Kanonisierung im B-Backend (§5.5-Trap)
 
-Kanonisiert `project_root` **einmalig** in `new` (realpath via `std::fs::canonicalize`, identisch zur `project_hash`-Ableitung in `port_discovery.rs:29`) + Trailing-`/`-Trim, sodass `position_body`-`strip_prefix` und `rel_to_uri` byte-identisch zur Kotlin-Seite arbeiten. Fehler-Guard: nicht-existenter Pfad → Roh-Root (erhält bestehende `/proj`-Tests).
+Kanonisiert `project_root` **einmalig** in `new` (realpath via `std::fs::canonicalize`, identisch zur `project_hash`
+-Ableitung in `port_discovery.rs:29`) + Trailing-`/`-Trim, sodass `position_body`-`strip_prefix` und `rel_to_uri`
+byte-identisch zur Kotlin-Seite arbeiten. Fehler-Guard: nicht-existenter Pfad → Roh-Root (erhält bestehende `/proj`
+-Tests).
 
 **Files:**
+
 - Modify: `rust/src/lsp/jetbrains_backend.rs` (`new` — Kanonisierung; neuer privater Helper `canonical_root`)
 - Test: `rust/src/lsp/jetbrains_backend.rs` (tests-mod)
 
 - [ ] **Step 1: Failing test schreiben**
 
-In `rust/src/lsp/jetbrains_backend.rs` (tests-mod) via Serena `insert_after_symbol` (Anker: `is_stale_false_for_matching_live_pid`):
+In `rust/src/lsp/jetbrains_backend.rs` (tests-mod) via Serena `insert_after_symbol` (Anker:
+`is_stale_false_for_matching_live_pid`):
 
 ```rust
     #[test]
@@ -383,7 +406,8 @@ In `rust/src/lsp/jetbrains_backend.rs` (tests-mod) via Serena `insert_after_symb
     }
 ```
 
-Außerdem im `impl JetBrainsHttpBackend` (nicht-Trait-Block) via Serena `insert_after_symbol` (Anker: `new`) einen Test-Accessor ergänzen:
+Außerdem im `impl JetBrainsHttpBackend` (nicht-Trait-Block) via Serena `insert_after_symbol` (Anker: `new`) einen
+Test-Accessor ergänzen:
 
 ```rust
     #[cfg(test)]
@@ -399,7 +423,8 @@ Expected: FAIL — Trailing-Slash bleibt (keine Kanonisierung) bzw. realpath wei
 
 - [ ] **Step 3: Kanonisierung in `new` + Helper**
 
-In `rust/src/lsp/jetbrains_backend.rs` via Serena `insert_before_symbol` (Anker: `new`) den Helper in den `impl JetBrainsHttpBackend`-Block:
+In `rust/src/lsp/jetbrains_backend.rs` via Serena `insert_before_symbol` (Anker: `new`) den Helper in den
+`impl JetBrainsHttpBackend`-Block:
 
 ```rust
     /// Canonicalize the project root ONCE so project-relative wire paths rejoin
@@ -431,7 +456,8 @@ Dann via Serena `replace_symbol_body` auf `new` — `project_root` durch den kan
 - [ ] **Step 4: Tests ausführen — müssen grün sein (inkl. der bestehenden Parser-Tests mit `/proj`)**
 
 Run: `cargo nextest run -p lean-ctx jetbrains_backend` (cwd `rust`)
-Expected: PASS — `canonical_root_*` grün; `references_parses_wire_locations` weiterhin grün (`/proj` existiert nicht → Fallback Roh-Root → URI endet auf `/proj/src/main.rs`).
+Expected: PASS — `canonical_root_*` grün; `references_parses_wire_locations` weiterhin grün (`/proj` existiert nicht →
+Fallback Roh-Root → URI endet auf `/proj/src/main.rs`).
 
 - [ ] **Step 5: clippy + fmt + Commit**
 
@@ -447,17 +473,22 @@ git commit -m "fix(lsp): canonicalize project_root in JetBrains backend (realpat
 
 ## Task 4: H3 — `truncated`/`total` Rust-seitig surfacen
 
-Ein `Truncation`-Typ + Trait-Default `last_truncation` (Backing A → `None`). `JetBrainsHttpBackend` merkt sich die Meta des letzten Calls (`last_meta`) und `ctx_refactor` hängt bei `truncated=true` einen Hinweis an den Output. Capped Ops: `references`, `implementations`, `type_hierarchy`, `symbols_overview`.
+Ein `Truncation`-Typ + Trait-Default `last_truncation` (Backing A → `None`). `JetBrainsHttpBackend` merkt sich die Meta
+des letzten Calls (`last_meta`) und `ctx_refactor` hängt bei `truncated=true` einen Hinweis an den Output. Capped Ops:
+`references`, `implementations`, `type_hierarchy`, `symbols_overview`.
 
 **Files:**
+
 - Modify: `rust/src/lsp/backend.rs` (`Truncation`-Struct + Trait-Default `last_truncation`)
-- Modify: `rust/src/lsp/jetbrains_backend.rs` (`last_meta`-Feld + `new` + `parse_truncation`-Helper + 4 Methoden + `last_truncation`-Override)
+- Modify: `rust/src/lsp/jetbrains_backend.rs` (`last_meta`-Feld + `new` + `parse_truncation`-Helper + 4 Methoden +
+  `last_truncation`-Override)
 - Modify: `rust/src/tools/ctx_refactor.rs` (4 Handler + `truncation_note`-Helper)
 - Test: `rust/src/lsp/jetbrains_backend.rs` + `rust/src/tools/ctx_refactor.rs`
 
 - [ ] **Step 1: Failing test (Backend-Meta) schreiben**
 
-In `rust/src/lsp/jetbrains_backend.rs` (tests-mod) via Serena `insert_after_symbol` (Anker: `symbols_overview_parses_wire_items`):
+In `rust/src/lsp/jetbrains_backend.rs` (tests-mod) via Serena `insert_after_symbol` (Anker:
+`symbols_overview_parses_wire_items`):
 
 ```rust
     #[test]
@@ -495,7 +526,8 @@ pub struct Truncation {
 }
 ```
 
-Dann via Serena `insert_after_symbol` (Anker: `is_stale` im Trait — die in Task 1 ergänzte Methode) den Default-Accessor in den Trait:
+Dann via Serena `insert_after_symbol` (Anker: `is_stale` im Trait — die in Task 1 ergänzte Methode) den Default-Accessor
+in den Trait:
 
 ```rust
     /// Truncation metadata of the most recent capped call, or `None` (Backing A,
@@ -542,7 +574,8 @@ b) via Serena `replace_symbol_body` auf `new` — `last_meta: None` initialisier
     }
 ```
 
-c) via Serena `insert_after_symbol` (Anker: `parse_symbols`) den Truncation-Parser in den `impl JetBrainsHttpBackend`-Block:
+c) via Serena `insert_after_symbol` (Anker: `parse_symbols`) den Truncation-Parser in den `impl JetBrainsHttpBackend`
+-Block:
 
 ```rust
     fn parse_truncation(v: &Value, shown: u32) -> Option<crate::lsp::backend::Truncation> {
@@ -648,11 +681,13 @@ e) via Serena `insert_after_symbol` (Anker: `is_stale` im Impl-Block) den Overri
 - [ ] **Step 5: Backend-Test ausführen — muss grün sein**
 
 Run: `cargo nextest run -p lean-ctx jetbrains_backend` (cwd `rust`)
-Expected: PASS — `references_records_truncation_meta` grün; bestehende Tests grün (truncated false/absent → `last_meta` Some/None, unkritisch).
+Expected: PASS — `references_records_truncation_meta` grün; bestehende Tests grün (truncated false/absent → `last_meta`
+Some/None, unkritisch).
 
 - [ ] **Step 6: Failing test (ctx_refactor-Surfacing) schreiben**
 
-In `rust/src/tools/ctx_refactor.rs` (tests-mod) via Serena `insert_after_symbol` (Anker: `parse_direction_defaults_to_supertypes`) — Test über einen Stub mit `last_truncation`:
+In `rust/src/tools/ctx_refactor.rs` (tests-mod) via Serena `insert_after_symbol` (Anker:
+`parse_direction_defaults_to_supertypes`) — Test über einen Stub mit `last_truncation`:
 
 ```rust
     #[test]
@@ -735,7 +770,8 @@ fn truncation_note(shown: usize, meta: Option<crate::lsp::backend::Truncation>) 
 }
 ```
 
-Dann via Serena `replace_symbol_body` die 4 Handler — Meta aus dem Backend ziehen + Hinweis anhängen. `handle_references`:
+Dann via Serena `replace_symbol_body` die 4 Handler — Meta aus dem Backend ziehen + Hinweis anhängen.
+`handle_references`:
 
 ```rust
 fn handle_references(
@@ -837,12 +873,15 @@ fn handle_type_hierarchy(
 - [ ] **Step 9: Tests ausführen — müssen grün sein**
 
 Run: `cargo nextest run -p lean-ctx ctx_refactor` (cwd `rust`)
-Expected: PASS — `references_output_surfaces_truncation_note` grün; bestehende `type_hierarchy_formats_indented_tree` / `unknown_action_help_lists_declaration` grün (HierBackend/StubBackend → `last_truncation()` Default `None` → kein Hinweis).
+Expected: PASS — `references_output_surfaces_truncation_note` grün; bestehende `type_hierarchy_formats_indented_tree` /
+`unknown_action_help_lists_declaration` grün (HierBackend/StubBackend → `last_truncation()` Default `None` → kein
+Hinweis).
 
 - [ ] **Step 10: Voller Rust-Lauf + clippy + fmt + Commit**
 
 Run: `cargo nextest run -p lean-ctx` (cwd `rust`)
-Expected: PASS (Baseline: 2 vorbestehende, unabhängige `hn_hardening`-Shell-Compression-Fails dürfen bleiben — sonst keine neuen Fails).
+Expected: PASS (Baseline: 2 vorbestehende, unabhängige `hn_hardening`-Shell-Compression-Fails dürfen bleiben — sonst
+keine neuen Fails).
 Run: `cargo clippy -p lean-ctx --all-targets` (cwd `rust`) → keine neuen Lints.
 `mcp__jetbrains__reformat_file` auf `backend.rs`, `jetbrains_backend.rs`, `ctx_refactor.rs`.
 
@@ -855,9 +894,13 @@ git commit -m "feat(refactor): surface truncated/total in ctx_refactor output (H
 
 ## Task 5: H4 — Plugin-CI-Workflow
 
-Eigener GitHub-Actions-Workflow (GitHub erkennt **nur** Dateien direkt in `.github/workflows/`, keine Unterordner) für das JetBrains-Plugin: Build + headless `check` (= `test`). Orientiert am `slint-idea-plugin/build.yml`, angepasst auf **JVM 21** (Plugin-Target) und das **Unterverzeichnis** `packages/jetbrains-lean-ctx` (Gradle-Wrapper liegt dort). Pfad-Filter, damit der Job nur bei Plugin-Änderungen läuft.
+Eigener GitHub-Actions-Workflow (GitHub erkennt **nur** Dateien direkt in `.github/workflows/`, keine Unterordner) für
+das JetBrains-Plugin: Build + headless `check` (= `test`). Orientiert am `slint-idea-plugin/build.yml`, angepasst auf *
+*JVM 21** (Plugin-Target) und das **Unterverzeichnis** `packages/jetbrains-lean-ctx` (Gradle-Wrapper liegt dort).
+Pfad-Filter, damit der Job nur bei Plugin-Änderungen läuft.
 
 **Files:**
+
 - Create: `.github/workflows/jetbrains-plugin.yml`
 
 - [ ] **Step 1: Workflow-Datei anlegen**
@@ -945,14 +988,17 @@ jobs:
 
 - [ ] **Step 2: YAML-Syntax lokal validieren**
 
-Run: `python3 -c "import yaml,sys; yaml.safe_load(open('.github/workflows/jetbrains-plugin.yml')); print('ok')"` (cwd Repo-Root)
+Run: `python3 -c "import yaml,sys; yaml.safe_load(open('.github/workflows/jetbrains-plugin.yml')); print('ok')"` (cwd
+Repo-Root)
 Expected: `ok` (keine YAML-Fehler).
 
 - [ ] **Step 3: Gradle-Tasks lokal verifizieren (headless, falls IC-Cache vorhanden)**
 
 Run: `./gradlew check --console=plain --offline` (cwd `packages/jetbrains-lean-ctx`)
-Expected: `BUILD SUCCESSFUL`, 54 Tests grün (entspricht dem aktuellen Stand). Falls `--offline` mangels Cache scheitert: einmal online `./gradlew check --console=plain`.
-_(Setzt Task 6 voraus, damit der Lauf keine Port-Dateien ins reale Data-Dir leakt — Reihenfolge bei der Ausführung: Task 6 vor diesem Verify-Step.)_
+Expected: `BUILD SUCCESSFUL`, 54 Tests grün (entspricht dem aktuellen Stand). Falls `--offline` mangels Cache scheitert:
+einmal online `./gradlew check --console=plain`.
+_(Setzt Task 6 voraus, damit der Lauf keine Port-Dateien ins reale Data-Dir leakt — Reihenfolge bei der Ausführung: Task
+6 vor diesem Verify-Step.)_
 
 - [ ] **Step 4: Commit**
 
@@ -965,11 +1011,16 @@ git commit -m "ci(jetbrains): plugin build + headless test workflow (JVM 21, H4)
 
 ## Task 6: H5a — Test-Hygiene: kein Port-Datei-Leak
 
-`BasePlatformTestCase` bootet via `LeanCtxStartupActivity` einen echten `BackendHttpServer`, der eine Port-Datei ins reale Data-Dir (`~/.lean-ctx` bzw. `LEAN_CTX_DATA_DIR`) schreibt. Test-Setup leitet das Data-Dir auf ein Test-Temp-Verzeichnis um (`LEAN_CTX_DATA_DIR`) und prüft im Teardown, dass keine `jetbrains-*.port` zurückbleibt.
+`BasePlatformTestCase` bootet via `LeanCtxStartupActivity` einen echten `BackendHttpServer`, der eine Port-Datei ins
+reale Data-Dir (`~/.lean-ctx` bzw. `LEAN_CTX_DATA_DIR`) schreibt. Test-Setup leitet das Data-Dir auf ein
+Test-Temp-Verzeichnis um (`LEAN_CTX_DATA_DIR`) und prüft im Teardown, dass keine `jetbrains-*.port` zurückbleibt.
 
-> **Hinweis:** Die konkrete Test-Basisklasse/Setup-Stelle in `packages/jetbrains-lean-ctx/src/test/kotlin/` ist beim Ausführen zu ermitteln (`ctx_search "BasePlatformTestCase" packages/jetbrains-lean-ctx/src/test`). `LeanCtxPaths` liest `LEAN_CTX_DATA_DIR` (Phase-2-Parität). Setze die Env **vor** dem `super.setUp()`-Boot.
+> **Hinweis:** Die konkrete Test-Basisklasse/Setup-Stelle in `packages/jetbrains-lean-ctx/src/test/kotlin/` ist beim
+> Ausführen zu ermitteln (`ctx_search "BasePlatformTestCase" packages/jetbrains-lean-ctx/src/test`). `LeanCtxPaths` liest
+`LEAN_CTX_DATA_DIR` (Phase-2-Parität). Setze die Env **vor** dem `super.setUp()`-Boot.
 
 **Files:**
+
 - Create: `packages/jetbrains-lean-ctx/src/test/kotlin/com/leanctx/plugin/PortFileHygieneTest.kt`
 - (ggf.) Modify: vorhandene Test-Basisklasse, falls ein gemeinsamer `setUp` existiert
 
@@ -980,7 +1031,8 @@ Ermittle zuerst die Data-Dir-Auflösung:
 Run: `ctx_search "fun.*[dD]ataDir|LEAN_CTX_DATA_DIR" packages/jetbrains-lean-ctx/src/main/kotlin`
 Expected: Fundstelle in `LeanCtxPaths` (Env-Lookup), die der Test übersteuert.
 
-Erstelle `packages/jetbrains-lean-ctx/src/test/kotlin/com/leanctx/plugin/PortFileHygieneTest.kt` (native `Write` — Kotlin, kein Serena-Zwang):
+Erstelle `packages/jetbrains-lean-ctx/src/test/kotlin/com/leanctx/plugin/PortFileHygieneTest.kt` (native `Write` —
+Kotlin, kein Serena-Zwang):
 
 ```kotlin
 package com.leanctx.plugin
@@ -1041,29 +1093,41 @@ class PortFileHygieneTest : BasePlatformTestCase() {
 }
 ```
 
-> **Falls `LeanCtxPaths` Umgebungs-Variablen statt System-Properties liest** (`System.getenv("LEAN_CTX_DATA_DIR")`): der Test kann `getenv` nicht setzen. Dann ist die korrekte Maßnahme, `LeanCtxPaths` test-freundlich zu machen — `System.getProperty("LEAN_CTX_DATA_DIR") ?: System.getenv("LEAN_CTX_DATA_DIR")` (Property-Override vor Env). Diese kleine Anpassung in `LeanCtxPaths` (main) ist Teil dieses Tasks, falls nötig; sie ändert das Produktivverhalten nicht (Property normalerweise ungesetzt).
+> **Falls `LeanCtxPaths` Umgebungs-Variablen statt System-Properties liest** (`System.getenv("LEAN_CTX_DATA_DIR")`): der
+> Test kann `getenv` nicht setzen. Dann ist die korrekte Maßnahme, `LeanCtxPaths` test-freundlich zu machen —
+`System.getProperty("LEAN_CTX_DATA_DIR") ?: System.getenv("LEAN_CTX_DATA_DIR")` (Property-Override vor Env). Diese
+> kleine Anpassung in `LeanCtxPaths` (main) ist Teil dieses Tasks, falls nötig; sie ändert das Produktivverhalten nicht (
+> Property normalerweise ungesetzt).
 
 - [ ] **Step 2: Test ausführen — etabliert die Hygiene-Erwartung**
 
-Run: `./gradlew test --tests "com.leanctx.plugin.PortFileHygieneTest" --console=plain` (cwd `packages/jetbrains-lean-ctx`)
-Expected: Falls der Leak existiert → FAIL (Port-Datei im realen `~/.lean-ctx` bzw. Temp-Dir nicht leer). Das ist der rote TDD-Zustand.
+Run: `./gradlew test --tests "com.leanctx.plugin.PortFileHygieneTest" --console=plain` (cwd
+`packages/jetbrains-lean-ctx`)
+Expected: Falls der Leak existiert → FAIL (Port-Datei im realen `~/.lean-ctx` bzw. Temp-Dir nicht leer). Das ist der
+rote TDD-Zustand.
 
 - [ ] **Step 3: Fix — Data-Dir-Override + Dispose-Cleanup sicherstellen**
 
-Falls Step 2 fehlschlägt, weil `LeanCtxPaths` `getenv` statt Property liest: in `packages/jetbrains-lean-ctx/src/main/kotlin/.../LeanCtxPaths.kt` die Auflösung um den Property-Override erweitern (native Kotlin-Edit):
+Falls Step 2 fehlschlägt, weil `LeanCtxPaths` `getenv` statt Property liest: in
+`packages/jetbrains-lean-ctx/src/main/kotlin/.../LeanCtxPaths.kt` die Auflösung um den Property-Override erweitern (
+native Kotlin-Edit):
 
 ```kotlin
 // Resolve data dir: test-overridable system property first, then env, then default.
 private fun dataDirEnv(): String? =
     System.getProperty("LEAN_CTX_DATA_DIR") ?: System.getenv("LEAN_CTX_DATA_DIR")
 ```
+
 (an der Stelle einsetzen, wo bisher `System.getenv("LEAN_CTX_DATA_DIR")` direkt gelesen wird).
 
-Stelle außerdem sicher, dass die Test-Fixture die `BackendHttpServer`-Disposable korrekt schließt (Server `dispose()` löscht die Port-Datei — bereits implementiert in `BackendHttpServer.dispose`, Commit `d2fd93f9`). Der Temp-Data-Dir-Override genügt i. d. R.
+Stelle außerdem sicher, dass die Test-Fixture die `BackendHttpServer`-Disposable korrekt schließt (Server `dispose()`
+löscht die Port-Datei — bereits implementiert in `BackendHttpServer.dispose`, Commit `d2fd93f9`). Der
+Temp-Data-Dir-Override genügt i. d. R.
 
 - [ ] **Step 4: Test ausführen — muss grün sein**
 
-Run: `./gradlew test --tests "com.leanctx.plugin.PortFileHygieneTest" --console=plain` (cwd `packages/jetbrains-lean-ctx`)
+Run: `./gradlew test --tests "com.leanctx.plugin.PortFileHygieneTest" --console=plain` (cwd
+`packages/jetbrains-lean-ctx`)
 Expected: PASS — kein Leak im realen Data-Dir, Temp-Dir nach Teardown leer.
 
 - [ ] **Step 5: Voller Kotlin-Lauf — keine Regression**
@@ -1086,9 +1150,12 @@ git commit -m "test(plugin): port-file hygiene — no leak into real data dir (H
 
 ## Task 7: Final-Gate + Spec-Gate-Protokoll
 
-Verifiziert alle automatisierten Gates zusammen und füllt §9 des Specs (Gate-Protokoll). Das manuelle `runIde`-Gate (IDE auf → B gecacht → IDE zu → sauberer A-Fallback) ist **User-gated** (separates Terminal, ~1 GB IC) und wird im Protokoll als PENDING markiert, falls nicht live ausgeführt.
+Verifiziert alle automatisierten Gates zusammen und füllt §9 des Specs (Gate-Protokoll). Das manuelle `runIde`-Gate (IDE
+auf → B gecacht → IDE zu → sauberer A-Fallback) ist **User-gated** (separates Terminal, ~1 GB IC) und wird im Protokoll
+als PENDING markiert, falls nicht live ausgeführt.
 
 **Files:**
+
 - Modify: `docs/lean-md/specs/2026-06-08-jetbrains-phase5a-hardening-design.md` (§9)
 
 - [ ] **Step 1: Voller Rust-Gate**
@@ -1105,12 +1172,16 @@ Expected: `BUILD SUCCESSFUL`, 55 Tests grün.
 
 - [ ] **Step 3: Drift-Gate (Doku-Generator)**
 
-Da `ctx_refactor` keine neuen Actions/Schema bekommt (H3 ändert nur Output-Text), darf das generierte Tool-Doc unverändert bleiben.
-Run: `ctx_read docs/reference/generated/mcp-tools.md mode=signatures` und prüfe, dass `ctx_refactor`-Schema (Actions) unverändert ist. Falls ein Drift-Test existiert: `cargo nextest run -p lean-ctx drift` → grün.
+Da `ctx_refactor` keine neuen Actions/Schema bekommt (H3 ändert nur Output-Text), darf das generierte Tool-Doc
+unverändert bleiben.
+Run: `ctx_read docs/reference/generated/mcp-tools.md mode=signatures` und prüfe, dass `ctx_refactor`-Schema (Actions)
+unverändert ist. Falls ein Drift-Test existiert: `cargo nextest run -p lean-ctx drift` → grün.
 
 - [ ] **Step 4: §9-Gate-Protokoll ins Spec schreiben**
 
-In `docs/lean-md/specs/2026-06-08-jetbrains-phase5a-hardening-design.md`, §9 ersetzen (native Markdown-Edit) — mit den realen Commit-Hashes (H1a, H1b, H2, H3, H4, H5a), Gate-Ergebnissen (Rust nextest N passed, Kotlin 55 grün, clippy clean), und dem manuellen `runIde`-Status (live verifiziert ODER PENDING/User-gated).
+In `docs/lean-md/specs/2026-06-08-jetbrains-phase5a-hardening-design.md`, §9 ersetzen (native Markdown-Edit) — mit den
+realen Commit-Hashes (H1a, H1b, H2, H3, H4, H5a), Gate-Ergebnissen (Rust nextest N passed, Kotlin 55 grün, clippy
+clean), und dem manuellen `runIde`-Status (live verifiziert ODER PENDING/User-gated).
 
 - [ ] **Step 5: Memory + Commit**
 
@@ -1125,7 +1196,13 @@ git commit -m "docs(spec): Phase-5a Gate-Protokoll — Härtung H1–H5a results
 
 ## Self-Review-Notiz (für den Ausführenden)
 
-- **Spec-Coverage:** H1→Task 1+2, H2→Task 3, H3→Task 4, H4→Task 5, H5a→Task 6, H5b→nur Doku (Spec §6, kein Task — korrekt). Gate §5→Task 7. Keine neuen Wire-Endpoints (Spec §4) — kein Task, korrekt.
-- **Typ-Konsistenz:** `Truncation { truncated: bool, total: u32 }` (backend.rs) einheitlich in `jetbrains_backend.rs` (`last_meta`, `parse_truncation`) und `ctx_refactor.rs` (`truncation_note`, Stub). `is_stale(&self, project_root: &str) -> bool` und `last_truncation(&self) -> Option<Truncation>` als Trait-Defaults — Backing A (`LspClient`) braucht **keine** Änderung.
-- **`new`-Signatur:** überall `new(port, token, project_root, pid)` — Call-Sites: `router.rs` (select_backend) + 3 Backend-Tests + neue Tests konsistent angepasst.
-- **Rust-Edits ausschließlich via Serena**; Kotlin/YAML via native `Write`/Edit. `cargo nextest`, nie `cargo test`. `ctx_shell` bare + `cwd=`.
+- **Spec-Coverage:** H1→Task 1+2, H2→Task 3, H3→Task 4, H4→Task 5, H5a→Task 6, H5b→nur Doku (Spec §6, kein Task —
+  korrekt). Gate §5→Task 7. Keine neuen Wire-Endpoints (Spec §4) — kein Task, korrekt.
+- **Typ-Konsistenz:** `Truncation { truncated: bool, total: u32 }` (backend.rs) einheitlich in `jetbrains_backend.rs` (
+  `last_meta`, `parse_truncation`) und `ctx_refactor.rs` (`truncation_note`, Stub).
+  `is_stale(&self, project_root: &str) -> bool` und `last_truncation(&self) -> Option<Truncation>` als Trait-Defaults —
+  Backing A (`LspClient`) braucht **keine** Änderung.
+- **`new`-Signatur:** überall `new(port, token, project_root, pid)` — Call-Sites: `router.rs` (select_backend) + 3
+  Backend-Tests + neue Tests konsistent angepasst.
+- **Rust-Edits ausschließlich via Serena**; Kotlin/YAML via native `Write`/Edit. `cargo nextest`, nie `cargo test`.
+  `ctx_shell` bare + `cwd=`.

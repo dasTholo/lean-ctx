@@ -232,3 +232,4 @@ spezifiziertes YAML, geringes Risiko):
 
 - Keine `concurrency`-Group im Plugin-Workflow (parallele Läufe nicht gecancelt).
 - Kein `timeout-minutes` am Job; keine Action-SHA-Pinning (Versions-Tags statt Commit-SHA).
+

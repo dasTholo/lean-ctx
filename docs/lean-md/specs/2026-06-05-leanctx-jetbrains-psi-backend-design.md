@@ -601,16 +601,6 @@ Finaler Opus-Gesamt-Review (Spec + Quality): **READY TO MERGE**, 0 Critical/Impo
    in Phase 1 (Skeleton) **noch nicht implementiert**. Ziel: **Phase 5** (PID-/Health-
    basiertes Cache-Invalidieren).
 
-### 14.2 Prozess-Hinweis (für Phase-3+-Ausführung)
-
-Während der Phase-0-Ausführung wurden die formalen **Spec-/Quality-Subagenten-Reviews**
-pro Task (Tasks 0.3/0.4) **übersprungen** — nur Controller-Code-Verifikation + grünes
-Gate. Der finale Opus-Gesamt-Review hat beide Phasen nachträglich abgedeckt (READY TO
-MERGE). Für Folgephasen: die Zwei-Stufen-Review (Spec-Compliance **vor** Code-Quality)
-pro Task nicht überspringen — sie ist Teil des `subagent-driven-development`-Vertrags.
-
----
-
 ## 15. Phase-2-Detaildesign — Plugin-Kern (HTTP-Lifecycle) — genehmigt 2026-06-06
 
 **Ziel:** Die Kotlin-Seite startet beim Projektöffnen einen localhost-HTTP-Server **pro
