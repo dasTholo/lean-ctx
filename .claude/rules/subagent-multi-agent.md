@@ -36,15 +36,16 @@ exposes them directly but bloats the tool catalog.)
 > NOT part of this contract. Subagents just `ctx_read` — **never `fresh`**
 > (mtime auto-validation keeps cached entries current), **never `raw`**.
 
-| Need                              | Tool                           | Note                                                    |
-|-----------------------------------|--------------------------------|---------------------------------------------------------|
-| Orient at start                   | `ctx_overview` + `ctx_repomap` | repomap = PageRank top symbols                          |
-| Warm-read N files before dispatch | `ctx_multi_read paths=[…]`     | one call, not N× `ctx_read`                             |
-| Re-read after an edit             | `ctx_delta path=…`             | only changed lines (cheaper than diff)                  |
-| Checkpoint at phase boundary      | `ctx_compress`                 | long-conversation context save                          |
-| Warm cache for a subagent         | (automatic — shared MCP cache) | no `ctx_share`; subagent just `ctx_read`, never `fresh` |
-| Team coordination / diaries       | `ctx_agent`                    | register/post/read/diary/sync/handoff/share_knowledge   |
-| Blast radius (risk gate)          | `ctx_impact`, `ctx_callgraph`  | standard — direct                                       |
+| Need                              | Tool                           | Note                                                                                   |
+|-----------------------------------|--------------------------------|----------------------------------------------------------------------------------------|
+| Orient at start                   | `ctx_overview` + `ctx_repomap` | repomap = PageRank top symbols                                                         |
+| Warm-read N files before dispatch | `ctx_multi_read paths=[…]`     | one call, not N× `ctx_read`                                                            |
+| Re-read after an edit             | `ctx_delta path=…`             | only changed lines (cheaper than diff)                                                 |
+| Checkpoint at phase boundary      | `ctx_compress`                 | long-conversation context save                                                         |
+| Warm cache for a subagent         | (automatic — shared MCP cache) | no `ctx_share`; subagent just `ctx_read`, never `fresh`                                |
+| Team coordination / diaries       | `ctx_agent`                    | register/post/read/diary/sync/handoff/share_knowledge                                  |
+| Blast radius (risk gate)          | `ctx_impact`, `ctx_callgraph`  | standard — direct                                                                      |
+| Task Liste                        | `ctx_task`                     | task create need: to_agent, States: "working,input-required,completed,failed,canceled" | 
 
 ## Controller contract (main agent, drives the plan)
 
