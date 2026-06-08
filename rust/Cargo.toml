@@ -65,38 +65,40 @@ qdrant = ["embeddings"]
 team-server = ["http-server"]
 secure-update = []
 cloud-server = [
-    "http-server",
-    "dep:deadpool-postgres",
-    "dep:tokio-postgres",
-    "dep:lettre",
-    "dep:jsonwebtoken",
-    "dep:uuid",
-    "dep:hex",
-    "dep:rand",
-    "dep:argon2",
-    "dep:resvg",
+  "http-server",
+  "dep:deadpool-postgres",
+  "dep:tokio-postgres",
+  "dep:lettre",
+  "dep:jsonwebtoken",
+  "dep:uuid",
+  "dep:hex",
+  "dep:rand",
+  "dep:argon2",
+  "dep:resvg",
 ]
 tree-sitter = [
-    "dep:tree-sitter",
-    "dep:tree-sitter-rust",
-    "dep:tree-sitter-typescript",
-    "dep:tree-sitter-javascript",
-    "dep:tree-sitter-python",
-    "dep:tree-sitter-go",
-    "dep:tree-sitter-java",
-    "dep:tree-sitter-c",
-    "dep:tree-sitter-cpp",
-    "dep:tree-sitter-ruby",
-    "dep:tree-sitter-c-sharp",
-    "dep:tree-sitter-kotlin-ng",
-    "dep:tree-sitter-swift",
-    "dep:tree-sitter-php",
-    "dep:tree-sitter-bash",
-    "dep:tree-sitter-dart",
-    "dep:tree-sitter-scala",
-    "dep:tree-sitter-elixir",
-    "dep:tree-sitter-zig",
+  "dep:tree-sitter",
+  "dep:tree-sitter-rust",
+  "dep:tree-sitter-typescript",
+  "dep:tree-sitter-javascript",
+  "dep:tree-sitter-python",
+  "dep:tree-sitter-go",
+  "dep:tree-sitter-java",
+  "dep:tree-sitter-c",
+  "dep:tree-sitter-cpp",
+  "dep:tree-sitter-ruby",
+  "dep:tree-sitter-c-sharp",
+  "dep:tree-sitter-kotlin-ng",
+  "dep:tree-sitter-swift",
+  "dep:tree-sitter-php",
+  "dep:tree-sitter-bash",
+  "dep:tree-sitter-dart",
+  "dep:tree-sitter-scala",
+  "dep:tree-sitter-elixir",
+  "dep:tree-sitter-zig",
+  "dep:tree-sitter-gdscript",
 ]
+wasm = ["dep:wasmi"]
 
 [dependencies]
 rmcp = { version = "1", features = ["server", "client", "transport-io", "transport-streamable-http-server", "transport-child-process", "transport-streamable-http-client-reqwest"] }
@@ -149,6 +151,7 @@ tree-sitter-scala = { version = "0.25", optional = true }
 tree-sitter-elixir = { version = "0.3", optional = true }
 tree-sitter-zig = { version = "1.1", optional = true }
 tree-sitter-dart = { version = "0.1", optional = true }
+tree-sitter-gdscript = { version = "6.1", optional = true }
 rten = { version = "0.24", optional = true }
 rten-tensor = { version = "0.24", optional = true }
 axum = { version = "0.8", optional = true }
@@ -181,10 +184,10 @@ bincode = { version = "2", features = ["serde"] }
 zstd = "0.13"
 memmap2 = "0.9"
 lsp-types = "0.97"
-rushdown = "0.18"
 fs2 = "0.4.3"
 unicode-width = "0.2"
 resvg = { version = "0.47.0", optional = true }
+wasmi = { version = "1.0.9", optional = true }
 
 [lints.rust]
 unreachable_pub = "warn"
@@ -264,6 +267,7 @@ proptest = "1"
 serial_test = "3.4.0"
 tempfile = "3.27.0"
 tower = "0.5"
+wat = "1.251.0"
 
 [[bench]]
 name = "compression"

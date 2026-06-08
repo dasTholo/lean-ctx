@@ -127,6 +127,13 @@ pub struct BM25Index {
     pub doc_freqs: HashMap<String, usize>,
     #[serde(default)]
     pub files: HashMap<String, IndexedFileState>,
+    /// True once `shrink_resident_content_to_snippet` has trimmed each chunk's
+    /// `content` down to the snippet lines. Resident-only RAM-saving state: never
+    /// persisted (`skip`) so the on-disk index keeps full content, and a reload
+    /// always starts as `false`. Guards the embedding pass against re-embedding
+    /// truncated bodies (see `ensure_embeddings`).
+    #[serde(default, skip)]
+    pub content_truncated: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -159,6 +166,7 @@ impl BM25Index {
             doc_count: 0,
             doc_freqs: HashMap::new(),
             files: HashMap::new(),
+            content_truncated: false,
         }
     }
 
@@ -197,6 +205,45 @@ impl BM25Index {
         tracing::info!(
             "[bm25] unloaded index, freed ~{:.1}MB",
             usage as f64 / 1_048_576.0
+        );
+    }
+
+    /// Shrinks each resident chunk's `content` to its first `keep_lines` lines,
+    /// reclaiming the RAM held by the full source bodies once the embedding pass
+    /// has already consumed them. The search path only ever reads
+    /// `content.lines().take(5)` for snippets, so the trimmed copy is functionally
+    /// complete for BM25/dense/hybrid result rendering.
+    ///
+    /// RESIDENT-ONLY: this mutates the in-memory copy. The persisted `.bin.zst`
+    /// keeps full content (truncation never runs before `save`), so a reload
+    /// restores complete bodies. Sets `content_truncated` so a later
+    /// `ensure_embeddings` against this same resident index skips re-embedding
+    /// (which would otherwise feed truncated bodies to the embedder).
+    ///
+    /// Idempotent and only ever shrinks: chunks shorter than `keep_lines` are
+    /// left untouched.
+    pub fn shrink_resident_content_to_snippet(&mut self, keep_lines: usize) {
+        let before = self.memory_usage_bytes();
+        for chunk in &mut self.chunks {
+            // Cheap line-count gate: only allocate a new string when the body is
+            // actually longer than the snippet window.
+            if chunk.content.lines().nth(keep_lines).is_some() {
+                let trimmed: String = chunk
+                    .content
+                    .lines()
+                    .take(keep_lines)
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                chunk.content = trimmed;
+                // Reclaim the spare capacity left by the larger original body.
+                chunk.content.shrink_to_fit();
+            }
+        }
+        self.content_truncated = true;
+        let after = self.memory_usage_bytes();
+        tracing::debug!(
+            "[bm25] shrank resident content to {keep_lines} lines/chunk, freed ~{:.1}MB",
+            before.saturating_sub(after) as f64 / 1_048_576.0
         );
     }
 
@@ -264,7 +311,21 @@ impl BM25Index {
                 mtime_ms: state.mtime_ms,
                 size_bytes: state.size_bytes,
             };
-            let content = if let Some(cached) = content_hint.get(rel) {
+            let content = if crate::core::extractors::is_binary_document(&abs) {
+                // Binary document (PDF, …): extract clean text from raw bytes.
+                // Skipped if extraction yields nothing (e.g. scanned/image-only).
+                // Never populates the shared UTF-8 content cache (not text).
+                match std::fs::read(&abs) {
+                    Ok(bytes) => {
+                        let text = crate::core::extractors::extract(&abs, &bytes).text;
+                        if text.is_empty() {
+                            continue;
+                        }
+                        std::borrow::Cow::Owned(text)
+                    }
+                    Err(_) => continue,
+                }
+            } else if let Some(cached) = content_hint.get(rel) {
                 cache_hits += 1;
                 std::borrow::Cow::Borrowed(cached.as_str())
             } else if let Some(arc) = crate::core::content_cache::get(&abs, cache_state) {
@@ -359,19 +420,31 @@ impl BM25Index {
             if state.size_bytes > MAX_FILE_SIZE_BYTES {
                 continue;
             }
-            if let Ok(content) = std::fs::read_to_string(&abs) {
-                let mut chunks = extract_chunks(rel, &content);
-                chunks.sort_by(|a, b| {
-                    a.start_line
-                        .cmp(&b.start_line)
-                        .then_with(|| a.end_line.cmp(&b.end_line))
-                        .then_with(|| a.symbol_name.cmp(&b.symbol_name))
-                });
-                for chunk in chunks {
-                    index.add_chunk(chunk);
+            let content = if crate::core::extractors::is_binary_document(&abs) {
+                match std::fs::read(&abs) {
+                    Ok(bytes) => crate::core::extractors::extract(&abs, &bytes).text,
+                    Err(_) => continue,
                 }
-                index.files.insert(rel.clone(), state);
+            } else {
+                match std::fs::read_to_string(&abs) {
+                    Ok(c) => c,
+                    Err(_) => continue,
+                }
+            };
+            if content.is_empty() {
+                continue;
             }
+            let mut chunks = extract_chunks(rel, &content);
+            chunks.sort_by(|a, b| {
+                a.start_line
+                    .cmp(&b.start_line)
+                    .then_with(|| a.end_line.cmp(&b.end_line))
+                    .then_with(|| a.symbol_name.cmp(&b.symbol_name))
+            });
+            for chunk in chunks {
+                index.add_chunk(chunk);
+            }
+            index.files.insert(rel.clone(), state);
         }
 
         index.finalize();
@@ -840,7 +913,7 @@ fn list_code_files(root: &Path) -> Vec<String> {
         if !path.is_file() {
             continue;
         }
-        if !is_code_file(path) {
+        if !crate::core::ingestion::is_ingestible(path) {
             continue;
         }
         let rel = path
