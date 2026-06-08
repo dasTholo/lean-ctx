@@ -31,8 +31,11 @@ pub fn handle(args: &Value, project_root: &str, abs_path: &str) -> String {
             handle_implementations(abs_path, project_root, &uri, position, scope)
         }
         "declaration" => handle_declaration(abs_path, project_root, &uri, position),
+        "type_hierarchy" => handle_type_hierarchy(args, abs_path, project_root, &uri, position),
+        "symbols_overview" => handle_symbols_overview(abs_path, project_root, &uri),
         _ => format!(
-            "ERROR: Unknown action '{action}'. Available: rename, references, definition, implementations, declaration."
+            "ERROR: Unknown action '{action}'. Available: rename, references, definition, \
+             implementations, declaration, type_hierarchy, symbols_overview."
         ),
     }
 }
@@ -136,6 +139,70 @@ fn handle_declaration(
         Ok(locations) => format_locations(&locations, project_root),
         Err(e) => format!("ERROR: {e}"),
     }
+}
+
+use crate::lsp::backend::{HierarchyDirection, SymbolOverviewItem, TypeHierarchyNode};
+
+fn parse_direction(args: &Value) -> HierarchyDirection {
+    match args.get("direction").and_then(Value::as_str) {
+        Some("subtypes") => HierarchyDirection::Subtypes,
+        _ => HierarchyDirection::Supertypes,
+    }
+}
+
+fn handle_type_hierarchy(
+    args: &Value,
+    file_path: &str,
+    project_root: &str,
+    uri: &lsp_types::Uri,
+    position: Position,
+) -> String {
+    let direction = parse_direction(args);
+    let result = crate::lsp::router::with_backend(file_path, project_root, |backend, _| {
+        backend.type_hierarchy(uri, position, direction)
+    });
+    match result {
+        Ok(tree) => format_type_hierarchy(&tree),
+        Err(e) => format!("ERROR: {e}"),
+    }
+}
+
+fn handle_symbols_overview(
+    file_path: &str,
+    project_root: &str,
+    uri: &lsp_types::Uri,
+) -> String {
+    let result = crate::lsp::router::with_backend(file_path, project_root, |backend, _| {
+        backend.symbols_overview(uri)
+    });
+    match result {
+        Ok(items) => format_symbols_overview(&items),
+        Err(e) => format!("ERROR: {e}"),
+    }
+}
+
+fn format_type_hierarchy(root: &TypeHierarchyNode) -> String {
+    fn walk(node: &TypeHierarchyNode, depth: usize, out: &mut String) {
+        let indent = "  ".repeat(depth);
+        out.push_str(&format!("{indent}{} ({}:{})\n", node.name, node.path, node.line));
+        for child in &node.children {
+            walk(child, depth + 1, out);
+        }
+    }
+    let mut out = String::new();
+    walk(root, 0, &mut out);
+    out
+}
+
+fn format_symbols_overview(items: &[SymbolOverviewItem]) -> String {
+    if items.is_empty() {
+        return "No symbols found.".to_string();
+    }
+    let mut out = format!("{} symbol(s):\n", items.len());
+    for item in items {
+        out.push_str(&format!("  {} {} (line {})\n", item.kind, item.name, item.line));
+    }
+    out
 }
 
 fn format_locations(locations: &[Location], project_root: &str) -> String {
@@ -309,5 +376,52 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn type_hierarchy_formats_indented_tree() {
+        use crate::lsp::backend::{HierarchyDirection, LspBackend, SymbolOverviewItem, TypeHierarchyNode};
+
+        struct HierBackend;
+        impl LspBackend for HierBackend {
+            fn open_file(&mut self, _u: &lsp_types::Uri, _l: &str, _t: &str) -> Result<(), String> { Ok(()) }
+            fn references(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position, _s: &str) -> Result<Vec<lsp_types::Location>, String> { Ok(vec![]) }
+            fn definition(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position) -> Result<lsp_types::GotoDefinitionResponse, String> { Ok(lsp_types::GotoDefinitionResponse::Array(vec![])) }
+            fn implementations(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position, _s: &str) -> Result<Vec<lsp_types::Location>, String> { Ok(vec![]) }
+            fn rename(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position, _n: &str) -> Result<Option<lsp_types::WorkspaceEdit>, String> { Ok(None) }
+            fn type_hierarchy(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position, dir: HierarchyDirection) -> Result<TypeHierarchyNode, String> {
+                assert_eq!(dir, HierarchyDirection::Subtypes);
+                Ok(TypeHierarchyNode {
+                    name: "Animal".into(), path: "A.kt".into(), line: 1,
+                    children: vec![TypeHierarchyNode { name: "Dog".into(), path: "A.kt".into(), line: 2, children: vec![] }],
+                })
+            }
+            fn symbols_overview(&mut self, _u: &lsp_types::Uri) -> Result<Vec<SymbolOverviewItem>, String> {
+                Ok(vec![SymbolOverviewItem { name: "Animal".into(), kind: "interface".into(), line: 1 }])
+            }
+        }
+
+        let tree = HierBackend.type_hierarchy(
+            &crate::lsp::client::file_path_to_uri("/p/A.kt").unwrap(),
+            lsp_types::Position::new(0, 0),
+            HierarchyDirection::Subtypes,
+        ).unwrap();
+        let out = super::format_type_hierarchy(&tree);
+        assert!(out.contains("Animal (A.kt:1)"), "{out}");
+        assert!(out.contains("  Dog (A.kt:2)"), "{out}"); // child indented
+
+        let items = HierBackend.symbols_overview(
+            &crate::lsp::client::file_path_to_uri("/p/A.kt").unwrap(),
+        ).unwrap();
+        let out2 = super::format_symbols_overview(&items);
+        assert!(out2.contains("interface Animal (line 1)"), "{out2}");
+    }
+
+    #[test]
+    fn parse_direction_defaults_to_supertypes() {
+        use crate::lsp::backend::HierarchyDirection;
+        assert_eq!(super::parse_direction(&json!({})), HierarchyDirection::Supertypes);
+        assert_eq!(super::parse_direction(&json!({"direction": "subtypes"})), HierarchyDirection::Subtypes);
+        assert_eq!(super::parse_direction(&json!({"direction": "supertypes"})), HierarchyDirection::Supertypes);
     }
 }
