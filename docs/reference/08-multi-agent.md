@@ -170,7 +170,7 @@ state, and message about a specific task.
 ctx_task action=create description="add OAuth" to_agent=<id>
 ctx_task action=list
 ctx_task action=get task_id=<id>
-ctx_task action=update task_id=<id> state=in_progress
+ctx_task action=update task_id=<id> state=working
 ctx_task action=message task_id=<id> message="blocked on secret rotation"
 ctx_task action=cancel task_id=<id>
 ```
