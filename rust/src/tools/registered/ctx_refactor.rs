@@ -15,29 +15,36 @@ impl McpTool for CtxRefactorTool {
     fn tool_def(&self) -> Tool {
         tool_def(
             "ctx_refactor",
-            "LSP-powered refactoring. Actions: rename, references, definition, implementations, declaration. \
-             Requires a running language server (rust-analyzer, typescript-language-server, pylsp, gopls) \
-             or the JetBrains backend (declaration is JetBrains-only).",
+            "LSP-powered refactoring. Actions: rename, references, definition, implementations, \
+             declaration, type_hierarchy, symbols_overview. Requires a running language server \
+             (rust-analyzer, typescript-language-server, pylsp, gopls) or the JetBrains backend \
+             (declaration, type_hierarchy, symbols_overview are JetBrains-only).",
             json!({
-                    "type": "object",
-                    "properties": {
-                        "action": {
-                            "type": "string",
-                            "enum": ["rename", "references", "definition", "implementations", "declaration"],
-                            "description": "Refactoring action"
-                        },
-                        "path": { "type": "string", "description": "File path" },
-                        "line": { "type": "integer", "description": "1-indexed line number" },
-                        "column": { "type": "integer", "description": "0-indexed character offset" },
-                        "new_name": { "type": "string", "description": "New name (only for rename action)" },
-                        "scope": {
-                            "type": "string",
-                            "enum": ["project", "all"],
-                            "description": "Search scope for references/implementations (JetBrains backend). 'project' = project sources only (default); 'all' = include libraries/SDK."
-                        }
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["rename", "references", "definition", "implementations",
+                                 "declaration", "type_hierarchy", "symbols_overview"],
+                        "description": "Refactoring action"
                     },
-                    "required": ["action", "path", "line"]
-                }),
+                    "path": { "type": "string", "description": "File path" },
+                    "line": { "type": "integer", "description": "1-indexed line number" },
+                    "column": { "type": "integer", "description": "0-indexed character offset" },
+                    "new_name": { "type": "string", "description": "New name (only for rename action)" },
+                    "scope": {
+                        "type": "string",
+                        "enum": ["project", "all"],
+                        "description": "Search scope for references/implementations/type_hierarchy (JetBrains backend). 'project' = project sources only (default); 'all' = include libraries/SDK."
+                    },
+                    "direction": {
+                        "type": "string",
+                        "enum": ["supertypes", "subtypes"],
+                        "description": "type_hierarchy direction (JetBrains backend). 'supertypes' (default) = parents; 'subtypes' = children/implementors."
+                    }
+                },
+                "required": ["action", "path"]
+            }),
         )
     }
 
@@ -76,13 +83,16 @@ mod schema_tests {
         let tool = CtxRefactorTool;
         let def = tool.tool_def();
         let schema = serde_json::to_string(&def).unwrap();
-        assert!(
-            schema.contains("declaration"),
-            "enum missing declaration: {schema}"
-        );
-        assert!(
-            schema.contains("\"scope\""),
-            "missing scope property: {schema}"
-        );
+        for needle in [
+            "declaration",
+            "\"scope\"",
+            "type_hierarchy",
+            "symbols_overview",
+            "\"direction\"",
+            "supertypes",
+            "subtypes",
+        ] {
+            assert!(schema.contains(needle), "schema missing {needle}: {schema}");
+        }
     }
 }
