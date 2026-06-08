@@ -39,18 +39,18 @@ after `ToolSearch`. (Profiles for reference — `minimal` = 6 tools, `standard` 
 > apply to subagent-driven-development.) Subagents just `ctx_read` — **never
 > `fresh`** (mtime auto-validation keeps cached entries current), **never `raw`**.
 
-| Need                              | Tool                           | Note                                                                                   |
-|-----------------------------------|--------------------------------|----------------------------------------------------------------------------------------|
-| Orient at start                   | `ctx_overview` + `ctx_repomap` | repomap = PageRank top symbols                                                         |
-| Warm-read N files before dispatch | `ctx_multi_read paths=[…]`     | one call, not N× `ctx_read`                                                            |
-| Re-read after an edit             | `ctx_delta path=…`             | only changed lines (cheaper than diff)                                                 |
-| Checkpoint at phase boundary      | `ctx_compress`                 | long-conversation context save                                                         |
-| Warm cache for a subagent         | (automatic — shared MCP cache) | no `ctx_share`; subagent just `ctx_read`, never `fresh`                                |
-| Team coordination / diaries       | `ctx_agent`                    | register/post/read/diary/sync/handoff/share_knowledge                                  |
-| Blast radius (risk gate)          | `ctx_impact`, `ctx_callgraph`  | standard — direct                                                                      |
-| A2A task board                    | `ctx_task`       | actions: create(needs `to_agent`)/update(needs `task_id`+`state`)/list/get/message/cancel/info. State machine: created(implicit)→working→{input-required↔working}→completed\|failed\|canceled (last 3 terminal). NOTE: `in_progress` is NOT valid (08-multi-agent.md §6 typo) |
-| Shadow-git of own edits           | `ctx_checkpoint` | snapshot/log/diff/restore — separate from the user's `.git`; snapshot before+after a change to capture exactly what you modified |
-| Rule consistency across agents    | `ctx_rules`      | sync (distribute rules) / diff (drift) / lint (consistency) / status / init |
+| Need                              | Tool                           | Note                                                                                                                                                                                                                                                                          |
+|-----------------------------------|--------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Orient at start                   | `ctx_overview` + `ctx_repomap` | repomap = PageRank top symbols                                                                                                                                                                                                                                                |
+| Warm-read N files before dispatch | `ctx_multi_read paths=[…]`     | one call, not N× `ctx_read`                                                                                                                                                                                                                                                   |
+| Re-read after an edit             | `ctx_delta path=…`             | only changed lines (cheaper than diff)                                                                                                                                                                                                                                        |
+| Checkpoint at phase boundary      | `ctx_compress`                 | long-conversation context save                                                                                                                                                                                                                                                |
+| Warm cache for a subagent         | (automatic — shared MCP cache) | no `ctx_share`; subagent just `ctx_read`, never `fresh`                                                                                                                                                                                                                       |
+| Team coordination / diaries       | `ctx_agent`                    | register/post/read/diary/sync/handoff/share_knowledge                                                                                                                                                                                                                         |
+| Blast radius (risk gate)          | `ctx_impact`, `ctx_callgraph`  | standard — direct                                                                                                                                                                                                                                                             |
+| A2A task board                    | `ctx_task`                     | actions: create(needs `to_agent`)/update(needs `task_id`+`state`)/list/get/message/cancel/info. State machine: created(implicit)→working→{input-required↔working}→completed\|failed\|canceled (last 3 terminal). NOTE: `in_progress` is NOT valid (08-multi-agent.md §6 typo) |
+| Shadow-git of own edits           | `ctx_checkpoint`               | snapshot/log/diff/restore — separate from the user's `.git`; snapshot before+after a change to capture exactly what you modified                                                                                                                                              |
+| Rule consistency across agents    | `ctx_rules`                    | sync (distribute rules) / diff (drift) / lint (consistency) / status / init                                                                                                                                                                                                   |
 
 ## Controller contract (main agent, drives the plan)
 
@@ -72,33 +72,20 @@ after `ToolSearch`. (Profiles for reference — `minimal` = 6 tools, `standard` 
 
 ## Implementer subagent contract
 
-1. **Start:** `ctx_agent action=register agent_type=subagent role=dev`. The
-   controller's warm cache is already shared (one MCP process) — just `ctx_read`,
-   **never `fresh`**, **no `ctx_share` pull**.
-2. Reads/search/shell via `ctx_read`/`ctx_search`/`ctx_shell` called **directly**
-   (if deferred → `ToolSearch(query="select:<tool>")` first; **never** wrap them in
-   `ctx_call`). **Never `fresh`** (mtime auto-validates; `fresh` right after a
-   cache read is forbidden — lmd spec §4.2a), **never `raw`**. Search with
-   `ctx_search`, not `grep`/`rg` inside `ctx_shell`; read files with `ctx_read`,
-   not `cat`. Batch files with `ctx_multi_read`; re-read after your own edits with
-   `ctx_delta` (changed lines only — that is what `ctx_delta` is for, not a `fresh`
-   full re-read). **`ctx_shell`: bare command + `cwd=` — never `cd <path> &&`**
-   (the pattern router matches on prefix, `mod.rs:140-145` `starts_with("git ")`/
-   `cargo `/`npm `; a `cd … &&` wrapper kills git/cargo/npm compression) and **no
-   `2>&1`** (stderr is already captured; the redirect breaks pattern matching).
-3. **Rust (`*.rs`) edits via Serena only** (`replace_symbol_body`, `insert_*`,
-   `rename`/`move`/`safe_delete`) — never native `Edit`/`ctx_edit` on Rust.
-4. **During work:** `ctx_agent action=diary category=<discovery|decision|blocker|progress|insight>`
+1. **Start:** `ctx_agent action=register agent_type=subagent role=dev` (warm cache
+   already shared — just `ctx_read`; see the No-`ctx_share` note above).
+2. **Tool discipline** is the **Dispatch Contract below** verbatim — that block is
+   the single source; don't restate it here. → `ToolSearch(query="select:<tool>")
+3. **During work:** `ctx_agent action=diary category=<discovery|decision|blocker|progress|insight>`
    at significant steps.
-5. **On finish:** `ctx_agent action=post category=status message="…"` with status
+4. **On finish:** `ctx_agent action=post category=status message="…"` with status
    token (see below) + `ctx_agent action=handoff to_agent=<controller-id>` as baton.
-6. Durable gotchas/facts: `ctx_knowledge action=remember`.
+5. Durable gotchas/facts: `ctx_knowledge action=remember`.
 
 ## Reviewer subagent contract (spec-reviewer + code-quality-reviewer)
 
 1. **Start:** `ctx_agent action=register agent_type=subagent role=review` (warm
-   cache already shared — just `ctx_read` directly, never `fresh`, never via
-   `ctx_call`).
+   cache already shared; tool discipline = Dispatch Contract below).
 2. Post findings via `ctx_agent action=post category=finding` (in addition to the
    text return to the controller).
 3. `ctx_agent action=diary` for non-trivial judgments.

@@ -8,19 +8,11 @@
 > modes, CEP, dense output) is loaded globally via `~/.claude/CLAUDE.md`
 > (+ `rules/lean-ctx.md`). Not repeated here — only project deltas below.
 
-- **`ctx_read` — `auto` only; `diff` for re-reads; never `fresh`/`raw`** (project
-  delta — overrides the global mode-selection table in `~/.claude/rules/lean-ctx.md`):
-  - Default to plain `ctx_read(path)` and let mode **`auto`** pick the optimal
-    compression. Do **not** pass any explicit mode (`signatures`/`map`/`full`/
-    `lines:N-M`/`aggressive`/`entropy`/…). Session cache + mtime auto-validation +
-    auto-delta keep re-reads current & cheap (~13 tok).
-  - **Never `fresh`/`raw`.** The only non-`auto` read allowed is the lean-ctx
-    incremental diff — **`ctx_read(path, mode="diff")`** (the `ctx_read` `diff` mode),
-    or equivalently the dedicated tool **`ctx_delta(path)`** ("only changed lines since
-    last read"). This is **not** the Unix `diff` command and there is **no** `ctx_diff`
-    tool. Use it to verify your own post-edit changes — wherever you would otherwise
-    have reached for `fresh`. (The session cache already tracks each file's state, so a
-    `diff`/`delta` re-read is always current and costs only the changed lines.)
+- **`ctx_read` — `auto` only; never `fresh`/`raw`** (project delta, overrides the
+  global mode table): call plain `ctx_read(path)` — no explicit mode. Cache + mtime
+  auto-validation keep re-reads cheap (~13 tok). Verify your own edits with
+  `ctx_read(path, mode="diff")` or `ctx_delta(path)` (changed lines only — not the
+  Unix `diff`; no `ctx_diff` tool exists).
 - **Tests**: always `cargo nextest run`, never `cargo test`
 - **Editing `*.rs` files**: always use Serena tools (`mcp__serena__jet_brains_find_symbol`,
   `replace_symbol_body`, `insert_before_symbol`/`insert_after_symbol`, `replace_content`,
@@ -42,7 +34,7 @@
     the pattern input and can break matching.
   - **Test runners (`cargo nextest`/`cargo test`/`pytest`/…): bare command, no
     `| tail`/`| grep`/`| head`.** Test output is kept **verbatim** by design
-    (`rust/src/shell/compress/engine.rs:49-55`, `is_test_runner_command` Z. 292-330)
+    (`rust/src/shell/compress/engine.rs:49-55`, `is_test_runner_command`)
     — only head/tail-truncated when huge, with failure/summary lines preserved.
     A `cd … &&` prefix makes `is_test_runner_command` miss (it splits only on `|`,
     strips only `ENV=` prefixes), and an external `| tail`/`| grep` discards the
