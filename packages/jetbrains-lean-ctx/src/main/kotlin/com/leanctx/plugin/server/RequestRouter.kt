@@ -5,6 +5,7 @@ import com.intellij.openapi.project.Project
 import com.leanctx.plugin.dto.JsonCodec
 import com.leanctx.plugin.dto.LocationsResponse
 import com.leanctx.plugin.dto.NavRequest
+import com.leanctx.plugin.endpoint.InspectionHandlers
 import com.leanctx.plugin.endpoint.NavHandlers
 import com.leanctx.plugin.endpoint.StructureHandlers
 
@@ -23,6 +24,7 @@ class RequestRouter(
     private val log = Logger.getInstance(RequestRouter::class.java)
     private val handlers = NavHandlers(project)
     private val structureHandlers = StructureHandlers(project)
+    private val inspectionHandlers = InspectionHandlers(project)
 
     fun route(method: String, path: String, headerToken: String?, body: String): HttpResult {
         if (headerToken != token) {
@@ -34,6 +36,8 @@ class RequestRouter(
         if (method == "POST") {
             if (path == "/type_hierarchy") return dispatchHierarchy(body)
             if (path == "/symbols_overview") return dispatchOverview(body)
+            if (path == "/inspections") return dispatchInspections(body)
+            if (path == "/list_inspections") return dispatchListInspections(body)
             val handler: ((NavRequest) -> LocationsResponse)? = when (path) {
                 "/references" -> handlers::references
                 "/definition" -> handlers::definition
@@ -84,6 +88,30 @@ class RequestRouter(
         HttpResult(200, JsonCodec.error("INTERNAL", e.message ?: "bad request"))
     } catch (e: Exception) {
         log.warn("symbols_overview endpoint failed", e)
+        HttpResult(500, JsonCodec.error("INTERNAL", e.message ?: "internal error"))
+    }
+
+    private fun dispatchInspections(body: String): HttpResult = try {
+        val req = JsonCodec.parseFileRequest(body)
+        HttpResult(200, JsonCodec.toJson(inspectionHandlers.runOnFile(req)))
+    } catch (e: BackendException) {
+        HttpResult(200, JsonCodec.error(e.code, e.message ?: e.code))
+    } catch (e: IllegalArgumentException) {
+        HttpResult(200, JsonCodec.error("INTERNAL", e.message ?: "bad request"))
+    } catch (e: Exception) {
+        log.warn("inspections endpoint failed", e)
+        HttpResult(500, JsonCodec.error("INTERNAL", e.message ?: "internal error"))
+    }
+
+    private fun dispatchListInspections(body: String): HttpResult = try {
+        val req = JsonCodec.parseFileRequest(body)
+        HttpResult(200, JsonCodec.toJson(inspectionHandlers.listAvailable(req)))
+    } catch (e: BackendException) {
+        HttpResult(200, JsonCodec.error(e.code, e.message ?: e.code))
+    } catch (e: IllegalArgumentException) {
+        HttpResult(200, JsonCodec.error("INTERNAL", e.message ?: "bad request"))
+    } catch (e: Exception) {
+        log.warn("list_inspections endpoint failed", e)
         HttpResult(500, JsonCodec.error("INTERNAL", e.message ?: "internal error"))
     }
 

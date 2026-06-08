@@ -8,7 +8,10 @@ use std::time::Duration;
 use lsp_types::{GotoDefinitionResponse, Location, Position, Range, Uri, WorkspaceEdit};
 use serde_json::Value;
 
-use crate::lsp::backend::{HierarchyDirection, LspBackend, SymbolOverviewItem, TypeHierarchyNode};
+use crate::lsp::backend::{
+    HierarchyDirection, InspectionDiag, InspectionInfo, LspBackend, SymbolOverviewItem,
+    TypeHierarchyNode,
+};
 use crate::lsp::client::file_path_to_uri;
 
 const REQUEST_TIMEOUT_SECS: u64 = 30;
@@ -163,6 +166,41 @@ impl JetBrainsHttpBackend {
             .unwrap_or_default()
     }
 
+    fn parse_inspections(v: &Value) -> Vec<InspectionDiag> {
+        v.get("diagnostics")
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|d| {
+                        Some(InspectionDiag {
+                            path: d.get("path")?.as_str()?.to_string(),
+                            line: d.get("line")?.as_u64()? as u32,
+                            severity: d.get("severity")?.as_str()?.to_string(),
+                            message: d.get("message")?.as_str()?.to_string(),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn parse_inspection_list(v: &Value) -> Vec<InspectionInfo> {
+        v.get("inspections")
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|i| {
+                        Some(InspectionInfo {
+                            id: i.get("id")?.as_str()?.to_string(),
+                            name: i.get("name")?.as_str()?.to_string(),
+                            severity: i.get("severity")?.as_str()?.to_string(),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     fn parse_truncation(v: &Value, shown: u32) -> Option<crate::lsp::backend::Truncation> {
         let truncated = v.get("truncated").and_then(Value::as_bool)?;
         let total = v
@@ -282,6 +320,35 @@ impl LspBackend for JetBrainsHttpBackend {
                 .to_string());
         }
         let items = Self::parse_symbols(&resp);
+        self.last_meta = Self::parse_truncation(&resp, items.len() as u32);
+        Ok(items)
+    }
+
+    fn inspections(&mut self, uri: &Uri) -> Result<Vec<InspectionDiag>, String> {
+        let body = self.path_body(uri);
+        let resp = self.post("/inspections", &body)?;
+        if let Some(err) = resp.get("error") {
+            return Err(err
+                .get("code")
+                .and_then(Value::as_str)
+                .unwrap_or("INTERNAL")
+                .to_string());
+        }
+        let diags = Self::parse_inspections(&resp);
+        self.last_meta = Self::parse_truncation(&resp, diags.len() as u32);
+        Ok(diags)
+    }
+
+    fn list_inspections(&mut self) -> Result<Vec<InspectionInfo>, String> {
+        let resp = self.post("/list_inspections", &serde_json::json!({ "path": "" }))?;
+        if let Some(err) = resp.get("error") {
+            return Err(err
+                .get("code")
+                .and_then(Value::as_str)
+                .unwrap_or("INTERNAL")
+                .to_string());
+        }
+        let items = Self::parse_inspection_list(&resp);
         self.last_meta = Self::parse_truncation(&resp, items.len() as u32);
         Ok(items)
     }
@@ -415,14 +482,79 @@ mod tests {
     }
 
     #[test]
+    fn inspections_parses_wire_diags() {
+        let body = r#"{"diagnostics":[{"path":"A.kt","line":3,"severity":"WARNING","message":"unused variable"}],"truncated":false,"total":1}"#;
+        let port = mock_once(body);
+        let mut backend = JetBrainsHttpBackend::new(
+            port,
+            "tok".to_string(),
+            "/proj".to_string(),
+            std::process::id(),
+        );
+        let uri = file_path_to_uri("/proj/A.kt").unwrap();
+        let diags = backend.inspections(&uri).expect("should parse");
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].path, "A.kt");
+        assert_eq!(diags[0].line, 3);
+        assert_eq!(diags[0].severity, "WARNING");
+        assert_eq!(diags[0].message, "unused variable");
+    }
+
+    #[test]
+    fn inspections_maps_error_envelope_to_err() {
+        let body = r#"{"error":{"code":"UNSUPPORTED_LANGUAGE","message":"only kotlin"}}"#;
+        let port = mock_once(body);
+        let mut backend = JetBrainsHttpBackend::new(
+            port,
+            "tok".to_string(),
+            "/proj".to_string(),
+            std::process::id(),
+        );
+        let uri = file_path_to_uri("/proj/A.kt").unwrap();
+        let err = backend.inspections(&uri).expect_err("envelope → Err");
+        assert_eq!(err, "UNSUPPORTED_LANGUAGE");
+    }
+
+    #[test]
+    fn list_inspections_parses_wire_items() {
+        let body = r#"{"inspections":[{"id":"UnusedSymbol","name":"Unused declaration","severity":"WARNING"}],"truncated":true,"total":342}"#;
+        let port = mock_once(body);
+        let mut backend = JetBrainsHttpBackend::new(
+            port,
+            "tok".to_string(),
+            "/proj".to_string(),
+            std::process::id(),
+        );
+        let items = backend.list_inspections().expect("should parse");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, "UnusedSymbol");
+        assert_eq!(items[0].name, "Unused declaration");
+        assert_eq!(items[0].severity, "WARNING");
+        let meta = backend.last_truncation().expect("meta recorded");
+        assert!(meta.truncated);
+        assert_eq!(meta.total, 342);
+    }
+
+    #[test]
     fn references_records_truncation_meta() {
         let body = r#"{"locations":[{"path":"a.rs","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":1}}}],"truncated":true,"total":742}"#;
         let port = mock_once(body);
-        let mut backend =
-            JetBrainsHttpBackend::new(port, "tok".to_string(), "/proj".to_string(), std::process::id());
+        let mut backend = JetBrainsHttpBackend::new(
+            port,
+            "tok".to_string(),
+            "/proj".to_string(),
+            std::process::id(),
+        );
         let uri = file_path_to_uri("/proj/a.rs").unwrap();
         let _ = backend
-            .references(&uri, Position { line: 0, character: 0 }, "project")
+            .references(
+                &uri,
+                Position {
+                    line: 0,
+                    character: 0,
+                },
+                "project",
+            )
             .unwrap();
         let meta = backend.last_truncation().expect("meta recorded");
         assert!(meta.truncated);

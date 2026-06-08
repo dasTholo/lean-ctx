@@ -31,9 +31,10 @@ pub fn handle(args: &Value, project_root: &str, abs_path: &str) -> String {
         "declaration" => handle_declaration(abs_path, project_root, &uri, position),
         "type_hierarchy" => handle_type_hierarchy(args, abs_path, project_root, &uri, position),
         "symbols_overview" => handle_symbols_overview(abs_path, project_root, &uri),
+        "inspections" => handle_inspections(args, abs_path, project_root, &uri),
         _ => format!(
             "ERROR: Unknown action '{action}'. Available: rename, references, definition, \
-             implementations, declaration, type_hierarchy, symbols_overview."
+             implementations, declaration, type_hierarchy, symbols_overview, inspections."
         ),
     }
 }
@@ -149,7 +150,9 @@ fn handle_declaration(
     }
 }
 
-use crate::lsp::backend::{HierarchyDirection, SymbolOverviewItem, TypeHierarchyNode};
+use crate::lsp::backend::{
+    HierarchyDirection, InspectionDiag, InspectionInfo, SymbolOverviewItem, TypeHierarchyNode,
+};
 
 fn parse_direction(args: &Value) -> HierarchyDirection {
     match args.get("direction").and_then(Value::as_str) {
@@ -195,6 +198,71 @@ fn handle_symbols_overview(file_path: &str, project_root: &str, uri: &lsp_types:
         }
         Err(e) => format!("ERROR: {e}"),
     }
+}
+
+fn handle_inspections(
+    args: &Value,
+    file_path: &str,
+    project_root: &str,
+    uri: &lsp_types::Uri,
+) -> String {
+    let mode = args.get("mode").and_then(Value::as_str).unwrap_or("run");
+    match mode {
+        "run" => {
+            let result = crate::lsp::router::with_backend(file_path, project_root, |backend, _| {
+                let diags = backend.inspections(uri)?;
+                Ok((diags, backend.last_truncation()))
+            });
+            match result {
+                Ok((diags, meta)) => {
+                    let mut out = format_inspections(&diags);
+                    out.push_str(&truncation_note(diags.len(), meta));
+                    out
+                }
+                Err(e) => format!("ERROR: {e}"),
+            }
+        }
+        "list" => {
+            let result = crate::lsp::router::with_backend(file_path, project_root, |backend, _| {
+                let items = backend.list_inspections()?;
+                Ok((items, backend.last_truncation()))
+            });
+            match result {
+                Ok((items, meta)) => {
+                    let mut out = format_inspection_list(&items);
+                    out.push_str(&truncation_note(items.len(), meta));
+                    out
+                }
+                Err(e) => format!("ERROR: {e}"),
+            }
+        }
+        other => format!("ERROR: Unknown mode '{other}' for inspections. Available: run, list."),
+    }
+}
+
+fn format_inspections(diags: &[InspectionDiag]) -> String {
+    if diags.is_empty() {
+        return "No inspection findings.".to_string();
+    }
+    let mut out = format!("{} finding(s):\n", diags.len());
+    for d in diags {
+        out.push_str(&format!(
+            "  {}:{}  {}  {}\n",
+            d.path, d.line, d.severity, d.message
+        ));
+    }
+    out
+}
+
+fn format_inspection_list(items: &[InspectionInfo]) -> String {
+    if items.is_empty() {
+        return "No inspections enabled.".to_string();
+    }
+    let mut out = format!("{} inspection(s):\n", items.len());
+    for i in items {
+        out.push_str(&format!("  {}  {}  {}\n", i.id, i.name, i.severity));
+    }
+    out
 }
 
 fn truncation_note(shown: usize, meta: Option<crate::lsp::backend::Truncation>) -> String {
@@ -405,6 +473,10 @@ mod tests {
             out.contains("declaration"),
             "help text missing declaration: {out}"
         );
+        assert!(
+            out.contains("inspections"),
+            "help text missing inspections: {out}"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -561,7 +633,10 @@ mod tests {
                 Ok(None)
             }
             fn last_truncation(&self) -> Option<crate::lsp::backend::Truncation> {
-                Some(crate::lsp::backend::Truncation { truncated: true, total: 742 })
+                Some(crate::lsp::backend::Truncation {
+                    truncated: true,
+                    total: 742,
+                })
             }
         }
         crate::lsp::router::seed_stub_backend("rust", Box::new(TruncBackend));
@@ -570,10 +645,134 @@ mod tests {
             "/proj/a.rs",
             "/proj",
             &uri,
-            Position { line: 0, character: 0 },
+            Position {
+                line: 0,
+                character: 0,
+            },
             "project",
         );
-        assert!(out.contains("truncated"), "expected truncation note, got: {out}");
+        assert!(
+            out.contains("truncated"),
+            "expected truncation note, got: {out}"
+        );
         assert!(out.contains("742"), "expected total in note, got: {out}");
+    }
+
+    #[test]
+    fn inspections_run_and_list_dispatch_and_truncation() {
+        use lsp_types::Position;
+        struct InspBackend;
+        impl crate::lsp::backend::LspBackend for InspBackend {
+            fn open_file(&mut self, _u: &lsp_types::Uri, _l: &str, _t: &str) -> Result<(), String> {
+                Ok(())
+            }
+            fn references(
+                &mut self,
+                _u: &lsp_types::Uri,
+                _p: lsp_types::Position,
+                _s: &str,
+            ) -> Result<Vec<lsp_types::Location>, String> {
+                Ok(vec![])
+            }
+            fn definition(
+                &mut self,
+                _u: &lsp_types::Uri,
+                _p: lsp_types::Position,
+            ) -> Result<lsp_types::GotoDefinitionResponse, String> {
+                Ok(lsp_types::GotoDefinitionResponse::Array(vec![]))
+            }
+            fn implementations(
+                &mut self,
+                _u: &lsp_types::Uri,
+                _p: lsp_types::Position,
+                _s: &str,
+            ) -> Result<Vec<lsp_types::Location>, String> {
+                Ok(vec![])
+            }
+            fn rename(
+                &mut self,
+                _u: &lsp_types::Uri,
+                _p: lsp_types::Position,
+                _n: &str,
+            ) -> Result<Option<lsp_types::WorkspaceEdit>, String> {
+                Ok(None)
+            }
+            fn inspections(
+                &mut self,
+                _u: &lsp_types::Uri,
+            ) -> Result<Vec<crate::lsp::backend::InspectionDiag>, String> {
+                Ok(vec![crate::lsp::backend::InspectionDiag {
+                    path: "A.kt".into(),
+                    line: 7,
+                    severity: "WARNING".into(),
+                    message: "unused".into(),
+                }])
+            }
+            fn list_inspections(
+                &mut self,
+            ) -> Result<Vec<crate::lsp::backend::InspectionInfo>, String> {
+                Ok(vec![crate::lsp::backend::InspectionInfo {
+                    id: "UnusedSymbol".into(),
+                    name: "Unused declaration".into(),
+                    severity: "WARNING".into(),
+                }])
+            }
+            fn last_truncation(&self) -> Option<crate::lsp::backend::Truncation> {
+                Some(crate::lsp::backend::Truncation {
+                    truncated: true,
+                    total: 99,
+                })
+            }
+        }
+        crate::lsp::router::seed_stub_backend("rust", Box::new(InspBackend));
+        let uri = crate::lsp::client::file_path_to_uri("/proj/a.rs").unwrap();
+
+        // run mode (default): formats path:line SEVERITY message + truncation note
+        let run_out = super::handle_inspections(
+            &json!({"action": "inspections"}),
+            "/proj/a.rs",
+            "/proj",
+            &uri,
+        );
+        assert!(run_out.contains("A.kt:7"), "run diag missing: {run_out}");
+        assert!(
+            run_out.contains("WARNING"),
+            "run severity missing: {run_out}"
+        );
+        assert!(run_out.contains("unused"), "run message missing: {run_out}");
+        assert!(
+            run_out.contains("truncated"),
+            "run truncation missing: {run_out}"
+        );
+        assert!(run_out.contains("99"), "run total missing: {run_out}");
+
+        // list mode: formats id name severity
+        let list_out = super::handle_inspections(
+            &json!({"action": "inspections", "mode": "list"}),
+            "/proj/a.rs",
+            "/proj",
+            &uri,
+        );
+        assert!(
+            list_out.contains("UnusedSymbol"),
+            "list id missing: {list_out}"
+        );
+        assert!(
+            list_out.contains("Unused declaration"),
+            "list name missing: {list_out}"
+        );
+
+        // unknown mode → defined ERROR
+        let bad_out = super::handle_inspections(
+            &json!({"action": "inspections", "mode": "bogus"}),
+            "/proj/a.rs",
+            "/proj",
+            &uri,
+        );
+        assert!(
+            bad_out.contains("ERROR"),
+            "unknown mode not rejected: {bad_out}"
+        );
+        let _ = (Position::new(0, 0),); // keep import used if refactored
     }
 }

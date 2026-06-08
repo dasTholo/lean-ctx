@@ -81,7 +81,7 @@ shows the smallest tool profile that exposes the tool (`M` minimal, `S` standard
 | `ctx_architecture` | Architecture analysis over the property graph | overview\|clusters\|layers\|cycles\|entrypoints\|hotspots\|health | S |
 | `ctx_repomap` | PageRank-ranked map of the most important symbols | `max_tokens`, `focus_files[]` | S |
 | `ctx_routes` | Extract HTTP routes (Express, Flask, FastAPI, Actix, Spring, Rails, Next.js) | `method`, `path` | S |
-| `ctx_refactor` | LSP-backed refactoring | rename\|references\|definition\|implementations | S |
+| `ctx_refactor` | LSP-backed refactoring | rename\|references\|definition\|implementations\|declaration\|type_hierarchy\|symbols_overview\|inspections | S |
 | `ctx_review` | Automated code review (impact, callers, tests, smells) | review\|diff-review\|checklist | P |
 | `ctx_smells` | Code-smell detection (8 rules over property graph) | scan\|summary\|rules\|file | P |
 | `ctx_pack` | Context Package Manager (PR packs, installable context) | pr\|create\|list\|info\|install\|export\|import\|auto_load | S |

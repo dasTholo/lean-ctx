@@ -48,6 +48,17 @@ pub struct InspectionDiag {
     pub message: String,
 }
 
+/// A single available inspection (the `list` mode of the inspections action).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InspectionInfo {
+    /// Stable short name / id of the inspection tool.
+    pub id: String,
+    /// Human-readable display name.
+    pub name: String,
+    /// Severity token: ERROR | WARNING | WEAK_WARNING | INFO.
+    pub severity: String,
+}
+
 /// Truncation metadata for capped result sets (Backing B caps; spec Phase 3/4).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Truncation {
@@ -105,6 +116,9 @@ pub trait LspBackend: Send {
     }
     fn inspections(&mut self, _uri: &Uri) -> Result<Vec<InspectionDiag>, String> {
         Err("inspections requires the JetBrains backend".to_string())
+    }
+    fn list_inspections(&mut self) -> Result<Vec<InspectionInfo>, String> {
+        Err("list_inspections requires the JetBrains backend".to_string())
     }
 
     // ── Self-management (liveness) ──

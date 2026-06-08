@@ -67,4 +67,40 @@ class JsonCodecTest {
         assertTrue(json.contains("\"children\""))
         assertTrue(json.contains("Dog"))
     }
+
+    @Test
+    fun inspectionsResponseRoundTrips() {
+        val resp = InspectionsResponse(
+            diagnostics = listOf(InspectionDiagDTO("A.kt", 3, "WARNING", "unused variable")),
+            truncated = true,
+            total = 42,
+        )
+        val json = JsonCodec.toJson(resp)
+        assertTrue(json.contains("\"diagnostics\""))
+        assertTrue(json.contains("\"path\":\"A.kt\""))
+        assertTrue(json.contains("\"severity\":\"WARNING\""))
+        assertTrue(json.contains("\"truncated\":true"))
+        assertTrue(json.contains("\"total\":42"))
+    }
+
+    @Test
+    fun listInspectionsResponseRoundTrips() {
+        val resp = ListInspectionsResponse(
+            inspections = listOf(InspectionInfoDTO("UnusedSymbol", "Unused declaration", "WARNING")),
+            truncated = false,
+            total = 1,
+        )
+        val json = JsonCodec.toJson(resp)
+        assertTrue(json.contains("\"inspections\""))
+        assertTrue(json.contains("\"id\":\"UnusedSymbol\""))
+        assertTrue(json.contains("\"name\":\"Unused declaration\""))
+        assertTrue(json.contains("\"truncated\":false"))
+    }
+
+    @Test
+    fun parseFileRequestReusedForInspections() {
+        // Both /inspections and /list_inspections use the {path} body → parseFileRequest.
+        val req = JsonCodec.parseFileRequest("""{"path":"src/A.kt"}""")
+        assertEquals("src/A.kt", req.path)
+    }
 }

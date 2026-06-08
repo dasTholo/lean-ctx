@@ -64,6 +64,29 @@ data class SymbolsOverviewResponse(
     val total: Int,
 )
 
+/** A single inspection diagnostic. `line` is 1-BASED (matches Rust InspectionDiag.line). */
+data class InspectionDiagDTO(
+    val path: String,
+    val line: Int,
+    val severity: String,
+    val message: String,
+)
+
+data class InspectionsResponse(
+    val diagnostics: List<InspectionDiagDTO>,
+    val truncated: Boolean,
+    val total: Int,
+)
+
+/** A single available inspection (the `list` mode). */
+data class InspectionInfoDTO(val id: String, val name: String, val severity: String)
+
+data class ListInspectionsResponse(
+    val inspections: List<InspectionInfoDTO>,
+    val truncated: Boolean,
+    val total: Int,
+)
+
 object JsonCodec {
     private val gson: Gson = GsonBuilder().disableHtmlEscaping().create()
 

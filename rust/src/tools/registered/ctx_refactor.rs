@@ -16,16 +16,17 @@ impl McpTool for CtxRefactorTool {
         tool_def(
             "ctx_refactor",
             "LSP-powered refactoring. Actions: rename, references, definition, implementations, \
-             declaration, type_hierarchy, symbols_overview. Requires a running language server \
-             (rust-analyzer, typescript-language-server, pylsp, gopls) or the JetBrains backend \
-             (declaration, type_hierarchy, symbols_overview are JetBrains-only).",
+             declaration, type_hierarchy, symbols_overview, inspections. Requires a running \
+             language server (rust-analyzer, typescript-language-server, pylsp, gopls) or the \
+             JetBrains backend (declaration, type_hierarchy, symbols_overview, inspections are \
+             JetBrains-only).",
             json!({
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
                         "enum": ["rename", "references", "definition", "implementations",
-                                 "declaration", "type_hierarchy", "symbols_overview"],
+                                 "declaration", "type_hierarchy", "symbols_overview", "inspections"],
                         "description": "Refactoring action"
                     },
                     "path": { "type": "string", "description": "File path" },
@@ -41,6 +42,11 @@ impl McpTool for CtxRefactorTool {
                         "type": "string",
                         "enum": ["supertypes", "subtypes"],
                         "description": "type_hierarchy direction (JetBrains backend). 'supertypes' (default) = parents; 'subtypes' = children/implementors."
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["run", "list"],
+                        "description": "inspections mode (JetBrains backend). 'run' (default) = diagnostics for the given file; 'list' = enabled inspections of the current project profile."
                     }
                 },
                 "required": ["action", "path"]
@@ -91,6 +97,8 @@ mod schema_tests {
             "\"direction\"",
             "supertypes",
             "subtypes",
+            "inspections",
+            "\"mode\"",
         ] {
             assert!(schema.contains(needle), "schema missing {needle}: {schema}");
         }
