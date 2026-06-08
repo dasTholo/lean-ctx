@@ -8,7 +8,7 @@ plugins {
 }
 
 group = "com.leanctx"
-version = "1.0.0"
+version = "3.7.5"
 
 repositories {
     mavenCentral()
