@@ -75,7 +75,7 @@ after `ToolSearch`. (Profiles for reference — `minimal` = 6 tools, `standard` 
 1. **Start:** `ctx_agent action=register agent_type=subagent role=dev` (warm cache
    already shared — just `ctx_read`; see the No-`ctx_share` note above).
 2. **Tool discipline** is the **Dispatch Contract below** verbatim — that block is
-   the single source; don't restate it here. → `ToolSearch(query="select:<tool>")
+   the single source; don't restate it here.
 3. **During work:** `ctx_agent action=diary category=<discovery|decision|blocker|progress|insight>`
    at significant steps.
 4. **On finish:** `ctx_agent action=post category=status message="…"` with status
