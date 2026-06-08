@@ -218,7 +218,7 @@ mod tests {
         std::env::set_var("LEAN_CTX_SHELL_TIMEOUT_MS", "5000");
         assert_eq!(
             command_timeout("cargo install --path ."),
-            std::time::Duration::from_millis(5000)
+            std::time::Duration::from_secs(5)
         );
 
         std::env::remove_var("LEAN_CTX_SHELL_TIMEOUT_MS");

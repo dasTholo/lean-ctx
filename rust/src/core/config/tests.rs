@@ -569,7 +569,7 @@ mod extra_roots_tests {
             shell_allowlist: vec!["git".to_string(), "cargo".to_string()],
             ..Config::default()
         };
-        base.merge_local(r#"minimal_overhead = true"#);
+        base.merge_local(r"minimal_overhead = true");
         assert_eq!(base.shell_allowlist, vec!["git", "cargo"]);
     }
 
@@ -590,7 +590,7 @@ mod extra_roots_tests {
             shell_allowlist: vec!["git".to_string()],
             ..Config::default()
         };
-        base.merge_local(r#"shell_allowlist = []"#);
+        base.merge_local(r"shell_allowlist = []");
         assert!(base.shell_allowlist.is_empty());
     }
 }
