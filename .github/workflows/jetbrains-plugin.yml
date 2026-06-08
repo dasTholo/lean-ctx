@@ -1,0 +1,76 @@
+name: JetBrains Plugin
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/jetbrains-lean-ctx/**'
+      - '.github/workflows/jetbrains-plugin.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'packages/jetbrains-lean-ctx/**'
+      - '.github/workflows/jetbrains-plugin.yml'
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: packages/jetbrains-lean-ctx
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch Sources
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Gradle Wrapper Validation
+        uses: gradle/actions/wrapper-validation@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: 21
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build plugin
+        run: ./gradlew buildPlugin --console=plain
+
+  test:
+    name: Test
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch Sources
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: 21
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-home-cache-cleanup: true
+
+      - name: Run Tests
+        run: ./gradlew check --console=plain
+
+      - name: Collect Tests Result
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: jetbrains-tests-result
+          path: packages/jetbrains-lean-ctx/build/reports/tests
