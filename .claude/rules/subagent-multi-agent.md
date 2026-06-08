@@ -16,19 +16,20 @@ hooks cannot inject.
 > `ctx_read(path, mode=map|signatures)`. This file carries only the *behavioral*
 > contract — never rely on memorized signatures.
 
-## lean-ctx tool set (3.7.x — use these proactively)
+## lean-ctx tool set (use these proactively)
 
-Requires `tool_profile = "standard"`+ (`lean-ctx tools standard`). Standard tools
-below are direct — **call them directly** (`ctx_read`, `ctx_search`, `ctx_shell`,
-`ctx_tree`, `ctx_multi_read`, `ctx_delta`, …). If a standard tool shows up
-**deferred** in an isolated subagent catalog, run `ToolSearch(query="select:<tool>")`
-FIRST, then call it directly. **NEVER wrap a standard tool in `ctx_call`** (no
-`ctx_call name=ctx_read`, no `ctx_call name=ctx_shell` — that is pure overhead).
+Requires `tool_profile = power` (`lean-ctx tools power` → all 72 MCP tools
+exposed). Under `power` **every** lean-ctx tool is direct — **call it directly**
+(`ctx_read`, `ctx_search`, `ctx_shell`, `ctx_tree`, `ctx_multi_read`, `ctx_delta`,
+`ctx_task`, `ctx_handoff`, `ctx_workflow`, `ctx_share`, `ctx_rules`, …). If a tool
+shows up **deferred** in an isolated subagent catalog, run
+`ToolSearch(query="select:<tool>")` FIRST, then call it directly. **NEVER wrap a
+tool in `ctx_call`** (no `ctx_call name=ctx_read`, no `ctx_call name=ctx_task` —
+that is pure overhead).
 
-Only **power-profile** tools (`ctx_task`, `ctx_handoff`, `ctx_workflow`) are NOT
-exposed directly under `standard` — reach those via the `ctx_call` gateway:
-`ctx_call name=ctx_task arguments={action:…}`. (Alt: `lean-ctx tools power`
-exposes them directly but bloats the tool catalog.)
+`ctx_call` is now only a **fallback**: use it solely if a tool stays deferred
+after `ToolSearch`. (Profiles for reference — `minimal` = 6 tools, `standard` = 22,
+`power` = all 72; this contract assumes `power`.)
 
 > **No `ctx_share`:** the lean-ctx file cache is shared across all agents in the
 > session (one MCP process). A subagent's first `ctx_read` is already warm, so
