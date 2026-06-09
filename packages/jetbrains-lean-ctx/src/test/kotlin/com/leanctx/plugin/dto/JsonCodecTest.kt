@@ -1,6 +1,7 @@
 package com.leanctx.plugin.dto
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -128,5 +129,35 @@ class JsonCodecTest {
         val json = JsonCodec.toJson(resp)
         assertTrue(json.contains("\"applied\":true"))
         assertTrue(json.contains("\"editedText\":\"NEW\""))
+    }
+
+    @Test
+    fun parsesRenamePreviewRequest() {
+        val body = """{"path":"a.kt","range":{"start":{"line":1,"character":4},"end":{"line":1,"character":7}},"new_name":"bar","search_comments":true}"""
+        val req = JsonCodec.parseRenamePreviewRequest(body)
+        assertEquals("a.kt", req.path)
+        assertEquals(4, req.range.start.character)
+        assertEquals("bar", req.new_name)
+        assertTrue(req.search_comments)
+        assertFalse(req.search_text_occurrences) // default
+    }
+
+    @Test
+    fun parsesRenameApplyRequestWithForceDefault() {
+        val body = """{"path":"a.kt","range":{"start":{"line":1,"character":4},"end":{"line":1,"character":7}},"new_name":"bar"}"""
+        val req = JsonCodec.parseRenameApplyRequest(body)
+        assertEquals("bar", req.new_name)
+        assertFalse(req.force) // default false
+    }
+
+    @Test
+    fun serializesRenamePreviewResponse() {
+        val resp = RenamePreviewResponse(
+            usages = listOf(UsageSiteDTO("a.kt", TextRangeDTO(PositionDTO(1, 4), PositionDTO(1, 7)), "foo()")),
+            conflicts = listOf(ConflictDTO("a.kt", null, "name clash")),
+        )
+        val json = JsonCodec.toJson(resp)
+        assertTrue(json, json.contains("\"usages\""))
+        assertTrue(json, json.contains("\"name clash\""))
     }
 }

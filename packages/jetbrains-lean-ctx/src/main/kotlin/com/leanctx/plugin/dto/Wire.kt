@@ -101,6 +101,47 @@ data class EditResponse(
     val editedText: String,
 )
 
+/** Request body for /renamePreview. range = target symbol declaration span (0-based). */
+data class RenamePreviewRequest(
+    val path: String,
+    val range: TextRangeDTO,
+    val new_name: String,
+    val search_comments: Boolean = false,
+    val search_text_occurrences: Boolean = false,
+)
+
+/** A single semantic usage of the renamed symbol (declaration or reference). */
+data class UsageSiteDTO(
+    val path: String,
+    val range: TextRangeDTO,
+    val context: String? = null,
+)
+
+/** A refactoring conflict. `range` is nullable (some conflicts are scope-level). */
+data class ConflictDTO(
+    val path: String,
+    val range: TextRangeDTO?,
+    val message: String,
+)
+
+data class RenamePreviewResponse(
+    val usages: List<UsageSiteDTO>,
+    val conflicts: List<ConflictDTO>,
+)
+
+/** Request body for /renameApply. force = override blocking conflicts (Rust already gated). */
+data class RenameApplyRequest(
+    val path: String,
+    val range: TextRangeDTO,
+    val new_name: String,
+    val force: Boolean = false,
+)
+
+data class RenameApplyResponse(
+    val applied: Boolean,
+    val changed_paths: List<String>,
+)
+
 object JsonCodec {
     private val gson: Gson = GsonBuilder().disableHtmlEscaping().create()
 
@@ -125,6 +166,14 @@ object JsonCodec {
 
     fun parseEditRequest(body: String): EditRequest =
         gson.fromJson(body, EditRequest::class.java)
+            ?: throw IllegalArgumentException("empty request body")
+
+    fun parseRenamePreviewRequest(body: String): RenamePreviewRequest =
+        gson.fromJson(body, RenamePreviewRequest::class.java)
+            ?: throw IllegalArgumentException("empty request body")
+
+    fun parseRenameApplyRequest(body: String): RenameApplyRequest =
+        gson.fromJson(body, RenameApplyRequest::class.java)
             ?: throw IllegalArgumentException("empty request body")
 
     fun toJson(value: Any): String = gson.toJson(value)
