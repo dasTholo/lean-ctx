@@ -5,7 +5,6 @@ import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Ref
-import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiNamedElement
 import com.intellij.refactoring.rename.RenameProcessor
@@ -102,9 +101,8 @@ class SymbolRefactorer(private val project: Project) {
                 processor.run()
                 // Persist every changed document to disk so lean-ctx (reads from disk) sees it.
                 WriteCommandAction.runWriteCommandAction(project) {
-                    val fdm = FileDocumentManager.getInstance()
-                    PsiDocumentManager.getInstance(project).let { /* commits handled by run() */ }
-                    fdm.saveAllDocuments()
+                    // PSI commits are handled by RenameProcessor.run(); just flush to disk.
+                    FileDocumentManager.getInstance().saveAllDocuments()
                 }
             } catch (t: Throwable) {
                 error = t
