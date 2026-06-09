@@ -135,6 +135,18 @@ class SymbolRefactorer(private val project: Project) {
             val conflictDtos = conflicts.entrySet().flatMap { entry ->
                 val loc = locator.toLocation(entry.key)
                 entry.value.map { msg -> ConflictDTO(loc?.path ?: "", loc?.range, msg) }
+            }.toMutableList()
+            // Surface a file-overwrite collision as a conflict too, so the Rust gate blocks
+            // apply (without force) and the headless apply pre-check (with force) reports it
+            // cleanly instead of deadlocking on the IDE's modal overwrite prompt (gate #4b).
+            fileRenameCollision(element, req.new_name)?.let { name ->
+                conflictDtos.add(
+                    ConflictDTO(
+                        locator.toLocation(element)?.path ?: "",
+                        null,
+                        "target file '$name' already exists; rename would overwrite it",
+                    )
+                )
             }
             RenamePreviewResponse(usageDtos, conflictDtos)
         }
@@ -145,6 +157,14 @@ class SymbolRefactorer(private val project: Project) {
             resolveTarget(
                 RenamePreviewRequest(req.path, req.range, req.new_name, false, false)
             )
+        }
+        // Refuse a rename that would overwrite an existing source file (declaration file is
+        // named after the symbol → the file is renamed too). The IDE would otherwise raise a
+        // modal "file already exists / Overwrite·Skip" prompt that deadlocks this headless
+        // server → /renameApply timeout (runIde gate #4b). force overrides symbol/usage
+        // conflicts, never a physical file overwrite.
+        locator.inSmartReadAction { fileRenameCollision(element, req.new_name) }?.let { name ->
+            throw BackendException("CONFLICT", "target file '$name' already exists; rename would overwrite it")
         }
         val processor = locator.inSmartReadAction {
             CapturingProcessor(project, element, req.new_name, false, false)
@@ -188,6 +208,24 @@ class SymbolRefactorer(private val project: Project) {
         val named = PsiTreeUtil.getParentOfType(at, PsiNamedElement::class.java, false)
         if (named != null && named.name != null) return named
         throw BackendException("NO_SYMBOL", "no named declaration at target range")
+    }
+
+    /**
+     * If renaming [element] to [newName] would also rename its declaration file (the file is
+     * named after the symbol, e.g. `Widget.kt` for `class Widget`) and a file with the target
+     * name already exists in the same directory, returns that target file name; else null.
+     * A non-null result must be refused as a CONFLICT — never silently overwrite a source
+     * file, and never let the IDE's modal overwrite prompt block the headless server.
+     * MUST be called inside a read action (PSI + VFS access).
+     */
+    private fun fileRenameCollision(element: PsiElement, newName: String): String? {
+        val currentName = (element as? PsiNamedElement)?.name ?: return null
+        val vFile = element.containingFile?.virtualFile ?: return null
+        if (vFile.nameWithoutExtension != currentName) return null // file not renamed with the symbol
+        val ext = vFile.extension
+        val targetName = if (ext.isNullOrEmpty()) newName else "$newName.$ext"
+        if (targetName == vFile.name) return null // no-op rename
+        return if (vFile.parent?.findChild(targetName) != null) targetName else null
     }
 
     private fun contextSnippet(el: PsiElement): String? {

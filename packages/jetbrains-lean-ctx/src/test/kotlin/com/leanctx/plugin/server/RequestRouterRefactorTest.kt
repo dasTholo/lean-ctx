@@ -146,4 +146,33 @@ class RequestRouterRefactorTest : BasePlatformTestCase() {
         assertEquals(r.body, 200, r.status)
         assertTrue(r.body, r.body.contains("INDEXING"))
     }
+
+    fun testRenameApplyFileCollisionRefusedEvenWithForce() {
+        // The declaration file is named after the class, so renaming Widget → Gadget would
+        // ALSO rename the file Widget.kt → Gadget.kt. Gadget.kt already exists, so the rename
+        // must be refused as a CONFLICT (never silently overwrite a source file) — even with
+        // force=true. Regression for the runIde #4b hang: the un-intercepted file-overwrite
+        // modal ("file already exists / Overwrite·Skip") blocked the EDT → /renameApply
+        // timed out. force overrides symbol/usage conflicts, NOT a physical file overwrite.
+        val widgetPath = writeFile("Widget.kt", "package p\nclass Widget\n")
+        writeFile("Gadget.kt", "package p\nclass Gadget\n")
+
+        val body = """
+            {"path":"Widget.kt",
+             "range":{"start":{"line":1,"character":6},"end":{"line":1,"character":12}},
+             "new_name":"Gadget","force":true}
+        """.trimIndent()
+
+        val res = routeOffEdt("POST", "/renameApply", body)
+        assertEquals(res.body, 200, res.status)
+        assertTrue(res.body, res.body.contains("CONFLICT"))
+        assertFalse(res.body, res.body.contains("\"applied\":true"))
+
+        // Widget.kt is untouched: no overwrite, no half-rename.
+        WriteAction.computeAndWait<Unit, RuntimeException> {
+            LocalFileSystem.getInstance().refreshAndFindFileByPath(widgetPath)
+        }
+        val w = Files.readString(Paths.get(widgetPath))
+        assertTrue(w, w.contains("class Widget"))
+    }
 }
