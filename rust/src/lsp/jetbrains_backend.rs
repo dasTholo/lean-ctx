@@ -330,7 +330,7 @@ impl JetBrainsHttpBackend {
                     .filter_map(|c| {
                         Some(Conflict {
                             path: c.get("path")?.as_str()?.to_string(),
-                            range: c.get("range").and_then(|r| Self::parse_range0(r)),
+                            range: c.get("range").and_then(Self::parse_range0),
                             message: c.get("message")?.as_str()?.to_string(),
                         })
                     })
