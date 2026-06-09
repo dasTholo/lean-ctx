@@ -3,6 +3,7 @@ package com.leanctx.plugin.server
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.WriteAction
 import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import java.nio.file.Files
@@ -40,9 +41,19 @@ class RequestRouterRefactorTest : BasePlatformTestCase() {
         val base = project.basePath!!
         val p = Paths.get(base, rel)
         Files.createDirectories(p.parent)
+        // Ensure the file exists on disk so LocalFileSystem can resolve it (PsiLocator
+        // resolves via LocalFileSystem.findFileByPath, which the in-memory TempFileSystem
+        // of addFileToProject would not satisfy).
         Files.writeString(p, content)
         WriteAction.computeAndWait<Unit, RuntimeException> {
-            LocalFileSystem.getInstance().refreshAndFindFileByPath(p.toString())
+            val vFile = LocalFileSystem.getInstance().refreshAndFindFileByPath(p.toString())
+                ?: error("could not refresh VFS for $p")
+            // Write the content THROUGH the VFS layer (VfsUtil.saveText) instead of leaving
+            // the raw Files.writeString as the source of truth. This keeps the VFS/document
+            // model and disk byte-identical, so a later document write (RenameProcessor) does
+            // not race a freshly-refreshed disk state → no MemoryDiskConflictResolver
+            // "Unexpected memory-disk conflict" flakiness.
+            VfsUtil.saveText(vFile, content)
         }
         return p.toString()
     }
