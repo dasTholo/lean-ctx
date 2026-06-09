@@ -104,6 +104,73 @@ pub struct EditResult {
     pub diff: String,
 }
 
+/// Query for `rename_preview`: the target symbol is already resolved (name_path →
+/// range) in `ctx_refactor`; the backend only ever sees an absolute + relative
+/// path and a range, exactly like `RangeEdit` (no `name_path` on the wire).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenameQuery {
+    /// Absolute, jail-checked path of the file containing the target symbol.
+    pub abs_path: String,
+    /// Project-relative path (wire body sent to Backing B).
+    pub rel_path: String,
+    /// Declaration span of the target symbol (start is what the IDE resolves from).
+    pub target_range: TextRange0Based,
+    pub new_name: String,
+    /// Also rename matches inside comments/strings (RenameProcessor flag).
+    pub search_comments: bool,
+    /// Also rename non-code text occurrences (RenameProcessor flag).
+    pub search_text_occurrences: bool,
+}
+
+/// A single semantic usage of the target symbol (declaration or reference),
+/// returned by Backing B's `RenameProcessor.findUsages`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UsageSite {
+    /// Project-relative path of the file holding this usage.
+    pub path: String,
+    /// 0-based range of the renamed identifier at this site.
+    pub range: TextRange0Based,
+    /// Optional one-line context snippet (display only; NOT part of plan_hash).
+    pub context: Option<String>,
+}
+
+/// A refactoring conflict surfaced by `RenameProcessor.preprocessUsages`
+/// (name collision, visibility loss, override clash). `range` is optional —
+/// some conflicts are scope-level, not tied to a single offset.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Conflict {
+    pub path: String,
+    pub range: Option<TextRange0Based>,
+    pub message: String,
+}
+
+/// Outcome of `rename_preview`: every usage + every conflict. The `plan_hash`
+/// is built in Rust from this (see `ctx_refactor::plan_hash`), never here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenamePlan {
+    pub usages: Vec<UsageSite>,
+    pub conflicts: Vec<Conflict>,
+}
+
+/// Apply request: same target addressing as `RenameQuery` plus the `force`
+/// flag (passed through to `RenameProcessor`; Rust has already gated conflicts).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenameApply {
+    pub abs_path: String,
+    pub rel_path: String,
+    pub target_range: TextRange0Based,
+    pub new_name: String,
+    pub force: bool,
+}
+
+/// Outcome of `rename_apply`: which files the IDE actually changed (no per-file
+/// bodies — Multi-File would be too large; Rust re-reads via mtime validation).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenameResult {
+    pub applied: bool,
+    pub changed_paths: Vec<String>,
+}
+
 /// Code-intelligence backend. `Send` so instances can live in the global
 /// `BACKENDS` cache (`Mutex<HashMap<String, Box<dyn LspBackend>>>`).
 pub trait LspBackend: Send {
@@ -178,6 +245,18 @@ pub trait LspBackend: Send {
         crate::lsp::edit_apply::local_range_write(edit)
     }
 
+    /// Phase 1 of the Two-Phase rename: resolve all usages + conflicts of the
+    /// target symbol. DEFAULT = `Err(BACKEND_REQUIRED)` — there is NO lossless
+    /// headless usage search (spec §3); only Backing B (live IDE) overrides this.
+    fn rename_preview(&mut self, _req: &RenameQuery) -> Result<RenamePlan, String> {
+        Err("BACKEND_REQUIRED: rename requires a running JetBrains IDE".to_string())
+    }
+    /// Phase 2 of the Two-Phase rename: perform the Multi-File rename as ONE
+    /// transaction (one Undo entry). DEFAULT = `Err(BACKEND_REQUIRED)`.
+    fn rename_apply(&mut self, _req: &RenameApply) -> Result<RenameResult, String> {
+        Err("BACKEND_REQUIRED: rename requires a running JetBrains IDE".to_string())
+    }
+
     // ── Self-management (liveness) ──
     /// Whether a cached instance of this backend is no longer valid and must be
     /// evicted + re-selected. Backing A (in-process LSP) is never stale → default `false`.
@@ -189,5 +268,68 @@ pub trait LspBackend: Send {
     /// or no capped call yet). Lets `ctx_refactor` surface "(truncated …)".
     fn last_truncation(&self) -> Option<Truncation> {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rename_types_construct_and_clone() {
+        let q = RenameQuery {
+            abs_path: "/proj/a.rs".into(),
+            rel_path: "a.rs".into(),
+            target_range: TextRange0Based { start_line: 0, start_char: 0, end_line: 0, end_char: 3 },
+            new_name: "bar".into(),
+            search_comments: false,
+            search_text_occurrences: false,
+        };
+        let q2 = q.clone();
+        assert_eq!(q2.new_name, "bar");
+
+        let plan = RenamePlan {
+            usages: vec![UsageSite {
+                path: "a.rs".into(),
+                range: TextRange0Based { start_line: 1, start_char: 4, end_line: 1, end_char: 7 },
+                context: Some("foo()".into()),
+            }],
+            conflicts: vec![Conflict {
+                path: "a.rs".into(),
+                range: None,
+                message: "name already exists".into(),
+            }],
+        };
+        assert_eq!(plan.usages.len(), 1);
+        assert_eq!(plan.conflicts[0].message, "name already exists");
+
+        let apply = RenameApply {
+            abs_path: "/proj/a.rs".into(),
+            rel_path: "a.rs".into(),
+            target_range: q.target_range,
+            new_name: "bar".into(),
+            force: true,
+        };
+        let res = RenameResult { applied: true, changed_paths: vec!["a.rs".into()] };
+        assert!(apply.force);
+        assert!(res.applied);
+    }
+
+    #[test]
+    fn headless_rename_default_is_backend_required() {
+        // HeadlessBackend inherits the Trait default → BACKEND_REQUIRED, no apply.
+        let mut be = crate::lsp::edit_apply::HeadlessBackend;
+        let q = RenameQuery {
+            abs_path: "/x".into(), rel_path: "x".into(),
+            target_range: TextRange0Based { start_line: 0, start_char: 0, end_line: 0, end_char: 1 },
+            new_name: "y".into(), search_comments: false, search_text_occurrences: false,
+        };
+        let err = be.rename_preview(&q).unwrap_err();
+        assert!(err.starts_with("BACKEND_REQUIRED"), "got: {err}");
+        let a = RenameApply {
+            abs_path: "/x".into(), rel_path: "x".into(),
+            target_range: q.target_range, new_name: "y".into(), force: false,
+        };
+        assert!(be.rename_apply(&a).unwrap_err().starts_with("BACKEND_REQUIRED"));
     }
 }
