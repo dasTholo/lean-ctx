@@ -180,9 +180,15 @@ fn bench_total_input_overhead() {
     // Full tool surface (all 72 tools, registry SSOT incl. full property
     // schemas) — the worst-case opt-in overhead. The default lazy surface is
     // far smaller; see `bench_lazy_default_vs_full_overhead` (#141).
+    //
+    // Threshold raised 11000 → 11600: the main merge grew the tool count and the
+    // v2b JetBrains rename surface (ctx_refactor: +2 actions, +4 params) adds a
+    // small, legitimate increment (~11320 observed). v2c FOLLOW-UP: analyze the
+    // real overhead drivers (schema-dominant tools, lazy-default vs full surface)
+    // instead of raising this ceiling further.
     assert!(
-        total < 11000,
-        "Total input overhead should be <11000 tokens, got {total}"
+        total < 11600,
+        "Total input overhead should be <11600 tokens, got {total}"
     );
 }
 
