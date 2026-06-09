@@ -9,6 +9,13 @@ pub fn handle(args: &Value, project_root: &str, abs_path: &str) -> String {
         .and_then(Value::as_str)
         .unwrap_or("references");
 
+    if matches!(
+        action,
+        "replace_symbol_body" | "insert_before_symbol" | "insert_after_symbol"
+    ) {
+        return handle_symbol_edit(action, args, project_root);
+    }
+
     let line = args.get("line").and_then(Value::as_u64).unwrap_or(1) as u32;
     let column = args.get("column").and_then(Value::as_u64).unwrap_or(0) as u32;
     let scope = args
@@ -34,7 +41,8 @@ pub fn handle(args: &Value, project_root: &str, abs_path: &str) -> String {
         "inspections" => handle_inspections(args, abs_path, project_root, &uri),
         _ => format!(
             "ERROR: Unknown action '{action}'. Available: rename, references, definition, \
-             implementations, declaration, type_hierarchy, symbols_overview, inspections."
+             implementations, declaration, type_hierarchy, symbols_overview, inspections, \
+             replace_symbol_body, insert_before_symbol, insert_after_symbol."
         ),
     }
 }
@@ -154,6 +162,131 @@ use crate::lsp::backend::{
     HierarchyDirection, InspectionDiag, InspectionInfo, SymbolOverviewItem, TypeHierarchyNode,
 };
 
+/// A resolved symbol location (project-relative path + 1-based inclusive line span).
+#[derive(Debug)]
+pub(crate) struct Resolved {
+    pub rel_path: String,
+    pub start_line: usize,
+    pub end_line: usize,
+}
+
+/// Apply a resolved edit. IDE-first: a live JetBrains backend (port file +
+/// liveness, mirroring router::select_backend) handles it via WriteCommandAction;
+/// otherwise the headless local_range_write applies the identical bytes.
+pub(crate) fn apply_symbol_edit(
+    action: &str,
+    project_root: &str,
+    edit: &crate::lsp::backend::RangeEdit,
+) -> Result<crate::lsp::backend::EditResult, String> {
+    use crate::lsp::backend::LspBackend;
+    use crate::lsp::port_discovery;
+
+    let mut backend: Box<dyn LspBackend> =
+        if let Some(pf) = port_discovery::read_port_file(project_root) {
+            if port_discovery::pid_alive(pf.pid) && port_discovery::health_ok(&pf) {
+                Box::new(crate::lsp::jetbrains_backend::JetBrainsHttpBackend::new(
+                    pf.port,
+                    pf.token,
+                    project_root.to_string(),
+                    pf.pid,
+                ))
+            } else {
+                Box::new(crate::lsp::edit_apply::HeadlessBackend)
+            }
+        } else {
+            Box::new(crate::lsp::edit_apply::HeadlessBackend)
+        };
+
+    match action {
+        "replace_symbol_body" => backend.replace_symbol_body(edit),
+        "insert_before_symbol" => backend.insert_before_symbol(edit),
+        "insert_after_symbol" => backend.insert_after_symbol(edit),
+        other => Err(format!("INTERNAL: not an edit action: {other}")),
+    }
+}
+
+/// Leading whitespace of the 1-based `line` in `content` (anchor indentation).
+pub(crate) fn anchor_indent(content: &str, line: usize) -> String {
+    content
+        .lines()
+        .nth(line.saturating_sub(1))
+        .map(|l| l.chars().take_while(|c| *c == ' ' || *c == '\t').collect())
+        .unwrap_or_default()
+}
+
+/// Prefix `indent` to the first line of `text` iff that line has no leading
+/// whitespace of its own (deterministic; the same Rust computes it for both
+/// apply paths, so the wire text is byte-identical).
+pub(crate) fn reindent_first_line(text: &str, indent: &str) -> String {
+    if text.starts_with(' ') || text.starts_with('\t') || indent.is_empty() {
+        return text.to_string();
+    }
+    format!("{indent}{text}")
+}
+
+/// Resolve a `name_path` (`Class/method` or bare `name`) to a single symbol via
+/// the tree-sitter index (spec v2a §3/§5.3). Disambiguates a qualified path by
+/// enclosing-range containment (ancestor symbol's line span contains the leaf's).
+pub(crate) fn resolve_name_path(name_path: &str, project_root: &str) -> Result<Resolved, String> {
+    use crate::core::graph_provider;
+    let open = graph_provider::open_or_build(project_root)
+        .ok_or_else(|| "NO_SYMBOL: no symbol index available".to_string())?;
+    let gp = &open.provider;
+
+    let segments: Vec<&str> = name_path.split('/').filter(|s| !s.is_empty()).collect();
+    let leaf = *segments
+        .last()
+        .ok_or_else(|| "NO_SYMBOL: empty name_path".to_string())?;
+
+    // Exact-name leaf candidates (case-sensitive — the index may substring-match).
+    let mut leaves: Vec<_> = gp
+        .find_symbols(leaf, None, None)
+        .into_iter()
+        .filter(|s| s.name == leaf)
+        .collect();
+
+    // Qualify by the immediate ancestor segment, if present.
+    if segments.len() >= 2 {
+        let ancestor = segments[segments.len() - 2];
+        let parents: Vec<_> = gp
+            .find_symbols(ancestor, None, None)
+            .into_iter()
+            .filter(|s| s.name == ancestor)
+            .collect();
+        leaves.retain(|leaf_sym| {
+            parents.iter().any(|p| {
+                p.file == leaf_sym.file
+                    && p.start_line <= leaf_sym.start_line
+                    && leaf_sym.end_line <= p.end_line
+            })
+        });
+    }
+
+    match leaves.len() {
+        0 => Err(format!(
+            "NO_SYMBOL: '{name_path}' did not resolve to any indexed symbol"
+        )),
+        1 => Ok(Resolved {
+            rel_path: leaves[0].file.clone(),
+            start_line: leaves[0].start_line,
+            end_line: leaves[0].end_line,
+        }),
+        _ => {
+            let mut msg = format!(
+                "AMBIGUOUS_SYMBOL: '{name_path}' matches {} symbols; qualify it:\n",
+                leaves.len()
+            );
+            for s in leaves.iter().take(10) {
+                msg.push_str(&format!(
+                    "  {}:{} (L{}-{})\n",
+                    s.file, s.name, s.start_line, s.end_line
+                ));
+            }
+            Err(msg)
+        }
+    }
+}
+
 fn parse_direction(args: &Value) -> HierarchyDirection {
     match args.get("direction").and_then(Value::as_str) {
         Some("subtypes") => HierarchyDirection::Subtypes,
@@ -198,6 +331,150 @@ fn handle_symbols_overview(file_path: &str, project_root: &str, uri: &lsp_types:
         }
         Err(e) => format!("ERROR: {e}"),
     }
+}
+
+fn handle_symbol_edit(action: &str, args: &Value, project_root: &str) -> String {
+    // 1) Resolve target: name_path (primary) or path+line(+column) fallback.
+    let (rel_path, start_line, end_line) = if let Some(np) =
+        args.get("name_path").and_then(Value::as_str)
+    {
+        match resolve_name_path(np, project_root) {
+            Ok(r) => (r.rel_path, r.start_line, r.end_line),
+            Err(e) => return format!("ERROR: {e}"),
+        }
+    } else {
+        let Some(path) = args.get("path").and_then(Value::as_str) else {
+            return "ERROR: provide 'name_path' or 'path'+'line' for symbol edits.".to_string();
+        };
+        let line = args.get("line").and_then(Value::as_u64).unwrap_or(0) as usize;
+        let end = args
+            .get("end_line")
+            .and_then(Value::as_u64)
+            .unwrap_or(line as u64) as usize;
+        if line == 0 {
+            return "ERROR: 'line' is required (1-based) when using the path fallback.".to_string();
+        }
+        (path.to_string(), line, end)
+    };
+
+    // 2) PathJail on the resolved path (v1 §4.5 seam — critical before writes).
+    let abs_path =
+        match crate::core::path_resolve::resolve_tool_path(Some(project_root), None, &rel_path) {
+            Ok(p) => p,
+            Err(e) => return format!("ERROR: path blocked by jail: {e}"),
+        };
+
+    let content = match std::fs::read_to_string(&abs_path) {
+        Ok(c) => c,
+        Err(e) => return format!("ERROR: FILE_NOT_FOUND: {abs_path}: {e}"),
+    };
+
+    // 3) Build the canonical range + final wire text per action.
+    let expected_hash = args
+        .get("expected_hash")
+        .and_then(Value::as_str)
+        .map(String::from);
+    let (range, text) = match action {
+        "replace_symbol_body" => {
+            let Some(new_body) = args.get("new_body").and_then(Value::as_str) else {
+                return "ERROR: 'new_body' is required for replace_symbol_body.".to_string();
+            };
+            let end_col = content
+                .lines()
+                .nth(end_line.saturating_sub(1))
+                .map_or(0, str::len) as u32;
+            (
+                crate::lsp::backend::TextRange0Based {
+                    start_line: (start_line - 1) as u32,
+                    start_char: 0,
+                    end_line: (end_line - 1) as u32,
+                    end_char: end_col,
+                },
+                new_body.to_string(),
+            )
+        }
+        "insert_before_symbol" | "insert_after_symbol" => {
+            let Some(t) = args.get("text").and_then(Value::as_str) else {
+                return format!("ERROR: 'text' is required for {action}.");
+            };
+            let indent = anchor_indent(&content, start_line);
+            let final_text = format!("{}\n", reindent_first_line(t, &indent));
+            let insert_line = if action == "insert_before_symbol" {
+                (start_line - 1) as u32
+            } else {
+                end_line as u32
+            };
+            (
+                crate::lsp::backend::TextRange0Based {
+                    start_line: insert_line,
+                    start_char: 0,
+                    end_line: insert_line,
+                    end_char: 0,
+                },
+                final_text,
+            )
+        }
+        other => return format!("ERROR: INTERNAL: not an edit action: {other}"),
+    };
+
+    // CONFLICT guard (BLAKE3, same source as headless local_range_write): verify
+    // expected_hash against the current on-disk range BEFORE dispatch. This makes
+    // the IDE path enforce CONFLICT identically to the headless path (which also
+    // re-checks atomically). hash_hex == blake3::hash(...).to_hex().
+    if let Some(exp) = &expected_hash {
+        let s =
+            match crate::lsp::edit_apply::offset_of(&content, range.start_line, range.start_char) {
+                Ok(o) => o,
+                Err(e) => return format!("ERROR: {e}"),
+            };
+        let e = match crate::lsp::edit_apply::offset_of(&content, range.end_line, range.end_char) {
+            Ok(o) => o,
+            Err(e) => return format!("ERROR: {e}"),
+        };
+        if e < s {
+            return "ERROR: POSITION_OUT_OF_RANGE: end before start".to_string();
+        }
+        let actual = crate::core::hasher::hash_hex(&content.as_bytes()[s..e]);
+        if *exp != actual {
+            return format!(
+                "ERROR: CONFLICT: range hash mismatch (expected={exp}, actual={actual})"
+            );
+        }
+    }
+
+    let edit = crate::lsp::backend::RangeEdit {
+        abs_path,
+        rel_path,
+        range,
+        text,
+        expected_hash,
+    };
+
+    // 4) Dispatch (IDE-first, headless fallback) + format.
+    match apply_symbol_edit(action, project_root, &edit) {
+        Ok(res) => format_edit_result(action, &res),
+        Err(e) => format!("ERROR: {e}"),
+    }
+}
+
+fn format_edit_result(action: &str, res: &crate::lsp::backend::EditResult) -> String {
+    if !res.applied {
+        return format!("{action}: not applied.");
+    }
+    let r = res.new_range;
+    let body = if res.diff.is_empty() {
+        res.edited_text.clone()
+    } else {
+        res.diff.clone()
+    };
+    format!(
+        "{action} applied (L{}:{}-L{}:{}):\n{}",
+        r.start_line + 1,
+        r.start_char,
+        r.end_line + 1,
+        r.end_char,
+        body
+    )
 }
 
 fn handle_inspections(
@@ -587,6 +864,144 @@ mod tests {
             super::parse_direction(&json!({"direction": "supertypes"})),
             HierarchyDirection::Supertypes
         );
+    }
+
+    #[test]
+    fn resolve_name_path_unique_class() {
+        let _lock = crate::core::data_dir::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        let data = tmp.path().join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        std::env::set_var("LEAN_CTX_DATA_DIR", data.to_string_lossy().to_string());
+
+        let proj = tmp.path().join("proj");
+        std::fs::create_dir_all(proj.join("src")).unwrap();
+        std::fs::write(
+            proj.join("Cargo.toml"),
+            "[package]\nname=\"x\"\nversion=\"0.0.0\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            proj.join("src/lib.rs"),
+            "pub struct UniqueZqWidget { pub a: u8 }\n",
+        )
+        .unwrap();
+        let root = proj.to_string_lossy().to_string();
+
+        let r = super::resolve_name_path("UniqueZqWidget", &root).expect("unique resolution");
+        assert!(r.rel_path.ends_with("lib.rs"), "got: {}", r.rel_path);
+        assert!(r.end_line >= r.start_line && r.start_line > 0);
+
+        std::env::remove_var("LEAN_CTX_DATA_DIR");
+    }
+
+    #[test]
+    fn resolve_name_path_unknown_is_no_symbol() {
+        let _lock = crate::core::data_dir::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        let data = tmp.path().join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        std::env::set_var("LEAN_CTX_DATA_DIR", data.to_string_lossy().to_string());
+
+        let proj = tmp.path().join("proj");
+        std::fs::create_dir_all(proj.join("src")).unwrap();
+        std::fs::write(
+            proj.join("Cargo.toml"),
+            "[package]\nname=\"x\"\nversion=\"0.0.0\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            proj.join("src/lib.rs"),
+            "pub struct UniqueZqWidget { pub a: u8 }\n",
+        )
+        .unwrap();
+        let root = proj.to_string_lossy().to_string();
+
+        let err = super::resolve_name_path("ZzzNoSuchSymbol123", &root).unwrap_err();
+        assert!(err.starts_with("NO_SYMBOL"), "got: {err}");
+
+        std::env::remove_var("LEAN_CTX_DATA_DIR");
+    }
+
+    #[test]
+    fn anchor_indent_reads_leading_whitespace() {
+        let content = "class A {\n    fun b() {}\n}\n";
+        assert_eq!(super::anchor_indent(content, 2), "    "); // line 2 (1-based) → 4 spaces
+        assert_eq!(super::anchor_indent(content, 1), ""); // line 1 → none
+    }
+
+    #[test]
+    fn reindent_prefixes_first_line_only() {
+        assert_eq!(
+            super::reindent_first_line("fun x() {}", "    "),
+            "    fun x() {}"
+        );
+        // Already-indented text is left untouched.
+        assert_eq!(
+            super::reindent_first_line("    fun x()", "    "),
+            "    fun x()"
+        );
+    }
+
+    #[test]
+    fn apply_symbol_edit_headless_replaces_range() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("Foo.txt"), "aaa\nBODY\nccc\n").unwrap();
+        let abs = dir.path().join("Foo.txt").to_string_lossy().to_string();
+        let edit = crate::lsp::backend::RangeEdit {
+            abs_path: abs.clone(),
+            rel_path: "Foo.txt".into(),
+            range: crate::lsp::backend::TextRange0Based {
+                start_line: 1,
+                start_char: 0,
+                end_line: 1,
+                end_char: 4,
+            },
+            text: "NEW".into(),
+            expected_hash: None,
+        };
+        // No port file under this temp dir → headless apply.
+        let res =
+            super::apply_symbol_edit("replace_symbol_body", dir.path().to_str().unwrap(), &edit)
+                .unwrap();
+        assert!(res.applied);
+        assert_eq!(std::fs::read_to_string(&abs).unwrap(), "aaa\nNEW\nccc\n");
+    }
+
+    #[test]
+    fn handle_replace_symbol_body_via_position_fallback() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "fn old() {\n  1\n}\n").unwrap();
+        let args = serde_json::json!({
+            "action": "replace_symbol_body",
+            "path": "a.rs",
+            "line": 1,
+            "end_line": 3,
+            "new_body": "fn new() {\n  2\n}"
+        });
+        let out = super::handle(&args, dir.path().to_str().unwrap(), "");
+        assert!(out.contains("replace_symbol_body applied"), "got: {out}");
+        let after = std::fs::read_to_string(dir.path().join("a.rs")).unwrap();
+        assert!(after.contains("fn new()"), "file: {after}");
+    }
+
+    #[test]
+    fn handle_replace_symbol_body_conflict_on_stale_hash() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "fn old() {\n  1\n}\n").unwrap();
+        // Range = full file lines 1..=3; old content = the whole file text.
+        let stale = serde_json::json!({
+            "action": "replace_symbol_body",
+            "path": "a.rs", "line": 1, "end_line": 3,
+            "new_body": "fn new() {\n  2\n}",
+            "expected_hash": "deadbeefnotahash"
+        });
+        let out = super::handle(&stale, dir.path().to_str().unwrap(), "");
+        assert!(out.contains("CONFLICT"), "got: {out}");
+        // file unchanged
+        assert!(std::fs::read_to_string(dir.path().join("a.rs"))
+            .unwrap()
+            .contains("fn old()"));
     }
 
     #[test]

@@ -5,6 +5,7 @@ import com.intellij.openapi.project.Project
 import com.leanctx.plugin.dto.JsonCodec
 import com.leanctx.plugin.dto.LocationsResponse
 import com.leanctx.plugin.dto.NavRequest
+import com.leanctx.plugin.endpoint.EditHandlers
 import com.leanctx.plugin.endpoint.InspectionHandlers
 import com.leanctx.plugin.endpoint.NavHandlers
 import com.leanctx.plugin.endpoint.StructureHandlers
@@ -25,6 +26,7 @@ class RequestRouter(
     private val handlers = NavHandlers(project)
     private val structureHandlers = StructureHandlers(project)
     private val inspectionHandlers = InspectionHandlers(project)
+    private val editHandlers = EditHandlers(project)
 
     fun route(method: String, path: String, headerToken: String?, body: String): HttpResult {
         if (headerToken != token) {
@@ -38,6 +40,9 @@ class RequestRouter(
             if (path == "/symbols_overview") return dispatchOverview(body)
             if (path == "/inspections") return dispatchInspections(body)
             if (path == "/list_inspections") return dispatchListInspections(body)
+            if (path == "/replaceSymbolBody") return dispatchEdit(body, editHandlers::replaceSymbolBody)
+            if (path == "/insertBeforeSymbol") return dispatchEdit(body, editHandlers::insertBeforeSymbol)
+            if (path == "/insertAfterSymbol") return dispatchEdit(body, editHandlers::insertAfterSymbol)
             val handler: ((NavRequest) -> LocationsResponse)? = when (path) {
                 "/references" -> handlers::references
                 "/definition" -> handlers::definition
@@ -112,6 +117,21 @@ class RequestRouter(
         HttpResult(200, JsonCodec.error("INTERNAL", e.message ?: "bad request"))
     } catch (e: Exception) {
         log.warn("list_inspections endpoint failed", e)
+        HttpResult(500, JsonCodec.error("INTERNAL", e.message ?: "internal error"))
+    }
+
+    private fun dispatchEdit(
+        body: String,
+        handler: (com.leanctx.plugin.dto.EditRequest) -> com.leanctx.plugin.dto.EditResponse,
+    ): HttpResult = try {
+        val req = JsonCodec.parseEditRequest(body)
+        HttpResult(200, JsonCodec.toJson(handler(req)))
+    } catch (e: BackendException) {
+        HttpResult(200, JsonCodec.error(e.code, e.message ?: e.code)) // fachlicher Negativfall = 200
+    } catch (e: IllegalArgumentException) {
+        HttpResult(200, JsonCodec.error("INTERNAL", e.message ?: "bad request"))
+    } catch (e: Exception) {
+        log.warn("edit endpoint failed", e)
         HttpResult(500, JsonCodec.error("INTERNAL", e.message ?: "internal error"))
     }
 

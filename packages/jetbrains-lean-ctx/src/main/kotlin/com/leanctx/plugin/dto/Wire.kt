@@ -87,6 +87,20 @@ data class ListInspectionsResponse(
     val total: Int,
 )
 
+/** Request body for /replaceSymbolBody|/insertBeforeSymbol|/insertAfterSymbol. */
+data class EditRequest(
+    val path: String,
+    val range: TextRangeDTO,
+    val text: String,
+)
+
+/** Response body for the three edit endpoints. */
+data class EditResponse(
+    val applied: Boolean,
+    val newRange: TextRangeDTO,
+    val editedText: String,
+)
+
 object JsonCodec {
     private val gson: Gson = GsonBuilder().disableHtmlEscaping().create()
 
@@ -107,6 +121,10 @@ object JsonCodec {
 
     fun parseFileRequest(body: String): FileRequest =
         gson.fromJson(body, FileRequest::class.java)
+            ?: throw IllegalArgumentException("empty request body")
+
+    fun parseEditRequest(body: String): EditRequest =
+        gson.fromJson(body, EditRequest::class.java)
             ?: throw IllegalArgumentException("empty request body")
 
     fun toJson(value: Any): String = gson.toJson(value)

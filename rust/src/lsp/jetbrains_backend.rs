@@ -9,8 +9,8 @@ use lsp_types::{GotoDefinitionResponse, Location, Position, Range, Uri, Workspac
 use serde_json::Value;
 
 use crate::lsp::backend::{
-    HierarchyDirection, InspectionDiag, InspectionInfo, LspBackend, SymbolOverviewItem,
-    TypeHierarchyNode,
+    EditResult, HierarchyDirection, InspectionDiag, InspectionInfo, LspBackend, RangeEdit,
+    SymbolOverviewItem, TextRange0Based, TypeHierarchyNode,
 };
 use crate::lsp::client::file_path_to_uri;
 
@@ -210,6 +210,39 @@ impl JetBrainsHttpBackend {
         Some(crate::lsp::backend::Truncation { truncated, total })
     }
 
+    fn parse_edit_result(v: &Value, fallback_text: &str) -> EditResult {
+        let pos = |obj: &Value, key: &str| -> (u32, u32) {
+            let p = obj.get(key);
+            let line = p
+                .and_then(|p| p.get("line"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as u32;
+            let ch = p
+                .and_then(|p| p.get("character"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as u32;
+            (line, ch)
+        };
+        let nr = v.get("newRange");
+        let (sl, sc) = nr.map_or((0, 0), |r| pos(r, "start"));
+        let (el, ec) = nr.map_or((0, 0), |r| pos(r, "end"));
+        EditResult {
+            applied: v.get("applied").and_then(Value::as_bool).unwrap_or(false),
+            new_range: TextRange0Based {
+                start_line: sl,
+                start_char: sc,
+                end_line: el,
+                end_char: ec,
+            },
+            edited_text: v
+                .get("editedText")
+                .and_then(Value::as_str)
+                .unwrap_or(fallback_text)
+                .to_string(),
+            diff: String::new(), // Rust builds the diff in ctx_refactor from old/new
+        }
+    }
+
     /// `{path}` request body (file-level ops, no position).
     fn path_body(&self, uri: &Uri) -> Value {
         let abs = crate::lsp::client::uri_to_file_path(uri).unwrap_or_default();
@@ -233,6 +266,31 @@ impl JetBrainsHttpBackend {
             "line": position.line,
             "character": position.character,
         })
+    }
+
+    /// POST a resolved edit to the plugin and parse the result. The wire range is
+    /// the canonical tree-sitter range (byte-identical to the headless path).
+    fn post_edit(&self, endpoint: &str, edit: &RangeEdit) -> Result<EditResult, String> {
+        let mut body = serde_json::json!({
+            "path": edit.rel_path,
+            "range": {
+                "start": { "line": edit.range.start_line, "character": edit.range.start_char },
+                "end":   { "line": edit.range.end_line,   "character": edit.range.end_char },
+            },
+            "text": edit.text,
+        });
+        if let Some(h) = &edit.expected_hash {
+            body["expected_hash"] = serde_json::json!(h);
+        }
+        let resp = self.post(endpoint, &body)?;
+        if let Some(err) = resp.get("error") {
+            return Err(err
+                .get("code")
+                .and_then(Value::as_str)
+                .unwrap_or("INTERNAL")
+                .to_string());
+        }
+        Ok(Self::parse_edit_result(&resp, &edit.text))
     }
 }
 
@@ -351,6 +409,18 @@ impl LspBackend for JetBrainsHttpBackend {
         let items = Self::parse_inspection_list(&resp);
         self.last_meta = Self::parse_truncation(&resp, items.len() as u32);
         Ok(items)
+    }
+
+    fn replace_symbol_body(&mut self, edit: &RangeEdit) -> Result<EditResult, String> {
+        self.post_edit("/replaceSymbolBody", edit)
+    }
+
+    fn insert_before_symbol(&mut self, edit: &RangeEdit) -> Result<EditResult, String> {
+        self.post_edit("/insertBeforeSymbol", edit)
+    }
+
+    fn insert_after_symbol(&mut self, edit: &RangeEdit) -> Result<EditResult, String> {
+        self.post_edit("/insertAfterSymbol", edit)
     }
 
     fn rename(
@@ -498,6 +568,51 @@ mod tests {
         assert_eq!(diags[0].line, 3);
         assert_eq!(diags[0].severity, "WARNING");
         assert_eq!(diags[0].message, "unused variable");
+    }
+
+    #[test]
+    fn replace_symbol_body_parses_wire_result() {
+        let port = mock_once(
+            r#"{"applied":true,
+                "newRange":{"start":{"line":1,"character":0},"end":{"line":1,"character":3}},
+                "editedText":"NEW"}"#,
+        );
+        let mut be = JetBrainsHttpBackend::new(port, "tok".into(), "/tmp/proj".to_string(), 1234);
+        let edit = crate::lsp::backend::RangeEdit {
+            abs_path: "/tmp/proj/Foo.kt".into(),
+            rel_path: "Foo.kt".into(),
+            range: crate::lsp::backend::TextRange0Based {
+                start_line: 1,
+                start_char: 0,
+                end_line: 1,
+                end_char: 4,
+            },
+            text: "NEW".into(),
+            expected_hash: None,
+        };
+        let res = be.replace_symbol_body(&edit).unwrap();
+        assert!(res.applied);
+        assert_eq!(res.edited_text, "NEW");
+        assert_eq!(res.new_range.end_char, 3);
+    }
+
+    #[test]
+    fn edit_maps_error_envelope_to_err() {
+        let port = mock_once(r#"{"error":{"code":"CONFLICT","message":"stale"}}"#);
+        let mut be = JetBrainsHttpBackend::new(port, "tok".into(), "/tmp/proj".to_string(), 1234);
+        let edit = crate::lsp::backend::RangeEdit {
+            abs_path: "/tmp/proj/Foo.kt".into(),
+            rel_path: "Foo.kt".into(),
+            range: crate::lsp::backend::TextRange0Based {
+                start_line: 0,
+                start_char: 0,
+                end_line: 0,
+                end_char: 0,
+            },
+            text: "x".into(),
+            expected_hash: None,
+        };
+        assert_eq!(be.replace_symbol_body(&edit).unwrap_err(), "CONFLICT");
     }
 
     #[test]

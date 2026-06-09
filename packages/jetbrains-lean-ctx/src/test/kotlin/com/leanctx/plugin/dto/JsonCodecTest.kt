@@ -103,4 +103,30 @@ class JsonCodecTest {
         val req = JsonCodec.parseFileRequest("""{"path":"src/A.kt"}""")
         assertEquals("src/A.kt", req.path)
     }
+
+    @Test
+    fun parseEditRequest_roundTrips() {
+        val json = """
+            {"path":"Foo.kt",
+             "range":{"start":{"line":1,"character":0},"end":{"line":1,"character":4}},
+             "text":"NEW"}
+        """.trimIndent()
+        val req = JsonCodec.parseEditRequest(json)
+        assertEquals("Foo.kt", req.path)
+        assertEquals(1, req.range.start.line)
+        assertEquals(4, req.range.end.character)
+        assertEquals("NEW", req.text)
+    }
+
+    @Test
+    fun editResponse_serializes() {
+        val resp = EditResponse(
+            applied = true,
+            newRange = TextRangeDTO(PositionDTO(1, 0), PositionDTO(1, 3)),
+            editedText = "NEW",
+        )
+        val json = JsonCodec.toJson(resp)
+        assertTrue(json.contains("\"applied\":true"))
+        assertTrue(json.contains("\"editedText\":\"NEW\""))
+    }
 }

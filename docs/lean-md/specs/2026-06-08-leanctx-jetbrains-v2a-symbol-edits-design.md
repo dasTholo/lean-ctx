@@ -46,7 +46,7 @@ geschlossene IDE) zu editieren, was Serena prinzipiell nicht kann.
 |---|------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | 1 | v2-Zuschnitt           | **v2a (Klasse A) jetzt**; v2b (Refactoring-Engine) folgt als **eigener Spec** nach v2a-Abschluss. Forward-Pointer in §11.                                                      |
 | 2 | Symbol-Adressierung    | **`name_path` primär**, auf der **lean-ctx-Rust-Seite** über den bestehenden Symbol-Index aufgelöst. **Position** `(path, line, character)` als Low-Level-Fallback.            |
-| 3 | Apply-Modell           | **Direkt anwenden + Diff/Delta zurück** (kein Preview/Two-Phase). Optionaler `expected_hash`-Guard → `CONFLICT` statt Blind-Überschreiben.                                     |
+| 3 | Apply-Modell           | **Direkt anwenden + Diff/Delta zurück** (kein Preview/Two-Phase). Optionaler `expected_hash`-Guard (**BLAKE3**, Rust-zentral — §7-Hinweis) → `CONFLICT` statt Blind-Überschreiben.                                     |
 | 4 | IDE vs. headless       | **IDE-first + Headless-Fallback**, gesteuert über `select_backend`. Kanonische Edit-Grenze = **tree-sitter-Range in beiden Pfaden** → IDE-Pfad ≡ Headless-Pfad byte-identisch. |
 | 5 | Headless-Apply-Schicht | **Default-Impl direkt im `LspBackend`-Trait** (lokaler Range-Write); `JetBrainsHttpBackend` **overridet** mit dem HTTP/PSI-Pfad.                                               |
 | 6 | Read-Fallback          | **Nur `overview`** bekommt einen tree-sitter-Default-Impl (strukturell, verlustfrei, headless). Semantische Reads (refs/def/impl/type_hierarchy) bleiben unangetastet.         |
@@ -126,6 +126,10 @@ fn insert_after_symbol(&mut self, edit: RangeEdit) -> Result<EditResult, Backend
   `range`→`text`, schreibt über den **`ctx_edit`-Schreibpfad** (Cache-Kohärenz, §8), gibt
   `EditResult` zurück. Backing A (`LspClient`) erbt diesen Default → headless-Edits ohne
   rust-analyzer-Beteiligung.
+- **CONFLICT-Guard (v2a-Implementierung):** `expected_hash` ist **BLAKE3** (`core::hasher::hash_hex`).
+  Headless prüft ihn **atomar** in `local_range_write`; der **IDE-Pfad** prüft ihn **vor** dem
+  Dispatch in `ctx_refactor::handle_symbol_edit` (das Plugin hasht nicht). Beide Pfade prüfen also
+  gegen denselben Rust-Disk-BLAKE3 → identisches CONFLICT-Verhalten. Begründung: §7-Hinweis.
 
 ### 5.2 `overview`-Default-Impl (Read-Fallback, §2-Entscheidung 6)
 
@@ -208,18 +212,33 @@ Das hält IDE- und Headless-Pfad konsistent (kein Format-Divergenz-Risiko) und v
     - `POST /replaceSymbolBody`
     - `POST /insertBeforeSymbol`
     - `POST /insertAfterSymbol`
-- **Request:** `{ path, range: { start:{line,character}, end:{line,character} }, text, expected_hash? }`
-  (name_path erscheint **nicht** auf der Wire — bereits in Rust zu `range` aufgelöst).
+- **Request:** `{ path, range: { start:{line,character}, end:{line,character} }, text }`
+  (weder `name_path` noch `expected_hash` erscheinen auf der Wire — beide werden **in Rust**
+  verarbeitet: name_path → `range`, `expected_hash` → CONFLICT-Vorprüfung; siehe Hinweis unten).
 - **Response:** `{ applied: true, new_range: {start,end}, edited_text }` → Rust baut den Diff
   und wärmt den Cache aus `edited_text`.
 - **Fehler** (additiv zum v1-Code-Set `{UNSUPPORTED_LANGUAGE, INDEXING, FILE_NOT_FOUND,
   POSITION_OUT_OF_RANGE, NO_SYMBOL_AT_POSITION, UNAUTHORIZED, INTERNAL}`):
-    - `+CONFLICT` (expected_hash ≠ aktueller Range-Inhalt)
+    - `+CONFLICT` (expected_hash ≠ aktueller Range-Inhalt) — **Rust-seitig** erzwungen (wie
+      `AMBIGUOUS_SYMBOL`/`NO_SYMBOL`); das Plugin hasht nicht und schreibt nur.
     - `+AMBIGUOUS_SYMBOL` (Rust-seitig vor dem HTTP-Call; trägt Kandidatenliste)
     - `+NO_SYMBOL` (Rust-seitig: name_path löst auf 0 Treffer auf — distinkt vom
       positions-basierten v1-`NO_SYMBOL_AT_POSITION`)
     - HTTP 200 für fachliche Negativfälle, 401 nur Token, 500 nur echte Exceptions. Rust mappt
       `code` → `ERROR: …`-String.
+
+> **v2a-Implementierungsentscheidung — CONFLICT-Guard ist Rust-zentral (verbindlich für v2b):**
+> Der `expected_hash`-Guard wird **ausschließlich in Rust** (`ctx_refactor::handle_symbol_edit`)
+> mit **BLAKE3** (`core::hasher::hash_hex`) gegen den aktuellen Range-Inhalt geprüft — **vor**
+> dem Dispatch. Das **Plugin hasht nicht** und erhält `expected_hash` **nicht** auf der Wire.
+> Gründe: (1) `hash_hex` ist BLAKE3, und es gibt **keine** offizielle KotlinCrypto-BLAKE3-Impl
+> (nur BLAKE2) — Dritt-Lib/vendored-Krypto im veröffentlichten Plugin wäre vermeidbarer Ballast;
+> (2) **eine** Hash-Quelle (Rust) ⇒ IDE- und Headless-Pfad prüfen **identisch** (beide
+> Rust-Disk-BLAKE3) ⇒ stärkt „IDE ≡ headless byte-identisch", statt es zu riskieren; (3) Rust hat
+> den Datei-Inhalt beim Dispatch ohnehin in der Hand (Range/Einrückung) — die Vorprüfung ist
+> quasi gratis. Headless (`local_range_write`) prüft zusätzlich **atomar** beim Write (TOCTOU).
+> **Für v2b verbindlich:** neue mutierende Endpoints bekommen **keinen** plugin-seitigen Hash —
+> Integritäts-Guards leben in Rust.
 
 ---
 

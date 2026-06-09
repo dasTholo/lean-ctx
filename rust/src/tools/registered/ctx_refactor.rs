@@ -19,14 +19,17 @@ impl McpTool for CtxRefactorTool {
              declaration, type_hierarchy, symbols_overview, inspections. Requires a running \
              language server (rust-analyzer, typescript-language-server, pylsp, gopls) or the \
              JetBrains backend (declaration, type_hierarchy, symbols_overview, inspections are \
-             JetBrains-only).",
+             JetBrains-only). Symbol-body edits (replace_symbol_body, insert_before_symbol, \
+             insert_after_symbol) are name_path-addressed and work IDE-first with a lossless \
+             headless fallback.",
             json!({
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
                         "enum": ["rename", "references", "definition", "implementations",
-                                 "declaration", "type_hierarchy", "symbols_overview", "inspections"],
+                                 "declaration", "type_hierarchy", "symbols_overview", "inspections",
+                                 "replace_symbol_body", "insert_before_symbol", "insert_after_symbol"],
                         "description": "Refactoring action"
                     },
                     "path": { "type": "string", "description": "File path" },
@@ -47,9 +50,14 @@ impl McpTool for CtxRefactorTool {
                         "type": "string",
                         "enum": ["run", "list"],
                         "description": "inspections mode (JetBrains backend). 'run' (default) = diagnostics for the given file; 'list' = enabled inspections of the current project profile."
-                    }
+                    },
+                    "name_path": { "type": "string", "description": "Symbol path for body edits: 'Class/method' (qualified) or bare 'name'. Resolved via the symbol index; ambiguous → AMBIGUOUS_SYMBOL with candidates." },
+                    "new_body": { "type": "string", "description": "Full replacement declaration text (replace_symbol_body)." },
+                    "text": { "type": "string", "description": "Sibling text to insert (insert_before_symbol/insert_after_symbol); indentation is applied automatically." },
+                    "end_line": { "type": "integer", "description": "1-based last line of the symbol (only for the path+line fallback when name_path is omitted)." },
+                    "expected_hash": { "type": "string", "description": "Optional BLAKE3-hex of the current range content; mismatch → CONFLICT (no blind overwrite)." }
                 },
-                "required": ["action", "path"]
+                "required": ["action"]
             }),
         )
     }
@@ -59,10 +67,14 @@ impl McpTool for CtxRefactorTool {
         args: &Map<String, Value>,
         ctx: &ToolContext,
     ) -> Result<ToolOutput, ErrorData> {
-        // §4.5: PathJail runs in the dispatcher BEFORE this handle. require_resolved_path
-        // surfaces a jail rejection / missing / non-string `path` as an MCP error here,
-        // so no relative/escaping path is ever rebuilt or sent to a backend.
-        let abs_path = require_resolved_path(ctx, args, "path")?;
+        // name_path edits resolve their own path; only require/resolve `path`
+        // when actually provided (read actions + position-fallback edits).
+        let has_path = args.get("path").and_then(Value::as_str).is_some();
+        let abs_path = if has_path {
+            require_resolved_path(ctx, args, "path")?
+        } else {
+            String::new()
+        };
 
         let args_value = Value::Object(args.clone());
         let result = crate::tools::ctx_refactor::handle(&args_value, &ctx.project_root, &abs_path);
@@ -72,9 +84,12 @@ impl McpTool for CtxRefactorTool {
             text: result,
             original_tokens: 0,
             saved_tokens: 0,
-            mode: Some(action),
+            mode: Some(action.clone()),
             path: get_str(args, "path"),
-            changed: false,
+            changed: matches!(
+                action.as_str(),
+                "replace_symbol_body" | "insert_before_symbol" | "insert_after_symbol"
+            ),
         })
     }
 }
@@ -99,6 +114,12 @@ mod schema_tests {
             "subtypes",
             "inspections",
             "\"mode\"",
+            "replace_symbol_body",
+            "insert_before_symbol",
+            "insert_after_symbol",
+            "name_path",
+            "new_body",
+            "expected_hash",
         ] {
             assert!(schema.contains(needle), "schema missing {needle}: {schema}");
         }
