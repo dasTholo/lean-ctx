@@ -1,14 +1,14 @@
 # Design-Spec: lean-ctx JetBrains v2b — Refactoring-Engine (Serena-Ablösung, Edit-Klasse B), exemplarisch `rename`
 
-| Feld             | Wert                                                                                              |
-| ---------------- | ------------------------------------------------------------------------------------------------- |
-| Status           | Draft (Design genehmigt 2026-06-09)                                                               |
-| Datum            | 2026-06-09                                                                                         |
-| Vorhaben         | Multi-File-Refactoring-Engine über das JetBrains-Plugin + lean-ctx; erste Op `rename`             |
+| Feld             | Wert                                                                                                   |
+|------------------|--------------------------------------------------------------------------------------------------------|
+| Status           | Draft (Design genehmigt 2026-06-09)                                                                    |
+| Datum            | 2026-06-09                                                                                             |
+| Vorhaben         | Multi-File-Refactoring-Engine über das JetBrains-Plugin + lean-ctx; erste Op `rename`                  |
 | Scope            | `rename_preview` + `rename_apply` (Two-Phase) — Engine etablieren; `move`/`safe_delete`/`inline` → v2c |
-| Basis-Spec       | `docs/lean-md/specs/2026-06-08-leanctx-jetbrains-v2a-symbol-edits-design.md` (v2a, §11 v2b-Pointer) |
-| Branch           | `feat-jetbrains-plugin` (Fortführung, Muster v1-§12.3 — ein Commit pro Phase)                     |
-| Nächster Schritt | `superpowers:writing-plans` (Implementierungsplan)                                                |
+| Basis-Spec       | `docs/lean-md/specs/2026-06-08-leanctx-jetbrains-v2a-symbol-edits-design.md` (v2a, §11 v2b-Pointer)    |
+| Branch           | `feat-jetbrains-plugin` (Fortführung, Muster v1-§12.3 — ein Commit pro Phase)                          |
+| Nächster Schritt | `superpowers:writing-plans` (Implementierungsplan)                                                     |
 
 ---
 
@@ -36,15 +36,15 @@ Two-Phase-Protokoll, Multi-File-Cache-Kohärenz) trägt die **erste** Op; danach
 
 ## 2. Getroffene Entscheidungen (User, 2026-06-09)
 
-| #  | Frage                  | Entscheidung                                                                                                                                                  |
-| -- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1  | v2b-Zuschnitt          | **Engine + `rename` zuerst.** `move`/`safe_delete`/`inline` als eigenes **v2c** auf derselben Engine (§11). Risiko-Isolation in der ersten Op.                 |
-| 2  | Apply-Modell           | **Two-Phase** (immer): `rename_preview` liefert Plan, `rename_apply` schreibt. Bewusster Bruch mit v2a-Direkt-Apply — Multi-File-Blast-Radius ist vorab unsichtbar. |
-| 3  | Konflikt-Policy        | **Plan meldet, Apply blockt.** `preprocessUsages`-Konflikte erscheinen im Plan; `rename_apply` blockt per Default (`CONFLICT`), `force=true` als bewusster Opt-out. |
-| 4  | Plan→Apply-Übergabe    | **Stateless `plan_hash` (BLAKE3, Rust-zentral).** Kein Server-State. Apply wiederholt die Usage-Suche, bildet den Hash neu, vergleicht → Mismatch = `CONFLICT` (TOCTOU). |
-| 5  | Action-Form            | **Zwei explizite Actions** `rename_preview` + `rename_apply` in `ctx_refactor` (kein neues Tool — wie v2a).                                                    |
-| 6  | Action-Namen           | **`rename_preview` / `rename_apply`** — `preview`/`apply` als selbsterklärender lesen-vs-schreiben-Gegensatz (Terraform-/Refactoring-Konvention).             |
-| 7  | Sprach-Scope           | **Generisch** über `RenameProcessor` (jede PSI-Sprache, Plugin gibt durch). **Akzeptanz-Gate: Kotlin** (Primär); Java optionaler Sekundär-Check.             |
+| # | Frage               | Entscheidung                                                                                                                                                             |
+|---|---------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 1 | v2b-Zuschnitt       | **Engine + `rename` zuerst.** `move`/`safe_delete`/`inline` als eigenes **v2c** auf derselben Engine (§11). Risiko-Isolation in der ersten Op.                           |
+| 2 | Apply-Modell        | **Two-Phase** (immer): `rename_preview` liefert Plan, `rename_apply` schreibt. Bewusster Bruch mit v2a-Direkt-Apply — Multi-File-Blast-Radius ist vorab unsichtbar.      |
+| 3 | Konflikt-Policy     | **Plan meldet, Apply blockt.** `preprocessUsages`-Konflikte erscheinen im Plan; `rename_apply` blockt per Default (`CONFLICT`), `force=true` als bewusster Opt-out.      |
+| 4 | Plan→Apply-Übergabe | **Stateless `plan_hash` (BLAKE3, Rust-zentral).** Kein Server-State. Apply wiederholt die Usage-Suche, bildet den Hash neu, vergleicht → Mismatch = `CONFLICT` (TOCTOU). |
+| 5 | Action-Form         | **Zwei explizite Actions** `rename_preview` + `rename_apply` in `ctx_refactor` (kein neues Tool — wie v2a).                                                              |
+| 6 | Action-Namen        | **`rename_preview` / `rename_apply`** — `preview`/`apply` als selbsterklärender lesen-vs-schreiben-Gegensatz (Terraform-/Refactoring-Konvention).                        |
+| 7 | Sprach-Scope        | **Generisch** über `RenameProcessor` (jede PSI-Sprache, Plugin gibt durch). **Akzeptanz-Gate: Kotlin** (Primär); Java optionaler Sekundär-Check.                         |
 
 ---
 
@@ -65,14 +65,35 @@ umkehrt:
 
 **Rollenverteilung daraus:**
 
-| Seite      | Aufgabe in v2b                                                                                                            |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------ |
-| **Rust**   | name_path → Ziel-Symbol (`resolve_name_path`, **reuse v2a**), PathJail, `plan_hash` bilden/prüfen, Konflikt-Gate, Multi-File-Cache-Kohärenz, Diff-Bau |
+| Seite      | Aufgabe in v2b                                                                                                                                                         |
+|------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Rust**   | name_path → Ziel-Symbol (`resolve_name_path`, **reuse v2a**), PathJail, `plan_hash` bilden/prüfen, Konflikt-Gate, Multi-File-Cache-Kohärenz, Diff-Bau                  |
 | **Plugin** | `RenameProcessor.findUsages` (semantische Usage-Suche), `preprocessUsages` (Konflikt-Sammlung), transaktionaler Apply (`WriteCommandAction { RenameProcessor.run() }`) |
 
 `resolve_name_path` aus v2a (`ctx_refactor.rs:230`) wird wiederverwendet, um das **Ziel**-Symbol
 zu adressieren — name_path primär, Position-Fallback. Die **Usages** kommen ausschließlich vom
 Plugin; Rust indexiert sie nicht.
+
+### 3.1 `select_backend` / `BACKEND_REQUIRED` — deterministische Erreichbarkeit (v1-§8)
+
+Weil v2b **ausschließlich** über Backing B läuft (kein Headless-Pfad), ist die
+Erreichbarkeits-Definition korrektheitskritisch — sie entscheidet zwischen „rename läuft" und
+`BACKEND_REQUIRED`. Sie ist **nicht** „Port-Datei existiert", sondern die **mehrstufige**
+v1-Definition (v1-§8 Risiko 1+2):
+
+1. Port/Token-Datei vorhanden (`<data_dir>/jetbrains-<projecthash>.port`, v1-§5.5),
+2. `pid` lebt (Prozess-Check),
+3. `GET /health`-Ping erfolgreich (innerhalb Timeout).
+
+Erst wenn **alle drei** zutreffen, gilt Backing B als erreichbar. Sonst (keine/stale Datei,
+toter pid, Health-Timeout) → **sofort** `BACKEND_REQUIRED`, ohne HTTP-Versuch. Das deckt den
+IDE-Crash-Fall (stale Port) deterministisch ab.
+
+**Kein stiller Fallback auf Backing A:** Anders als die read-only-v1-Ops (wo A = rust-analyzer
+ein gültiger Headless-Fallback ist) gibt es für rename **keinen** A-Fallback — rust-analyzer
+liefert keine IDE-genaue, transaktionale Multi-File-Rename-Semantik, und ein halber rename wäre
+schlimmer als ein klarer Fehler. v2b degradiert deshalb **nie** auf A, sondern meldet
+`BACKEND_REQUIRED`.
 
 ---
 
@@ -139,9 +160,13 @@ Sicherheit, die es kauft.
   `dynamic_tools.rs`/`workflow/types.rs`, exakt wie v2a): `rename_preview`, `rename_apply`.
   Match-Block + Hilfetext erweitern; Schema über die **eine** Tool-Registry
   `tool_defs::tool_def(...)` (kein zweites handgepflegtes Schema; Drift-Regression-Test deckt es ab).
+  > **Konsistenz zu v1-§13.2:** Dort ist nur `rename_apply` als Ziel-Action gelistet. v2b
+  > erweitert das bewusst um `rename_preview` — die Two-Phase-Sicherheit (Multi-File-Blast-Radius,
+  > Entscheidung 2) ist v2b-Designentscheidung, kein Widerspruch zur v1-Tool-Landkarte.
 - **Parameter:**
     - `rename_preview`: `name_path` (primär) **oder** `path`+`line`(+`character`) (Fallback); `new_name`.
-    - `rename_apply`: dieselben Adressierungs-Parameter + `new_name` + `plan_hash` (required) + `force` (optional, default `false`).
+    - `rename_apply`: dieselben Adressierungs-Parameter + `new_name` + `plan_hash` (required) + `force` (optional,
+      default `false`).
 - **Auflösungsschritt (beide Actions, vor dem Backend-Dispatch):**
     1. `resolve_name_path` (reuse v2a) → `(target_path, target_range)`. >1 → `AMBIGUOUS_SYMBOL`
        mit Kandidatenliste; 0 → `NO_SYMBOL` (beide reuse v2a).
@@ -189,13 +214,13 @@ fn rename_apply(&mut self, req: RenameApply) -> Result<RenameResult, BackendErro
 
 ### 5.4 Änderungsstellen (Rust)
 
-| Datei                                       | Änderung                                                                                          |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Datei                                       | Änderung                                                                                                                                                                       |
+|---------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `rust/src/tools/ctx_refactor.rs`            | +2 Actions (`rename_preview`/`rename_apply`), `plan_hash` bilden/prüfen, Konflikt-Gate, Multi-File-Cache-Kohärenz, Multi-File-Diff; reuse `resolve_name_path`/PathJail aus v2a |
-| `rust/src/tools/registered/ctx_refactor.rs` | Schema-Erweiterung über `tool_def(...)` (`new_name`, `plan_hash`, `force`)                         |
-| `rust/src/lsp/backend.rs`                   | +`rename_preview`/`rename_apply`-Trait-Methoden (Default `Err BackendRequired`) + `RenameQuery`/`RenamePlan`/`RenameApply`/`RenameResult`/`UsageSite`/`Conflict`-Typen |
-| `rust/src/lsp/jetbrains_backend.rs`         | HTTP-Override der 2 Methoden (`/renamePreview`, `/renameApply`)                                    |
-| `rust/src/lsp/client.rs`                    | erbt `Err`-Default (keine Änderung außer ggf. Trait-Re-Export)                                     |
+| `rust/src/tools/registered/ctx_refactor.rs` | Schema-Erweiterung über `tool_def(...)` (`new_name`, `plan_hash`, `force`)                                                                                                     |
+| `rust/src/lsp/backend.rs`                   | +`rename_preview`/`rename_apply`-Trait-Methoden (Default `Err BackendRequired`) + `RenameQuery`/`RenamePlan`/`RenameApply`/`RenameResult`/`UsageSite`/`Conflict`-Typen         |
+| `rust/src/lsp/jetbrains_backend.rs`         | HTTP-Override der 2 Methoden (`/renamePreview`, `/renameApply`)                                                                                                                |
+| `rust/src/lsp/client.rs`                    | erbt `Err`-Default (keine Änderung außer ggf. Trait-Re-Export)                                                                                                                 |
 
 **Multi-File-Jail-Hinweis:** Anders als v2a (genau eine Datei) kann ein rename *mehrere*
 Dateien berühren, deren Pfade Rust **vor** dem Apply nicht kennt (sie stehen erst im
@@ -212,6 +237,8 @@ zurückmelden).
 Integriert additiv in `com.leanctx.plugin` (koexistiert mit v1/v2a, ersetzt nichts).
 
 - **`psi/SymbolRefactorer.kt`** (neu): kapselt die `RefactoringFactory`/`RenameProcessor`-Naht.
+  (Architektur-Referenz — **nicht** Code-Quelle: Serenas `RenameSymbolHandler`,
+  `tmp/serena-jetbrains-plugin/lib/`; v1-§9 Phase-5 „nicht übernommen" + v1-§11.)
     - Ziel-`PsiElement` aus der übergebenen Wire-Range via `PsiLocator` (dieselbe
       0-basiert↔offset-Logik wie v1/v2a).
     - **Preview:** `RenameProcessor(project, element, newName, /*searchInComments*/…, /*searchTextOccurrences*/…)`
@@ -230,9 +257,19 @@ Integriert additiv in `com.leanctx.plugin` (koexistiert mit v1/v2a, ersetzt nich
       v1-`action=format` nachziehbar.
 - **`endpoint/RefactorHandlers.kt`** (neu): `renamePreview` / `renameApply`, registriert im
   `RequestRouter` (Token-Check wie v1).
-- **Threading:** `findUsages`/`preprocessUsages` unter `ReadAction` (off-EDT, wie v1-Reads);
-  der Apply über `WriteCommandAction` (dispatcht selbst auf EDT). Handler bleiben off-EDT
-  (HttpServer-Pool).
+- **Threading + Index-Schutz:** `findUsages`/`preprocessUsages` unter
+  `DumbService.runReadActionInSmartMode` (off-EDT, wie v1-Reads). **Smart-Mode ist Pflicht:** die
+  semantische Usage-Suche braucht den fertigen Index — läuft die IDE noch im Dumb-Mode
+  (Indizierung), liefert schon `rename_preview` den v1-Fehlercode `INDEXING` (Retry-Hinweis),
+  statt eine **unvollständige** Usage-Menge zu produzieren (unvollständige Usages = kaputter
+  rename). Der Apply läuft über `WriteCommandAction` (dispatcht selbst auf EDT). Handler bleiben
+  off-EDT (HttpServer-Pool).
+- **Sprach-Fallback (defensiv, v1-Risiko 5+7):** Der generische Scope (Entscheidung 7) hängt am
+  `RenamePsiElementProcessor`-EP. Sprachen **ohne** Rename-Support → sauberes
+  `UNSUPPORTED_LANGUAGE` (nullable `LanguageExtension`-Lookup, **keine** harten Imports, kein
+  Crash) — exakt das v1-`type_hierarchy`-Muster.
+- **gson `compileOnly` (v1-§5.4/Risiko 9):** die neuen DTOs/Handler nutzen die IDE-gebündelte
+  gson — `compileOnly` halten, sonst ClassLoader-Laufzeitkonflikt.
 - **Kanonische Refactoring-Grenze:** Das Plugin ist die **alleinige** Quelle der Usage-Menge
   (semantisch, IDE-genau). Anders als v2a gibt es hier **keine** tree-sitter-Spiegelung der
   Edit-Stellen in Rust — der `plan_hash` hasht nur den *Ist-Inhalt* der vom Plugin gemeldeten
@@ -244,7 +281,8 @@ Integriert additiv in `com.leanctx.plugin` (koexistiert mit v1/v2a, ersetzt nich
 
 - **0-basiert** auf der Wire (Zeile + Spalte), wie v1/v2a. Pfade relativ zu `project_root`.
 - **Neue Endpoints** (POST, Token-Header `X-LeanCtx-Token` wie v1):
-    - `POST /renamePreview` — Request `{ path, range:{start,end}, new_name, search_comments?, search_text_occurrences? }`
+    - `POST /renamePreview` — Request
+      `{ path, range:{start,end}, new_name, search_comments?, search_text_occurrences? }`
       → Response `{ usages:[{path, range:{start,end}, context?}], conflicts:[{path, range:{start,end}, message}] }`.
     - `POST /renameApply` — Request `{ path, range:{start,end}, new_name, force }`
       → Response `{ applied:true, changed_paths:[…] }`.
@@ -256,6 +294,10 @@ Integriert additiv in `com.leanctx.plugin` (koexistiert mit v1/v2a, ersetzt nich
     - `+CONFLICT` — Doppelbelegung: `plan_hash`-Mismatch (TOCTOU) **oder** geblockte
       Refactoring-Konflikte (`conflicts≠∅ ∧ ¬force`). Beide Rust-seitig erzwungen.
     - **Reuse v2a:** `AMBIGUOUS_SYMBOL` (Kandidatenliste), `NO_SYMBOL` (name_path → 0 Treffer).
+    - **Reuse v1** `+INDEXING` — IDE im Dumb-Mode (Indizierung läuft); `rename_preview`/`_apply`
+      mit Retry-Hinweis, **bevor** eine unvollständige Usage-Menge entsteht (§6 Index-Schutz).
+    - **Reuse v1** `+UNSUPPORTED_LANGUAGE` — Zielsprache hat keinen `RenamePsiElementProcessor`
+      (§6 Sprach-Fallback).
     - HTTP 200 für fachliche Negativfälle, 401 nur Token, 500 nur echte Exceptions. Rust mappt
       `code` → `ERROR: …`-String.
 
@@ -263,10 +305,10 @@ Integriert additiv in `com.leanctx.plugin` (koexistiert mit v1/v2a, ersetzt nich
 
 ## 8. rename-Semantik (Serena-Parität)
 
-| Action           | Eingabe                                            | Wirkung                                                                 |
-| ---------------- | ------------------------------------------------- | ----------------------------------------------------------------------- |
-| `rename_preview` | Ziel-Symbol (`name_path`/Position) + `new_name`   | **kein** Write; liefert betroffene Dateien, Usage-Count, Konflikte, `plan_hash`, Diff-Vorschau |
-| `rename_apply`   | Ziel + `new_name` + `plan_hash` [+ `force`]       | benennt Deklaration **und alle Usages** um (Multi-File, ein Undo)        |
+| Action           | Eingabe                                         | Wirkung                                                                                        |
+|------------------|-------------------------------------------------|------------------------------------------------------------------------------------------------|
+| `rename_preview` | Ziel-Symbol (`name_path`/Position) + `new_name` | **kein** Write; liefert betroffene Dateien, Usage-Count, Konflikte, `plan_hash`, Diff-Vorschau |
+| `rename_apply`   | Ziel + `new_name` + `plan_hash` [+ `force`]     | benennt Deklaration **und alle Usages** um (Multi-File, ein Undo)                              |
 
 - Adressierung des **Ziel**-Symbols identisch zu v2a (name_path primär, Position-Fallback).
 - Damit drop-in-kompatibel zu Serenas `jet_brains_rename` (gleiche Semantik „Symbol +
@@ -298,8 +340,10 @@ Direkte Verallgemeinerung von v2a-§9 auf mehrere Dateien:
     - `plan_hash`: deterministische Bildung über sortierte Usages+Inhalt; Match → Apply läuft;
       Mismatch → `CONFLICT`.
     - Konflikt-Gate: `conflicts≠∅ ∧ ¬force → CONFLICT`; `force=true` → durchgereicht.
-    - Ziel-Auflösung: name_path eindeutig/mehrdeutig/0 → `(path,range)`/`AMBIGUOUS_SYMBOL`/`NO_SYMBOL` (reuse v2a-Tests).
-    - headless / Backing B nicht erreichbar → `BACKEND_REQUIRED` (kein Apply, kein Hänger).
+    - Ziel-Auflösung: name_path eindeutig/mehrdeutig/0 → `(path,range)`/`AMBIGUOUS_SYMBOL`/`NO_SYMBOL` (reuse
+      v2a-Tests).
+    - `select_backend` (mehrstufig, v1-§8): stale Port / toter pid / Health-Timeout →
+      `BACKEND_REQUIRED` (kein Apply, kein Hänger), **kein** stiller Fallback auf Backing A.
     - PathJail: Ziel **und** zurückgemeldete Usage-Pfade außerhalb `project_root` → Fehler vor Apply/Cache-Mutation.
     - 0/1-Basierungs-Naht (Tool-Eingabe 1-basiert ↔ Wire 0-basiert ↔ Offset).
 - **Plugin (Kotlin-Unit + manuelles `runIde`-Gate, wie v1):**
@@ -308,6 +352,10 @@ Direkte Verallgemeinerung von v2a-§9 auf mehrere Dateien:
       Ergebnisdateien prüfen.
     - `preprocessUsages` meldet einen konstruierten Konflikt (z.B. Namenskollision) korrekt im Preview.
     - `RenameProcessor.run()` erzeugt **einen** Undo-Eintrag; `saveDocument` persistiert je Datei.
+    - **Index-Schutz:** rename während laufender Indizierung (Dumb-Mode) → `INDEXING`, **kein**
+      Teil-Rename.
+    - **Sprach-Fallback:** rename in einer Sprache ohne `RenamePsiElementProcessor` →
+      `UNSUPPORTED_LANGUAGE`, kein Crash.
     - Java optionaler Sekundär-Check (nicht akzeptanzkritisch).
 - **Fallback:** ohne laufende IDE → `BACKEND_REQUIRED` in beiden Phasen, kein Apply.
 
@@ -322,11 +370,19 @@ Konflikt-Gate, Multi-File-Cache-Kohärenz, `BACKEND_REQUIRED`-Headless-Verhalten
 deshalb inkrementell. Eigenheiten je Op (in v2c zu spezifizieren):
 
 - **`move`**: braucht ein **Ziel** (Ziel-Package/-Datei) als Zusatzparameter; Ziel-Auflösung
-  + Ziel-Jail.
+    + Ziel-Jail.
 - **`safe_delete`**: Preview liefert die **blockierenden Usages** (das „safe" = Abbruch bei
   verbleibenden Referenzen, sofern nicht `force`).
 - **`inline`**: Usage-**Substitution** (Body an die Aufrufstellen), nicht nur Umbenennung —
   die semantisch komplexeste Op.
+
+Die v2b-Gates **erben sich** über die Engine: Smart-Mode-Pflicht/`INDEXING`, Sprach-Fallback
+`UNSUPPORTED_LANGUAGE`, mehrstufiges `select_backend`/`BACKEND_REQUIRED` (§3.1, §6) gelten für
+`move`/`safe_delete`/`inline` identisch — in v2c nicht neu zu entwerfen, nur zu referenzieren.
+
+**Beim v2c-Schnitt explizit ein-/auszuschließen:** `ApplyQuickFixHandler` ist in v1-§9 als
+„v2-Edit-Spec **bzw. out of scope**" markiert — kein klassisches Struktur-Refactoring; Default
+**out of scope**, sofern v2c nicht bewusst anders entscheidet.
 
 Erst nach v2c ist Serena auch als Edit-Engine vollständig entbehrlich (v1-§13.4).
 
