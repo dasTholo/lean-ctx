@@ -74,6 +74,35 @@ umkehrt:
 zu adressieren — name_path primär, Position-Fallback. Die **Usages** kommen ausschließlich vom
 Plugin; Rust indexiert sie nicht.
 
+### 3.0 Warum nicht der vorhandene lean-ctx-Stack? (3-Ebenen-Abgrenzung)
+
+Naheliegender Einwand: lean-ctx hat bereits `ctx_callgraph`/`ctx_graph`/`ctx_impact` **und**
+`ctx_semantic_search` — warum die Usage-Suche nicht **headless** daraus speisen statt Backing B
+zu verlangen? Weil „semantisch" drei verschiedene Dinge meint und ein resolve-genaues Rename nur
+das dritte verträgt:
+
+| Ebene                    | lean-ctx-Mittel                                            | Misst                                  | Rename-tauglich?               |
+| ------------------------ | ---------------------------------------------------------- | -------------------------------------- | ------------------------------ |
+| **1. Lexikalisch**       | `ctx_search` (regex), BM25, `call_graph` (Namens-Match, `call_graph.rs:416-420`, case-**insensitiv**) | Text-/Namens-**Treffer**               | ✗ false positives + negatives  |
+| **2. NLP-semantisch**    | `ctx_semantic_search` (Embeddings minilm/jina/nomic, Cosine, Reranking) | Bedeutungs-**Nähe** (Konzept-Ähnlichkeit, probabilistisch) | ✗ bewusst unscharf — schlechter als 1 |
+| **3. Compiler-semantisch** | **nur** Backing B (IDE-PSI `RenameProcessor`) / A (rust-analyzer) | Binding-**Identität** (resolve)        | ✓ — **das** braucht rename     |
+
+- **Ebene 1** (Graph/Callgraph) ist ein reiner Namens-Match (`e.callee_name.to_lowercase() == sym`)
+  ohne Scope-/Typ-Auflösung → Homonyme/Overloads/Shadowing/Import-Alias/Override-Hierarchien sind
+  ununterscheidbar. Hervorragend für Navigation/Blast-Radius-**Schätzung** (Over-Approximation ist
+  dort erwünscht), toxisch als **Edit**-Quelle (benennt still das falsche Symbol um oder verpasst
+  eines).
+- **Ebene 2** (`ctx_semantic_search`) misst Konzept-**Ähnlichkeit** (Cosine 0.87 = „ungefähr"),
+  nicht Referenz-**Identität**. Für ein Rename braucht es das Gegenteil: binäre Exaktheit „genau
+  dieses Symbol, ja/nein". Embedding-Unschärfe ist hier **ungeeigneter** als Ebene 1.
+- **Ebene 3** ist resolve-basiertes Binding über ein Compiler-Frontend. lean-ctx hat es **nicht
+  headless** (rust-analyzer = nur Rust, ohne IDE-Transaktion/Undo/Multi-Sprach-Güte — daher der
+  ausgeschlossene A-Fallback, §3.1). Die laufende IDE (Backing B) ist die einzige Ebene-3-Quelle.
+
+**Konsequenz:** Was lean-ctx etabliert hat (Ebene 1 + 2), ist **kategorisch** nicht das, was ein
+Rename braucht (Ebene 3) — kein Reifegrad-, sondern ein Kategorie-Unterschied. Die Backing-B-Pflicht
+(§3.1) ist damit prinzipiell begründet, nicht bloß eine Implementierungs-Bequemlichkeit.
+
 ### 3.1 `select_backend` / `BACKEND_REQUIRED` — deterministische Erreichbarkeit (v1-§8)
 
 Weil v2b **ausschließlich** über Backing B läuft (kein Headless-Pfad), ist die
