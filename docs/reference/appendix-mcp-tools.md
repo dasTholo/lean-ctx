@@ -81,7 +81,7 @@ shows the smallest tool profile that exposes the tool (`M` minimal, `S` standard
 | `ctx_architecture` | Architecture analysis over the property graph | overview\|clusters\|layers\|cycles\|entrypoints\|hotspots\|health | S |
 | `ctx_repomap` | PageRank-ranked map of the most important symbols | `max_tokens`, `focus_files[]` | S |
 | `ctx_routes` | Extract HTTP routes (Express, Flask, FastAPI, Actix, Spring, Rails, Next.js) | `method`, `path` | S |
-| `ctx_refactor` | LSP-backed refactoring + name_path symbol-body edits (IDE-first, lossless headless fallback; `expected_hash` BLAKE3 CONFLICT guard) | rename\|references\|definition\|implementations\|declaration\|type_hierarchy\|symbols_overview\|inspections\|replace_symbol_body\|insert_before_symbol\|insert_after_symbol | S |
+| `ctx_refactor` | LSP-backed refactoring + name_path symbol-body edits + Two-Phase rename (IDE-first, lossless headless fallback for edits; rename needs a live IDE → BACKEND_REQUIRED; `expected_hash`/`plan_hash` BLAKE3 CONFLICT guards) | rename\|references\|definition\|implementations\|declaration\|type_hierarchy\|symbols_overview\|inspections\|replace_symbol_body\|insert_before_symbol\|insert_after_symbol\|rename_preview\|rename_apply | S |
 | `ctx_review` | Automated code review (impact, callers, tests, smells) | review\|diff-review\|checklist | P |
 | `ctx_smells` | Code-smell detection (8 rules over property graph) | scan\|summary\|rules\|file | P |
 | `ctx_pack` | Context Package Manager (PR packs, installable context) | pr\|create\|list\|info\|install\|export\|import\|auto_load | S |

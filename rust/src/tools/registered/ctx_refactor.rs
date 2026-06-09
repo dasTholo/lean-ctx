@@ -21,7 +21,9 @@ impl McpTool for CtxRefactorTool {
              JetBrains backend (declaration, type_hierarchy, symbols_overview, inspections are \
              JetBrains-only). Symbol-body edits (replace_symbol_body, insert_before_symbol, \
              insert_after_symbol) are name_path-addressed and work IDE-first with a lossless \
-             headless fallback.",
+             headless fallback. The Two-Phase rename ops (rename_preview, rename_apply) are \
+             name_path-addressed, require a running JetBrains IDE (BACKEND_REQUIRED otherwise), \
+             use a stateless plan_hash guard, and block on refactoring conflicts unless force=true.",
             json!({
                 "type": "object",
                 "properties": {
@@ -29,7 +31,8 @@ impl McpTool for CtxRefactorTool {
                         "type": "string",
                         "enum": ["rename", "references", "definition", "implementations",
                                  "declaration", "type_hierarchy", "symbols_overview", "inspections",
-                                 "replace_symbol_body", "insert_before_symbol", "insert_after_symbol"],
+                                 "replace_symbol_body", "insert_before_symbol", "insert_after_symbol",
+                                 "rename_preview", "rename_apply"],
                         "description": "Refactoring action"
                     },
                     "path": { "type": "string", "description": "File path" },
@@ -55,7 +58,11 @@ impl McpTool for CtxRefactorTool {
                     "new_body": { "type": "string", "description": "Full replacement declaration text (replace_symbol_body)." },
                     "text": { "type": "string", "description": "Sibling text to insert (insert_before_symbol/insert_after_symbol); indentation is applied automatically." },
                     "end_line": { "type": "integer", "description": "1-based last line of the symbol (only for the path+line fallback when name_path is omitted)." },
-                    "expected_hash": { "type": "string", "description": "Optional BLAKE3-hex of the current range content; mismatch → CONFLICT (no blind overwrite)." }
+                    "expected_hash": { "type": "string", "description": "Optional BLAKE3-hex of the current range content; mismatch → CONFLICT (no blind overwrite)." },
+                    "plan_hash": { "type": "string", "description": "Required for rename_apply: the BLAKE3 plan hash returned by rename_preview (stateless TOCTOU guard; mismatch → CONFLICT)." },
+                    "force": { "type": "boolean", "description": "rename_apply only: override blocking refactoring conflicts (default false → CONFLICT when conflicts exist)." },
+                    "search_comments": { "type": "boolean", "description": "rename: also rename matches inside comments/strings (default false)." },
+                    "search_text_occurrences": { "type": "boolean", "description": "rename: also rename non-code text occurrences (default false)." }
                 },
                 "required": ["action"]
             }),
@@ -88,7 +95,10 @@ impl McpTool for CtxRefactorTool {
             path: get_str(args, "path"),
             changed: matches!(
                 action.as_str(),
-                "replace_symbol_body" | "insert_before_symbol" | "insert_after_symbol"
+                "replace_symbol_body"
+                    | "insert_before_symbol"
+                    | "insert_after_symbol"
+                    | "rename_apply"
             ),
         })
     }
@@ -120,6 +130,12 @@ mod schema_tests {
             "name_path",
             "new_body",
             "expected_hash",
+            "rename_preview",
+            "rename_apply",
+            "plan_hash",
+            "force",
+            "search_comments",
+            "search_text_occurrences",
         ] {
             assert!(schema.contains(needle), "schema missing {needle}: {schema}");
         }
