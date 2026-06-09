@@ -55,23 +55,47 @@ class SymbolRefactorer(private val project: Project) {
         }
     }
 
-    fun preview(req: RenamePreviewRequest): RenamePreviewResponse = locator.inSmartReadAction {
-        val element = resolveTarget(req)
-        val processor = CapturingProcessor(
-            project, element, req.new_name, req.search_comments, req.search_text_occurrences,
-        )
-        val usages = processor.usages()
-        processor.collectConflicts(usages)
+    fun preview(req: RenamePreviewRequest): RenamePreviewResponse {
+        // 1) Resolve target + findUsages in a single read action.
+        val (processor, usages) = locator.inSmartReadAction {
+            val element = resolveTarget(req)
+            val proc = CapturingProcessor(
+                project, element, req.new_name, req.search_comments, req.search_text_occurrences,
+            )
+            proc to proc.usages()
+        }
 
-        val usageDtos = usages.mapNotNull { info ->
-            val el = info.element ?: return@mapNotNull null
-            locator.toLocation(el)?.let { UsageSiteDTO(it.path, it.range, contextSnippet(el)) }
+        // 2) Collect conflicts on the EDT. preprocessUsages is doubly constrained:
+        //    it reads PSI (PsiElementRenameHandler.canRename → PsiManager.isInProject →
+        //    WorkspaceFileIndex.ensureIsUpToDate needs READ access) AND drives a modal
+        //    progress (findRenamedVariables → runProcessWithProgressSynchronously, which
+        //    invokeAndWaits). A pooled thread without a read action fails the read-access
+        //    assertion; a read action forbids the invokeAndWait. The EDT satisfies both:
+        //    it carries an implicit write-intent read action and is the proper home for
+        //    modal progress. The test pumps the EDT via PlatformTestUtil.waitForFuture so
+        //    this invokeAndWait does not deadlock; rethrow EDT failures on the caller.
+        var error: Throwable? = null
+        ApplicationManager.getApplication().invokeAndWait {
+            try {
+                processor.collectConflicts(usages)
+            } catch (t: Throwable) {
+                error = t
+            }
         }
-        val conflictDtos = processor.captured.entrySet().flatMap { entry ->
-            val loc = locator.toLocation(entry.key)
-            entry.value.map { msg -> ConflictDTO(loc?.path ?: "", loc?.range, msg) }
+        error?.let { throw it }
+
+        // 3) Map results back to DTOs in a read action (PSI access).
+        return locator.inSmartReadAction {
+            val usageDtos = usages.mapNotNull { info ->
+                val el = info.element ?: return@mapNotNull null
+                locator.toLocation(el)?.let { UsageSiteDTO(it.path, it.range, contextSnippet(el)) }
+            }
+            val conflictDtos = processor.captured.entrySet().flatMap { entry ->
+                val loc = locator.toLocation(entry.key)
+                entry.value.map { msg -> ConflictDTO(loc?.path ?: "", loc?.range, msg) }
+            }
+            RenamePreviewResponse(usageDtos, conflictDtos)
         }
-        RenamePreviewResponse(usageDtos, conflictDtos)
     }
 
     fun apply(req: RenameApplyRequest): RenameApplyResponse {
