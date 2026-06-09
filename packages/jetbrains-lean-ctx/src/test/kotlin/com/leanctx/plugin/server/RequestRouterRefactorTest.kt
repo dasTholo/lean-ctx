@@ -4,6 +4,7 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.WriteAction
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VfsUtil
+import com.intellij.testFramework.DumbModeTestUtils
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import java.nio.file.Files
@@ -125,5 +126,24 @@ class RequestRouterRefactorTest : BasePlatformTestCase() {
         assertEquals(res.body, 200, res.status)
         assertTrue(res.body, res.body.contains("UNSUPPORTED_LANGUAGE"))
         assertFalse(res.body, res.body.contains("NO_SYMBOL"))
+    }
+
+    fun testRenamePreviewDuringIndexingReturnsIndexing() {
+        // Note: this exercises the isDumb early gate in PsiLocator.inSmartReadAction,
+        // NOT the IndexNotReadyException catch-net (the indexing-onset race cannot be
+        // simulated deterministically in the headless test harness).
+        writeFile("A.kt", "package p\nclass Widget\n")
+        val body = """
+            {"path":"A.kt",
+            "range":{"start":{"line":1,"character":6},"end":{"line":1,"character":12}},
+            "new_name":"Gadget"}
+        """.trimIndent()
+        var res: HttpResult? = null
+        DumbModeTestUtils.runInDumbModeSynchronously(project) {
+            res = routeOffEdt("POST", "/renamePreview", body)
+        }
+        val r = requireNotNull(res) { "response must not be null" }
+        assertEquals(r.body, 200, r.status)
+        assertTrue(r.body, r.body.contains("INDEXING"))
     }
 }

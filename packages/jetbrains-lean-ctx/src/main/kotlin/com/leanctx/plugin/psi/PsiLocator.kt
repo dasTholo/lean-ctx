@@ -2,6 +2,7 @@ package com.leanctx.plugin.psi
 
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.project.DumbService
+import com.intellij.openapi.project.IndexNotReadyException
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.psi.PsiDocumentManager
@@ -80,6 +81,10 @@ class PsiLocator(private val project: Project) {
         if (DumbService.getInstance(project).isDumb) {
             throw BackendException("INDEXING", "IDE is indexing; retry shortly")
         }
-        return ReadAction.nonBlocking<T> { body() }.executeSynchronously()
+        return try {
+            ReadAction.nonBlocking<T> { body() }.executeSynchronously()
+        } catch (e: IndexNotReadyException) {
+            throw BackendException("INDEXING", "IDE started indexing during read; retry shortly")
+        }
     }
 }
