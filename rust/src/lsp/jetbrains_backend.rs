@@ -284,11 +284,7 @@ impl JetBrainsHttpBackend {
         }
         let resp = self.post(endpoint, &body)?;
         if let Some(err) = resp.get("error") {
-            return Err(err
-                .get("code")
-                .and_then(Value::as_str)
-                .unwrap_or("INTERNAL")
-                .to_string());
+            return Err(Self::error_from_envelope(err));
         }
         Ok(Self::parse_edit_result(&resp, &edit.text))
     }
@@ -355,6 +351,17 @@ impl JetBrainsHttpBackend {
             "new_name": new_name,
         })
     }
+
+    /// Build an error message from a backend error envelope: the structured `code` plus
+    /// `": message"` when a non-empty detail message is present (else just the code). Keeps
+    /// the code prefix that callers/tests match on while preserving the human-readable detail.
+    fn error_from_envelope(err: &Value) -> String {
+        let code = err.get("code").and_then(Value::as_str).unwrap_or("INTERNAL");
+        match err.get("message").and_then(Value::as_str) {
+            Some(m) if !m.is_empty() => format!("{code}: {m}"),
+            _ => code.to_string(),
+        }
+    }
 }
 
 impl LspBackend for JetBrainsHttpBackend {
@@ -420,11 +427,7 @@ impl LspBackend for JetBrainsHttpBackend {
         });
         let resp = self.post("/type_hierarchy", &body)?;
         if let Some(err) = resp.get("error") {
-            return Err(err
-                .get("code")
-                .and_then(Value::as_str)
-                .unwrap_or("INTERNAL")
-                .to_string());
+            return Err(Self::error_from_envelope(err));
         }
         self.last_meta = Self::parse_truncation(&resp, 0);
         Ok(Self::parse_type_hierarchy(&resp))
@@ -434,11 +437,7 @@ impl LspBackend for JetBrainsHttpBackend {
         let body = self.path_body(uri);
         let resp = self.post("/symbols_overview", &body)?;
         if let Some(err) = resp.get("error") {
-            return Err(err
-                .get("code")
-                .and_then(Value::as_str)
-                .unwrap_or("INTERNAL")
-                .to_string());
+            return Err(Self::error_from_envelope(err));
         }
         let items = Self::parse_symbols(&resp);
         self.last_meta = Self::parse_truncation(&resp, items.len() as u32);
@@ -449,11 +448,7 @@ impl LspBackend for JetBrainsHttpBackend {
         let body = self.path_body(uri);
         let resp = self.post("/inspections", &body)?;
         if let Some(err) = resp.get("error") {
-            return Err(err
-                .get("code")
-                .and_then(Value::as_str)
-                .unwrap_or("INTERNAL")
-                .to_string());
+            return Err(Self::error_from_envelope(err));
         }
         let diags = Self::parse_inspections(&resp);
         self.last_meta = Self::parse_truncation(&resp, diags.len() as u32);
@@ -463,11 +458,7 @@ impl LspBackend for JetBrainsHttpBackend {
     fn list_inspections(&mut self) -> Result<Vec<InspectionInfo>, String> {
         let resp = self.post("/list_inspections", &serde_json::json!({ "path": "" }))?;
         if let Some(err) = resp.get("error") {
-            return Err(err
-                .get("code")
-                .and_then(Value::as_str)
-                .unwrap_or("INTERNAL")
-                .to_string());
+            return Err(Self::error_from_envelope(err));
         }
         let items = Self::parse_inspection_list(&resp);
         self.last_meta = Self::parse_truncation(&resp, items.len() as u32);
@@ -495,11 +486,7 @@ impl LspBackend for JetBrainsHttpBackend {
         body["search_text_occurrences"] = serde_json::json!(req.search_text_occurrences);
         let resp = self.post("/renamePreview", &body)?;
         if let Some(err) = resp.get("error") {
-            return Err(err
-                .get("code")
-                .and_then(Value::as_str)
-                .unwrap_or("INTERNAL")
-                .to_string());
+            return Err(Self::error_from_envelope(err));
         }
         Ok(Self::parse_rename_plan(&resp))
     }
@@ -512,11 +499,7 @@ impl LspBackend for JetBrainsHttpBackend {
         body["force"] = serde_json::json!(req.force);
         let resp = self.post("/renameApply", &body)?;
         if let Some(err) = resp.get("error") {
-            return Err(err
-                .get("code")
-                .and_then(Value::as_str)
-                .unwrap_or("INTERNAL")
-                .to_string());
+            return Err(Self::error_from_envelope(err));
         }
         let changed_paths = resp
             .get("changed_paths")
@@ -725,7 +708,7 @@ mod tests {
             text: "x".into(),
             expected_hash: None,
         };
-        assert_eq!(be.replace_symbol_body(&edit).unwrap_err(), "CONFLICT");
+        assert_eq!(be.replace_symbol_body(&edit).unwrap_err(), "CONFLICT: stale");
     }
 
     #[test]
@@ -740,7 +723,7 @@ mod tests {
         );
         let uri = file_path_to_uri("/proj/A.kt").unwrap();
         let err = backend.inspections(&uri).expect_err("envelope → Err");
-        assert_eq!(err, "UNSUPPORTED_LANGUAGE");
+        assert_eq!(err, "UNSUPPORTED_LANGUAGE: only kotlin");
     }
 
     #[test]
@@ -905,7 +888,7 @@ mod tests {
             search_comments: false,
             search_text_occurrences: false,
         };
-        assert_eq!(be.rename_preview(&q).unwrap_err(), "INDEXING");
+        assert_eq!(be.rename_preview(&q).unwrap_err(), "INDEXING: busy");
     }
 
     #[test]
