@@ -121,29 +121,11 @@ fn parse_args(args: &[String]) -> Result<CallArgs, CallError> {
     })
 }
 
-/// Build a minimal one-shot ToolContext: project_root set, all shared-state
-/// handles None, plus any pre-resolved `path`. Mirrors the `empty_ctx` test
-/// pattern in `tool_trait.rs`.
 fn oneshot_ctx(project_root: String, resolved_paths: HashMap<String, String>) -> ToolContext {
     ToolContext {
         project_root,
-        minimal: false,
         resolved_paths,
-        crp_mode: crate::tools::CrpMode::Off,
-        cache: None,
-        session: None,
-        tool_calls: None,
-        agent_id: None,
-        workflow: None,
-        ledger: None,
-        client_name: None,
-        pipeline_stats: None,
-        call_count: None,
-        autonomy: None,
-        pressure_snapshot: None,
-        path_errors: HashMap::new(),
-        bm25_cache: None,
-        progress_sender: None,
+        ..Default::default()
     }
 }
 
@@ -197,7 +179,7 @@ pub(crate) fn run_call(args: &[String]) -> Result<String, CallError> {
     // so no tokio runtime is required here.
     let output = tool
         .handle(&args_map, &ctx)
-        .map_err(|e| CallError::Dispatch(format!("{e:?}")))?;
+        .map_err(|e| CallError::Dispatch(format!("{e}")))?;
 
     Ok(output.text)
 }
