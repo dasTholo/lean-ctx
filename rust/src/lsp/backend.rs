@@ -280,7 +280,12 @@ mod tests {
         let q = RenameQuery {
             abs_path: "/proj/a.rs".into(),
             rel_path: "a.rs".into(),
-            target_range: TextRange0Based { start_line: 0, start_char: 0, end_line: 0, end_char: 3 },
+            target_range: TextRange0Based {
+                start_line: 0,
+                start_char: 0,
+                end_line: 0,
+                end_char: 3,
+            },
             new_name: "bar".into(),
             search_comments: false,
             search_text_occurrences: false,
@@ -291,7 +296,12 @@ mod tests {
         let plan = RenamePlan {
             usages: vec![UsageSite {
                 path: "a.rs".into(),
-                range: TextRange0Based { start_line: 1, start_char: 4, end_line: 1, end_char: 7 },
+                range: TextRange0Based {
+                    start_line: 1,
+                    start_char: 4,
+                    end_line: 1,
+                    end_char: 7,
+                },
                 context: Some("foo()".into()),
             }],
             conflicts: vec![Conflict {
@@ -310,7 +320,10 @@ mod tests {
             new_name: "bar".into(),
             force: true,
         };
-        let res = RenameResult { applied: true, changed_paths: vec!["a.rs".into()] };
+        let res = RenameResult {
+            applied: true,
+            changed_paths: vec!["a.rs".into()],
+        };
         assert!(apply.force);
         assert!(res.applied);
     }
@@ -320,16 +333,30 @@ mod tests {
         // HeadlessBackend inherits the Trait default → BACKEND_REQUIRED, no apply.
         let mut be = crate::lsp::edit_apply::HeadlessBackend;
         let q = RenameQuery {
-            abs_path: "/x".into(), rel_path: "x".into(),
-            target_range: TextRange0Based { start_line: 0, start_char: 0, end_line: 0, end_char: 1 },
-            new_name: "y".into(), search_comments: false, search_text_occurrences: false,
+            abs_path: "/x".into(),
+            rel_path: "x".into(),
+            target_range: TextRange0Based {
+                start_line: 0,
+                start_char: 0,
+                end_line: 0,
+                end_char: 1,
+            },
+            new_name: "y".into(),
+            search_comments: false,
+            search_text_occurrences: false,
         };
         let err = be.rename_preview(&q).unwrap_err();
         assert!(err.starts_with("BACKEND_REQUIRED"), "got: {err}");
         let a = RenameApply {
-            abs_path: "/x".into(), rel_path: "x".into(),
-            target_range: q.target_range, new_name: "y".into(), force: false,
+            abs_path: "/x".into(),
+            rel_path: "x".into(),
+            target_range: q.target_range,
+            new_name: "y".into(),
+            force: false,
         };
-        assert!(be.rename_apply(&a).unwrap_err().starts_with("BACKEND_REQUIRED"));
+        assert!(be
+            .rename_apply(&a)
+            .unwrap_err()
+            .starts_with("BACKEND_REQUIRED"));
     }
 }
