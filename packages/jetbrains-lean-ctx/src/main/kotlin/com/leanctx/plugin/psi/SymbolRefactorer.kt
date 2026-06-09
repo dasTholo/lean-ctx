@@ -1,12 +1,16 @@
 package com.leanctx.plugin.psi
 
+import com.intellij.lang.LanguageRefactoringSupport
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.openapi.fileTypes.PlainTextFileType
+import com.intellij.openapi.fileTypes.PlainTextLanguage
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Ref
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiNamedElement
+import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.refactoring.rename.RenameProcessor
 import com.intellij.usageView.UsageInfo
 import com.intellij.util.containers.MultiMap
@@ -140,12 +144,19 @@ class SymbolRefactorer(private val project: Project) {
     /** Resolve the target PsiElement from the declaration range start (walk to a named decl). */
     private fun resolveTarget(req: RenamePreviewRequest): PsiElement {
         val file = locator.psiFile(req.path)
+        val lang = file.language
+        if (lang == PlainTextLanguage.INSTANCE ||
+            file.fileType == PlainTextFileType.INSTANCE ||
+            LanguageRefactoringSupport.getInstance().forLanguage(lang) == null
+        ) {
+            throw BackendException("UNSUPPORTED_LANGUAGE", "rename not supported for ${lang.id}")
+        }
         val offset = locator.offsetOf(file, req.range.start.line, req.range.start.character)
         val at = file.findElementAt(offset)
             ?: throw BackendException("NO_SYMBOL", "no element at ${req.range.start.line}:${req.range.start.character}")
-        return generateSequence(at) { it.parent }
-            .firstOrNull { it is PsiNamedElement && it.name != null }
-            ?: throw BackendException("NO_SYMBOL", "no named declaration at target range")
+        val named = PsiTreeUtil.getParentOfType(at, PsiNamedElement::class.java, false)
+        if (named != null && named.name != null) return named
+        throw BackendException("NO_SYMBOL", "no named declaration at target range")
     }
 
     private fun contextSnippet(el: PsiElement): String? {

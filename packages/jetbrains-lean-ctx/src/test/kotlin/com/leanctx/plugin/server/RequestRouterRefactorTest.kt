@@ -113,4 +113,17 @@ class RequestRouterRefactorTest : BasePlatformTestCase() {
         val res = router().route("POST", "/renamePreview", "wrong", "{}")
         assertEquals(401, res.status)
     }
+
+    fun testRenamePreviewUnsupportedLanguageBeforeNoSymbol() {
+        writeFile("notes.txt", "just some notes here\n")
+        val body = """
+            {"path":"notes.txt",
+            "range":{"start":{"line":0,"character":0},"end":{"line":0,"character":4}},
+            "new_name":"x"}
+        """.trimIndent()
+        val res = routeOffEdt("POST", "/renamePreview", body)
+        assertEquals(res.body, 200, res.status)
+        assertTrue(res.body, res.body.contains("UNSUPPORTED_LANGUAGE"))
+        assertFalse(res.body, res.body.contains("NO_SYMBOL"))
+    }
 }
