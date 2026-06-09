@@ -344,7 +344,10 @@ pub(crate) fn plan_hash(
 
 /// Resolve the rename target: `name_path` (primary, reuse v2a) or `path`+`line`
 /// (+`end_line`) fallback. Returns `(rel_path, start_line, end_line)` 1-based incl.
-fn resolve_rename_target(args: &Value, project_root: &str) -> Result<(String, usize, usize), String> {
+fn resolve_rename_target(
+    args: &Value,
+    project_root: &str,
+) -> Result<(String, usize, usize), String> {
     if let Some(np) = args.get("name_path").and_then(Value::as_str) {
         let r = resolve_name_path(np, project_root)?;
         Ok((r.rel_path, r.start_line, r.end_line))
@@ -354,7 +357,10 @@ fn resolve_rename_target(args: &Value, project_root: &str) -> Result<(String, us
             .and_then(Value::as_str)
             .ok_or_else(|| "provide 'name_path' or 'path'+'line' for rename.".to_string())?;
         let line = args.get("line").and_then(Value::as_u64).unwrap_or(0) as usize;
-        let end = args.get("end_line").and_then(Value::as_u64).unwrap_or(line as u64) as usize;
+        let end = args
+            .get("end_line")
+            .and_then(Value::as_u64)
+            .unwrap_or(line as u64) as usize;
         if line == 0 {
             return Err("'line' is required (1-based) when using the path fallback.".to_string());
         }
@@ -365,16 +371,20 @@ fn resolve_rename_target(args: &Value, project_root: &str) -> Result<(String, us
 /// Deterministic 3-stage Backing-B reachability gate (spec §3.1, v1-§8): live
 /// port file + pid alive + `/health` ping. Any miss → `BACKEND_REQUIRED` BEFORE
 /// any rename HTTP call. NO fallback to Backing A (no IDE-grade rename there).
-fn live_jetbrains_backend(project_root: &str) -> Result<Box<dyn crate::lsp::backend::LspBackend>, String> {
+fn live_jetbrains_backend(
+    project_root: &str,
+) -> Result<Box<dyn crate::lsp::backend::LspBackend>, String> {
     use crate::lsp::port_discovery;
     if let Some(pf) = port_discovery::read_port_file(project_root) {
         if port_discovery::pid_alive(pf.pid) && port_discovery::health_ok(&pf) {
-            return Ok(Box::new(crate::lsp::jetbrains_backend::JetBrainsHttpBackend::new(
-                pf.port,
-                pf.token,
-                project_root.to_string(),
-                pf.pid,
-            )));
+            return Ok(Box::new(
+                crate::lsp::jetbrains_backend::JetBrainsHttpBackend::new(
+                    pf.port,
+                    pf.token,
+                    project_root.to_string(),
+                    pf.pid,
+                ),
+            ));
         }
     }
     Err("BACKEND_REQUIRED: rename requires a running JetBrains IDE \
@@ -565,7 +575,14 @@ fn handle_rename_refactor(action: &str, args: &Value, project_root: &str) -> Str
                 .and_then(Value::as_str)
                 .unwrap_or_default();
             let force = args.get("force").and_then(Value::as_bool).unwrap_or(false);
-            render_rename_apply(backend.as_mut(), project_root, &query, new_name, expected, force)
+            render_rename_apply(
+                backend.as_mut(),
+                project_root,
+                &query,
+                new_name,
+                expected,
+                force,
+            )
         }
         other => format!("ERROR: INTERNAL: not a rename action: {other}"),
     }
@@ -1548,17 +1565,16 @@ mod tests {
         let (rel, sl, el) = super::resolve_rename_target(
             &serde_json::json!({"path": "a.rs", "line": 3, "end_line": 5}),
             "/proj",
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(rel, "a.rs");
         assert_eq!((sl, el), (3, 5));
     }
 
     #[test]
     fn resolve_rename_target_requires_line_in_fallback() {
-        let err = super::resolve_rename_target(
-            &serde_json::json!({"path": "a.rs"}),
-            "/proj",
-        ).unwrap_err();
+        let err = super::resolve_rename_target(&serde_json::json!({"path": "a.rs"}), "/proj")
+            .unwrap_err();
         assert!(err.contains("line"), "got: {err}");
     }
 
@@ -1577,23 +1593,71 @@ mod tests {
         applied_with_force: std::cell::Cell<Option<bool>>,
     }
     impl crate::lsp::backend::LspBackend for RenameStub {
-        fn open_file(&mut self, _u: &lsp_types::Uri, _l: &str, _t: &str) -> Result<(), String> { Ok(()) }
-        fn references(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position, _s: &str) -> Result<Vec<lsp_types::Location>, String> { Ok(vec![]) }
-        fn definition(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position) -> Result<lsp_types::GotoDefinitionResponse, String> { Ok(lsp_types::GotoDefinitionResponse::Array(vec![])) }
-        fn implementations(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position, _s: &str) -> Result<Vec<lsp_types::Location>, String> { Ok(vec![]) }
-        fn rename(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position, _n: &str) -> Result<Option<lsp_types::WorkspaceEdit>, String> { Ok(None) }
-        fn rename_preview(&mut self, _q: &crate::lsp::backend::RenameQuery) -> Result<crate::lsp::backend::RenamePlan, String> { Ok(self.plan.clone()) }
-        fn rename_apply(&mut self, req: &crate::lsp::backend::RenameApply) -> Result<crate::lsp::backend::RenameResult, String> {
+        fn open_file(&mut self, _u: &lsp_types::Uri, _l: &str, _t: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn references(
+            &mut self,
+            _u: &lsp_types::Uri,
+            _p: lsp_types::Position,
+            _s: &str,
+        ) -> Result<Vec<lsp_types::Location>, String> {
+            Ok(vec![])
+        }
+        fn definition(
+            &mut self,
+            _u: &lsp_types::Uri,
+            _p: lsp_types::Position,
+        ) -> Result<lsp_types::GotoDefinitionResponse, String> {
+            Ok(lsp_types::GotoDefinitionResponse::Array(vec![]))
+        }
+        fn implementations(
+            &mut self,
+            _u: &lsp_types::Uri,
+            _p: lsp_types::Position,
+            _s: &str,
+        ) -> Result<Vec<lsp_types::Location>, String> {
+            Ok(vec![])
+        }
+        fn rename(
+            &mut self,
+            _u: &lsp_types::Uri,
+            _p: lsp_types::Position,
+            _n: &str,
+        ) -> Result<Option<lsp_types::WorkspaceEdit>, String> {
+            Ok(None)
+        }
+        fn rename_preview(
+            &mut self,
+            _q: &crate::lsp::backend::RenameQuery,
+        ) -> Result<crate::lsp::backend::RenamePlan, String> {
+            Ok(self.plan.clone())
+        }
+        fn rename_apply(
+            &mut self,
+            req: &crate::lsp::backend::RenameApply,
+        ) -> Result<crate::lsp::backend::RenameResult, String> {
             self.applied_with_force.set(Some(req.force));
-            Ok(crate::lsp::backend::RenameResult { applied: true, changed_paths: vec!["a.rs".into()] })
+            Ok(crate::lsp::backend::RenameResult {
+                applied: true,
+                changed_paths: vec!["a.rs".into()],
+            })
         }
     }
 
     fn stub_query(abs: &str) -> crate::lsp::backend::RenameQuery {
         crate::lsp::backend::RenameQuery {
-            abs_path: abs.into(), rel_path: "a.rs".into(),
-            target_range: crate::lsp::backend::TextRange0Based { start_line: 0, start_char: 4, end_line: 0, end_char: 7 },
-            new_name: "bar".into(), search_comments: false, search_text_occurrences: false,
+            abs_path: abs.into(),
+            rel_path: "a.rs".into(),
+            target_range: crate::lsp::backend::TextRange0Based {
+                start_line: 0,
+                start_char: 4,
+                end_line: 0,
+                end_char: 7,
+            },
+            new_name: "bar".into(),
+            search_comments: false,
+            search_text_occurrences: false,
         }
     }
 
@@ -1604,17 +1668,29 @@ mod tests {
         let root = dir.path().to_str().unwrap();
         let usage = crate::lsp::backend::UsageSite {
             path: "a.rs".into(),
-            range: crate::lsp::backend::TextRange0Based { start_line: 0, start_char: 4, end_line: 0, end_char: 7 },
+            range: crate::lsp::backend::TextRange0Based {
+                start_line: 0,
+                start_char: 4,
+                end_line: 0,
+                end_char: 7,
+            },
             context: None,
         };
         let mut be = RenameStub {
-            plan: crate::lsp::backend::RenamePlan { usages: vec![usage], conflicts: vec![] },
+            plan: crate::lsp::backend::RenamePlan {
+                usages: vec![usage],
+                conflicts: vec![],
+            },
             applied_with_force: std::cell::Cell::new(None),
         };
         let q = stub_query(&dir.path().join("a.rs").to_string_lossy());
         let out = super::render_rename_apply(&mut be, root, &q, "bar", "stalehash", false);
         assert!(out.contains("CONFLICT"), "got: {out}");
-        assert_eq!(be.applied_with_force.get(), None, "apply must not run on hash mismatch");
+        assert_eq!(
+            be.applied_with_force.get(),
+            None,
+            "apply must not run on hash mismatch"
+        );
     }
 
     #[test]
@@ -1624,24 +1700,39 @@ mod tests {
         let root = dir.path().to_str().unwrap();
         let usage = crate::lsp::backend::UsageSite {
             path: "a.rs".into(),
-            range: crate::lsp::backend::TextRange0Based { start_line: 0, start_char: 4, end_line: 0, end_char: 7 },
+            range: crate::lsp::backend::TextRange0Based {
+                start_line: 0,
+                start_char: 4,
+                end_line: 0,
+                end_char: 7,
+            },
             context: None,
         };
         let plan = crate::lsp::backend::RenamePlan {
             usages: vec![usage.clone()],
-            conflicts: vec![crate::lsp::backend::Conflict { path: "a.rs".into(), range: None, message: "clash".into() }],
+            conflicts: vec![crate::lsp::backend::Conflict {
+                path: "a.rs".into(),
+                range: None,
+                message: "clash".into(),
+            }],
         };
         let hash = super::plan_hash(root, &plan.usages).unwrap();
         let q = stub_query(&dir.path().join("a.rs").to_string_lossy());
 
         // force=false → CONFLICT, apply not called.
-        let mut be = RenameStub { plan: plan.clone(), applied_with_force: std::cell::Cell::new(None) };
+        let mut be = RenameStub {
+            plan: plan.clone(),
+            applied_with_force: std::cell::Cell::new(None),
+        };
         let out = super::render_rename_apply(&mut be, root, &q, "bar", &hash, false);
         assert!(out.contains("CONFLICT"), "got: {out}");
         assert_eq!(be.applied_with_force.get(), None);
 
         // force=true → applies, force passed through.
-        let mut be2 = RenameStub { plan, applied_with_force: std::cell::Cell::new(None) };
+        let mut be2 = RenameStub {
+            plan,
+            applied_with_force: std::cell::Cell::new(None),
+        };
         let out2 = super::render_rename_apply(&mut be2, root, &q, "bar", &hash, true);
         assert!(out2.contains("applied"), "got: {out2}");
         assert_eq!(be2.applied_with_force.get(), Some(true));
@@ -1654,12 +1745,23 @@ mod tests {
         let root = dir.path().to_str().unwrap();
         let usage = crate::lsp::backend::UsageSite {
             path: "a.rs".into(),
-            range: crate::lsp::backend::TextRange0Based { start_line: 0, start_char: 4, end_line: 0, end_char: 7 },
+            range: crate::lsp::backend::TextRange0Based {
+                start_line: 0,
+                start_char: 4,
+                end_line: 0,
+                end_char: 7,
+            },
             context: None,
         };
-        let plan = crate::lsp::backend::RenamePlan { usages: vec![usage], conflicts: vec![] };
+        let plan = crate::lsp::backend::RenamePlan {
+            usages: vec![usage],
+            conflicts: vec![],
+        };
         let hash = super::plan_hash(root, &plan.usages).unwrap();
-        let mut be = RenameStub { plan, applied_with_force: std::cell::Cell::new(None) };
+        let mut be = RenameStub {
+            plan,
+            applied_with_force: std::cell::Cell::new(None),
+        };
         let q = stub_query(&dir.path().join("a.rs").to_string_lossy());
         let out = super::render_rename_apply(&mut be, root, &q, "bar", &hash, false);
         assert!(out.contains("applied"), "got: {out}");
@@ -1673,11 +1775,22 @@ mod tests {
         let root = dir.path().to_str().unwrap();
         let usage = crate::lsp::backend::UsageSite {
             path: "a.rs".into(),
-            range: crate::lsp::backend::TextRange0Based { start_line: 0, start_char: 4, end_line: 0, end_char: 7 },
+            range: crate::lsp::backend::TextRange0Based {
+                start_line: 0,
+                start_char: 4,
+                end_line: 0,
+                end_char: 7,
+            },
             context: None,
         };
-        let plan = crate::lsp::backend::RenamePlan { usages: vec![usage], conflicts: vec![] };
-        let mut be = RenameStub { plan, applied_with_force: std::cell::Cell::new(None) };
+        let plan = crate::lsp::backend::RenamePlan {
+            usages: vec![usage],
+            conflicts: vec![],
+        };
+        let mut be = RenameStub {
+            plan,
+            applied_with_force: std::cell::Cell::new(None),
+        };
         let q = stub_query(&dir.path().join("a.rs").to_string_lossy());
         let out = super::render_rename_preview(&mut be, root, &q, "bar");
         assert!(out.contains("plan_hash:"), "got: {out}");
