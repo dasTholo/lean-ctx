@@ -287,6 +287,56 @@ pub(crate) fn resolve_name_path(name_path: &str, project_root: &str) -> Result<R
     }
 }
 
+/// Read the current on-disk text covered by a usage's range, jail-checking its
+/// path first. Out-of-jail / unreadable / bad range → `Err` (spec §5.4 Multi-File
+/// jail: every plugin-reported path is re-checked against `project_root`).
+pub(crate) fn usage_range_text(
+    project_root: &str,
+    u: &crate::lsp::backend::UsageSite,
+) -> Result<String, String> {
+    let abs = crate::core::path_resolve::resolve_tool_path(Some(project_root), None, &u.path)
+        .map_err(|e| format!("CONFLICT: usage path blocked by jail: {e}"))?;
+    let content =
+        std::fs::read_to_string(&abs).map_err(|e| format!("FILE_NOT_FOUND: {abs}: {e}"))?;
+    let s = crate::lsp::edit_apply::offset_of(&content, u.range.start_line, u.range.start_char)?;
+    let e = crate::lsp::edit_apply::offset_of(&content, u.range.end_line, u.range.end_char)?;
+    if e < s {
+        return Err("POSITION_OUT_OF_RANGE: end before start".to_string());
+    }
+    Ok(content[s..e].to_string())
+}
+
+/// Stateless Multi-File integrity guard (spec §5.2). BLAKE3 over the usages
+/// canonicalized by sorted `(path, range)` plus each usage's *current* on-disk
+/// text. `context` is display-only and intentionally excluded. Re-built in
+/// `rename_apply` and compared → mismatch = `CONFLICT` (TOCTOU).
+pub(crate) fn plan_hash(
+    project_root: &str,
+    usages: &[crate::lsp::backend::UsageSite],
+) -> Result<String, String> {
+    use crate::lsp::backend::TextRange0Based;
+    let mut rows: Vec<(String, TextRange0Based, String)> = Vec::with_capacity(usages.len());
+    for u in usages {
+        let text = usage_range_text(project_root, u)?;
+        rows.push((u.path.clone(), u.range, text));
+    }
+    rows.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then(a.1.start_line.cmp(&b.1.start_line))
+            .then(a.1.start_char.cmp(&b.1.start_char))
+            .then(a.1.end_line.cmp(&b.1.end_line))
+            .then(a.1.end_char.cmp(&b.1.end_char))
+    });
+    let mut canon = String::new();
+    for (path, r, text) in &rows {
+        canon.push_str(&format!(
+            "{path}|{}:{}-{}:{}|{text}\n",
+            r.start_line, r.start_char, r.end_line, r.end_char
+        ));
+    }
+    Ok(crate::core::hasher::hash_hex(canon.as_bytes()))
+}
+
 fn parse_direction(args: &Value) -> HierarchyDirection {
     match args.get("direction").and_then(Value::as_str) {
         Some("subtypes") => HierarchyDirection::Subtypes,
@@ -1189,5 +1239,53 @@ mod tests {
             "unknown mode not rejected: {bad_out}"
         );
         let _ = (Position::new(0, 0),); // keep import used if refactored
+    }
+
+    #[test]
+    fn usage_range_text_reads_jailed_slice() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "let foo = 1;\nfoo + foo;\n").unwrap();
+        let root = dir.path().to_str().unwrap();
+        let u = crate::lsp::backend::UsageSite {
+            path: "a.rs".into(),
+            range: crate::lsp::backend::TextRange0Based { start_line: 0, start_char: 4, end_line: 0, end_char: 7 },
+            context: None,
+        };
+        assert_eq!(super::usage_range_text(root, &u).unwrap(), "foo");
+    }
+
+    #[test]
+    fn usage_range_text_rejects_jail_escape() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_str().unwrap();
+        let u = crate::lsp::backend::UsageSite {
+            path: "../../etc/passwd".into(),
+            range: crate::lsp::backend::TextRange0Based { start_line: 0, start_char: 0, end_line: 0, end_char: 1 },
+            context: None,
+        };
+        assert!(super::usage_range_text(root, &u).is_err());
+    }
+
+    #[test]
+    fn plan_hash_is_deterministic_and_order_independent() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "let foo = 1;\nfoo + foo;\n").unwrap();
+        let root = dir.path().to_str().unwrap();
+        let u1 = crate::lsp::backend::UsageSite {
+            path: "a.rs".into(),
+            range: crate::lsp::backend::TextRange0Based { start_line: 0, start_char: 4, end_line: 0, end_char: 7 },
+            context: Some("ignored-in-hash".into()),
+        };
+        let u2 = crate::lsp::backend::UsageSite {
+            path: "a.rs".into(),
+            range: crate::lsp::backend::TextRange0Based { start_line: 1, start_char: 0, end_line: 1, end_char: 3 },
+            context: None,
+        };
+        let h1 = super::plan_hash(root, &[u1.clone(), u2.clone()]).unwrap();
+        let h2 = super::plan_hash(root, std::slice::from_ref(&u2)).unwrap(); // subset → differs
+        let h3 = super::plan_hash(root, &[u2, u1]).unwrap(); // reversed → SAME (sorted canonical)
+        assert_eq!(h1.len(), 64);
+        assert_eq!(h1, h3, "hash must be order-independent");
+        assert_ne!(h1, h2, "different usage set must differ");
     }
 }
