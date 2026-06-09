@@ -10,7 +10,6 @@ import com.intellij.openapi.fileTypes.PlainTextLanguage
 import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiNamedElement
-import com.intellij.openapi.util.Ref
 import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.refactoring.ConflictsDialogBase
 import com.intellij.refactoring.rename.RenameProcessor
