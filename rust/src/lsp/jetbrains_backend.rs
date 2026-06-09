@@ -292,6 +292,51 @@ impl JetBrainsHttpBackend {
         }
         Ok(Self::parse_edit_result(&resp, &edit.text))
     }
+
+    /// Parse a `{start,end}` range object into `TextRange0Based`.
+    fn parse_range0(v: &Value) -> Option<crate::lsp::backend::TextRange0Based> {
+        let start = Self::parse_position(v.get("start")?)?;
+        let end = Self::parse_position(v.get("end")?)?;
+        Some(crate::lsp::backend::TextRange0Based {
+            start_line: start.line, start_char: start.character,
+            end_line: end.line, end_char: end.character,
+        })
+    }
+
+    fn parse_rename_plan(v: &Value) -> crate::lsp::backend::RenamePlan {
+        use crate::lsp::backend::{Conflict, RenamePlan, UsageSite};
+        let usages = v.get("usages").and_then(Value::as_array).map(|arr| {
+            arr.iter().filter_map(|u| {
+                Some(UsageSite {
+                    path: u.get("path")?.as_str()?.to_string(),
+                    range: Self::parse_range0(u.get("range")?)?,
+                    context: u.get("context").and_then(Value::as_str).map(String::from),
+                })
+            }).collect()
+        }).unwrap_or_default();
+        let conflicts = v.get("conflicts").and_then(Value::as_array).map(|arr| {
+            arr.iter().filter_map(|c| {
+                Some(Conflict {
+                    path: c.get("path")?.as_str()?.to_string(),
+                    range: c.get("range").and_then(|r| Self::parse_range0(r)),
+                    message: c.get("message")?.as_str()?.to_string(),
+                })
+            }).collect()
+        }).unwrap_or_default();
+        RenamePlan { usages, conflicts }
+    }
+
+    /// Common `{path, range, new_name}` request body for both rename endpoints.
+    fn rename_body(rel_path: &str, range: crate::lsp::backend::TextRange0Based, new_name: &str) -> Value {
+        serde_json::json!({
+            "path": rel_path,
+            "range": {
+                "start": { "line": range.start_line, "character": range.start_char },
+                "end":   { "line": range.end_line,   "character": range.end_char },
+            },
+            "new_name": new_name,
+        })
+    }
 }
 
 impl LspBackend for JetBrainsHttpBackend {
@@ -421,6 +466,39 @@ impl LspBackend for JetBrainsHttpBackend {
 
     fn insert_after_symbol(&mut self, edit: &RangeEdit) -> Result<EditResult, String> {
         self.post_edit("/insertAfterSymbol", edit)
+    }
+
+    fn rename_preview(
+        &mut self,
+        req: &crate::lsp::backend::RenameQuery,
+    ) -> Result<crate::lsp::backend::RenamePlan, String> {
+        let mut body = Self::rename_body(&req.rel_path, req.target_range, &req.new_name);
+        body["search_comments"] = serde_json::json!(req.search_comments);
+        body["search_text_occurrences"] = serde_json::json!(req.search_text_occurrences);
+        let resp = self.post("/renamePreview", &body)?;
+        if let Some(err) = resp.get("error") {
+            return Err(err.get("code").and_then(Value::as_str).unwrap_or("INTERNAL").to_string());
+        }
+        Ok(Self::parse_rename_plan(&resp))
+    }
+
+    fn rename_apply(
+        &mut self,
+        req: &crate::lsp::backend::RenameApply,
+    ) -> Result<crate::lsp::backend::RenameResult, String> {
+        let mut body = Self::rename_body(&req.rel_path, req.target_range, &req.new_name);
+        body["force"] = serde_json::json!(req.force);
+        let resp = self.post("/renameApply", &body)?;
+        if let Some(err) = resp.get("error") {
+            return Err(err.get("code").and_then(Value::as_str).unwrap_or("INTERNAL").to_string());
+        }
+        let changed_paths = resp.get("changed_paths").and_then(Value::as_array).map(|a| {
+            a.iter().filter_map(|p| p.as_str().map(String::from)).collect()
+        }).unwrap_or_default();
+        Ok(crate::lsp::backend::RenameResult {
+            applied: resp.get("applied").and_then(Value::as_bool).unwrap_or(false),
+            changed_paths,
+        })
     }
 
     fn rename(
@@ -741,5 +819,56 @@ mod tests {
         let backend =
             JetBrainsHttpBackend::new(1, "t".to_string(), raw.to_string(), std::process::id());
         assert_eq!(backend.project_root_for_test(), raw);
+    }
+
+    #[test]
+    fn rename_preview_parses_usages_and_conflicts() {
+        let body = r#"{"usages":[
+            {"path":"src/a.rs","range":{"start":{"line":5,"character":4},"end":{"line":5,"character":7}},"context":"foo()"},
+            {"path":"src/b.rs","range":{"start":{"line":1,"character":0},"end":{"line":1,"character":3}}}
+          ],"conflicts":[
+            {"path":"src/a.rs","range":{"start":{"line":9,"character":0},"end":{"line":9,"character":3}},"message":"name clash"}
+          ]}"#;
+        let port = mock_once(body);
+        let mut be = JetBrainsHttpBackend::new(port, "tok".into(), "/proj".to_string(), 1234);
+        let q = crate::lsp::backend::RenameQuery {
+            abs_path: "/proj/src/a.rs".into(), rel_path: "src/a.rs".into(),
+            target_range: crate::lsp::backend::TextRange0Based { start_line: 5, start_char: 4, end_line: 5, end_char: 7 },
+            new_name: "bar".into(), search_comments: false, search_text_occurrences: false,
+        };
+        let plan = be.rename_preview(&q).unwrap();
+        assert_eq!(plan.usages.len(), 2);
+        assert_eq!(plan.usages[0].path, "src/a.rs");
+        assert_eq!(plan.usages[0].context.as_deref(), Some("foo()"));
+        assert_eq!(plan.usages[1].context, None);
+        assert_eq!(plan.conflicts.len(), 1);
+        assert_eq!(plan.conflicts[0].message, "name clash");
+    }
+
+    #[test]
+    fn rename_preview_maps_error_envelope() {
+        let port = mock_once(r#"{"error":{"code":"INDEXING","message":"busy"}}"#);
+        let mut be = JetBrainsHttpBackend::new(port, "tok".into(), "/proj".to_string(), 1234);
+        let q = crate::lsp::backend::RenameQuery {
+            abs_path: "/proj/a.rs".into(), rel_path: "a.rs".into(),
+            target_range: crate::lsp::backend::TextRange0Based { start_line: 0, start_char: 0, end_line: 0, end_char: 1 },
+            new_name: "y".into(), search_comments: false, search_text_occurrences: false,
+        };
+        assert_eq!(be.rename_preview(&q).unwrap_err(), "INDEXING");
+    }
+
+    #[test]
+    fn rename_apply_parses_changed_paths() {
+        let body = r#"{"applied":true,"changed_paths":["src/a.rs","src/b.rs"]}"#;
+        let port = mock_once(body);
+        let mut be = JetBrainsHttpBackend::new(port, "tok".into(), "/proj".to_string(), 1234);
+        let a = crate::lsp::backend::RenameApply {
+            abs_path: "/proj/src/a.rs".into(), rel_path: "src/a.rs".into(),
+            target_range: crate::lsp::backend::TextRange0Based { start_line: 5, start_char: 4, end_line: 5, end_char: 7 },
+            new_name: "bar".into(), force: false,
+        };
+        let res = be.rename_apply(&a).unwrap();
+        assert!(res.applied);
+        assert_eq!(res.changed_paths, vec!["src/a.rs", "src/b.rs"]);
     }
 }
