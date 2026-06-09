@@ -8,6 +8,7 @@ import com.leanctx.plugin.dto.NavRequest
 import com.leanctx.plugin.endpoint.EditHandlers
 import com.leanctx.plugin.endpoint.InspectionHandlers
 import com.leanctx.plugin.endpoint.NavHandlers
+import com.leanctx.plugin.endpoint.RefactorHandlers
 import com.leanctx.plugin.endpoint.StructureHandlers
 
 data class HttpResult(val status: Int, val body: String)
@@ -27,6 +28,7 @@ class RequestRouter(
     private val structureHandlers = StructureHandlers(project)
     private val inspectionHandlers = InspectionHandlers(project)
     private val editHandlers = EditHandlers(project)
+    private val refactorHandlers = RefactorHandlers(project)
 
     fun route(method: String, path: String, headerToken: String?, body: String): HttpResult {
         if (headerToken != token) {
@@ -43,6 +45,8 @@ class RequestRouter(
             if (path == "/replaceSymbolBody") return dispatchEdit(body, editHandlers::replaceSymbolBody)
             if (path == "/insertBeforeSymbol") return dispatchEdit(body, editHandlers::insertBeforeSymbol)
             if (path == "/insertAfterSymbol") return dispatchEdit(body, editHandlers::insertAfterSymbol)
+            if (path == "/renamePreview") return dispatchRenamePreview(body)
+            if (path == "/renameApply") return dispatchRenameApply(body)
             val handler: ((NavRequest) -> LocationsResponse)? = when (path) {
                 "/references" -> handlers::references
                 "/definition" -> handlers::definition
@@ -132,6 +136,30 @@ class RequestRouter(
         HttpResult(200, JsonCodec.error("INTERNAL", e.message ?: "bad request"))
     } catch (e: Exception) {
         log.warn("edit endpoint failed", e)
+        HttpResult(500, JsonCodec.error("INTERNAL", e.message ?: "internal error"))
+    }
+
+    private fun dispatchRenamePreview(body: String): HttpResult = try {
+        val req = JsonCodec.parseRenamePreviewRequest(body)
+        HttpResult(200, JsonCodec.toJson(refactorHandlers.renamePreview(req)))
+    } catch (e: BackendException) {
+        HttpResult(200, JsonCodec.error(e.code, e.message ?: e.code)) // fachlicher Negativfall = 200
+    } catch (e: IllegalArgumentException) {
+        HttpResult(200, JsonCodec.error("INTERNAL", e.message ?: "bad request"))
+    } catch (e: Exception) {
+        log.warn("renamePreview endpoint failed", e)
+        HttpResult(500, JsonCodec.error("INTERNAL", e.message ?: "internal error"))
+    }
+
+    private fun dispatchRenameApply(body: String): HttpResult = try {
+        val req = JsonCodec.parseRenameApplyRequest(body)
+        HttpResult(200, JsonCodec.toJson(refactorHandlers.renameApply(req)))
+    } catch (e: BackendException) {
+        HttpResult(200, JsonCodec.error(e.code, e.message ?: e.code))
+    } catch (e: IllegalArgumentException) {
+        HttpResult(200, JsonCodec.error("INTERNAL", e.message ?: "bad request"))
+    } catch (e: Exception) {
+        log.warn("renameApply endpoint failed", e)
         HttpResult(500, JsonCodec.error("INTERNAL", e.message ?: "internal error"))
     }
 
