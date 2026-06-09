@@ -35,11 +35,11 @@ Notiere das beobachtete Ergebnis (für die v2b-PR-/Merge-Beschreibung).
 | # | Fall | Aufruf (`--json`) | Soll-Ergebnis |
 | 1 | Preview cross-file | `{"action":"rename_preview","name_path":"Widget","new_name":"Renamed"}` | usages über `Widget.kt`+`Usage.kt`, `files: 2`, `plan_hash` gesetzt |
 | 2 | Apply + Undo | `{"action":"rename_apply","name_path":"Widget","new_name":"Renamed","plan_hash":"<aus #1>"}` | alle Stellen umbenannt; in IDE **ein** Undo-Eintrag (Strg+Z revertet komplett). Danach Strg+Z → Fixture reset |
-| 3 | TOCTOU | `Widget.kt` zwischen #1 und apply ändern, dann #2 mit altem `plan_hash` | `CONFLICT` |
-| 4a | Konflikt ohne force | `{"action":"rename_apply","name_path":"Widget","new_name":"Gadget","plan_hash":"<preview Gadget>"}` | `CONFLICT` (Kollision mit `Gadget.kt`) |
+| 3 | TOCTOU | eine **usage-Stelle** in `Usage.kt` zwischen #1 und apply ändern (z.B. eine Leerzeile davor einfügen → usage-range verschiebt sich), dann #2 mit altem `plan_hash` | `CONFLICT`. Hinweis: `plan_hash` deckt nur usage-Stellen ab (`path\|range\|text`), **nicht** die Deklarations-Datei — eine Änderung an `Widget.kt` allein triggert **kein** `CONFLICT`. |
+| 4a | Konflikt ohne force | `{"action":"rename_apply","name_path":"Widget","new_name":"Gadget","plan_hash":"<preview Gadget>"}` | `CONFLICT` (Kollision mit `Gadget.kt`) Nach Fix A headless als CONFLICT-**Token** erwartet, **kein** modaler Dialog. |
 | 4b | Konflikt mit force | wie 4a + `"force":true` | durchgereicht/angewandt |
-| 5 | INDEXING | Projekt neu öffnen, sofort `rename_preview` während Indizierung | `INDEXING`, kein Teil-Rename |
-| 6 | UNSUPPORTED_LANGUAGE | `{"action":"rename_preview","name_path":"notes","new_name":"x"}` (Ziel in `notes.txt`) | `UNSUPPORTED_LANGUAGE`, kein Crash |
+| 5 | INDEXING | Projekt neu öffnen, sofort `rename_preview` während Indizierung | `INDEXING`, kein Teil-Rename Manuell/best-effort (kurzes Re-Index-Fenster beim Mini-Fixture); deterministisch durch Unit-Test (Dumb-Mode → INDEXING) abgesichert. |
+| 6 | UNSUPPORTED_LANGUAGE | `{"action":"rename_preview","name_path":"notes","new_name":"x"}` (Ziel in `notes.txt`) | `UNSUPPORTED_LANGUAGE`, kein Crash Über den `path:"notes.txt"`+`line:1`-Fallback (Rust `resolve_rename_target`, `ctx_refactor.rs:354-367`); nach Fix B kommt `UNSUPPORTED_LANGUAGE` zuverlässig vor `NO_SYMBOL`. |
 | 7 | BACKEND_REQUIRED | IDE schließen, dann preview **und** apply | `BACKEND_REQUIRED` in beiden Phasen |
 
 > Für Fall 4 zuerst ein eigenes `rename_preview` mit `new_name=Gadget` ausführen,
