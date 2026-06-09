@@ -408,15 +408,18 @@ fn render_rename_preview(
         Ok(h) => h,
         Err(e) => return format!("ERROR: {e}"),
     };
-    let mut files: Vec<&str> = plan.usages.iter().map(|u| u.path.as_str()).collect();
-    files.sort_unstable();
-    files.dedup();
-
+    let mut usage_files: Vec<&str> = plan.usages.iter().map(|u| u.path.as_str()).collect();
+    usage_files.sort_unstable();
+    usage_files.dedup();
+    let mut all_files: Vec<&str> = usage_files.clone();
+    all_files.push(query.rel_path.as_str());
+    all_files.sort_unstable();
+    all_files.dedup();
     let mut out = format!(
         "rename_preview: '{}' → '{new_name}'\n  usages: {}\n  files: {}\n  plan_hash: {hash}\n",
         query.rel_path,
         plan.usages.len(),
-        files.len(),
+        all_files.len(),
     );
     if !plan.conflicts.is_empty() {
         out.push_str(&format!(
@@ -427,7 +430,7 @@ fn render_rename_preview(
             out.push_str(&format!("    {}: {}\n", c.path, c.message));
         }
     }
-    for f in &files {
+    for f in &usage_files {
         let n = plan.usages.iter().filter(|u| u.path == **f).count();
         out.push_str(&format!("  {f}: {n} usage(s)\n"));
     }
@@ -1771,10 +1774,10 @@ mod tests {
     #[test]
     fn preview_renders_plan_hash_and_files() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("a.rs"), "let foo = 1;\nfoo + foo;\n").unwrap();
+        std::fs::write(dir.path().join("usage.rs"), "let foo = 1;\nfoo + foo;\n").unwrap();
         let root = dir.path().to_str().unwrap();
         let usage = crate::lsp::backend::UsageSite {
-            path: "a.rs".into(),
+            path: "usage.rs".into(),
             range: crate::lsp::backend::TextRange0Based {
                 start_line: 0,
                 start_char: 4,
@@ -1791,11 +1794,13 @@ mod tests {
             plan,
             applied_with_force: std::cell::Cell::new(None),
         };
-        let q = stub_query(&dir.path().join("a.rs").to_string_lossy());
+        let mut q = stub_query(&dir.path().join("usage.rs").to_string_lossy());
+        q.rel_path = "decl.rs".into();
         let out = super::render_rename_preview(&mut be, root, &q, "bar");
         assert!(out.contains("plan_hash:"), "got: {out}");
         assert!(out.contains("usages: 1"), "got: {out}");
-        assert!(out.contains("a.rs: 1 usage"), "got: {out}");
+        assert!(out.contains("files: 2"), "got: {out}");
+        assert!(out.contains("usage.rs: 1 usage"), "got: {out}");
     }
 
     #[test]
