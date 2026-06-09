@@ -356,7 +356,10 @@ impl JetBrainsHttpBackend {
     /// `": message"` when a non-empty detail message is present (else just the code). Keeps
     /// the code prefix that callers/tests match on while preserving the human-readable detail.
     fn error_from_envelope(err: &Value) -> String {
-        let code = err.get("code").and_then(Value::as_str).unwrap_or("INTERNAL");
+        let code = err
+            .get("code")
+            .and_then(Value::as_str)
+            .unwrap_or("INTERNAL");
         match err.get("message").and_then(Value::as_str) {
             Some(m) if !m.is_empty() => format!("{code}: {m}"),
             _ => code.to_string(),
@@ -708,7 +711,10 @@ mod tests {
             text: "x".into(),
             expected_hash: None,
         };
-        assert_eq!(be.replace_symbol_body(&edit).unwrap_err(), "CONFLICT: stale");
+        assert_eq!(
+            be.replace_symbol_body(&edit).unwrap_err(),
+            "CONFLICT: stale"
+        );
     }
 
     #[test]
