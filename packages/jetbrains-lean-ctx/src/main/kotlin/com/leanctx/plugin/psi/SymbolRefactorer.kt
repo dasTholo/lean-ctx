@@ -144,7 +144,7 @@ class SymbolRefactorer(private val project: Project) {
         val at = file.findElementAt(offset)
             ?: throw BackendException("NO_SYMBOL", "no element at ${req.range.start.line}:${req.range.start.character}")
         return generateSequence(at) { it.parent }
-            .firstOrNull { it is PsiNamedElement && (it as PsiNamedElement).name != null }
+            .firstOrNull { it is PsiNamedElement && it.name != null }
             ?: throw BackendException("NO_SYMBOL", "no named declaration at target range")
     }
 
