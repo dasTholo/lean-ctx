@@ -2,16 +2,20 @@ package com.leanctx.plugin.psi
 
 import com.intellij.lang.LanguageRefactoringSupport
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.command.CommandProcessor
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileTypes.PlainTextFileType
 import com.intellij.openapi.fileTypes.PlainTextLanguage
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.util.Ref
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiNamedElement
+import com.intellij.openapi.util.Ref
 import com.intellij.psi.util.PsiTreeUtil
+import com.intellij.refactoring.ConflictsDialogBase
 import com.intellij.refactoring.rename.RenameProcessor
+import com.intellij.refactoring.rename.RenamePsiElementProcessor
+import com.intellij.refactoring.rename.RenameUtil
 import com.intellij.usageView.UsageInfo
 import com.intellij.util.containers.MultiMap
 import com.leanctx.plugin.dto.ConflictDTO
@@ -33,7 +37,7 @@ import com.leanctx.plugin.server.BackendException
 class SymbolRefactorer(private val project: Project) {
     private val locator = PsiLocator(project)
 
-    /** Subclass exposing protected findUsages + capturing conflicts without a dialog. */
+    /** Subclass exposing protected findUsages + allRenames + performRefactoring (no dialog). */
     private class CapturingProcessor(
         project: Project,
         element: PsiElement,
@@ -41,60 +45,95 @@ class SymbolRefactorer(private val project: Project) {
         searchInComments: Boolean,
         searchTextOccurrences: Boolean,
     ) : RenameProcessor(project, element, newName, searchInComments, searchTextOccurrences) {
-        val captured = MultiMap<PsiElement, String>()
-
         fun usages(): Array<UsageInfo> = findUsages()
 
-        /** Collect conflicts via preprocessUsages → showConflicts hook, then proceed. */
-        fun collectConflicts(usages: Array<UsageInfo>) {
-            preprocessUsages(Ref.create(usages))
-        }
+        fun renamesView(): Map<PsiElement, String> = myAllRenames
 
-        public override fun showConflicts(
+        /**
+         * Headless-safe conflict gate. The SDK's [RenameProcessor.preprocessUsages]
+         * INLINES its conflict modal — it does NOT route through the (overridable)
+         * [showConflicts] hook. The IC-2026.x body, after collecting conflicts via
+         * [RenameUtil.addConflictDescriptions] +
+         * [RenamePsiElementProcessor.findExistingNameConflicts], does (non-unit-test path):
+         *
+         *     ConflictsDialogBase dialog = prepareConflictsDialog(conflicts, refUsages.get());
+         *     if (!dialog.showAndGet()) { if (dialog.isShowConflicts()) prepareSuccessful(); return false; }
+         *
+         * On the embedded HTTP server thread a modal `showAndGet()` would block/deadlock
+         * the server. The Rust layer already owns the plan_hash + conflict gate and passes
+         * force=true through, so apply() is legitimately reached even WITH conflicts
+         * (runIde Case #4b). We override the dialog FACTORY (not preprocessUsages) so the
+         * ENTIRE base preprocessUsages body — every bit of post-conflict bookkeeping that
+         * drives companion/declaration renames: the automatic-renamer pass
+         * (findRenamedVariables, myRenamers, addElement, prepareRenaming), the
+         * myAllRenames checkRename/checkFileExist loop, the usagesSet assembly +
+         * RenameUtil.removeConflictUsages, the `refUsages.set(...)` mutation and final
+         * `prepareSuccessful()` — runs VERBATIM. Those members are private to the SDK class
+         * and cannot be faithfully reproduced from a subclass, so we must NOT reimplement
+         * preprocessUsages; we only neutralise the modal. The stub's [showAndGet] returns
+         * true WITHOUT calling super, so no DialogWrapper peer is created and no modal event
+         * pump is ever started — the base then takes the "approved" branch and proceeds,
+         * headless, with companion renames intact.
+         */
+        override fun prepareConflictsDialog(
             conflicts: MultiMap<PsiElement, String>,
             usages: Array<out UsageInfo>?,
-        ): Boolean {
-            captured.putAllValues(conflicts)
-            return true // never block here — the Rust gate decides
+        ): ConflictsDialogBase =
+            // ConflictsDialogBase is a 3-method INTERFACE (setCommandName / showAndGet /
+            // isShowConflicts) — NOT a DialogWrapper. Implement it directly: no Swing peer,
+            // no modal event pump is ever created.
+            object : ConflictsDialogBase {
+                override fun setCommandName(name: String?) {} // no-op; headless
+
+                // Auto-approve so the base takes the "conflicts accepted" branch.
+                override fun showAndGet(): Boolean = true
+
+                // Cancel branch is unreachable (showAndGet is always true); value is moot.
+                override fun isShowConflicts(): Boolean = false
+            }
+
+        /**
+         * Execute the rename. NOTE: the SDK's protected [performRefactoring] cannot be
+         * called standalone — IC-2026.1.3 dereferences a transaction that only
+         * [BaseRefactoringProcessor.run] sets up (NPE at RenameProcessor.performRefactoring,
+         * getTransaction()==null). So we drive [run], which sets up the transaction, then
+         * preprocesses + performs. The [prepareConflictsDialog] override above guarantees
+         * the inlined conflict modal never blocks (force+conflict → proceeds headless).
+         * Wrapping this in a single outer CommandProcessor.executeCommand keeps it to one
+         * Undo entry.
+         */
+        fun runRefactoring() {
+            setPreviewUsages(false)
+            run()
         }
     }
 
     fun preview(req: RenamePreviewRequest): RenamePreviewResponse {
-        // 1) Resolve target + findUsages in a single read action.
-        val (processor, usages) = locator.inSmartReadAction {
-            val element = resolveTarget(req)
+        val (element, processor, usages) = locator.inSmartReadAction {
+            val el = resolveTarget(req)
             val proc = CapturingProcessor(
-                project, element, req.new_name, req.search_comments, req.search_text_occurrences,
+                project, el, req.new_name, req.search_comments, req.search_text_occurrences,
             )
-            proc to proc.usages()
+            Triple(el, proc, proc.usages())
         }
-
-        // 2) Collect conflicts on the EDT. preprocessUsages is doubly constrained:
-        //    it reads PSI (PsiElementRenameHandler.canRename → PsiManager.isInProject →
-        //    WorkspaceFileIndex.ensureIsUpToDate needs READ access) AND drives a modal
-        //    progress (findRenamedVariables → runProcessWithProgressSynchronously, which
-        //    invokeAndWaits). A pooled thread without a read action fails the read-access
-        //    assertion; a read action forbids the invokeAndWait. The EDT satisfies both:
-        //    it carries an implicit write-intent read action and is the proper home for
-        //    modal progress. The test pumps the EDT via PlatformTestUtil.waitForFuture so
-        //    this invokeAndWait does not deadlock; rethrow EDT failures on the caller.
+        val conflicts = MultiMap<PsiElement, String>()
         var error: Throwable? = null
         ApplicationManager.getApplication().invokeAndWait {
             try {
-                processor.collectConflicts(usages)
+                RenameUtil.addConflictDescriptions(usages, conflicts)
+                RenamePsiElementProcessor.forElement(element)
+                    .findExistingNameConflicts(element, req.new_name, conflicts, processor.renamesView())
             } catch (t: Throwable) {
                 error = t
             }
         }
         error?.let { throw it }
-
-        // 3) Map results back to DTOs in a read action (PSI access).
         return locator.inSmartReadAction {
             val usageDtos = usages.mapNotNull { info ->
                 val el = info.element ?: return@mapNotNull null
                 locator.toLocation(el)?.let { UsageSiteDTO(it.path, it.range, contextSnippet(el)) }
             }
-            val conflictDtos = processor.captured.entrySet().flatMap { entry ->
+            val conflictDtos = conflicts.entrySet().flatMap { entry ->
                 val loc = locator.toLocation(entry.key)
                 entry.value.map { msg -> ConflictDTO(loc?.path ?: "", loc?.range, msg) }
             }
@@ -103,7 +142,6 @@ class SymbolRefactorer(private val project: Project) {
     }
 
     fun apply(req: RenameApplyRequest): RenameApplyResponse {
-        // Resolve + findUsages in a read action; run the transaction on the EDT.
         val element = locator.inSmartReadAction {
             resolveTarget(
                 RenamePreviewRequest(req.path, req.range, req.new_name, false, false)
@@ -113,31 +151,25 @@ class SymbolRefactorer(private val project: Project) {
             CapturingProcessor(project, element, req.new_name, false, false)
         }
         val usages = locator.inSmartReadAction { processor.usages() }
-
-        // Distinct changed files = every usage's file (+ the declaration file).
         val changed = LinkedHashSet<String>()
         locator.inSmartReadAction {
             usages.forEach { info -> info.element?.let { el -> locator.toLocation(el)?.let { changed.add(it.path) } } }
             locator.toLocation(element)?.let { changed.add(it.path) }
         }
-
-        // RenameProcessor.run() performs its own WriteCommandAction → one Undo entry.
         var error: Throwable? = null
         ApplicationManager.getApplication().invokeAndWait {
             try {
-                processor.setPreviewUsages(false)
-                processor.run()
-                // Persist every changed document to disk so lean-ctx (reads from disk) sees it.
-                WriteCommandAction.runWriteCommandAction(project) {
-                    // PSI commits are handled by RenameProcessor.run(); just flush to disk.
-                    FileDocumentManager.getInstance().saveAllDocuments()
-                }
+                CommandProcessor.getInstance().executeCommand(project, {
+                    processor.runRefactoring()
+                    WriteCommandAction.runWriteCommandAction(project) {
+                        FileDocumentManager.getInstance().saveAllDocuments()
+                    }
+                }, "Rename", null)
             } catch (t: Throwable) {
                 error = t
             }
         }
         error?.let { throw it }
-
         return RenameApplyResponse(applied = true, changed_paths = changed.toList())
     }
 
