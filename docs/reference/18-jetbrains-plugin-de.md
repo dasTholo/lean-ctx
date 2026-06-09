@@ -121,6 +121,38 @@ Rust prüft die Erreichbarkeit in **drei Stufen** (`rust/src/lsp/port_discovery.
 Nur wenn alle drei bestehen, gilt Backing B als erreichbar; sonst greift Headless
 bzw. `BACKEND_REQUIRED`.
 
+### 1.3 Worktrees & Projektfenster
+
+Der HTTP-Server ist ein **project-level Service** (`BackendHttpServer` als
+`Disposable`, gebootet von `LeanCtxStartupActivity` pro `Project`, gebunden an
+`127.0.0.1:0` = ephemerer Port). Die Port-Datei ist über
+`projecthash = sha256(canonical(projectRoot))[..16]` **pro Projekt** gekeyt. Daraus
+folgt für `git worktree`:
+
+- **Pro Worktree eine eigene Port-Datei** — aber nur, wenn der Worktree als eigenes
+  **Projektfenster** geöffnet ist. Mehrere Terminals **innerhalb eines** Projektfensters
+  teilen sich **eine** Port-Datei (Terminals starten kein Plugin).
+- **Ein offenes Projektfenster bedient genau einen Worktree-Pfad.** Eine lean-ctx-Session,
+  die in einem **anderen** Worktree läuft, berechnet einen abweichenden `projecthash`,
+  findet **keine** Port-Datei → sauberer **Fallback auf Backing A** (rust-analyzer);
+  bei `lsp.<lang>="jetbrains"` stattdessen `BACKEND_REQUIRED`. **Keine** Pfad-Kollision.
+- **Backing B für N Worktrees parallel:** je Worktree ein eigenes **Projektfenster**.
+  Dafür genügt **eine** IDE-Instanz — *File → Open → in neuem Fenster* instanziiert den
+  Project-Service erneut (eigener Server, eigener Port, eigene Port-Datei). **Keine**
+  zweite IDE-Installation/-Prozess nötig.
+- **JetBrains-VCS ↔ PSI orthogonal:** Die Git-Tool-Window-Verwirrung bei Worktrees
+  (`.git`-Datei → `gitdir:`-Indirektion) betrifft die **VCS-Schicht**, nicht die
+  Indexierung. Die Backing-B-Endpoints brauchen ein **indiziertes Cargo-Projekt**, kein
+  erkanntes VCS-Root → **PSI funktioniert** auch dann, wenn das Git-Panel zickt.
+- **Pro Terminal** muss die lean-ctx-Session in den **passenden** Worktree ge-`cd`t sein;
+  der `projecthash`-Match läuft danach automatisch.
+
+> Kosten-Abwägung: N Projektfenster = N× Indexierung/RAM (gemeinsame JVM, getrennte
+> Indizes). Lohnt nur bei echtem Bedarf an PSI-Symbolik in mehreren Worktrees
+> **gleichzeitig** — sonst den Nebenworktree im Terminal lassen und den
+> rust-analyzer-Fallback (Backing A) akzeptieren. Derselbe **Branch** kann nicht in
+> zwei Worktrees zugleich ausgecheckt sein (git-Constraint).
+
 ---
 
 ## 2. Funktionsreferenz
