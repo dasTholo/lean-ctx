@@ -20,6 +20,10 @@ pub fn handle(args: &Value, project_root: &str, abs_path: &str) -> String {
         return handle_rename_refactor(action, args, project_root);
     }
 
+    if matches!(action, "safe_delete_preview" | "safe_delete_apply") {
+        return handle_safe_delete_refactor(action, args, project_root);
+    }
+
     let line = args.get("line").and_then(Value::as_u64).unwrap_or(1) as u32;
     let column = args.get("column").and_then(Value::as_u64).unwrap_or(0) as u32;
     let scope = args
@@ -47,7 +51,7 @@ pub fn handle(args: &Value, project_root: &str, abs_path: &str) -> String {
             "ERROR: Unknown action '{action}'. Available: rename, references, definition, \
              implementations, declaration, type_hierarchy, symbols_overview, inspections, \
              replace_symbol_body, insert_before_symbol, insert_after_symbol, \
-             rename_preview, rename_apply."
+             rename_preview, rename_apply, safe_delete_preview, safe_delete_apply."
         ),
     }
 }
@@ -588,6 +592,174 @@ fn handle_rename_refactor(action: &str, args: &Value, project_root: &str) -> Str
             )
         }
         other => format!("ERROR: INTERNAL: not a rename action: {other}"),
+    }
+}
+
+/// Phase 1 renderer for safe_delete: ask Backing B for the REMAINING references
+/// (blocking usages/conflicts), build the stateless plan_hash, present them.
+fn render_safe_delete_preview(
+    backend: &mut dyn crate::lsp::backend::LspBackend,
+    project_root: &str,
+    query: &crate::lsp::backend::SafeDeleteQuery,
+) -> String {
+    let plan = match backend.safe_delete_preview(query) {
+        Ok(p) => p,
+        Err(e) => return format!("ERROR: {e}"),
+    };
+    let hash = match plan_hash(project_root, &plan.usages) {
+        Ok(h) => h,
+        Err(e) => return format!("ERROR: {e}"),
+    };
+    let mut files: Vec<&str> = plan.usages.iter().map(|u| u.path.as_str()).collect();
+    files.sort_unstable();
+    files.dedup();
+    let mut out = format!(
+        "safe_delete_preview: '{}'\n  blocking usages: {}\n  files: {}\n  plan_hash: {hash}\n",
+        query.rel_path,
+        plan.usages.len(),
+        files.len(),
+    );
+    if !plan.conflicts.is_empty() {
+        out.push_str(&format!(
+            "  conflicts: {} (safe_delete_apply blocks unless force=true)\n",
+            plan.conflicts.len()
+        ));
+        for c in &plan.conflicts {
+            out.push_str(&format!("    {}: {}\n", c.path, c.message));
+        }
+    }
+    for f in &files {
+        let n = plan.usages.iter().filter(|u| u.path == **f).count();
+        out.push_str(&format!("  {f}: {n} remaining ref(s)\n"));
+    }
+    out
+}
+
+/// Phase 2 renderer for safe_delete: re-fetch usages, enforce plan_hash (TOCTOU)
+/// + conflict gate (conflict = "reference still exists", spec §5.4) in Rust, then
+/// run the IDE delete transaction and evict changed files.
+fn render_safe_delete_apply(
+    backend: &mut dyn crate::lsp::backend::LspBackend,
+    project_root: &str,
+    query: &crate::lsp::backend::SafeDeleteQuery,
+    expected_hash: &str,
+    force: bool,
+    propagate: bool,
+) -> String {
+    let plan = match backend.safe_delete_preview(query) {
+        Ok(p) => p,
+        Err(e) => return format!("ERROR: {e}"),
+    };
+    // Gate (a): TOCTOU plan_hash (also jail-checks every usage path).
+    let actual = match plan_hash(project_root, &plan.usages) {
+        Ok(h) => h,
+        Err(e) => return format!("ERROR: {e}"),
+    };
+    if actual != expected_hash {
+        return format!(
+            "ERROR: CONFLICT: plan_hash mismatch (source changed since preview; \
+             expected={expected_hash}, actual={actual})"
+        );
+    }
+    // Gate (b): remaining references block unless force.
+    if !plan.conflicts.is_empty() && !force {
+        return format!(
+            "ERROR: CONFLICT: {} blocking reference(s) remain; pass force=true to delete anyway",
+            plan.conflicts.len()
+        );
+    }
+
+    let apply = crate::lsp::backend::SafeDeleteApply {
+        query: query.clone(),
+        force,
+        propagate,
+    };
+    let res = match backend.safe_delete_apply(&apply) {
+        Ok(r) => r,
+        Err(e) => return format!("ERROR: {e}"),
+    };
+
+    // Jail-check + cache-evict each changed file (Multi-File coherence, spec §9).
+    for cp in &res.changed_paths {
+        match crate::core::path_resolve::resolve_tool_path(Some(project_root), None, cp) {
+            Ok(abs) => crate::core::cli_cache::invalidate(&abs),
+            Err(e) => return format!("ERROR: CONFLICT: changed path blocked by jail: {e}"),
+        }
+    }
+
+    format!(
+        "safe_delete_apply: '{}' deleted\n  changed files: {}\n",
+        query.rel_path,
+        res.changed_paths.len(),
+    )
+}
+
+/// Entry for the Two-Phase safe_delete actions. Resolves the source (name_path /
+/// position), jail-checks it, requires a live IDE, then dispatches to the renderer.
+/// Two-stage jail only (source + changed_paths) — no new caller-supplied target.
+fn handle_safe_delete_refactor(action: &str, args: &Value, project_root: &str) -> String {
+    if action == "safe_delete_apply" && args.get("plan_hash").and_then(Value::as_str).is_none() {
+        return "ERROR: 'plan_hash' is required for safe_delete_apply (run safe_delete_preview first)."
+            .to_string();
+    }
+    // Resolve source symbol → 1-based inclusive span (reuse v2b resolver).
+    let (rel_path, start_line, end_line) = match resolve_rename_target(args, project_root) {
+        Ok(t) => t,
+        Err(e) => return format!("ERROR: {e}"),
+    };
+    let abs_path =
+        match crate::core::path_resolve::resolve_tool_path(Some(project_root), None, &rel_path) {
+            Ok(p) => p,
+            Err(e) => return format!("ERROR: path blocked by jail: {e}"),
+        };
+    let content = match std::fs::read_to_string(&abs_path) {
+        Ok(c) => c,
+        Err(e) => return format!("ERROR: FILE_NOT_FOUND: {abs_path}: {e}"),
+    };
+    let end_col = content
+        .lines()
+        .nth(end_line.saturating_sub(1))
+        .map_or(0, str::len) as u32;
+    let src_range = crate::lsp::backend::TextRange0Based {
+        start_line: (start_line - 1) as u32,
+        start_char: 0,
+        end_line: (end_line - 1) as u32,
+        end_char: end_col,
+    };
+
+    let mut backend = match live_jetbrains_backend(project_root) {
+        Ok(b) => b,
+        Err(e) => return format!("ERROR: {e}"),
+    };
+
+    let query = crate::lsp::backend::SafeDeleteQuery {
+        abs_path,
+        rel_path,
+        src_range,
+    };
+
+    match action {
+        "safe_delete_preview" => render_safe_delete_preview(backend.as_mut(), project_root, &query),
+        "safe_delete_apply" => {
+            let expected = args
+                .get("plan_hash")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let force = args.get("force").and_then(Value::as_bool).unwrap_or(false);
+            let propagate = args
+                .get("propagate")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            render_safe_delete_apply(
+                backend.as_mut(),
+                project_root,
+                &query,
+                expected,
+                force,
+                propagate,
+            )
+        }
+        other => format!("ERROR: INTERNAL: not a safe_delete action: {other}"),
     }
 }
 
@@ -1829,11 +2001,179 @@ mod tests {
     }
 
     #[test]
+    fn handle_safe_delete_preview_without_ide_is_backend_required() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "fn foo() {}\n").unwrap();
+        let root = dir.path().to_str().unwrap();
+        let args = serde_json::json!({"action": "safe_delete_preview", "path": "a.rs", "line": 1});
+        let out = super::handle(&args, root, "");
+        assert!(out.contains("BACKEND_REQUIRED"), "got: {out}");
+    }
+
+    #[test]
+    fn handle_safe_delete_apply_requires_plan_hash() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "fn foo() {}\n").unwrap();
+        let root = dir.path().to_str().unwrap();
+        let args = serde_json::json!({"action": "safe_delete_apply", "path": "a.rs", "line": 1});
+        let out = super::handle(&args, root, "");
+        assert!(out.contains("plan_hash"), "got: {out}");
+    }
+
+    #[test]
     fn unknown_action_help_lists_rename_actions() {
         // Resolution happens before backend selection for rename actions, so an
         // empty new_name short-circuits with a clear ERROR mentioning new_name.
         let args = serde_json::json!({"action": "rename_preview", "path": "a.rs", "line": 1});
         let out = super::handle(&args, "/proj", "");
         assert!(out.contains("new_name"), "got: {out}");
+    }
+
+    /// Minimal backend for the safe_delete renderers: canned plan + recorded apply flags.
+    struct SafeDeleteStub {
+        plan: crate::lsp::backend::RenamePlan,
+        applied: std::cell::Cell<Option<(bool, bool)>>, // (force, propagate)
+    }
+    impl crate::lsp::backend::LspBackend for SafeDeleteStub {
+        fn open_file(&mut self, _u: &lsp_types::Uri, _l: &str, _t: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn references(
+            &mut self,
+            _u: &lsp_types::Uri,
+            _p: lsp_types::Position,
+            _s: &str,
+        ) -> Result<Vec<lsp_types::Location>, String> {
+            Ok(vec![])
+        }
+        fn definition(
+            &mut self,
+            _u: &lsp_types::Uri,
+            _p: lsp_types::Position,
+        ) -> Result<lsp_types::GotoDefinitionResponse, String> {
+            Ok(lsp_types::GotoDefinitionResponse::Array(vec![]))
+        }
+        fn implementations(
+            &mut self,
+            _u: &lsp_types::Uri,
+            _p: lsp_types::Position,
+            _s: &str,
+        ) -> Result<Vec<lsp_types::Location>, String> {
+            Ok(vec![])
+        }
+        fn rename(
+            &mut self,
+            _u: &lsp_types::Uri,
+            _p: lsp_types::Position,
+            _n: &str,
+        ) -> Result<Option<lsp_types::WorkspaceEdit>, String> {
+            Ok(None)
+        }
+        fn safe_delete_preview(
+            &mut self,
+            _q: &crate::lsp::backend::SafeDeleteQuery,
+        ) -> Result<crate::lsp::backend::RenamePlan, String> {
+            Ok(self.plan.clone())
+        }
+        fn safe_delete_apply(
+            &mut self,
+            req: &crate::lsp::backend::SafeDeleteApply,
+        ) -> Result<crate::lsp::backend::RenameResult, String> {
+            self.applied.set(Some((req.force, req.propagate)));
+            Ok(crate::lsp::backend::RenameResult {
+                applied: true,
+                changed_paths: vec!["Widget.kt".into()],
+            })
+        }
+    }
+
+    fn safe_delete_query(abs: &str) -> crate::lsp::backend::SafeDeleteQuery {
+        crate::lsp::backend::SafeDeleteQuery {
+            abs_path: abs.into(),
+            rel_path: "a.rs".into(),
+            src_range: crate::lsp::backend::TextRange0Based {
+                start_line: 0,
+                start_char: 4,
+                end_line: 0,
+                end_char: 7,
+            },
+        }
+    }
+
+    #[test]
+    fn safe_delete_apply_blocks_on_remaining_refs_without_force() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "let foo = 1;\nfoo + foo;\n").unwrap();
+        let root = dir.path().to_str().unwrap();
+        let usage = crate::lsp::backend::UsageSite {
+            path: "a.rs".into(),
+            range: crate::lsp::backend::TextRange0Based {
+                start_line: 0,
+                start_char: 4,
+                end_line: 0,
+                end_char: 7,
+            },
+            context: None,
+        };
+        // A remaining reference = a blocking conflict (spec §5.4).
+        let plan = crate::lsp::backend::RenamePlan {
+            usages: vec![usage.clone()],
+            conflicts: vec![crate::lsp::backend::Conflict {
+                path: "a.rs".into(),
+                range: None,
+                message: "still referenced".into(),
+            }],
+        };
+        let hash = super::plan_hash(root, &plan.usages).unwrap();
+        let q = safe_delete_query(&dir.path().join("a.rs").to_string_lossy());
+
+        // force=false → CONFLICT, apply not called.
+        let mut be = SafeDeleteStub {
+            plan: plan.clone(),
+            applied: std::cell::Cell::new(None),
+        };
+        let out = super::render_safe_delete_apply(&mut be, root, &q, &hash, false, false);
+        assert!(out.contains("CONFLICT"), "got: {out}");
+        assert_eq!(be.applied.get(), None);
+
+        // force=true → applies, force+propagate passed through.
+        let mut be2 = SafeDeleteStub {
+            plan,
+            applied: std::cell::Cell::new(None),
+        };
+        let out2 = super::render_safe_delete_apply(&mut be2, root, &q, &hash, true, true);
+        assert!(
+            out2.contains("deleted") || out2.contains("applied"),
+            "got: {out2}"
+        );
+        assert_eq!(be2.applied.get(), Some((true, true)));
+    }
+
+    #[test]
+    fn safe_delete_apply_blocks_on_plan_hash_mismatch() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "let foo = 1;\nfoo + foo;\n").unwrap();
+        let root = dir.path().to_str().unwrap();
+        let usage = crate::lsp::backend::UsageSite {
+            path: "a.rs".into(),
+            range: crate::lsp::backend::TextRange0Based {
+                start_line: 0,
+                start_char: 4,
+                end_line: 0,
+                end_char: 7,
+            },
+            context: None,
+        };
+        let mut be = SafeDeleteStub {
+            plan: crate::lsp::backend::RenamePlan {
+                usages: vec![usage],
+                conflicts: vec![],
+            },
+            applied: std::cell::Cell::new(None),
+        };
+        let q = safe_delete_query(&dir.path().join("a.rs").to_string_lossy());
+        let out = super::render_safe_delete_apply(&mut be, root, &q, "stalehash", false, false);
+        assert!(out.contains("CONFLICT"), "got: {out}");
+        assert_eq!(be.applied.get(), None);
     }
 }
