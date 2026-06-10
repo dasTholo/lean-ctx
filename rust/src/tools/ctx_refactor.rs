@@ -24,6 +24,10 @@ pub fn handle(args: &Value, project_root: &str, abs_path: &str) -> String {
         return handle_safe_delete_refactor(action, args, project_root);
     }
 
+    if matches!(action, "move_preview" | "move_apply") {
+        return handle_move_refactor(action, args, project_root);
+    }
+
     let line = args.get("line").and_then(Value::as_u64).unwrap_or(1) as u32;
     let column = args.get("column").and_then(Value::as_u64).unwrap_or(0) as u32;
     let scope = args
@@ -51,7 +55,8 @@ pub fn handle(args: &Value, project_root: &str, abs_path: &str) -> String {
             "ERROR: Unknown action '{action}'. Available: rename, references, definition, \
              implementations, declaration, type_hierarchy, symbols_overview, inspections, \
              replace_symbol_body, insert_before_symbol, insert_after_symbol, \
-             rename_preview, rename_apply, safe_delete_preview, safe_delete_apply."
+             rename_preview, rename_apply, safe_delete_preview, safe_delete_apply, \
+             move_preview, move_apply."
         ),
     }
 }
@@ -760,6 +765,213 @@ fn handle_safe_delete_refactor(action: &str, args: &Value, project_root: &str) -
             )
         }
         other => format!("ERROR: INTERNAL: not a safe_delete action: {other}"),
+    }
+}
+
+/// Resolve the `move` target (spec §5.3 stage 2): EXACTLY ONE of `target_path` /
+/// `target_parent` must be set. `target_path` → jail-checked dir/file →
+/// MoveTarget::Path. `target_parent` → resolve_name_path → its file → MoveTarget::
+/// Parent. None/both → INVALID_TARGET. Jail violation → INVALID_TARGET. This runs
+/// BEFORE any backend call so an out-of-jail target can never reach the plugin.
+fn resolve_move_target(
+    args: &Value,
+    project_root: &str,
+) -> Result<crate::lsp::backend::MoveTarget, String> {
+    let target_path = args.get("target_path").and_then(Value::as_str);
+    let target_parent = args.get("target_parent").and_then(Value::as_str);
+    match (target_path, target_parent) {
+        (Some(_), Some(_)) | (None, None) => Err(
+            "INVALID_TARGET: set exactly one of 'target_path' or 'target_parent'".to_string(),
+        ),
+        (Some(tp), None) => {
+            let abs = crate::core::path_resolve::resolve_tool_path(Some(project_root), None, tp)
+                .map_err(|e| format!("INVALID_TARGET: target_path blocked by jail: {e}"))?;
+            Ok(crate::lsp::backend::MoveTarget::Path {
+                abs_path: abs,
+                rel_path: tp.to_string(),
+            })
+        }
+        (None, Some(parent_np)) => {
+            // Resolve the parent symbol → its file + declaration span.
+            let r = resolve_name_path(parent_np, project_root)?; // NO_SYMBOL / AMBIGUOUS_SYMBOL
+            let abs = crate::core::path_resolve::resolve_tool_path(Some(project_root), None, &r.rel_path)
+                .map_err(|e| format!("INVALID_TARGET: target_parent file blocked by jail: {e}"))?;
+            // Read the parent file to compute the end-of-line column (mirror handle_rename_refactor).
+            let content = std::fs::read_to_string(&abs)
+                .map_err(|e| format!("FILE_NOT_FOUND: {abs}: {e}"))?;
+            let end_col = content
+                .lines()
+                .nth(r.end_line.saturating_sub(1))
+                .map_or(0, str::len) as u32;
+            Ok(crate::lsp::backend::MoveTarget::Parent {
+                abs_path: abs,
+                rel_path: r.rel_path,
+                range: crate::lsp::backend::TextRange0Based {
+                    start_line: (r.start_line - 1) as u32,
+                    start_char: 0,
+                    end_line: (r.end_line - 1) as u32,
+                    end_char: end_col,
+                },
+            })
+        }
+    }
+}
+
+/// Phase 1 renderer for move: ask Backing B for usages+conflicts at the new
+/// location, build the stateless plan_hash, present the blast radius.
+fn render_move_preview(
+    backend: &mut dyn crate::lsp::backend::LspBackend,
+    project_root: &str,
+    query: &crate::lsp::backend::MoveQuery,
+) -> String {
+    let plan = match backend.move_preview(query) {
+        Ok(p) => p,
+        Err(e) => return format!("ERROR: {e}"),
+    };
+    let hash = match plan_hash(project_root, &plan.usages) {
+        Ok(h) => h,
+        Err(e) => return format!("ERROR: {e}"),
+    };
+    let target_desc = match &query.target {
+        crate::lsp::backend::MoveTarget::Path { rel_path, .. } => format!("→ {rel_path}"),
+        crate::lsp::backend::MoveTarget::Parent { rel_path, .. } => format!("→ member of {rel_path}"),
+    };
+    let mut files: Vec<&str> = plan.usages.iter().map(|u| u.path.as_str()).collect();
+    files.push(query.rel_path.as_str());
+    files.sort_unstable();
+    files.dedup();
+    let mut out = format!(
+        "move_preview: '{}' {target_desc}\n  usages: {}\n  files: {}\n  plan_hash: {hash}\n",
+        query.rel_path,
+        plan.usages.len(),
+        files.len(),
+    );
+    if !plan.conflicts.is_empty() {
+        out.push_str(&format!(
+            "  conflicts: {} (move_apply blocks unless force=true)\n",
+            plan.conflicts.len()
+        ));
+        for c in &plan.conflicts {
+            out.push_str(&format!("    {}: {}\n", c.path, c.message));
+        }
+    }
+    out
+}
+
+/// Phase 2 renderer for move: re-fetch usages, enforce plan_hash (TOCTOU) +
+/// conflict gate in Rust, run the IDE Multi-File move, then jail-check + evict
+/// every changed path (spec §5.3 stage 3 — includes the NEW destination file).
+fn render_move_apply(
+    backend: &mut dyn crate::lsp::backend::LspBackend,
+    project_root: &str,
+    query: &crate::lsp::backend::MoveQuery,
+    expected_hash: &str,
+    force: bool,
+) -> String {
+    let plan = match backend.move_preview(query) {
+        Ok(p) => p,
+        Err(e) => return format!("ERROR: {e}"),
+    };
+    let actual = match plan_hash(project_root, &plan.usages) {
+        Ok(h) => h,
+        Err(e) => return format!("ERROR: {e}"),
+    };
+    if actual != expected_hash {
+        return format!(
+            "ERROR: CONFLICT: plan_hash mismatch (source changed since preview; \
+             expected={expected_hash}, actual={actual})"
+        );
+    }
+    if !plan.conflicts.is_empty() && !force {
+        return format!(
+            "ERROR: CONFLICT: {} refactoring conflict(s); pass force=true to override",
+            plan.conflicts.len()
+        );
+    }
+
+    let apply = crate::lsp::backend::MoveApply {
+        query: query.clone(),
+        force,
+    };
+    let res = match backend.move_apply(&apply) {
+        Ok(r) => r,
+        Err(e) => return format!("ERROR: {e}"),
+    };
+
+    // Stage-3 jail: every changed path (incl. the new destination file) re-checked
+    // against project_root BEFORE eviction (spec §5.3).
+    for cp in &res.changed_paths {
+        match crate::core::path_resolve::resolve_tool_path(Some(project_root), None, cp) {
+            Ok(abs) => crate::core::cli_cache::invalidate(&abs),
+            Err(e) => return format!("ERROR: CONFLICT: changed path blocked by jail: {e}"),
+        }
+    }
+
+    format!(
+        "move_apply: '{}' applied\n  changed files: {}\n",
+        query.rel_path,
+        res.changed_paths.len(),
+    )
+}
+
+/// Entry for the Two-Phase move actions. Resolves the source (stage-1 jail), the
+/// target (stage-2 jail via resolve_move_target → INVALID_TARGET on miss/escape),
+/// requires a live IDE, then dispatches. Stage-3 jail is inside render_move_apply.
+fn handle_move_refactor(action: &str, args: &Value, project_root: &str) -> String {
+    if action == "move_apply" && args.get("plan_hash").and_then(Value::as_str).is_none() {
+        return "ERROR: 'plan_hash' is required for move_apply (run move_preview first)."
+            .to_string();
+    }
+    // Stage 2 (target) BEFORE any read/backend work, so INVALID_TARGET fires first.
+    let target = match resolve_move_target(args, project_root) {
+        Ok(t) => t,
+        Err(e) => return format!("ERROR: {e}"),
+    };
+    // Stage 1 (source).
+    let (rel_path, start_line, end_line) = match resolve_rename_target(args, project_root) {
+        Ok(t) => t,
+        Err(e) => return format!("ERROR: {e}"),
+    };
+    let abs_path =
+        match crate::core::path_resolve::resolve_tool_path(Some(project_root), None, &rel_path) {
+            Ok(p) => p,
+            Err(e) => return format!("ERROR: path blocked by jail: {e}"),
+        };
+    let content = match std::fs::read_to_string(&abs_path) {
+        Ok(c) => c,
+        Err(e) => return format!("ERROR: FILE_NOT_FOUND: {abs_path}: {e}"),
+    };
+    let end_col = content
+        .lines()
+        .nth(end_line.saturating_sub(1))
+        .map_or(0, str::len) as u32;
+    let src_range = crate::lsp::backend::TextRange0Based {
+        start_line: (start_line - 1) as u32,
+        start_char: 0,
+        end_line: (end_line - 1) as u32,
+        end_char: end_col,
+    };
+
+    let mut backend = match live_jetbrains_backend(project_root) {
+        Ok(b) => b,
+        Err(e) => return format!("ERROR: {e}"),
+    };
+
+    let query = crate::lsp::backend::MoveQuery {
+        abs_path,
+        rel_path,
+        src_range,
+        target,
+    };
+
+    match action {
+        "move_preview" => render_move_preview(backend.as_mut(), project_root, &query),
+        "move_apply" => {
+            let expected = args.get("plan_hash").and_then(Value::as_str).unwrap_or_default();
+            let force = args.get("force").and_then(Value::as_bool).unwrap_or(false);
+            render_move_apply(backend.as_mut(), project_root, &query, expected, force)
+        }
+        other => format!("ERROR: INTERNAL: not a move action: {other}"),
     }
 }
 
@@ -2016,6 +2228,154 @@ mod tests {
         std::fs::write(dir.path().join("a.rs"), "fn foo() {}\n").unwrap();
         let root = dir.path().to_str().unwrap();
         let args = serde_json::json!({"action": "safe_delete_apply", "path": "a.rs", "line": 1});
+        let out = super::handle(&args, root, "");
+        assert!(out.contains("plan_hash"), "got: {out}");
+    }
+
+    #[test]
+    fn resolve_move_target_requires_exactly_one_field() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("app/moved")).unwrap();
+        let root = dir.path().to_str().unwrap();
+
+        // Neither set → INVALID_TARGET.
+        let err = super::resolve_move_target(&serde_json::json!({}), root).unwrap_err();
+        assert!(err.starts_with("INVALID_TARGET"), "got: {err}");
+
+        // Both set → INVALID_TARGET.
+        let err2 = super::resolve_move_target(
+            &serde_json::json!({"target_path": "app/moved", "target_parent": "Other"}),
+            root,
+        ).unwrap_err();
+        assert!(err2.starts_with("INVALID_TARGET"), "got: {err2}");
+    }
+
+    #[test]
+    fn resolve_move_target_path_is_jailed() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("app/moved")).unwrap();
+        let root = dir.path().to_str().unwrap();
+
+        // In-jail path resolves to a MoveTarget::Path.
+        let t = super::resolve_move_target(&serde_json::json!({"target_path": "app/moved"}), root).unwrap();
+        match t {
+            crate::lsp::backend::MoveTarget::Path { rel_path, .. } => assert_eq!(rel_path, "app/moved"),
+            other => panic!("expected Path, got {other:?}"),
+        }
+
+        // Escape attempt → INVALID_TARGET (jail violation, before any backend call).
+        let err = super::resolve_move_target(&serde_json::json!({"target_path": "../../etc/skel"}), root).unwrap_err();
+        assert!(err.starts_with("INVALID_TARGET"), "got: {err}");
+    }
+
+    /// Minimal backend for the move renderers: canned plan + recorded apply flags + changed paths.
+    struct MoveStub {
+        plan: crate::lsp::backend::RenamePlan,
+        applied_with_force: std::cell::Cell<Option<bool>>,
+    }
+    impl crate::lsp::backend::LspBackend for MoveStub {
+        fn open_file(&mut self, _u: &lsp_types::Uri, _l: &str, _t: &str) -> Result<(), String> { Ok(()) }
+        fn references(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position, _s: &str) -> Result<Vec<lsp_types::Location>, String> { Ok(vec![]) }
+        fn definition(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position) -> Result<lsp_types::GotoDefinitionResponse, String> { Ok(lsp_types::GotoDefinitionResponse::Array(vec![])) }
+        fn implementations(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position, _s: &str) -> Result<Vec<lsp_types::Location>, String> { Ok(vec![]) }
+        fn rename(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position, _n: &str) -> Result<Option<lsp_types::WorkspaceEdit>, String> { Ok(None) }
+        fn move_preview(&mut self, _q: &crate::lsp::backend::MoveQuery) -> Result<crate::lsp::backend::RenamePlan, String> {
+            Ok(self.plan.clone())
+        }
+        fn move_apply(&mut self, req: &crate::lsp::backend::MoveApply) -> Result<crate::lsp::backend::RenameResult, String> {
+            self.applied_with_force.set(Some(req.force));
+            Ok(crate::lsp::backend::RenameResult { applied: true, changed_paths: vec!["app/moved/Widget.kt".into()] })
+        }
+    }
+
+    fn move_query(abs: &str) -> crate::lsp::backend::MoveQuery {
+        crate::lsp::backend::MoveQuery {
+            abs_path: abs.into(),
+            rel_path: "a.rs".into(),
+            src_range: crate::lsp::backend::TextRange0Based { start_line: 0, start_char: 4, end_line: 0, end_char: 7 },
+            target: crate::lsp::backend::MoveTarget::Path { abs_path: "/p/app/moved".into(), rel_path: "app/moved".into() },
+        }
+    }
+
+    #[test]
+    fn move_apply_gates_then_evicts() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("app/moved")).unwrap();
+        std::fs::write(dir.path().join("a.rs"), "let foo = 1;\nfoo + foo;\n").unwrap();
+        std::fs::write(dir.path().join("app/moved/Widget.kt"), "// moved\n").unwrap();
+        let root = dir.path().to_str().unwrap();
+        let usage = crate::lsp::backend::UsageSite {
+            path: "a.rs".into(),
+            range: crate::lsp::backend::TextRange0Based { start_line: 0, start_char: 4, end_line: 0, end_char: 7 },
+            context: None,
+        };
+        let plan = crate::lsp::backend::RenamePlan { usages: vec![usage], conflicts: vec![] };
+        let hash = super::plan_hash(root, &plan.usages).unwrap();
+        let q = move_query(&dir.path().join("a.rs").to_string_lossy());
+
+        // hash mismatch → CONFLICT, apply not called.
+        let mut be = MoveStub { plan: plan.clone(), applied_with_force: std::cell::Cell::new(None) };
+        let out = super::render_move_apply(&mut be, root, &q, "stalehash", false);
+        assert!(out.contains("CONFLICT"), "got: {out}");
+        assert_eq!(be.applied_with_force.get(), None);
+
+        // matching hash + force → applies, force passed through, changed path jailed+evicted.
+        let mut be2 = MoveStub { plan, applied_with_force: std::cell::Cell::new(None) };
+        let out2 = super::render_move_apply(&mut be2, root, &q, &hash, true);
+        assert!(out2.contains("applied"), "got: {out2}");
+        assert_eq!(be2.applied_with_force.get(), Some(true));
+    }
+
+    #[test]
+    fn move_apply_rejects_out_of_jail_changed_path() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "let foo = 1;\nfoo + foo;\n").unwrap();
+        let root = dir.path().to_str().unwrap();
+        let usage = crate::lsp::backend::UsageSite {
+            path: "a.rs".into(),
+            range: crate::lsp::backend::TextRange0Based { start_line: 0, start_char: 4, end_line: 0, end_char: 7 },
+            context: None,
+        };
+        // Stub returns an out-of-jail changed path (stage-3 jail must reject it post-apply).
+        struct EscapeStub { plan: crate::lsp::backend::RenamePlan }
+        impl crate::lsp::backend::LspBackend for EscapeStub {
+            fn open_file(&mut self, _u: &lsp_types::Uri, _l: &str, _t: &str) -> Result<(), String> { Ok(()) }
+            fn references(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position, _s: &str) -> Result<Vec<lsp_types::Location>, String> { Ok(vec![]) }
+            fn definition(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position) -> Result<lsp_types::GotoDefinitionResponse, String> { Ok(lsp_types::GotoDefinitionResponse::Array(vec![])) }
+            fn implementations(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position, _s: &str) -> Result<Vec<lsp_types::Location>, String> { Ok(vec![]) }
+            fn rename(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position, _n: &str) -> Result<Option<lsp_types::WorkspaceEdit>, String> { Ok(None) }
+            fn move_preview(&mut self, _q: &crate::lsp::backend::MoveQuery) -> Result<crate::lsp::backend::RenamePlan, String> { Ok(self.plan.clone()) }
+            fn move_apply(&mut self, _r: &crate::lsp::backend::MoveApply) -> Result<crate::lsp::backend::RenameResult, String> {
+                Ok(crate::lsp::backend::RenameResult { applied: true, changed_paths: vec!["../../etc/passwd".into()] })
+            }
+        }
+        let plan = crate::lsp::backend::RenamePlan { usages: vec![usage], conflicts: vec![] };
+        let hash = super::plan_hash(root, &plan.usages).unwrap();
+        let mut be = EscapeStub { plan };
+        let q = move_query(&dir.path().join("a.rs").to_string_lossy());
+        let out = super::render_move_apply(&mut be, root, &q, &hash, false);
+        assert!(out.contains("jail"), "expected jail rejection, got: {out}");
+    }
+
+    #[test]
+    fn handle_move_preview_invalid_target_before_backend() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "fn foo() {}\n").unwrap();
+        let root = dir.path().to_str().unwrap();
+        // No target → INVALID_TARGET, and crucially BEFORE BACKEND_REQUIRED (no live IDE here).
+        let args = serde_json::json!({"action": "move_preview", "path": "a.rs", "line": 1});
+        let out = super::handle(&args, root, "");
+        assert!(out.contains("INVALID_TARGET"), "got: {out}");
+        assert!(!out.contains("BACKEND_REQUIRED"), "target gate must precede backend gate: {out}");
+    }
+
+    #[test]
+    fn handle_move_apply_requires_plan_hash() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("x")).unwrap();
+        std::fs::write(dir.path().join("a.rs"), "fn foo() {}\n").unwrap();
+        let root = dir.path().to_str().unwrap();
+        let args = serde_json::json!({"action": "move_apply", "path": "a.rs", "line": 1, "target_path": "x"});
         let out = super::handle(&args, root, "");
         assert!(out.contains("plan_hash"), "got: {out}");
     }
