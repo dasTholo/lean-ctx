@@ -49,7 +49,7 @@ Für force-/TOCTOU-Fälle zuerst das passende `*_preview` ausführen, um den akt
 | 5 | move TOCTOU | eine usage-Stelle in `Usage.kt` zwischen #1 und Apply ändern, dann Apply mit altem `plan_hash` | `CONFLICT` |
 | 6 | safe_delete Preview (ungenutzt) | `{"action":"safe_delete_preview","name_path":"Unused"}` | keine blockierenden usages, `plan_hash` gesetzt |
 | 7 | safe_delete Apply ohne force (genutzt) | `{"action":"safe_delete_apply","name_path":"Widget","plan_hash":"<preview Widget>"}` | `CONFLICT` mit blockierenden Refs, **kein** Löschen |
-| 8 | safe_delete Apply mit force | wie #7 + `"force":true` | gelöscht; Refs bleiben dangling (Rust-Gate hat `force` akzeptiert; IntelliJ-`SafeDeleteProcessor` in IC-2026.1.3 kennt kein `deleteEvenIfUsed` — `run()` löscht immer durch) |
+| 8 | safe_delete Apply mit force | wie #7 + `"force":true` | gelöscht; Refs bleiben dangling (Rust-Gate hat `force` akzeptiert; Plugin umgeht SafeDeleteProcessor komplett (final/private ctor → nicht subklassierbar) und löscht direkt per PSI: sole-top-level-decl → ganze Datei, sonst element.delete(). Kein Konflikt-Modal mehr auf dem Server-Thread.) |
 | 9 | INDEXING | Projekt neu öffnen, sofort `move_preview`/`safe_delete_preview` während Indizierung | `INDEXING`, kein Teil-Edit (best-effort beim Mini-Fixture; deterministisch via Rust-Unit abgesichert) |
 | 10 | UNSUPPORTED_LANGUAGE | `{"action":"move_preview","path":"notes.txt","line":1,"target_path":"src/main/kotlin/app/moved"}` (`path`+`line`-Fallback, **nicht** `name_path`) | `UNSUPPORTED_LANGUAGE`, kein Crash |
 | 11 | BACKEND_REQUIRED | IDE schließen, dann preview **und** apply (move + safe_delete) | `BACKEND_REQUIRED` in beiden Phasen |
