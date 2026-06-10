@@ -195,5 +195,60 @@ class RequestRouterRefactorTest : BasePlatformTestCase() {
         // applied depending on SDK collision handling — both are non-hang outcomes.
         assertEquals(res.body, 200, res.status)
     }
+
+    fun testSafeDeleteApplyForceDeletesSoleDeclarationFileHeadless() {
+        // Widget is the ONLY top-level declaration in its file AND referenced intra-file (the
+        // self() return type). A raw SafeDeleteProcessor would raise the "Conflicts Detected"
+        // modal on the server thread (runIde gate #8). Headless + force must delete the WHOLE
+        // file (class == file) and leave the dangling ref. Intra-file refs ARE resolved in the
+        // light fixture (Spec §6.1), so this reproduces #8 as a missing "applied":true.
+        val widgetPath = writeFile(
+            "app/Widget.kt",
+            "package app\nclass Widget {\n    fun self(): Widget = this\n}\n",
+        )
+
+        val body = """
+            {"path":"app/Widget.kt",
+             "range":{"start":{"line":1,"character":6},"end":{"line":1,"character":12}},
+             "force":true}
+        """.trimIndent()
+
+        val res = routeOffEdt("POST", "/safeDeleteApply", body)
+        assertEquals(res.body, 200, res.status)
+        assertTrue(res.body, res.body.contains("\"applied\":true"))
+
+        WriteAction.computeAndWait<Unit, RuntimeException> {
+            LocalFileSystem.getInstance().refreshAndFindFileByPath(widgetPath)
+        }
+        assertFalse("Widget.kt must be deleted from disk", Files.exists(Paths.get(widgetPath)))
+    }
+
+    fun testSafeDeleteApplyForceDeletesReferencedMemberHeadless() {
+        // `target` is referenced intra-file by `caller`. force + headless must delete JUST the
+        // member (element.delete()), leaving the file, the class and the now-dangling call —
+        // never delete the whole file (Spec §8 sole-decl-heuristic risk guard).
+        val holderPath = writeFile(
+            "app/Holder.kt",
+            "package app\nclass Holder {\n    fun target() {}\n    fun caller() { target() }\n}\n",
+        )
+
+        val body = """
+            {"path":"app/Holder.kt",
+             "range":{"start":{"line":2,"character":8},"end":{"line":2,"character":14}},
+             "force":true}
+        """.trimIndent()
+
+        val res = routeOffEdt("POST", "/safeDeleteApply", body)
+        assertEquals(res.body, 200, res.status)
+        assertTrue(res.body, res.body.contains("\"applied\":true"))
+
+        WriteAction.computeAndWait<Unit, RuntimeException> {
+            LocalFileSystem.getInstance().refreshAndFindFileByPath(holderPath)
+        }
+        val text = Files.readString(Paths.get(holderPath))
+        assertTrue(text, text.contains("class Holder"))   // file + class survive
+        assertTrue(text, text.contains("fun caller"))     // sibling member survives
+        assertFalse(text, text.contains("fun target"))    // deleted member is gone
+    }
 }
 

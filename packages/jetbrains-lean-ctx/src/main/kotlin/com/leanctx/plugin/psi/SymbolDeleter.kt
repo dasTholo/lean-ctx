@@ -8,11 +8,12 @@ import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileTypes.PlainTextFileType
 import com.intellij.openapi.fileTypes.PlainTextLanguage
 import com.intellij.openapi.project.Project
+import com.intellij.psi.PsiComment
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiNamedElement
+import com.intellij.psi.PsiWhiteSpace
 import com.intellij.psi.search.searches.ReferencesSearch
 import com.intellij.psi.util.PsiTreeUtil
-import com.intellij.refactoring.safeDelete.SafeDeleteProcessor
 import com.leanctx.plugin.dto.ConflictDTO
 import com.leanctx.plugin.dto.RenameApplyResponse
 import com.leanctx.plugin.dto.RenamePreviewResponse
@@ -22,18 +23,15 @@ import com.leanctx.plugin.dto.UsageSiteDTO
 import com.leanctx.plugin.server.BackendException
 
 /**
- * Safe-delete via IntelliJ's SafeDeleteProcessor (spec §6). Preview reports the
- * remaining (blocking) references as usages+conflicts (NO write). Apply runs the
- * delete as one CommandProcessor.executeCommand → one Undo entry, saved to disk
- * for lean-ctx. The plan_hash + conflict gate live entirely in Rust; this class
- * never hashes.
- *
- * API note (IC-2026.1.3): SafeDeleteProcessor is final with a private constructor.
- * The only public entry point is SafeDeleteProcessor.createInstance(project, runnable?,
- * elements[], searchInComments, searchInNonJavaFiles). There is no deleteEvenIfUsed/
- * force parameter — the Rust gate owns that decision; apply() calls run() unconditionally.
- * For preview, ReferencesSearch is used (same approach as SymbolMover) since findUsages()
- * is protected and the class cannot be subclassed.
+ * Safe-delete (spec §6). Preview reports the remaining (blocking) references as
+ * usages+conflicts (NO write). Apply performs a direct PSI deletion — it deliberately
+ * does NOT use SafeDeleteProcessor, because SafeDeleteProcessor.run() shows a modal
+ * "Conflicts Detected" dialog when referenced symbols are deleted, which would block
+ * the embedded HTTP server thread (runIde gate #8). The Rust gate (render_safe_delete_apply)
+ * already decided force/conflict before apply() is called; apply() only DELETEs. The
+ * plan_hash + conflict gate live entirely in Rust; this class never hashes.
+ * For preview, ReferencesSearch is used (same approach as SymbolMover) since
+ * SafeDeleteProcessor is final with a private constructor and cannot be subclassed.
  */
 class SymbolDeleter(private val project: Project) {
     private val locator = PsiLocator(project)
@@ -63,20 +61,26 @@ class SymbolDeleter(private val project: Project) {
             resolveTarget(req.path, req.range.start.line, req.range.start.character)
         }
         val changed = LinkedHashSet<String>()
-        locator.inSmartReadAction { locator.toLocation(element)?.let { changed.add(it.path) } }
+        val deleteWholeFile = locator.inSmartReadAction {
+            locator.toLocation(element)?.let { changed.add(it.path) }
+            isSoleTopLevelDeclaration(element)
+        }
         var error: Throwable? = null
         ApplicationManager.getApplication().invokeAndWait {
             try {
                 CommandProcessor.getInstance().executeCommand(project, {
-                    // createInstance(project, prepareSuccessfulCallback, elements,
-                    //                searchInComments, searchInNonJavaFiles)
-                    // No force/deleteEvenIfUsed param exists in IC-2026.1.3 — the Rust gate
-                    // already blocked the non-force path; we proceed unconditionally here.
-                    val processor = SafeDeleteProcessor.createInstance(
-                        project, null, arrayOf(element), false, false,
-                    )
-                    processor.run()
                     WriteCommandAction.runWriteCommandAction(project) {
+                        // The Rust gate (render_safe_delete_apply) already decided force/conflict;
+                        // by the time we reach apply() we only DELETE — never re-check, never call
+                        // SafeDeleteProcessor (its conflict modal would block the embedded HTTP
+                        // server thread, runIde gate #8). Dangling refs stay = force = Runbook #8.
+                        if (deleteWholeFile) {
+                            val vFile = element.containingFile?.virtualFile
+                                ?: throw BackendException("NO_SYMBOL", "element has no virtual file to delete")
+                            vFile.delete(this@SymbolDeleter)
+                        } else {
+                            element.delete() // member deletion; file and siblings stay
+                        }
                         FileDocumentManager.getInstance().saveAllDocuments()
                     }
                 }, "Safe Delete", null)
@@ -104,6 +108,30 @@ class SymbolDeleter(private val project: Project) {
         val named = PsiTreeUtil.getParentOfType(at, PsiNamedElement::class.java, false)
         if (named != null && named.name != null) return named
         throw BackendException("NO_SYMBOL", "no named declaration at target range")
+    }
+
+    /**
+     * True if [element] is the ONLY non-trivial top-level declaration of its file — i.e.
+     * deleting it means deleting the whole file (SafeDeleteProcessor's "class IS the file"
+     * behavior). Language-robust: [element] must be a DIRECT top-level child (a member, whose
+     * parent is a class body, is never the file), and it must be the sole significant top-level
+     * child (whitespace, comments and package/import housekeeping ignored). MUST run in a read
+     * action (PSI access).
+     */
+    private fun isSoleTopLevelDeclaration(element: PsiElement): Boolean {
+        val file = element.containingFile ?: return false
+        if (element.parent != file) return false // a member → never the whole file
+        val significant = file.children.filter { isSignificantTopLevel(it) }
+        return significant.size == 1 && significant.first() === element
+    }
+
+    /** A top-level child that is a real declaration (not whitespace/comment/package/import). */
+    private fun isSignificantTopLevel(child: PsiElement): Boolean {
+        if (child is PsiWhiteSpace || child is PsiComment) return false
+        val text = child.text.trim()
+        if (text.isEmpty()) return false
+        // Language-neutral housekeeping filter (avoids depending on Kotlin PSI classes).
+        return !(text.startsWith("package ") || text.startsWith("import "))
     }
 
     private fun contextSnippet(el: PsiElement): String? {
