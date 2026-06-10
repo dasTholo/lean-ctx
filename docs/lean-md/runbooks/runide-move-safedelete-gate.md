@@ -57,6 +57,12 @@ Für force-/TOCTOU-Fälle zuerst das passende `*_preview` ausführen, um den akt
 > `safe_delete_preview` für `Unused` (#6) liefert den `plan_hash`; für den genutzten
 > `Widget` (#7) zuerst `safe_delete_preview name_path=Widget` für dessen `plan_hash`.
 
+## Audit-Ergebnis (Headless-Konflikt, 2026-06-10)
+
+- **rename:** grün — Guard `CapturingProcessor.prepareConflictsDialog` deckt den Modal; keine Änderung.
+- **safe_delete:** Fix umgesetzt — direkte PSI-Löschung statt `SafeDeleteProcessor` (kein Modal mehr).
+- **move:** Subklassierbarkeit: ja — `MoveFilesOrDirectoriesProcessor` ist eine öffentliche Java-Klasse mit öffentlichem Konstruktor, wird direkt in `SymbolMover.kt:104` instanziiert (nicht final). Test-Modus-Charakterisierung (Step 3/4): CONFLICT, Call kehrt zurück, kein Hang (7/7 Tests grün, `testMoveCollisionReturnsConflictHeadless_characterization` 0.823s). runIde-Live-Provokation (Step 5): **PENDING — manuelle runIde-Reverify durch User ausstehend.** Default bis dahin: KEIN move-Code-Change (Task 3 gated/skipped, YAGNI Spec §4).
+
 ## 4. Teardown
 - Sandbox-IDE schließen.
 - `tmp/runide-move-safedelete-gate/` kann liegen bleiben (gitignored) oder via

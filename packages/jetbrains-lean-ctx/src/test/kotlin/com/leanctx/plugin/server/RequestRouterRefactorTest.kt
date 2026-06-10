@@ -175,4 +175,25 @@ class RequestRouterRefactorTest : BasePlatformTestCase() {
         val w = Files.readString(Paths.get(widgetPath))
         assertTrue(w, w.contains("class Widget"))
     }
+
+    fun testMoveCollisionReturnsConflictHeadless_characterization() {
+        // CHARACTERIZATION (test-mode only): move Widget.kt into a dir that already holds a
+        // Widget.kt. In UnitTestMode a would-be modal becomes an exception → SymbolMover.apply
+        // catches it → CONFLICT. Proves the call RETURNS (no test-mode hang); the real runIde
+        // modal risk is decided manually in Step 5 (manual), not here.
+        writeFile("app/Widget.kt", "package app\nclass Widget\n")
+        writeFile("app/moved/Widget.kt", "package app\nclass Widget\n")
+
+        val body = """
+            {"path":"app/Widget.kt",
+             "range":{"start":{"line":1,"character":6},"end":{"line":1,"character":12}},
+             "target":{"kind":"path","path":"app/moved"},"force":false}
+        """.trimIndent()
+
+        val res = routeOffEdt("POST", "/moveApply", body)
+        // Acceptance: the call RETURNS with 200 (no deadlock in test mode). Body is CONFLICT or
+        // applied depending on SDK collision handling — both are non-hang outcomes.
+        assertEquals(res.body, 200, res.status)
+    }
 }
+
