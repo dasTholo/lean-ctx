@@ -32,7 +32,9 @@ impl McpTool for CtxRefactorTool {
                         "enum": ["rename", "references", "definition", "implementations",
                                  "declaration", "type_hierarchy", "symbols_overview", "inspections",
                                  "replace_symbol_body", "insert_before_symbol", "insert_after_symbol",
-                                 "rename_preview", "rename_apply"],
+                                 "rename_preview", "rename_apply",
+                                 "move_preview", "move_apply",
+                                 "safe_delete_preview", "safe_delete_apply"],
                         "description": "Refactoring action"
                     },
                     "path": { "type": "string", "description": "File path" },
@@ -62,7 +64,10 @@ impl McpTool for CtxRefactorTool {
                     "plan_hash": { "type": "string", "description": "Required for rename_apply: the BLAKE3 plan hash returned by rename_preview (stateless TOCTOU guard; mismatch → CONFLICT)." },
                     "force": { "type": "boolean", "description": "rename_apply only: override blocking refactoring conflicts (default false → CONFLICT when conflicts exist)." },
                     "search_comments": { "type": "boolean", "description": "rename: also rename matches inside comments/strings (default false)." },
-                    "search_text_occurrences": { "type": "boolean", "description": "rename: also rename non-code text occurrences (default false)." }
+                    "search_text_occurrences": { "type": "boolean", "description": "rename: also rename non-code text occurrences (default false)." },
+                    "target_path": { "type": "string", "description": "move only: destination directory/file (project-relative). Set EXACTLY ONE of target_path/target_parent. Out-of-jail or both/neither set → INVALID_TARGET." },
+                    "target_parent": { "type": "string", "description": "move only: destination parent symbol (name_path, e.g. 'OtherClass') for a member move. Set EXACTLY ONE of target_path/target_parent." },
+                    "propagate": { "type": "boolean", "description": "safe_delete_apply only: also delete dependencies that become unreferenced (Serena 'propagate', default false)." }
                 },
                 "required": ["action"]
             }),
@@ -99,6 +104,8 @@ impl McpTool for CtxRefactorTool {
                     | "insert_before_symbol"
                     | "insert_after_symbol"
                     | "rename_apply"
+                    | "move_apply"
+                    | "safe_delete_apply"
             ),
         })
     }
@@ -136,6 +143,13 @@ mod schema_tests {
             "force",
             "search_comments",
             "search_text_occurrences",
+            "move_preview",
+            "move_apply",
+            "safe_delete_preview",
+            "safe_delete_apply",
+            "target_path",
+            "target_parent",
+            "propagate",
         ] {
             assert!(schema.contains(needle), "schema missing {needle}: {schema}");
         }

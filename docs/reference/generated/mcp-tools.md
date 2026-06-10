@@ -325,7 +325,7 @@ Parameters: `fresh`, `mode`, `path`*, `start_line`
 
 LSP-powered refactoring. Actions: rename, references, definition, implementations, declaration, type_hierarchy, symbols_overview, inspections. Requires a running language server (rust-analyzer, typescript-language-server, pylsp, gopls) or the JetBrains backend (declaration, type_hierarchy, symbols_overview, inspections are JetBrains-only). Symbol-body edits (replace_symbol_body, insert_before_symbol, insert_after_symbol) are name_path-addressed and work IDE-first with a lossless headless fallback. The Two-Phase rename ops (rename_preview, rename_apply) are name_path-addressed, require a running JetBrains IDE (BACKEND_REQUIRED otherwise), use a stateless plan_hash guard, and block on refactoring conflicts unless force=true.
 
-Parameters: `action`*, `column`, `direction`, `end_line`, `expected_hash`, `force`, `line`, `mode`, `name_path`, `new_body`, `new_name`, `path`, `plan_hash`, `scope`, `search_comments`, `search_text_occurrences`, `text`
+Parameters: `action`*, `column`, `direction`, `end_line`, `expected_hash`, `force`, `line`, `mode`, `name_path`, `new_body`, `new_name`, `path`, `plan_hash`, `propagate`, `scope`, `search_comments`, `search_text_occurrences`, `target_parent`, `target_path`, `text`
 
 ## `ctx_repomap`
 
