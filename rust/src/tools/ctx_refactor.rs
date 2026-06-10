@@ -641,8 +641,8 @@ fn render_safe_delete_preview(
 }
 
 /// Phase 2 renderer for safe_delete: re-fetch usages, enforce plan_hash (TOCTOU)
-/// + conflict gate (conflict = "reference still exists", spec §5.4) in Rust, then
-/// run the IDE delete transaction and evict changed files.
+/// and a conflict gate (conflict = "reference still exists", spec §5.4) in Rust,
+/// then run the IDE delete transaction and evict changed files.
 fn render_safe_delete_apply(
     backend: &mut dyn crate::lsp::backend::LspBackend,
     project_root: &str,
@@ -780,9 +780,9 @@ fn resolve_move_target(
     let target_path = args.get("target_path").and_then(Value::as_str);
     let target_parent = args.get("target_parent").and_then(Value::as_str);
     match (target_path, target_parent) {
-        (Some(_), Some(_)) | (None, None) => Err(
-            "INVALID_TARGET: set exactly one of 'target_path' or 'target_parent'".to_string(),
-        ),
+        (Some(_), Some(_)) | (None, None) => {
+            Err("INVALID_TARGET: set exactly one of 'target_path' or 'target_parent'".to_string())
+        }
         (Some(tp), None) => {
             let abs = crate::core::path_resolve::resolve_tool_path(Some(project_root), None, tp)
                 .map_err(|e| format!("INVALID_TARGET: target_path blocked by jail: {e}"))?;
@@ -794,11 +794,14 @@ fn resolve_move_target(
         (None, Some(parent_np)) => {
             // Resolve the parent symbol → its file + declaration span.
             let r = resolve_name_path(parent_np, project_root)?; // NO_SYMBOL / AMBIGUOUS_SYMBOL
-            let abs = crate::core::path_resolve::resolve_tool_path(Some(project_root), None, &r.rel_path)
-                .map_err(|e| format!("INVALID_TARGET: target_parent file blocked by jail: {e}"))?;
+            let abs =
+                crate::core::path_resolve::resolve_tool_path(Some(project_root), None, &r.rel_path)
+                    .map_err(|e| {
+                        format!("INVALID_TARGET: target_parent file blocked by jail: {e}")
+                    })?;
             // Read the parent file to compute the end-of-line column (mirror handle_rename_refactor).
-            let content = std::fs::read_to_string(&abs)
-                .map_err(|e| format!("FILE_NOT_FOUND: {abs}: {e}"))?;
+            let content =
+                std::fs::read_to_string(&abs).map_err(|e| format!("FILE_NOT_FOUND: {abs}: {e}"))?;
             let end_col = content
                 .lines()
                 .nth(r.end_line.saturating_sub(1))
@@ -834,7 +837,9 @@ fn render_move_preview(
     };
     let target_desc = match &query.target {
         crate::lsp::backend::MoveTarget::Path { rel_path, .. } => format!("→ {rel_path}"),
-        crate::lsp::backend::MoveTarget::Parent { rel_path, .. } => format!("→ member of {rel_path}"),
+        crate::lsp::backend::MoveTarget::Parent { rel_path, .. } => {
+            format!("→ member of {rel_path}")
+        }
     };
     let mut files: Vec<&str> = plan.usages.iter().map(|u| u.path.as_str()).collect();
     files.push(query.rel_path.as_str());
@@ -967,7 +972,10 @@ fn handle_move_refactor(action: &str, args: &Value, project_root: &str) -> Strin
     match action {
         "move_preview" => render_move_preview(backend.as_mut(), project_root, &query),
         "move_apply" => {
-            let expected = args.get("plan_hash").and_then(Value::as_str).unwrap_or_default();
+            let expected = args
+                .get("plan_hash")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
             let force = args.get("force").and_then(Value::as_bool).unwrap_or(false);
             render_move_apply(backend.as_mut(), project_root, &query, expected, force)
         }
@@ -2246,7 +2254,8 @@ mod tests {
         let err2 = super::resolve_move_target(
             &serde_json::json!({"target_path": "app/moved", "target_parent": "Other"}),
             root,
-        ).unwrap_err();
+        )
+        .unwrap_err();
         assert!(err2.starts_with("INVALID_TARGET"), "got: {err2}");
     }
 
@@ -2257,14 +2266,21 @@ mod tests {
         let root = dir.path().to_str().unwrap();
 
         // In-jail path resolves to a MoveTarget::Path.
-        let t = super::resolve_move_target(&serde_json::json!({"target_path": "app/moved"}), root).unwrap();
+        let t = super::resolve_move_target(&serde_json::json!({"target_path": "app/moved"}), root)
+            .unwrap();
         match t {
-            crate::lsp::backend::MoveTarget::Path { rel_path, .. } => assert_eq!(rel_path, "app/moved"),
-            other => panic!("expected Path, got {other:?}"),
+            crate::lsp::backend::MoveTarget::Path { rel_path, .. } => {
+                assert_eq!(rel_path, "app/moved");
+            }
+            other @ crate::lsp::backend::MoveTarget::Parent { .. } => {
+                panic!("expected Path, got {other:?}")
+            }
         }
 
         // Escape attempt → INVALID_TARGET (jail violation, before any backend call).
-        let err = super::resolve_move_target(&serde_json::json!({"target_path": "../../etc/skel"}), root).unwrap_err();
+        let err =
+            super::resolve_move_target(&serde_json::json!({"target_path": "../../etc/skel"}), root)
+                .unwrap_err();
         assert!(err.starts_with("INVALID_TARGET"), "got: {err}");
     }
 
@@ -2274,17 +2290,55 @@ mod tests {
         applied_with_force: std::cell::Cell<Option<bool>>,
     }
     impl crate::lsp::backend::LspBackend for MoveStub {
-        fn open_file(&mut self, _u: &lsp_types::Uri, _l: &str, _t: &str) -> Result<(), String> { Ok(()) }
-        fn references(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position, _s: &str) -> Result<Vec<lsp_types::Location>, String> { Ok(vec![]) }
-        fn definition(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position) -> Result<lsp_types::GotoDefinitionResponse, String> { Ok(lsp_types::GotoDefinitionResponse::Array(vec![])) }
-        fn implementations(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position, _s: &str) -> Result<Vec<lsp_types::Location>, String> { Ok(vec![]) }
-        fn rename(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position, _n: &str) -> Result<Option<lsp_types::WorkspaceEdit>, String> { Ok(None) }
-        fn move_preview(&mut self, _q: &crate::lsp::backend::MoveQuery) -> Result<crate::lsp::backend::RenamePlan, String> {
+        fn open_file(&mut self, _u: &lsp_types::Uri, _l: &str, _t: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn references(
+            &mut self,
+            _u: &lsp_types::Uri,
+            _p: lsp_types::Position,
+            _s: &str,
+        ) -> Result<Vec<lsp_types::Location>, String> {
+            Ok(vec![])
+        }
+        fn definition(
+            &mut self,
+            _u: &lsp_types::Uri,
+            _p: lsp_types::Position,
+        ) -> Result<lsp_types::GotoDefinitionResponse, String> {
+            Ok(lsp_types::GotoDefinitionResponse::Array(vec![]))
+        }
+        fn implementations(
+            &mut self,
+            _u: &lsp_types::Uri,
+            _p: lsp_types::Position,
+            _s: &str,
+        ) -> Result<Vec<lsp_types::Location>, String> {
+            Ok(vec![])
+        }
+        fn rename(
+            &mut self,
+            _u: &lsp_types::Uri,
+            _p: lsp_types::Position,
+            _n: &str,
+        ) -> Result<Option<lsp_types::WorkspaceEdit>, String> {
+            Ok(None)
+        }
+        fn move_preview(
+            &mut self,
+            _q: &crate::lsp::backend::MoveQuery,
+        ) -> Result<crate::lsp::backend::RenamePlan, String> {
             Ok(self.plan.clone())
         }
-        fn move_apply(&mut self, req: &crate::lsp::backend::MoveApply) -> Result<crate::lsp::backend::RenameResult, String> {
+        fn move_apply(
+            &mut self,
+            req: &crate::lsp::backend::MoveApply,
+        ) -> Result<crate::lsp::backend::RenameResult, String> {
             self.applied_with_force.set(Some(req.force));
-            Ok(crate::lsp::backend::RenameResult { applied: true, changed_paths: vec!["app/moved/Widget.kt".into()] })
+            Ok(crate::lsp::backend::RenameResult {
+                applied: true,
+                changed_paths: vec!["app/moved/Widget.kt".into()],
+            })
         }
     }
 
@@ -2292,8 +2346,16 @@ mod tests {
         crate::lsp::backend::MoveQuery {
             abs_path: abs.into(),
             rel_path: "a.rs".into(),
-            src_range: crate::lsp::backend::TextRange0Based { start_line: 0, start_char: 4, end_line: 0, end_char: 7 },
-            target: crate::lsp::backend::MoveTarget::Path { abs_path: "/p/app/moved".into(), rel_path: "app/moved".into() },
+            src_range: crate::lsp::backend::TextRange0Based {
+                start_line: 0,
+                start_char: 4,
+                end_line: 0,
+                end_char: 7,
+            },
+            target: crate::lsp::backend::MoveTarget::Path {
+                abs_path: "/p/app/moved".into(),
+                rel_path: "app/moved".into(),
+            },
         }
     }
 
@@ -2306,21 +2368,35 @@ mod tests {
         let root = dir.path().to_str().unwrap();
         let usage = crate::lsp::backend::UsageSite {
             path: "a.rs".into(),
-            range: crate::lsp::backend::TextRange0Based { start_line: 0, start_char: 4, end_line: 0, end_char: 7 },
+            range: crate::lsp::backend::TextRange0Based {
+                start_line: 0,
+                start_char: 4,
+                end_line: 0,
+                end_char: 7,
+            },
             context: None,
         };
-        let plan = crate::lsp::backend::RenamePlan { usages: vec![usage], conflicts: vec![] };
+        let plan = crate::lsp::backend::RenamePlan {
+            usages: vec![usage],
+            conflicts: vec![],
+        };
         let hash = super::plan_hash(root, &plan.usages).unwrap();
         let q = move_query(&dir.path().join("a.rs").to_string_lossy());
 
         // hash mismatch → CONFLICT, apply not called.
-        let mut be = MoveStub { plan: plan.clone(), applied_with_force: std::cell::Cell::new(None) };
+        let mut be = MoveStub {
+            plan: plan.clone(),
+            applied_with_force: std::cell::Cell::new(None),
+        };
         let out = super::render_move_apply(&mut be, root, &q, "stalehash", false);
         assert!(out.contains("CONFLICT"), "got: {out}");
         assert_eq!(be.applied_with_force.get(), None);
 
         // matching hash + force → applies, force passed through, changed path jailed+evicted.
-        let mut be2 = MoveStub { plan, applied_with_force: std::cell::Cell::new(None) };
+        let mut be2 = MoveStub {
+            plan,
+            applied_with_force: std::cell::Cell::new(None),
+        };
         let out2 = super::render_move_apply(&mut be2, root, &q, &hash, true);
         assert!(out2.contains("applied"), "got: {out2}");
         assert_eq!(be2.applied_with_force.get(), Some(true));
@@ -2333,23 +2409,73 @@ mod tests {
         let root = dir.path().to_str().unwrap();
         let usage = crate::lsp::backend::UsageSite {
             path: "a.rs".into(),
-            range: crate::lsp::backend::TextRange0Based { start_line: 0, start_char: 4, end_line: 0, end_char: 7 },
+            range: crate::lsp::backend::TextRange0Based {
+                start_line: 0,
+                start_char: 4,
+                end_line: 0,
+                end_char: 7,
+            },
             context: None,
         };
         // Stub returns an out-of-jail changed path (stage-3 jail must reject it post-apply).
-        struct EscapeStub { plan: crate::lsp::backend::RenamePlan }
+        struct EscapeStub {
+            plan: crate::lsp::backend::RenamePlan,
+        }
         impl crate::lsp::backend::LspBackend for EscapeStub {
-            fn open_file(&mut self, _u: &lsp_types::Uri, _l: &str, _t: &str) -> Result<(), String> { Ok(()) }
-            fn references(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position, _s: &str) -> Result<Vec<lsp_types::Location>, String> { Ok(vec![]) }
-            fn definition(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position) -> Result<lsp_types::GotoDefinitionResponse, String> { Ok(lsp_types::GotoDefinitionResponse::Array(vec![])) }
-            fn implementations(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position, _s: &str) -> Result<Vec<lsp_types::Location>, String> { Ok(vec![]) }
-            fn rename(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position, _n: &str) -> Result<Option<lsp_types::WorkspaceEdit>, String> { Ok(None) }
-            fn move_preview(&mut self, _q: &crate::lsp::backend::MoveQuery) -> Result<crate::lsp::backend::RenamePlan, String> { Ok(self.plan.clone()) }
-            fn move_apply(&mut self, _r: &crate::lsp::backend::MoveApply) -> Result<crate::lsp::backend::RenameResult, String> {
-                Ok(crate::lsp::backend::RenameResult { applied: true, changed_paths: vec!["../../etc/passwd".into()] })
+            fn open_file(&mut self, _u: &lsp_types::Uri, _l: &str, _t: &str) -> Result<(), String> {
+                Ok(())
+            }
+            fn references(
+                &mut self,
+                _u: &lsp_types::Uri,
+                _p: lsp_types::Position,
+                _s: &str,
+            ) -> Result<Vec<lsp_types::Location>, String> {
+                Ok(vec![])
+            }
+            fn definition(
+                &mut self,
+                _u: &lsp_types::Uri,
+                _p: lsp_types::Position,
+            ) -> Result<lsp_types::GotoDefinitionResponse, String> {
+                Ok(lsp_types::GotoDefinitionResponse::Array(vec![]))
+            }
+            fn implementations(
+                &mut self,
+                _u: &lsp_types::Uri,
+                _p: lsp_types::Position,
+                _s: &str,
+            ) -> Result<Vec<lsp_types::Location>, String> {
+                Ok(vec![])
+            }
+            fn rename(
+                &mut self,
+                _u: &lsp_types::Uri,
+                _p: lsp_types::Position,
+                _n: &str,
+            ) -> Result<Option<lsp_types::WorkspaceEdit>, String> {
+                Ok(None)
+            }
+            fn move_preview(
+                &mut self,
+                _q: &crate::lsp::backend::MoveQuery,
+            ) -> Result<crate::lsp::backend::RenamePlan, String> {
+                Ok(self.plan.clone())
+            }
+            fn move_apply(
+                &mut self,
+                _r: &crate::lsp::backend::MoveApply,
+            ) -> Result<crate::lsp::backend::RenameResult, String> {
+                Ok(crate::lsp::backend::RenameResult {
+                    applied: true,
+                    changed_paths: vec!["../../etc/passwd".into()],
+                })
             }
         }
-        let plan = crate::lsp::backend::RenamePlan { usages: vec![usage], conflicts: vec![] };
+        let plan = crate::lsp::backend::RenamePlan {
+            usages: vec![usage],
+            conflicts: vec![],
+        };
         let hash = super::plan_hash(root, &plan.usages).unwrap();
         let mut be = EscapeStub { plan };
         let q = move_query(&dir.path().join("a.rs").to_string_lossy());
@@ -2366,7 +2492,10 @@ mod tests {
         let args = serde_json::json!({"action": "move_preview", "path": "a.rs", "line": 1});
         let out = super::handle(&args, root, "");
         assert!(out.contains("INVALID_TARGET"), "got: {out}");
-        assert!(!out.contains("BACKEND_REQUIRED"), "target gate must precede backend gate: {out}");
+        assert!(
+            !out.contains("BACKEND_REQUIRED"),
+            "target gate must precede backend gate: {out}"
+        );
     }
 
     #[test]
