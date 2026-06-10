@@ -60,8 +60,8 @@ Für force-/TOCTOU-Fälle zuerst das passende `*_preview` ausführen, um den akt
 ## Audit-Ergebnis (Headless-Konflikt, 2026-06-10)
 
 - **rename:** grün — Guard `CapturingProcessor.prepareConflictsDialog` deckt den Modal; keine Änderung.
-- **safe_delete:** Fix umgesetzt — direkte PSI-Löschung statt `SafeDeleteProcessor` (kein Modal mehr).
-- **move:** Subklassierbarkeit: ja — `MoveFilesOrDirectoriesProcessor` ist eine öffentliche Java-Klasse mit öffentlichem Konstruktor, wird direkt in `SymbolMover.kt:104` instanziiert (nicht final). Test-Modus-Charakterisierung (Step 3/4): CONFLICT, Call kehrt zurück, kein Hang (7/7 Tests grün, `testMoveCollisionReturnsConflictHeadless_characterization` 0.823s). runIde-Live-Provokation (Step 5): **PENDING — manuelle runIde-Reverify durch User ausstehend.** Default bis dahin: KEIN move-Code-Change (Task 3 gated/skipped, YAGNI Spec §4).
+- **safe_delete:** Fix umgesetzt — direkte PSI-Löschung statt `SafeDeleteProcessor` (kein Modal mehr). **runIde-Live-verifiziert (2026-06-10):** `safe_delete_apply force=true` auf genutztes `Widget` (2 cross-file-Refs in `Usage.kt`) kehrte headless zurück (`applied`, kein Modal, kein Server-Thread-Hang); Widget.kt von Disk gelöscht, Refs dangling = `force`-Semantik = #8-Soll.
+- **move:** Subklassierbarkeit: ja — `MoveFilesOrDirectoriesProcessor` ist eine öffentliche Java-Klasse mit öffentlichem Konstruktor, wird direkt in `SymbolMover.kt:104` instanziiert (nicht final). Test-Modus-Charakterisierung (Step 3/4): CONFLICT, Call kehrt zurück, kein Hang (7/7 Tests grün, `testMoveCollisionReturnsConflictHeadless_characterization` 0.823s). **runIde-Live-Provokation (Step 5, 2026-06-10):** Namens-Kollision im Zielordner (`app/moved/Widget.kt` vorab angelegt) + `move_apply force=true` → **headless** zurück (`applied`, changed files: 3, **kein "Conflicts Detected"-Modal, kein Server-Thread-Hang**), `Usage.kt`-Import auf `app.moved.Widget` umgeschrieben. **Ergebnis: KEIN Modal-Risiko im Move-Pfad** (bestätigt Spec §4) → **Task 3 endgültig übersprungen, kein move-Code-Change.**
 
 ## 4. Teardown
 - Sandbox-IDE schließen.
