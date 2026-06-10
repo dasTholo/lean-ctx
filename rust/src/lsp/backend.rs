@@ -171,6 +171,59 @@ pub struct RenameResult {
     pub changed_paths: Vec<String>,
 }
 
+/// Where a `move` sends the symbol. Mirrors Serena's two-field dispatch
+/// (`targetRelativePath` XOR `targetParentNamePath`, spec §3): the caller picks
+/// the variant, the backend never sees a `name_path`. Both variants carry the
+/// jail-checked `abs_path` plus the wire-facing `rel_path` (rebuilt by the IDE).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MoveTarget {
+    /// Move a file/class into a directory or file (FileMoveProcessor side).
+    Path { abs_path: String, rel_path: String },
+    /// Move a member into a parent symbol (SymbolMoveProcessor side); `range`
+    /// is the parent declaration span used to resolve it in the IDE.
+    Parent {
+        abs_path: String,
+        rel_path: String,
+        range: TextRange0Based,
+    },
+}
+
+/// Phase-1 `move` request: the resolved source span plus an already-resolved,
+/// already-jailed target (the trait never resolves a `name_path` or a path).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MoveQuery {
+    pub abs_path: String,
+    pub rel_path: String,
+    pub src_range: TextRange0Based,
+    pub target: MoveTarget,
+}
+
+/// Phase-2 `move` request: the query plus the `force` flag (Rust already gated
+/// plan_hash + conflicts before this is built).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MoveApply {
+    pub query: MoveQuery,
+    pub force: bool,
+}
+
+/// Phase-1 `safe_delete` request: just the resolved source span. `*_preview`
+/// returns the remaining (blocking) usages in the reused `RenamePlan`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SafeDeleteQuery {
+    pub abs_path: String,
+    pub rel_path: String,
+    pub src_range: TextRange0Based,
+}
+
+/// Phase-2 `safe_delete` request: `force` = Serena's `deleteEvenIfUsed`,
+/// `propagate` = delete now-unreferenced dependencies too.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SafeDeleteApply {
+    pub query: SafeDeleteQuery,
+    pub force: bool,
+    pub propagate: bool,
+}
+
 /// Code-intelligence backend. `Send` so instances can live in the global
 /// `BACKENDS` cache (`Mutex<HashMap<String, Box<dyn LspBackend>>>`).
 pub trait LspBackend: Send {
@@ -257,6 +310,28 @@ pub trait LspBackend: Send {
         Err("BACKEND_REQUIRED: rename requires a running JetBrains IDE".to_string())
     }
 
+    /// Phase 1 of the Two-Phase move: resolve all usages + conflicts of the
+    /// target at the new location. DEFAULT = `Err(BACKEND_REQUIRED)` (no lossless
+    /// headless move; only Backing B overrides — spec §5.5).
+    fn move_preview(&mut self, _req: &MoveQuery) -> Result<RenamePlan, String> {
+        Err("BACKEND_REQUIRED: move requires a running JetBrains IDE".to_string())
+    }
+    /// Phase 2 of the Two-Phase move: perform the Multi-File move as ONE Undo
+    /// transaction. DEFAULT = `Err(BACKEND_REQUIRED)`.
+    fn move_apply(&mut self, _req: &MoveApply) -> Result<RenameResult, String> {
+        Err("BACKEND_REQUIRED: move requires a running JetBrains IDE".to_string())
+    }
+    /// Phase 1 of the Two-Phase safe-delete: report the REMAINING (blocking)
+    /// references as `usages`/`conflicts`. DEFAULT = `Err(BACKEND_REQUIRED)`.
+    fn safe_delete_preview(&mut self, _req: &SafeDeleteQuery) -> Result<RenamePlan, String> {
+        Err("BACKEND_REQUIRED: safe_delete requires a running JetBrains IDE".to_string())
+    }
+    /// Phase 2 of the Two-Phase safe-delete: delete the symbol (force =
+    /// deleteEvenIfUsed) as ONE Undo transaction. DEFAULT = `Err(BACKEND_REQUIRED)`.
+    fn safe_delete_apply(&mut self, _req: &SafeDeleteApply) -> Result<RenameResult, String> {
+        Err("BACKEND_REQUIRED: safe_delete requires a running JetBrains IDE".to_string())
+    }
+
     // ── Self-management (liveness) ──
     /// Whether a cached instance of this backend is no longer valid and must be
     /// evicted + re-selected. Backing A (in-process LSP) is never stale → default `false`.
@@ -329,6 +404,39 @@ mod tests {
     }
 
     #[test]
+    fn move_and_safe_delete_types_construct_and_clone() {
+        let mt = MoveTarget::Path {
+            abs_path: "/proj/app/moved".into(),
+            rel_path: "app/moved".into(),
+        };
+        let mq = MoveQuery {
+            abs_path: "/proj/Widget.kt".into(),
+            rel_path: "Widget.kt".into(),
+            src_range: TextRange0Based { start_line: 2, start_char: 0, end_line: 2, end_char: 12 },
+            target: mt.clone(),
+        };
+        let ma = MoveApply { query: mq.clone(), force: true };
+        assert_eq!(ma.query.target, mt);
+
+        let parent = MoveTarget::Parent {
+            abs_path: "/proj/Other.kt".into(),
+            rel_path: "Other.kt".into(),
+            range: TextRange0Based { start_line: 0, start_char: 0, end_line: 5, end_char: 1 },
+        };
+        assert_ne!(parent, mt);
+
+        let sq = SafeDeleteQuery {
+            abs_path: "/proj/Widget.kt".into(),
+            rel_path: "Widget.kt".into(),
+            src_range: TextRange0Based { start_line: 2, start_char: 0, end_line: 2, end_char: 12 },
+        };
+        let sa = SafeDeleteApply { query: sq.clone(), force: true, propagate: false };
+        assert_eq!(sa.query, sq);
+        assert!(sa.force);
+        assert!(!sa.propagate);
+    }
+
+    #[test]
     fn headless_rename_default_is_backend_required() {
         // HeadlessBackend inherits the Trait default → BACKEND_REQUIRED, no apply.
         let mut be = crate::lsp::edit_apply::HeadlessBackend;
@@ -358,5 +466,33 @@ mod tests {
             .rename_apply(&a)
             .unwrap_err()
             .starts_with("BACKEND_REQUIRED"));
+    }
+
+    #[test]
+    fn headless_move_and_safe_delete_default_is_backend_required() {
+        // A backend that only implements the mandatory methods inherits the four
+        // v2c Err defaults (no lossless headless move/delete — spec §4 inherited §3).
+        struct Bare;
+        impl LspBackend for Bare {
+            fn open_file(&mut self, _u: &lsp_types::Uri, _l: &str, _t: &str) -> Result<(), String> { Ok(()) }
+            fn references(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position, _s: &str) -> Result<Vec<lsp_types::Location>, String> { Ok(vec![]) }
+            fn definition(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position) -> Result<lsp_types::GotoDefinitionResponse, String> { Ok(lsp_types::GotoDefinitionResponse::Array(vec![])) }
+            fn implementations(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position, _s: &str) -> Result<Vec<lsp_types::Location>, String> { Ok(vec![]) }
+            fn rename(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position, _n: &str) -> Result<Option<lsp_types::WorkspaceEdit>, String> { Ok(None) }
+        }
+        let mut b = Bare;
+        let mq = MoveQuery {
+            abs_path: "/p/a.kt".into(), rel_path: "a.kt".into(),
+            src_range: TextRange0Based { start_line: 0, start_char: 0, end_line: 0, end_char: 1 },
+            target: MoveTarget::Path { abs_path: "/p/x".into(), rel_path: "x".into() },
+        };
+        assert!(b.move_preview(&mq).unwrap_err().starts_with("BACKEND_REQUIRED"));
+        assert!(b.move_apply(&MoveApply { query: mq, force: false }).unwrap_err().starts_with("BACKEND_REQUIRED"));
+        let sq = SafeDeleteQuery {
+            abs_path: "/p/a.kt".into(), rel_path: "a.kt".into(),
+            src_range: TextRange0Based { start_line: 0, start_char: 0, end_line: 0, end_char: 1 },
+        };
+        assert!(b.safe_delete_preview(&sq).unwrap_err().starts_with("BACKEND_REQUIRED"));
+        assert!(b.safe_delete_apply(&SafeDeleteApply { query: sq, force: false, propagate: false }).unwrap_err().starts_with("BACKEND_REQUIRED"));
     }
 }
