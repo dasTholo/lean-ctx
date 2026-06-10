@@ -352,6 +352,75 @@ impl JetBrainsHttpBackend {
         })
     }
 
+    /// Request body for `/movePreview` + `/moveApply`. `target` mirrors the
+    /// MoveTarget variant (kind=path → `{path}`, kind=parent → `{path,range}`).
+    fn move_body(
+        rel_path: &str,
+        src_range: crate::lsp::backend::TextRange0Based,
+        target: &crate::lsp::backend::MoveTarget,
+    ) -> Value {
+        use crate::lsp::backend::MoveTarget;
+        let target_json = match target {
+            MoveTarget::Path { rel_path: tp, .. } => serde_json::json!({
+                "kind": "path",
+                "path": tp,
+            }),
+            MoveTarget::Parent { rel_path: pp, range, .. } => serde_json::json!({
+                "kind": "parent",
+                "path": pp,
+                "range": {
+                    "start": { "line": range.start_line, "character": range.start_char },
+                    "end":   { "line": range.end_line,   "character": range.end_char },
+                },
+            }),
+        };
+        serde_json::json!({
+            "path": rel_path,
+            "range": {
+                "start": { "line": src_range.start_line, "character": src_range.start_char },
+                "end":   { "line": src_range.end_line,   "character": src_range.end_char },
+            },
+            "target": target_json,
+        })
+    }
+
+    /// Request body for `/safeDeletePreview` (force/propagate ignored there) +
+    /// `/safeDeleteApply`.
+    fn safe_delete_body(
+        rel_path: &str,
+        src_range: crate::lsp::backend::TextRange0Based,
+        force: bool,
+        propagate: bool,
+    ) -> Value {
+        serde_json::json!({
+            "path": rel_path,
+            "range": {
+                "start": { "line": src_range.start_line, "character": src_range.start_char },
+                "end":   { "line": src_range.end_line,   "character": src_range.end_char },
+            },
+            "force": force,
+            "propagate": propagate,
+        })
+    }
+
+    /// Parse a `{applied, changed_paths}` apply response (shared by rename/move/
+    /// safe_delete apply). Error envelopes are handled by the caller.
+    fn parse_apply_result(resp: &Value) -> crate::lsp::backend::RenameResult {
+        let changed_paths = resp
+            .get("changed_paths")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(|p| p.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        crate::lsp::backend::RenameResult {
+            applied: resp.get("applied").and_then(Value::as_bool).unwrap_or(false),
+            changed_paths,
+        }
+    }
+
     /// Build an error message from a backend error envelope: the structured `code` plus
     /// `": message"` when a non-empty detail message is present (else just the code). Keeps
     /// the code prefix that callers/tests match on while preserving the human-readable detail.
@@ -504,22 +573,56 @@ impl LspBackend for JetBrainsHttpBackend {
         if let Some(err) = resp.get("error") {
             return Err(Self::error_from_envelope(err));
         }
-        let changed_paths = resp
-            .get("changed_paths")
-            .and_then(Value::as_array)
-            .map(|a| {
-                a.iter()
-                    .filter_map(|p| p.as_str().map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default();
-        Ok(crate::lsp::backend::RenameResult {
-            applied: resp
-                .get("applied")
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
-            changed_paths,
-        })
+        Ok(Self::parse_apply_result(&resp))
+    }
+
+    fn move_preview(
+        &mut self,
+        req: &crate::lsp::backend::MoveQuery,
+    ) -> Result<crate::lsp::backend::RenamePlan, String> {
+        let body = Self::move_body(&req.rel_path, req.src_range, &req.target);
+        let resp = self.post("/movePreview", &body)?;
+        if let Some(err) = resp.get("error") {
+            return Err(Self::error_from_envelope(err));
+        }
+        Ok(Self::parse_rename_plan(&resp))
+    }
+
+    fn move_apply(
+        &mut self,
+        req: &crate::lsp::backend::MoveApply,
+    ) -> Result<crate::lsp::backend::RenameResult, String> {
+        let mut body = Self::move_body(&req.query.rel_path, req.query.src_range, &req.query.target);
+        body["force"] = serde_json::json!(req.force);
+        let resp = self.post("/moveApply", &body)?;
+        if let Some(err) = resp.get("error") {
+            return Err(Self::error_from_envelope(err));
+        }
+        Ok(Self::parse_apply_result(&resp))
+    }
+
+    fn safe_delete_preview(
+        &mut self,
+        req: &crate::lsp::backend::SafeDeleteQuery,
+    ) -> Result<crate::lsp::backend::RenamePlan, String> {
+        let body = Self::safe_delete_body(&req.rel_path, req.src_range, false, false);
+        let resp = self.post("/safeDeletePreview", &body)?;
+        if let Some(err) = resp.get("error") {
+            return Err(Self::error_from_envelope(err));
+        }
+        Ok(Self::parse_rename_plan(&resp))
+    }
+
+    fn safe_delete_apply(
+        &mut self,
+        req: &crate::lsp::backend::SafeDeleteApply,
+    ) -> Result<crate::lsp::backend::RenameResult, String> {
+        let body = Self::safe_delete_body(&req.query.rel_path, req.query.src_range, req.force, req.propagate);
+        let resp = self.post("/safeDeleteApply", &body)?;
+        if let Some(err) = resp.get("error") {
+            return Err(Self::error_from_envelope(err));
+        }
+        Ok(Self::parse_apply_result(&resp))
     }
 
     fn rename(
@@ -917,5 +1020,39 @@ mod tests {
         let res = be.rename_apply(&a).unwrap();
         assert!(res.applied);
         assert_eq!(res.changed_paths, vec!["src/a.rs", "src/b.rs"]);
+    }
+
+    #[test]
+    fn move_body_path_and_parent_variants() {
+        use crate::lsp::backend::{MoveTarget, TextRange0Based};
+        let r = TextRange0Based { start_line: 2, start_char: 0, end_line: 2, end_char: 12 };
+
+        let path_body = JetBrainsHttpBackend::move_body(
+            "Widget.kt", r, &MoveTarget::Path { abs_path: "/p/app/moved".into(), rel_path: "app/moved".into() },
+        );
+        assert_eq!(path_body["path"], "Widget.kt");
+        assert_eq!(path_body["target"]["kind"], "path");
+        assert_eq!(path_body["target"]["path"], "app/moved");
+        assert!(path_body["target"].get("range").is_none());
+
+        let pr = TextRange0Based { start_line: 0, start_char: 0, end_line: 5, end_char: 1 };
+        let parent_body = JetBrainsHttpBackend::move_body(
+            "Widget.kt", r, &MoveTarget::Parent { abs_path: "/p/Other.kt".into(), rel_path: "Other.kt".into(), range: pr },
+        );
+        assert_eq!(parent_body["target"]["kind"], "parent");
+        assert_eq!(parent_body["target"]["path"], "Other.kt");
+        assert_eq!(parent_body["target"]["range"]["start"]["line"], 0);
+        assert_eq!(parent_body["target"]["range"]["end"]["line"], 5);
+    }
+
+    #[test]
+    fn safe_delete_body_carries_flags() {
+        use crate::lsp::backend::TextRange0Based;
+        let r = TextRange0Based { start_line: 2, start_char: 0, end_line: 2, end_char: 12 };
+        let body = JetBrainsHttpBackend::safe_delete_body("Widget.kt", r, true, false);
+        assert_eq!(body["path"], "Widget.kt");
+        assert_eq!(body["range"]["start"]["line"], 2);
+        assert_eq!(body["force"], true);
+        assert_eq!(body["propagate"], false);
     }
 }
