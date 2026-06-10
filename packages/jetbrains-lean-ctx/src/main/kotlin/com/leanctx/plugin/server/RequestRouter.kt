@@ -5,6 +5,10 @@ import com.intellij.openapi.project.Project
 import com.leanctx.plugin.dto.JsonCodec
 import com.leanctx.plugin.dto.LocationsResponse
 import com.leanctx.plugin.dto.NavRequest
+import com.leanctx.plugin.dto.MoveApplyRequest
+import com.leanctx.plugin.dto.MovePreviewRequest
+import com.leanctx.plugin.dto.SafeDeleteApplyRequest
+import com.leanctx.plugin.dto.SafeDeletePreviewRequest
 import com.leanctx.plugin.endpoint.EditHandlers
 import com.leanctx.plugin.endpoint.InspectionHandlers
 import com.leanctx.plugin.endpoint.NavHandlers
@@ -47,6 +51,10 @@ class RequestRouter(
             if (path == "/insertAfterSymbol") return dispatchEdit(body, editHandlers::insertAfterSymbol)
             if (path == "/renamePreview") return dispatchRenamePreview(body)
             if (path == "/renameApply") return dispatchRenameApply(body)
+            if (path == "/movePreview") return dispatchMovePreview(body)
+            if (path == "/moveApply") return dispatchMoveApply(body)
+            if (path == "/safeDeletePreview") return dispatchSafeDeletePreview(body)
+            if (path == "/safeDeleteApply") return dispatchSafeDeleteApply(body)
             val handler: ((NavRequest) -> LocationsResponse)? = when (path) {
                 "/references" -> handlers::references
                 "/definition" -> handlers::definition
@@ -160,6 +168,50 @@ class RequestRouter(
         HttpResult(200, JsonCodec.error("INTERNAL", e.message ?: "bad request"))
     } catch (e: Exception) {
         log.warn("renameApply endpoint failed", e)
+        HttpResult(500, JsonCodec.error("INTERNAL", e.message ?: "internal error"))
+    }
+
+    private fun dispatchMovePreview(body: String): HttpResult = try {
+        HttpResult(200, JsonCodec.toJson(refactorHandlers.movePreview(JsonCodec.parseMovePreviewRequest(body))))
+    } catch (e: BackendException) {
+        HttpResult(200, JsonCodec.error(e.code, e.message ?: e.code))
+    } catch (e: IllegalArgumentException) {
+        HttpResult(200, JsonCodec.error("INTERNAL", e.message ?: "bad request"))
+    } catch (e: Exception) {
+        log.warn("movePreview endpoint failed", e)
+        HttpResult(500, JsonCodec.error("INTERNAL", e.message ?: "internal error"))
+    }
+
+    private fun dispatchMoveApply(body: String): HttpResult = try {
+        HttpResult(200, JsonCodec.toJson(refactorHandlers.moveApply(JsonCodec.parseMoveApplyRequest(body))))
+    } catch (e: BackendException) {
+        HttpResult(200, JsonCodec.error(e.code, e.message ?: e.code))
+    } catch (e: IllegalArgumentException) {
+        HttpResult(200, JsonCodec.error("INTERNAL", e.message ?: "bad request"))
+    } catch (e: Exception) {
+        log.warn("moveApply endpoint failed", e)
+        HttpResult(500, JsonCodec.error("INTERNAL", e.message ?: "internal error"))
+    }
+
+    private fun dispatchSafeDeletePreview(body: String): HttpResult = try {
+        HttpResult(200, JsonCodec.toJson(refactorHandlers.safeDeletePreview(JsonCodec.parseSafeDeletePreviewRequest(body))))
+    } catch (e: BackendException) {
+        HttpResult(200, JsonCodec.error(e.code, e.message ?: e.code))
+    } catch (e: IllegalArgumentException) {
+        HttpResult(200, JsonCodec.error("INTERNAL", e.message ?: "bad request"))
+    } catch (e: Exception) {
+        log.warn("safeDeletePreview endpoint failed", e)
+        HttpResult(500, JsonCodec.error("INTERNAL", e.message ?: "internal error"))
+    }
+
+    private fun dispatchSafeDeleteApply(body: String): HttpResult = try {
+        HttpResult(200, JsonCodec.toJson(refactorHandlers.safeDeleteApply(JsonCodec.parseSafeDeleteApplyRequest(body))))
+    } catch (e: BackendException) {
+        HttpResult(200, JsonCodec.error(e.code, e.message ?: e.code))
+    } catch (e: IllegalArgumentException) {
+        HttpResult(200, JsonCodec.error("INTERNAL", e.message ?: "bad request"))
+    } catch (e: Exception) {
+        log.warn("safeDeleteApply endpoint failed", e)
         HttpResult(500, JsonCodec.error("INTERNAL", e.message ?: "internal error"))
     }
 

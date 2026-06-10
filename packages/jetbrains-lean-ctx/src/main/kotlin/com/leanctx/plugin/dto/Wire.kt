@@ -142,6 +142,42 @@ data class RenameApplyResponse(
     val changed_paths: List<String>,
 )
 
+/** Move target: kind="path" → {path}; kind="parent" → {path,range}. Mirrors Rust MoveTarget. */
+data class MoveTargetDTO(
+    val kind: String,
+    val path: String,
+    val range: TextRangeDTO? = null,
+)
+
+/** Request body for /movePreview. range = source symbol declaration span (0-based). */
+data class MovePreviewRequest(
+    val path: String,
+    val range: TextRangeDTO,
+    val target: MoveTargetDTO,
+)
+
+/** Request body for /moveApply. force = override blocking conflicts (Rust already gated). */
+data class MoveApplyRequest(
+    val path: String,
+    val range: TextRangeDTO,
+    val target: MoveTargetDTO,
+    val force: Boolean = false,
+)
+
+/** Request body for /safeDeletePreview. range = source symbol declaration span (0-based). */
+data class SafeDeletePreviewRequest(
+    val path: String,
+    val range: TextRangeDTO,
+)
+
+/** Request body for /safeDeleteApply. force = deleteEvenIfUsed; propagate = delete now-unreferenced deps. */
+data class SafeDeleteApplyRequest(
+    val path: String,
+    val range: TextRangeDTO,
+    val force: Boolean = false,
+    val propagate: Boolean = false,
+)
+
 object JsonCodec {
     private val gson: Gson = GsonBuilder().disableHtmlEscaping().create()
 
@@ -174,6 +210,22 @@ object JsonCodec {
 
     fun parseRenameApplyRequest(body: String): RenameApplyRequest =
         gson.fromJson(body, RenameApplyRequest::class.java)
+            ?: throw IllegalArgumentException("empty request body")
+
+    fun parseMovePreviewRequest(body: String): MovePreviewRequest =
+        gson.fromJson(body, MovePreviewRequest::class.java)
+            ?: throw IllegalArgumentException("empty request body")
+
+    fun parseMoveApplyRequest(body: String): MoveApplyRequest =
+        gson.fromJson(body, MoveApplyRequest::class.java)
+            ?: throw IllegalArgumentException("empty request body")
+
+    fun parseSafeDeletePreviewRequest(body: String): SafeDeletePreviewRequest =
+        gson.fromJson(body, SafeDeletePreviewRequest::class.java)
+            ?: throw IllegalArgumentException("empty request body")
+
+    fun parseSafeDeleteApplyRequest(body: String): SafeDeleteApplyRequest =
+        gson.fromJson(body, SafeDeleteApplyRequest::class.java)
             ?: throw IllegalArgumentException("empty request body")
 
     fun toJson(value: Any): String = gson.toJson(value)
