@@ -48,22 +48,22 @@ Jeder Check: `lean-ctx call ctx_refactor --project-root "$FIX" --json '<args>'`.
 Für TOCTOU-Fälle zuerst das passende `inline_preview` ausführen, um den aktuellen
 `plan_hash` zu holen.
 
-| # | Fall | Aufruf (`--json`, Auszug) | Soll-Ergebnis |
-|---|------|--------------------------|---------------|
-| 1 | inline_preview — lokale Variable | `{"action":"inline_preview","path":"src/main/kotlin/app/Calc.kt","line":5}` | `plan_hash` gesetzt, `tmp` identifiziert, keine Konflikte |
-| 2 | inline_apply — lokale Variable | `{"action":"inline_apply","path":"src/main/kotlin/app/Calc.kt","line":5,"plan_hash":"<#1>"}` | `tmp` inlined, `return (a+b)+(a+b)`, Datei geändert |
-| 3 | inline_preview — Methode mit ≥2 Call-Sites | `{"action":"inline_preview","path":"src/main/kotlin/app/Helper.kt","line":4}` | `plan_hash` gesetzt, 2 Call-Sites (`h.calc(3)`, `h.calc(4)`) erkannt |
-| 4 | inline_apply mit keep_definition=true | `{"action":"inline_apply","path":"src/main/kotlin/app/Helper.kt","line":4,"plan_hash":"<#3>","keep_definition":true}` | Call-Sites mit `x*2` ersetzt, Methoden-Deklaration bleibt erhalten |
-| 5 | inline — rekursive Methode (UNSUPPORTED) | `{"action":"inline_preview","path":"src/main/kotlin/app/Recurse.kt","line":4}` | `UNSUPPORTED` (IntelliJ-Inline-Handler lehnt rekursive Methoden ab) |
-| 6 | TOCTOU — veralteter plan_hash | (a) `inline_preview` auf `Calc.kt:5` → `plan_hash_A`; (b) eine Nutzung manuell ändern; (c) `{"action":"inline_apply","path":"src/main/kotlin/app/Calc.kt","line":5,"plan_hash":"<plan_hash_A>"}` | `CONFLICT` — Rust-Gate erkennt Hash-Mismatch, kein Apply |
-| 7 | reformat — gesamte Datei | `{"action":"reformat","path":"src/main/kotlin/app/Messy.kt"}` | Datei formatiert: geschweifte Klammern, Einrückungen, Leerzeichen korrigiert |
-| 8 | reformat — Region (Zeilen) | `{"action":"reformat","path":"src/main/kotlin/app/Messy.kt","line":3,"end_line":7}` | Nur der angegebene Zeilenbereich formatiert |
-| 9 | reformat — Symbol | `{"action":"reformat","name_path":"Messy/render"}` | Nur Methode `render` formatiert, `other` unverändert |
-| 10 | reformat — optimize_imports | `{"action":"reformat","path":"src/main/kotlin/app/Imports.kt","optimize_imports":true}` | Ungenutzte Imports (`ArrayList`, `HashMap`) entfernt (`OptimizeImportsProcessor` aus `com.intellij.codeInsight.actions`) |
-| 11 | INVALID_TARGET — keine Adresse / beide Adressen | (a) `{"action":"reformat"}` (kein `path`); (b) `{"action":"reformat","name_path":"Messy/render","path":"src/main/kotlin/app/Messy.kt"}` (name_path + path zugleich) | je `INVALID_TARGET`, **vor** Backend-Call, kein Apply |
-| 12 | INDEXING | Projekt neu öffnen, sofort `inline_preview` während Indizierung | `INDEXING`, kein Teil-Edit |
-| 13 | UNSUPPORTED_LANGUAGE | `{"action":"inline_preview","path":"notes.txt","line":1}` | `UNSUPPORTED_LANGUAGE`, kein Crash |
-| 14 | BACKEND_REQUIRED | IDE schließen, dann `inline_preview` und `reformat` | `BACKEND_REQUIRED` in beiden Fällen |
+| #  | Fall                                            | Aufruf (`--json`, Auszug)                                                                                                                                                                        | Soll-Ergebnis                                                                                                            |
+|----|-------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------|
+| 1  | inline_preview — lokale Variable                | `{"action":"inline_preview","path":"src/main/kotlin/app/Calc.kt","line":5}`                                                                                                                      | `plan_hash` gesetzt, `tmp` identifiziert, keine Konflikte                                                                |
+| 2  | inline_apply — lokale Variable                  | `{"action":"inline_apply","path":"src/main/kotlin/app/Calc.kt","line":5,"plan_hash":"<#1>"}`                                                                                                     | `tmp` inlined, `return (a+b)+(a+b)`, Datei geändert                                                                      |
+| 3  | inline_preview — Methode mit ≥2 Call-Sites      | `{"action":"inline_preview","path":"src/main/kotlin/app/Helper.kt","line":4}`                                                                                                                    | `plan_hash` gesetzt, 2 Call-Sites (`h.calc(3)`, `h.calc(4)`) erkannt                                                     |
+| 4  | inline_apply mit keep_definition=true           | `{"action":"inline_apply","path":"src/main/kotlin/app/Helper.kt","line":4,"plan_hash":"<#3>","keep_definition":true}`                                                                            | Call-Sites mit `x*2` ersetzt, Methoden-Deklaration bleibt erhalten                                                       |
+| 5  | inline — rekursive Methode (UNSUPPORTED)        | `{"action":"inline_preview","path":"src/main/kotlin/app/Recurse.kt","line":4}`                                                                                                                   | `UNSUPPORTED` (IntelliJ-Inline-Handler lehnt rekursive Methoden ab)                                                      |
+| 6  | TOCTOU — veralteter plan_hash                   | (a) `inline_preview` auf `Calc.kt:5` → `plan_hash_A`; (b) eine Nutzung manuell ändern; (c) `{"action":"inline_apply","path":"src/main/kotlin/app/Calc.kt","line":5,"plan_hash":"<plan_hash_A>"}` | `CONFLICT` — Rust-Gate erkennt Hash-Mismatch, kein Apply                                                                 |
+| 7  | reformat — gesamte Datei                        | `{"action":"reformat","path":"src/main/kotlin/app/Messy.kt"}`                                                                                                                                    | Datei formatiert: geschweifte Klammern, Einrückungen, Leerzeichen korrigiert                                             |
+| 8  | reformat — Region (Zeilen)                      | `{"action":"reformat","path":"src/main/kotlin/app/Messy.kt","line":3,"end_line":7}`                                                                                                              | Nur der angegebene Zeilenbereich formatiert                                                                              |
+| 9  | reformat — Symbol                               | `{"action":"reformat","name_path":"Messy/render"}`                                                                                                                                               | Nur Methode `render` formatiert, `other` unverändert                                                                     |
+| 10 | reformat — optimize_imports                     | `{"action":"reformat","path":"src/main/kotlin/app/Imports.kt","optimize_imports":true}`                                                                                                          | Ungenutzte Imports (`ArrayList`, `HashMap`) entfernt (`OptimizeImportsProcessor` aus `com.intellij.codeInsight.actions`) |
+| 11 | INVALID_TARGET — keine Adresse / beide Adressen | (a) `{"action":"reformat"}` (kein `path`); (b) `{"action":"reformat","name_path":"Messy/render","path":"src/main/kotlin/app/Messy.kt"}` (name_path + path zugleich)                              | je `INVALID_TARGET`, **vor** Backend-Call, kein Apply                                                                    |
+| 12 | INDEXING                                        | Projekt neu öffnen, sofort `inline_preview` während Indizierung                                                                                                                                  | `INDEXING`, kein Teil-Edit                                                                                               |
+| 13 | UNSUPPORTED_LANGUAGE                            | `{"action":"inline_preview","path":"notes.txt","line":1}`                                                                                                                                        | `UNSUPPORTED_LANGUAGE`, kein Crash                                                                                       |
+| 14 | BACKEND_REQUIRED                                | IDE schließen, dann `inline_preview` und `reformat`                                                                                                                                              | `BACKEND_REQUIRED` in beiden Fällen                                                                                      |
 
 ### Task 7 `runInline` — Live-Gate-Befund (2026-06-13)
 
@@ -87,8 +87,12 @@ einen **modalen Dialog** — ein Modal auf dem HTTP-Handler-Thread deadlockt (ru
 > landet auf der Einrückung, `getParentOfType(PsiNamedElement)` greift dann den
 > umschließenden Knoten (lokale Var → Funktion; Methode → Klasse). Fix: führende
 > `PsiWhiteSpace` via `PsiTreeUtil.nextLeaf` überspringen. Die v2c-Geschwister
-> (`SymbolMover`/`SymbolDeleter`) tragen dasselbe latente Muster, exponieren es aber
-> nicht (ihre Testsymbole stehen auf Spalte 0); dort bewusst **nicht** angefasst.
+> (`SymbolMover`/`SymbolDeleter`/`SymbolRefactorer`/`ReferenceFinder`) trugen dasselbe
+> latente Muster (Testsymbole auf Spalte 0 → nie exponiert); seit dem v2c-Port
+> (Spec `2026-06-13-leanctx-jetbrains-v2c-resolvetarget-indentation-fix.md`) ist der
+> Fix dort gespiegelt und je mit einem RED-first-Unit-Test über den Preview-Pfad
+> (`SymbolDeleterTest`/`SymbolMoverTest`/`SymbolRefactorerTest`/`ReferenceFinderTest`)
+> abgesichert — nicht mehr latent.
 
 ### Hinweis: OptimizeImportsProcessor — Package-Gotcha
 
@@ -103,22 +107,22 @@ compileOnly-kompatibel aussieht. Sicherste Prüfung: `javap -cp <plugin-jar>` au
 
 IC-2026.1.3-Sandbox, Fixture wie oben. Befund je Check:
 
-| # | Ergebnis | Notiz |
-|---|---|---|
-| 1 | ✅ | `usages: 2` (`tmp`), `plan_hash` gesetzt — nach `resolveTarget`-Fix korrekt |
-| 2 | ✅ | `UNSUPPORTED_LANGUAGE` (Kotlin-Headless-Grenze; Hash+Konflikt-Gate passiert, dann `runInline`) |
-| 3 | ✅ | `usages: 2` (`calc`, 2 Call-Sites) |
-| 4 | ✅ | `UNSUPPORTED_LANGUAGE` (mit `keep_definition=true`) |
-| 5 | ✅ | Preview trifft `loop` (`usages: 1`, Selbstaufruf); apply → `UNSUPPORTED_LANGUAGE` (subsumiert Rekursions-Refusal) |
-| 6 | ✅ | `CONFLICT: plan_hash mismatch` mit `expected`/`actual` — force-loser TOCTOU-Gate greift **vor** `runInline` |
-| 7 | ✅ | Messy.kt vollständig formatiert (Klammern/Einrückung/Spacing) |
-| 8 | ✅ | Region `applied` |
-| 9 | ✅ | Symbol via `name_path` `applied` (Index: 7 Dateien/12 Symbole) |
-| 10 | ✅ | `optimize_imports` entfernt `ArrayList`/`HashMap` — `OptimizeImportsProcessor`-Package-Gotcha **live bestätigt** |
-| 11 | ✅ | `INVALID_TARGET` (keine Adresse **und** beide Adressen) |
-| 12 | ⏭️ | Nicht live ausgelöst (Steady-State-Index); `INDEXING`-Gate über `inSmartReadAction` (Dumb-Mode) + Unit abgedeckt |
-| 13 | ✅ | `UNSUPPORTED_LANGUAGE: ... for TEXT` (notes.txt) |
-| 14 | ✅ | `BACKEND_REQUIRED` — vor IDE-Start reproduziert (kein Live-Port-File) |
+| #  | Ergebnis | Notiz                                                                                                             |
+|----|----------|-------------------------------------------------------------------------------------------------------------------|
+| 1  | ✅        | `usages: 2` (`tmp`), `plan_hash` gesetzt — nach `resolveTarget`-Fix korrekt                                       |
+| 2  | ✅        | `UNSUPPORTED_LANGUAGE` (Kotlin-Headless-Grenze; Hash+Konflikt-Gate passiert, dann `runInline`)                    |
+| 3  | ✅        | `usages: 2` (`calc`, 2 Call-Sites)                                                                                |
+| 4  | ✅        | `UNSUPPORTED_LANGUAGE` (mit `keep_definition=true`)                                                               |
+| 5  | ✅        | Preview trifft `loop` (`usages: 1`, Selbstaufruf); apply → `UNSUPPORTED_LANGUAGE` (subsumiert Rekursions-Refusal) |
+| 6  | ✅        | `CONFLICT: plan_hash mismatch` mit `expected`/`actual` — force-loser TOCTOU-Gate greift **vor** `runInline`       |
+| 7  | ✅        | Messy.kt vollständig formatiert (Klammern/Einrückung/Spacing)                                                     |
+| 8  | ✅        | Region `applied`                                                                                                  |
+| 9  | ✅        | Symbol via `name_path` `applied` (Index: 7 Dateien/12 Symbole)                                                    |
+| 10 | ✅        | `optimize_imports` entfernt `ArrayList`/`HashMap` — `OptimizeImportsProcessor`-Package-Gotcha **live bestätigt**  |
+| 11 | ✅        | `INVALID_TARGET` (keine Adresse **und** beide Adressen)                                                           |
+| 12 | ⏭️       | Nicht live ausgelöst (Steady-State-Index); `INDEXING`-Gate über `inSmartReadAction` (Dumb-Mode) + Unit abgedeckt  |
+| 13 | ✅        | `UNSUPPORTED_LANGUAGE: ... for TEXT` (notes.txt)                                                                  |
+| 14 | ✅        | `BACKEND_REQUIRED` — vor IDE-Start reproduziert (kein Live-Port-File)                                             |
 
 **Fazit:** reformat-Stack + Rust-Gate (TOCTOU/force-los/Adress-Dualität/Fehlerfälle)
 vollständig live verifiziert. `inline_apply` = dokumentierte Kotlin-Headless-Grenze.
