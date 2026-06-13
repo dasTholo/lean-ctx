@@ -96,6 +96,34 @@ Jede Datei hat eine Default-Strategie. ⚠-Dateien werden bei der Ausführung
   main automatisch mit; relevant, da der Branch intensiv über
   `ctx_read`/`ctx_shell` arbeitet.
 
+### Automatische Adoption — keine Branch-Anpassung nötig (`ctx_read`, `graph_index`)
+
+Geprüft: Beide profitieren ohne Code-Änderung am Branch.
+
+- **`ctx_read`** (`tools/registered/ctx_read.rs`, +69/−51 in main): **nur main**
+  hat es geändert (byte-faithful / terse-skip / reference-results-Fix); der
+  Branch fasst weder `ctx_read.rs` noch `read_modes`/`terse.rs` an → kommt 1:1
+  von main, der Branch ist reiner Konsument und profitiert automatisch.
+- **`graph_index`**: asymmetrisch. Branch fügt nur `get_forward_deps` hinzu
+  (unabhängig, nutzt nur `self.edges`); main bringt C#-Namespace- + Godot-`.tscn`-
+  Edges (#316), content-aware Staleness (#324), bessere scan-root-Erkennung
+  (GL#438), `require_git(false)` (#400), `purge_index`, content-cache-gestützte
+  Import-Resolution. Diese **verbessern die Graph-Qualität, die `get_forward_deps`
+  liest** — reiner Gewinn, keine Branch-Änderung.
+
+### Achtungspunkt — semantische auto-merge-Brüche (API-Umbauten in main)
+
+main hat zwei APIs umgebaut, die textuell sauber auto-mergen, aber semantisch
+brechen könnten: `import_resolver::ResolverContext::new` (+`content_cache`-Param)
+und `cloud_files::keep_entry` → `walk_filter::keep_entry` (move). **Verifiziert
+(2026-06-13):** kein Branch-geänderter Quellcode ruft die alten Formen auf — alle
+Treffer liegen in Dateien, die der Branch nicht angefasst hat (`edges.rs`,
+`ctx_impact.rs`, `bm25_index`, `search_index`, `ctx_search`, `ctx_tree`) und die
+main beim Merge sauber gewinnt. `graph_index/mod.rs` ist unkritisch (Branch ändert
+dort nur `get_forward_deps`, main's `scan_inner`-Umbau liegt im disjunkten
+Bereich). Definitiver Fang für diese Risikoklasse bleibt der `cargo nextest` +
+`clippy`-Gate (§4).
+
 ### Additiv, kein Branch-Impact (nur zur Kenntnis, keine Aktion)
 
 Context OS 12.x (Personas, Extension-Registry, WASM-Runtime, Python/TS/Rust
@@ -128,7 +156,10 @@ fehl. Expliziter Gate-Punkt.
    `git add`.
 7. **Gates (Agent):** `cargo nextest run` · `cargo clippy` · `cargo fmt --check`
    · Drift-/Conformance-Tests · ggf. `gen_docs` neu. Alle grün = Voraussetzung
-   für den Commit.
+   für den Commit. **Fängt insbesondere die semantischen auto-merge-Brüche aus
+   §3 ab** (API-Umbauten `ResolverContext::new` / `walk_filter::keep_entry`):
+   ein textuell sauberer Merge, der eine umgebaute API in alter Form aufruft,
+   schlägt hier als Compile-/Clippy-Fehler fehl.
 8. **Merge-Commit** anlegen.
 9. **Finaler Release-Build (Nutzer, manuell):** der Agent liefert den exakten
    Befehl (`cargo build --release` bzw. `cargo install --path rust`) → `3.8.3-jb`
