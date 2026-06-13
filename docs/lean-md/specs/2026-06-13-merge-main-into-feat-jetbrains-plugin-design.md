@@ -211,6 +211,40 @@ Repo-Docs (#3) sind nur ein **Entwickler-/CI-Spiegel** (Drift-Test) und dürfen
      `ctx_call name=ctx_refactor` (beide aus dem Binary) die volle Action-Liste
      liefern — der Test, der den Neuinstallations-Fall abdeckt.
 
+### §3c — Filesystem-Boundary / PathJail (#392, GH #392) ↔ v2c-move
+
+Der Branch nutzt PathJail intensiv (v2c move: 3-Stage-PathJail → `INVALID_TARGET`).
+Geprüft: **alle PathJail-Kern-APIs sind signatur-stabil**, der Branch fasst
+`pathjail.rs`/`path_resolve.rs` nicht an → sie kommen 1:1 von main.
+
+- **Stabile APIs (keine Code-Anpassung nötig):**
+  `resolve_tool_path(project_root, shell_cwd, raw) -> Result<String,String>` —
+  identisch (genau die Fn, die v2c-move/rename aufruft, `ctx_refactor.rs:540/1058`);
+  `jail_path(path, root)`, `allow_paths_from_env_and_config()` — unverändert.
+- **main-Änderungen = additiv/Verhalten, keine API-Brüche:**
+  - **#392** expandiert `~`/`$VAR`/`${VAR}` in `allow_paths`/`extra_roots`
+    (vorher literal gematcht, nie getroffen) — neue `expand_user_path`.
+    **Gewinn** für den Branch: move-Ziel-Validierung über `extra_roots`
+    respektiert nun Tilde/Env.
+  - **#422** IDE-Config-Dirs (`~/.cursor`, `~/.claude`, …) sind jetzt **opt-in**
+    (`allow_ide_config_dirs = true` / `LEAN_CTX_ALLOW_IDE_DIRS=1`); nur
+    `~/.lean-ctx` immer erlaubt. Marginal für JetBrains-Refactoring.
+  - **#415** relative Pfade werden **nie** gegen den Prozess-CWD aufgelöst
+    (nur `is_absolute`, kein `exists()`-Kurzschluss) → deterministisch über
+    MCP/daemon/CLI. **Gewinn**: Branch nutzt `Some(project_root)` +
+    projekt-relative Pfade.
+  - **GL#442 / #397** Windows-Reparse/Junction-Reject + Unix-Drive-Translation-
+    Fix — Korrektheit, marginal.
+- **`tool_trait.rs` (auto-merge):** main +`ShellOutcome`/`shell_outcome`/
+  `get_usize`; Branch +`impl Default for ToolContext`. Disjunkt → sauber. main
+  berührt das `ToolContext`-Struct **nicht** → der Branch's `impl Default` bleibt
+  vollständig (kein `missing field`). Folge-Effekt `shell_outcome: None` im
+  ctx_refactor-`ToolOutput` ist bereits in §2 erfasst.
+- **Anpassungsbedarf:** am PathJail-Aufruf-Code **keiner**. Einzige Wachsamkeit:
+  Gate-Lauf bestätigt, dass die v2c-move/rename-**Tests** mit #415 (kein
+  CWD-Kurzschluss) grün bleiben. `appendix-paths-and-config.md` = Repo-Doc, von
+  main, kein Konflikt.
+
 ### Additiv, kein Branch-Impact (nur zur Kenntnis, keine Aktion)
 
 Context OS 12.x (Personas, Extension-Registry, WASM-Runtime, Python/TS/Rust
