@@ -103,8 +103,15 @@ class SymbolDeleter(private val project: Project) {
             throw BackendException("UNSUPPORTED_LANGUAGE", "safe_delete not supported for ${lang.id}")
         }
         val offset = locator.offsetOf(file, line, character)
-        val at = file.findElementAt(offset)
+        var at = file.findElementAt(offset)
             ?: throw BackendException("NO_SYMBOL", "no element at $line:$character")
+        // Line-addressed targets (char 0) land on the leading indentation; skip it so
+        // getParentOfType resolves the declaration ON the line, not its enclosing
+        // class/function. Top-level (col-0) symbols never hit this; surfaced at the v2d
+        // inline live-gate (SymbolInliner), ported to the v2c siblings.
+        if (at is PsiWhiteSpace) {
+            at = PsiTreeUtil.nextLeaf(at) ?: at
+        }
         val named = PsiTreeUtil.getParentOfType(at, PsiNamedElement::class.java, false)
         if (named != null && named.name != null) return named
         throw BackendException("NO_SYMBOL", "no named declaration at target range")
