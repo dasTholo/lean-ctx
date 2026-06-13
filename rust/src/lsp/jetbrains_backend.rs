@@ -495,10 +495,17 @@ impl JetBrainsHttpBackend {
         let changed_paths = resp
             .get("changed_paths")
             .and_then(Value::as_array)
-            .map(|a| a.iter().filter_map(|p| p.as_str().map(String::from)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|p| p.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default();
         crate::lsp::backend::ReformatResult {
-            applied: resp.get("applied").and_then(Value::as_bool).unwrap_or(false),
+            applied: resp
+                .get("applied")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             changed_paths,
         }
     }
@@ -714,7 +721,11 @@ impl LspBackend for JetBrainsHttpBackend {
         &mut self,
         req: &crate::lsp::backend::InlineApply,
     ) -> Result<crate::lsp::backend::RenameResult, String> {
-        let body = Self::inline_body(&req.query.rel_path, req.query.src_range, req.query.keep_definition);
+        let body = Self::inline_body(
+            &req.query.rel_path,
+            req.query.src_range,
+            req.query.keep_definition,
+        );
         let resp = self.post("/inlineApply", &body)?;
         if let Some(err) = resp.get("error") {
             return Err(Self::error_from_envelope(err));
@@ -1193,7 +1204,12 @@ mod tests {
 
     #[test]
     fn inline_body_carries_keep_definition() {
-        let r = crate::lsp::backend::TextRange0Based { start_line: 2, start_char: 4, end_line: 2, end_char: 7 };
+        let r = crate::lsp::backend::TextRange0Based {
+            start_line: 2,
+            start_char: 4,
+            end_line: 2,
+            end_char: 7,
+        };
         let body = JetBrainsHttpBackend::inline_body("Calc.kt", r, true);
         assert_eq!(body["path"], "Calc.kt");
         assert_eq!(body["keep_definition"], true);
@@ -1208,14 +1224,28 @@ mod tests {
         assert_eq!(file["optimize_imports"], true);
         let region = JetBrainsHttpBackend::reformat_body(
             "M.kt",
-            &ReformatScope::Region { range: TextRange0Based { start_line: 9, start_char: 0, end_line: 19, end_char: 0 } },
+            &ReformatScope::Region {
+                range: TextRange0Based {
+                    start_line: 9,
+                    start_char: 0,
+                    end_line: 19,
+                    end_char: 0,
+                },
+            },
             false,
         );
         assert_eq!(region["scope"]["kind"], "region");
         assert_eq!(region["scope"]["range"]["start"]["line"], 9);
         let sym = JetBrainsHttpBackend::reformat_body(
             "M.kt",
-            &ReformatScope::Symbol { range: TextRange0Based { start_line: 3, start_char: 0, end_line: 5, end_char: 1 } },
+            &ReformatScope::Symbol {
+                range: TextRange0Based {
+                    start_line: 3,
+                    start_char: 0,
+                    end_line: 5,
+                    end_char: 1,
+                },
+            },
             false,
         );
         assert_eq!(sym["scope"]["kind"], "symbol");

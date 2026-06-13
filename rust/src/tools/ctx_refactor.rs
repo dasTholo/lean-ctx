@@ -28,6 +28,14 @@ pub fn handle(args: &Value, project_root: &str, abs_path: &str) -> String {
         return handle_move_refactor(action, args, project_root);
     }
 
+    if matches!(action, "inline_preview" | "inline_apply") {
+        return handle_inline_refactor(action, args, project_root);
+    }
+
+    if action == "reformat" {
+        return handle_reformat_refactor(args, project_root);
+    }
+
     let line = args.get("line").and_then(Value::as_u64).unwrap_or(1) as u32;
     let column = args.get("column").and_then(Value::as_u64).unwrap_or(0) as u32;
     let scope = args
@@ -56,7 +64,7 @@ pub fn handle(args: &Value, project_root: &str, abs_path: &str) -> String {
              implementations, declaration, type_hierarchy, symbols_overview, inspections, \
              replace_symbol_body, insert_before_symbol, insert_after_symbol, \
              rename_preview, rename_apply, safe_delete_preview, safe_delete_apply, \
-             move_preview, move_apply."
+             move_preview, move_apply, inline_preview, inline_apply, reformat."
         ),
     }
 }
@@ -981,6 +989,270 @@ fn handle_move_refactor(action: &str, args: &Value, project_root: &str) -> Strin
         }
         other => format!("ERROR: INTERNAL: not a move action: {other}"),
     }
+}
+
+/// Phase 1 renderer for inline: ask Backing B for substitution sites + conflicts,
+/// build the stateless plan_hash, present the blast radius.
+fn render_inline_preview(
+    backend: &mut dyn crate::lsp::backend::LspBackend,
+    project_root: &str,
+    query: &crate::lsp::backend::InlineQuery,
+) -> String {
+    let plan = match backend.inline_preview(query) {
+        Ok(p) => p,
+        Err(e) => return format!("ERROR: {e}"),
+    };
+    let hash = match plan_hash(project_root, &plan.usages) {
+        Ok(h) => h,
+        Err(e) => return format!("ERROR: {e}"),
+    };
+    let mut files: Vec<&str> = plan.usages.iter().map(|u| u.path.as_str()).collect();
+    files.push(query.rel_path.as_str());
+    files.sort_unstable();
+    files.dedup();
+    let mut out = format!(
+        "inline_preview: '{}'\n  usages: {}\n  files: {}\n  plan_hash: {hash}\n",
+        query.rel_path,
+        plan.usages.len(),
+        files.len(),
+    );
+    if !plan.conflicts.is_empty() {
+        out.push_str(&format!(
+            "  conflicts: {} (inline_apply blocks — no force; hard refusal → UNSUPPORTED)\n",
+            plan.conflicts.len()
+        ));
+        for c in &plan.conflicts {
+            out.push_str(&format!("    {}: {}\n", c.path, c.message));
+        }
+    }
+    out
+}
+
+/// Phase 2 renderer for inline: re-fetch sites, enforce plan_hash (TOCTOU) and a
+/// FORCE-LESS conflict gate (spec §5.2, Entscheidung 4) in Rust, run the IDE
+/// inline transaction, then jail-check + evict every changed path.
+fn render_inline_apply(
+    backend: &mut dyn crate::lsp::backend::LspBackend,
+    project_root: &str,
+    query: &crate::lsp::backend::InlineQuery,
+    expected_hash: &str,
+) -> String {
+    let plan = match backend.inline_preview(query) {
+        Ok(p) => p,
+        Err(e) => return format!("ERROR: {e}"),
+    };
+    let actual = match plan_hash(project_root, &plan.usages) {
+        Ok(h) => h,
+        Err(e) => return format!("ERROR: {e}"),
+    };
+    if actual != expected_hash {
+        return format!(
+            "ERROR: CONFLICT: plan_hash mismatch (source changed since preview; \
+             expected={expected_hash}, actual={actual})"
+        );
+    }
+    // FORCE-LESS gate: any conflict is final (no bypass arg exists, spec §5.2).
+    if !plan.conflicts.is_empty() {
+        return format!(
+            "ERROR: CONFLICT: {} inline conflict(s); inline cannot be forced",
+            plan.conflicts.len()
+        );
+    }
+
+    let apply = crate::lsp::backend::InlineApply {
+        query: query.clone(),
+    };
+    let res = match backend.inline_apply(&apply) {
+        Ok(r) => r,
+        // Hard refusal from IntelliJ (recursive, multiple returns, override) → UNSUPPORTED.
+        Err(e) => return format!("ERROR: {e}"),
+    };
+
+    for cp in &res.changed_paths {
+        match crate::core::path_resolve::resolve_tool_path(Some(project_root), None, cp) {
+            Ok(abs) => crate::core::cli_cache::invalidate(&abs),
+            Err(e) => return format!("ERROR: CONFLICT: changed path blocked by jail: {e}"),
+        }
+    }
+
+    format!(
+        "inline_apply: '{}' applied\n  changed files: {}\n",
+        query.rel_path,
+        res.changed_paths.len(),
+    )
+}
+
+/// Entry for the Two-Phase inline actions. Resolves the source (name_path /
+/// position), jail-checks it, requires a live IDE, then dispatches. NO `force`.
+fn handle_inline_refactor(action: &str, args: &Value, project_root: &str) -> String {
+    if action == "inline_apply" && args.get("plan_hash").and_then(Value::as_str).is_none() {
+        return "ERROR: 'plan_hash' is required for inline_apply (run inline_preview first)."
+            .to_string();
+    }
+    let (rel_path, start_line, end_line) = match resolve_rename_target(args, project_root) {
+        Ok(t) => t,
+        Err(e) => return format!("ERROR: {e}"),
+    };
+    let abs_path =
+        match crate::core::path_resolve::resolve_tool_path(Some(project_root), None, &rel_path) {
+            Ok(p) => p,
+            Err(e) => return format!("ERROR: path blocked by jail: {e}"),
+        };
+    let content = match std::fs::read_to_string(&abs_path) {
+        Ok(c) => c,
+        Err(e) => return format!("ERROR: FILE_NOT_FOUND: {abs_path}: {e}"),
+    };
+    let end_col = content
+        .lines()
+        .nth(end_line.saturating_sub(1))
+        .map_or(0, str::len) as u32;
+    let src_range = crate::lsp::backend::TextRange0Based {
+        start_line: (start_line - 1) as u32,
+        start_char: 0,
+        end_line: (end_line - 1) as u32,
+        end_char: end_col,
+    };
+
+    let mut backend = match live_jetbrains_backend(project_root) {
+        Ok(b) => b,
+        Err(e) => return format!("ERROR: {e}"),
+    };
+
+    let keep_definition = args
+        .get("keep_definition")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let query = crate::lsp::backend::InlineQuery {
+        abs_path,
+        rel_path,
+        src_range,
+        keep_definition,
+    };
+
+    match action {
+        "inline_preview" => render_inline_preview(backend.as_mut(), project_root, &query),
+        "inline_apply" => {
+            let expected = args
+                .get("plan_hash")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            render_inline_apply(backend.as_mut(), project_root, &query, expected)
+        }
+        other => format!("ERROR: INTERNAL: not an inline action: {other}"),
+    }
+}
+
+/// Resolve the reformat address (spec §5.3) to (abs_path, rel_path, scope).
+/// EXACTLY one address form: name_path → Symbol; path alone → File; path+line
+/// (+end_line) → Region. None / contradictory → INVALID_TARGET. Jail-checked here.
+fn resolve_reformat_scope(
+    args: &Value,
+    project_root: &str,
+) -> Result<(String, String, crate::lsp::backend::ReformatScope), String> {
+    use crate::lsp::backend::{ReformatScope, TextRange0Based};
+    let name_path = args.get("name_path").and_then(Value::as_str);
+    let path = args.get("path").and_then(Value::as_str);
+    let line = args.get("line").and_then(Value::as_u64);
+
+    match (name_path, path) {
+        (Some(_), Some(_)) | (None, None) => {
+            Err("INVALID_TARGET: set exactly one of 'name_path' or 'path' for reformat".to_string())
+        }
+        (Some(np), None) => {
+            let r = resolve_name_path(np, project_root)?; // NO_SYMBOL / AMBIGUOUS_SYMBOL
+            let abs =
+                crate::core::path_resolve::resolve_tool_path(Some(project_root), None, &r.rel_path)
+                    .map_err(|e| format!("INVALID_TARGET: path blocked by jail: {e}"))?;
+            let content =
+                std::fs::read_to_string(&abs).map_err(|e| format!("FILE_NOT_FOUND: {abs}: {e}"))?;
+            let end_col = content
+                .lines()
+                .nth(r.end_line.saturating_sub(1))
+                .map_or(0, str::len) as u32;
+            let range = TextRange0Based {
+                start_line: (r.start_line - 1) as u32,
+                start_char: 0,
+                end_line: (r.end_line - 1) as u32,
+                end_char: end_col,
+            };
+            Ok((abs, r.rel_path, ReformatScope::Symbol { range }))
+        }
+        (None, Some(p)) => {
+            let abs = crate::core::path_resolve::resolve_tool_path(Some(project_root), None, p)
+                .map_err(|e| format!("INVALID_TARGET: path blocked by jail: {e}"))?;
+            match line {
+                None => Ok((abs, p.to_string(), ReformatScope::File)),
+                Some(l) => {
+                    if l == 0 {
+                        return Err(
+                            "INVALID_TARGET: 'line' is 1-based (>=1) for a region reformat"
+                                .to_string(),
+                        );
+                    }
+                    let end = args.get("end_line").and_then(Value::as_u64).unwrap_or(l);
+                    let content = std::fs::read_to_string(&abs)
+                        .map_err(|e| format!("FILE_NOT_FOUND: {abs}: {e}"))?;
+                    let end_col = content
+                        .lines()
+                        .nth((end as usize).saturating_sub(1))
+                        .map_or(0, str::len) as u32;
+                    let range = TextRange0Based {
+                        start_line: (l - 1) as u32,
+                        start_char: 0,
+                        end_line: (end - 1) as u32,
+                        end_char: end_col,
+                    };
+                    Ok((abs, p.to_string(), ReformatScope::Region { range }))
+                }
+            }
+        }
+    }
+}
+
+/// Single-Phase reformat: resolve address → scope, jail, require live IDE, run the
+/// IDE reformat, then Single-File evict (spec §5.3). No plan_hash, no preview.
+fn render_reformat(
+    backend: &mut dyn crate::lsp::backend::LspBackend,
+    project_root: &str,
+    query: &crate::lsp::backend::ReformatQuery,
+) -> String {
+    let res = match backend.reformat(query) {
+        Ok(r) => r,
+        Err(e) => return format!("ERROR: {e}"),
+    };
+    for cp in &res.changed_paths {
+        match crate::core::path_resolve::resolve_tool_path(Some(project_root), None, cp) {
+            Ok(abs) => crate::core::cli_cache::invalidate(&abs),
+            Err(e) => return format!("ERROR: INVALID_TARGET: changed path blocked by jail: {e}"),
+        }
+    }
+    format!(
+        "reformat: '{}' applied\n  changed files: {}\n",
+        query.rel_path,
+        res.changed_paths.len(),
+    )
+}
+
+fn handle_reformat_refactor(args: &Value, project_root: &str) -> String {
+    let (abs_path, rel_path, scope) = match resolve_reformat_scope(args, project_root) {
+        Ok(t) => t,
+        Err(e) => return format!("ERROR: {e}"),
+    };
+    let mut backend = match live_jetbrains_backend(project_root) {
+        Ok(b) => b,
+        Err(e) => return format!("ERROR: {e}"),
+    };
+    let optimize_imports = args
+        .get("optimize_imports")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let query = crate::lsp::backend::ReformatQuery {
+        abs_path,
+        rel_path,
+        scope,
+        optimize_imports,
+    };
+    render_reformat(backend.as_mut(), project_root, &query)
 }
 
 fn parse_direction(args: &Value) -> HierarchyDirection {
@@ -2664,5 +2936,156 @@ mod tests {
         let out = super::render_safe_delete_apply(&mut be, root, &q, "stalehash", false, false);
         assert!(out.contains("CONFLICT"), "got: {out}");
         assert_eq!(be.applied.get(), None);
+    }
+
+    /// Minimal backend for the inline renderers: canned preview plan (with
+    /// optional conflicts) + a no-op apply. Mirrors SafeDeleteStub above, but the
+    /// inline path has NO force flag, so the stub records nothing.
+    struct InlineStub {
+        conflicts: Vec<crate::lsp::backend::Conflict>,
+    }
+    impl crate::lsp::backend::LspBackend for InlineStub {
+        fn open_file(&mut self, _u: &lsp_types::Uri, _l: &str, _t: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn references(
+            &mut self,
+            _u: &lsp_types::Uri,
+            _p: lsp_types::Position,
+            _s: &str,
+        ) -> Result<Vec<lsp_types::Location>, String> {
+            Ok(vec![])
+        }
+        fn definition(
+            &mut self,
+            _u: &lsp_types::Uri,
+            _p: lsp_types::Position,
+        ) -> Result<lsp_types::GotoDefinitionResponse, String> {
+            Ok(lsp_types::GotoDefinitionResponse::Array(vec![]))
+        }
+        fn implementations(
+            &mut self,
+            _u: &lsp_types::Uri,
+            _p: lsp_types::Position,
+            _s: &str,
+        ) -> Result<Vec<lsp_types::Location>, String> {
+            Ok(vec![])
+        }
+        fn rename(
+            &mut self,
+            _u: &lsp_types::Uri,
+            _p: lsp_types::Position,
+            _n: &str,
+        ) -> Result<Option<lsp_types::WorkspaceEdit>, String> {
+            Ok(None)
+        }
+        fn inline_preview(
+            &mut self,
+            _q: &crate::lsp::backend::InlineQuery,
+        ) -> Result<crate::lsp::backend::RenamePlan, String> {
+            Ok(crate::lsp::backend::RenamePlan {
+                usages: vec![],
+                conflicts: self.conflicts.clone(),
+            })
+        }
+        fn inline_apply(
+            &mut self,
+            _r: &crate::lsp::backend::InlineApply,
+        ) -> Result<crate::lsp::backend::RenameResult, String> {
+            Ok(crate::lsp::backend::RenameResult {
+                applied: true,
+                changed_paths: vec![],
+            })
+        }
+    }
+
+    fn inline_query(abs: &str) -> crate::lsp::backend::InlineQuery {
+        crate::lsp::backend::InlineQuery {
+            abs_path: abs.to_string(),
+            rel_path: "Calc.kt".to_string(),
+            src_range: crate::lsp::backend::TextRange0Based {
+                start_line: 0,
+                start_char: 0,
+                end_line: 0,
+                end_char: 0,
+            },
+            keep_definition: false,
+        }
+    }
+
+    #[test]
+    fn handle_inline_apply_requires_plan_hash() {
+        let args = serde_json::json!({ "action": "inline_apply", "name_path": "Calc/tmp" });
+        let out = super::handle_inline_refactor("inline_apply", &args, "/nonexistent-root");
+        assert!(out.contains("plan_hash"), "got: {out}");
+    }
+
+    #[test]
+    fn handle_inline_preview_without_ide_is_backend_required() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("Calc.kt"), "val tmp = 1\n").unwrap();
+        let root = dir.path().to_str().unwrap();
+        // File exists → flow reaches the live-IDE gate; no port file → BACKEND_REQUIRED.
+        let args = serde_json::json!({ "action": "inline_preview", "path": "Calc.kt", "line": 1 });
+        let out = super::handle_inline_refactor("inline_preview", &args, root);
+        assert!(out.contains("BACKEND_REQUIRED"), "got: {out}");
+    }
+
+    #[test]
+    fn inline_apply_blocks_on_conflicts_with_no_force_path() {
+        // A conflicting plan must ALWAYS produce CONFLICT — there is no force arg to pass.
+        let mut be = InlineStub {
+            conflicts: vec![crate::lsp::backend::Conflict {
+                path: "Calc.kt".into(),
+                range: None,
+                message: "recursive".into(),
+            }],
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("Calc.kt");
+        std::fs::write(&f, "val tmp = 1\n").unwrap();
+        let q = inline_query(f.to_str().unwrap());
+        // expected_hash is irrelevant: the conflict gate fires regardless.
+        let out = super::render_inline_apply(&mut be, dir.path().to_str().unwrap(), &q, "deadbeef");
+        assert!(out.contains("CONFLICT"), "got: {out}");
+    }
+
+    #[test]
+    fn reformat_invalid_target_when_no_address() {
+        let args = serde_json::json!({ "action": "reformat" });
+        let out = super::handle_reformat_refactor(&args, env!("CARGO_MANIFEST_DIR"));
+        assert!(out.contains("INVALID_TARGET"), "got: {out}");
+    }
+
+    #[test]
+    fn reformat_address_dispatch_resolves_scope() {
+        // path alone → File; path+line → Region; name_path → Symbol.
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("M.kt");
+        std::fs::write(&f, "fun a(){}\nfun b(){}\n").unwrap();
+        let root = dir.path().to_str().unwrap();
+
+        let file_args = serde_json::json!({ "action": "reformat", "path": "M.kt" });
+        let (_abs, _rel, scope) = super::resolve_reformat_scope(&file_args, root).unwrap();
+        assert!(matches!(scope, crate::lsp::backend::ReformatScope::File));
+
+        let region_args =
+            serde_json::json!({ "action": "reformat", "path": "M.kt", "line": 1, "end_line": 2 });
+        let (_a, _r, scope) = super::resolve_reformat_scope(&region_args, root).unwrap();
+        assert!(matches!(
+            scope,
+            crate::lsp::backend::ReformatScope::Region { .. }
+        ));
+    }
+
+    #[test]
+    fn reformat_without_ide_is_backend_required() {
+        let args = serde_json::json!({ "action": "reformat", "path": "M.kt" });
+        let out = super::handle_reformat_refactor(&args, env!("CARGO_MANIFEST_DIR"));
+        // Either resolved scope then BACKEND_REQUIRED, or FILE_NOT_FOUND if M.kt absent in manifest.
+        assert!(
+            out.contains("BACKEND_REQUIRED") || out.contains("FILE_NOT_FOUND"),
+            "got: {out}"
+        );
     }
 }

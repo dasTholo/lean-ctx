@@ -522,7 +522,12 @@ mod tests {
 
     #[test]
     fn inline_and_reformat_types_construct_and_clone() {
-        let range = TextRange0Based { start_line: 1, start_char: 0, end_line: 1, end_char: 9 };
+        let range = TextRange0Based {
+            start_line: 1,
+            start_char: 0,
+            end_line: 1,
+            end_char: 9,
+        };
         let iq = InlineQuery {
             abs_path: "/p/Calc.kt".into(),
             rel_path: "Calc.kt".into(),
@@ -531,7 +536,7 @@ mod tests {
         };
         assert_eq!(iq.clone(), iq);
         let ia = InlineApply { query: iq.clone() };
-        assert_eq!(ia.clone().query.keep_definition, false);
+        assert!(!ia.clone().query.keep_definition);
         let rq = ReformatQuery {
             abs_path: "/p/M.kt".into(),
             rel_path: "M.kt".into(),
@@ -540,10 +545,17 @@ mod tests {
         };
         assert_eq!(rq.clone(), rq);
         assert!(matches!(
-            ReformatQuery { scope: ReformatScope::Region { range }, ..rq.clone() }.scope,
+            ReformatQuery {
+                scope: ReformatScope::Region { range },
+                ..rq.clone()
+            }
+            .scope,
             ReformatScope::Region { .. }
         ));
-        let rr = ReformatResult { applied: true, changed_paths: vec!["M.kt".into()] };
+        let rr = ReformatResult {
+            applied: true,
+            changed_paths: vec!["M.kt".into()],
+        };
         assert_eq!(rr.clone(), rr);
     }
 
@@ -552,20 +564,70 @@ mod tests {
         struct Bare2;
         // minimal LspBackend impl reusing the existing `Bare` pattern (mandatory methods only)
         impl LspBackend for Bare2 {
-            fn open_file(&mut self, _u: &Uri, _l: &str, _t: &str) -> Result<(), String> { Ok(()) }
-            fn references(&mut self, _u: &Uri, _p: Position, _s: &str) -> Result<Vec<Location>, String> { Ok(vec![]) }
-            fn definition(&mut self, _u: &Uri, _p: Position) -> Result<GotoDefinitionResponse, String> {
+            fn open_file(&mut self, _u: &Uri, _l: &str, _t: &str) -> Result<(), String> {
+                Ok(())
+            }
+            fn references(
+                &mut self,
+                _u: &Uri,
+                _p: Position,
+                _s: &str,
+            ) -> Result<Vec<Location>, String> {
+                Ok(vec![])
+            }
+            fn definition(
+                &mut self,
+                _u: &Uri,
+                _p: Position,
+            ) -> Result<GotoDefinitionResponse, String> {
                 Ok(GotoDefinitionResponse::Array(vec![]))
             }
-            fn implementations(&mut self, _u: &Uri, _p: Position, _s: &str) -> Result<Vec<Location>, String> { Ok(vec![]) }
-            fn rename(&mut self, _u: &Uri, _p: Position, _n: &str) -> Result<Option<WorkspaceEdit>, String> { Ok(None) }
+            fn implementations(
+                &mut self,
+                _u: &Uri,
+                _p: Position,
+                _s: &str,
+            ) -> Result<Vec<Location>, String> {
+                Ok(vec![])
+            }
+            fn rename(
+                &mut self,
+                _u: &Uri,
+                _p: Position,
+                _n: &str,
+            ) -> Result<Option<WorkspaceEdit>, String> {
+                Ok(None)
+            }
         }
-        let q = InlineQuery { abs_path: "/a".into(), rel_path: "a".into(),
-            src_range: TextRange0Based { start_line: 0, start_char: 0, end_line: 0, end_char: 0 }, keep_definition: false };
-        assert!(Bare2.inline_preview(&q).unwrap_err().contains("BACKEND_REQUIRED"));
-        assert!(Bare2.inline_apply(&InlineApply { query: q.clone() }).unwrap_err().contains("BACKEND_REQUIRED"));
-        let rq = ReformatQuery { abs_path: "/a".into(), rel_path: "a".into(), scope: ReformatScope::File, optimize_imports: false };
-        assert!(Bare2.reformat(&rq).unwrap_err().contains("BACKEND_REQUIRED"));
+        let q = InlineQuery {
+            abs_path: "/a".into(),
+            rel_path: "a".into(),
+            src_range: TextRange0Based {
+                start_line: 0,
+                start_char: 0,
+                end_line: 0,
+                end_char: 0,
+            },
+            keep_definition: false,
+        };
+        assert!(Bare2
+            .inline_preview(&q)
+            .unwrap_err()
+            .contains("BACKEND_REQUIRED"));
+        assert!(Bare2
+            .inline_apply(&InlineApply { query: q.clone() })
+            .unwrap_err()
+            .contains("BACKEND_REQUIRED"));
+        let rq = ReformatQuery {
+            abs_path: "/a".into(),
+            rel_path: "a".into(),
+            scope: ReformatScope::File,
+            optimize_imports: false,
+        };
+        assert!(Bare2
+            .reformat(&rq)
+            .unwrap_err()
+            .contains("BACKEND_REQUIRED"));
     }
 
     #[test]
