@@ -3,8 +3,10 @@ package com.leanctx.plugin.psi
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiNamedElement
+import com.intellij.psi.PsiWhiteSpace
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.search.searches.ReferencesSearch
+import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.util.Processor
 import com.leanctx.plugin.dto.LocationDTO
 import com.leanctx.plugin.dto.LocationsResponse
@@ -56,8 +58,14 @@ class ReferenceFinder(private val locator: PsiLocator) {
             val resolved = reference.resolve()
             if (resolved != null) return resolved
         }
-        val element = file.findElementAt(offset)
+        var element = file.findElementAt(offset)
             ?: throw BackendException("NO_SYMBOL_AT_POSITION", "no element at $line:$character")
+        // Line-addressed targets (char 0) land on the leading indentation; skip it so the
+        // parent walk resolves the declaration ON the line, not its enclosing class/function.
+        // (findReferenceAt above returns null on whitespace.) Ported from the v2d SymbolInliner fix.
+        if (element is PsiWhiteSpace) {
+            element = PsiTreeUtil.nextLeaf(element) ?: element
+        }
         return generateSequence(element) { it.parent }
             .firstOrNull { it is PsiNamedElement }
             ?: throw BackendException("NO_SYMBOL_AT_POSITION", "no named symbol at $line:$character")
