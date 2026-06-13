@@ -285,6 +285,14 @@ fehl. Expliziter Gate-Punkt.
 9. **Finaler Release-Build (Nutzer, manuell):** der Agent liefert den exakten
    Befehl (`cargo build --release` bzw. `cargo install --path rust`) → `3.8.3-jb`
    Binary. Der Agent führt ihn **nicht** aus.
+10. **Post-Build-Smoke-Check (Nutzer, optional, nach Schritt 9):**
+    `lean-ctx doctor --migrate-check` (GL #396) — validiert `config.toml`-Keys
+    gegen das Schema, aktive Deprecations, Data-Layout-Writability, Frozen-
+    Contract-Set; Exit 0 = „1.0-ready". Verifiziert: der Branch führt **keine**
+    neuen `config.toml`-Keys ein (nur `shell_allowlist`-Merge-Semantik +
+    Kotlin-Ext-Mapping) → sollte clean durchlaufen. Kein Merge-Gate, sondern
+    Bestätigung, dass der gemergte Fork keine Schema-/Deprecation-Probleme
+    mitbringt.
 
 ---
 
@@ -311,3 +319,10 @@ fehl. Expliziter Gate-Punkt.
 - Keine Ausführung des finalen Release-Builds durch den Agenten.
 - Keine Änderung an additiven main-Subsystemen (Context OS / Commercial Plane).
 - Keine Refactorings außerhalb der Konfliktauflösung.
+- **Kein v1.0-Launch-Programm.** Die mit main mitgelieferten Release-Docs
+  (`docs/releases/v1.0-runbook.md`, `docs/releases/migration-1.0.md`,
+  `marketing/launch-v1/`) gehören zum **Upstream**-1.0-Release von lean-ctx, nicht
+  zu diesem lokalen `3.8.3-jb`-JetBrains-Fork. Sie kommen über den Merge mit, aber
+  es wird nichts daran getan. `doctor --migrate-check` (GL #396) wird nur als
+  optionaler Post-Build-Smoke-Check genutzt (§4 Schritt 10), nicht als
+  Launch-Vorbereitung.
