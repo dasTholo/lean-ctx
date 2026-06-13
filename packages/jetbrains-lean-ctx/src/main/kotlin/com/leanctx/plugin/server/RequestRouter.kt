@@ -13,7 +13,7 @@ import com.leanctx.plugin.endpoint.EditHandlers
 import com.leanctx.plugin.endpoint.InspectionHandlers
 import com.leanctx.plugin.endpoint.NavHandlers
 import com.leanctx.plugin.endpoint.RefactorHandlers
-import com.leanctx.plugin.endpoint.StructureHandlers
+import com.leanctx.plugin.spi.StructureProvider
 
 data class HttpResult(val status: Int, val body: String)
 
@@ -26,10 +26,10 @@ class RequestRouter(
     private val ideVersion: String,
     private val projectName: String,
     project: Project,
+    private val structureProvider: StructureProvider? = StructureProvider.forProject(project),
 ) {
     private val log = Logger.getInstance(RequestRouter::class.java)
     private val handlers = NavHandlers(project)
-    private val structureHandlers = StructureHandlers(project)
     private val inspectionHandlers = InspectionHandlers(project)
     private val editHandlers = EditHandlers(project)
     private val refactorHandlers = RefactorHandlers(project)
@@ -87,28 +87,40 @@ class RequestRouter(
         HttpResult(500, JsonCodec.error("INTERNAL", e.message ?: "internal error")) // 500 = echte Exception
     }
 
-    private fun dispatchHierarchy(body: String): HttpResult = try {
-        val req = JsonCodec.parseHierarchyRequest(body)
-        HttpResult(200, JsonCodec.toJson(structureHandlers.typeHierarchy(req)))
-    } catch (e: BackendException) {
-        HttpResult(200, JsonCodec.error(e.code, e.message ?: e.code))
-    } catch (e: IllegalArgumentException) {
-        HttpResult(200, JsonCodec.error("INTERNAL", e.message ?: "bad request"))
-    } catch (e: Exception) {
-        log.warn("type_hierarchy endpoint failed", e)
-        HttpResult(500, JsonCodec.error("INTERNAL", e.message ?: "internal error"))
+    private fun dispatchHierarchy(body: String): HttpResult {
+        val provider = structureProvider ?: return HttpResult(
+            200,
+            JsonCodec.error("UNSUPPORTED_LANGUAGE", "type_hierarchy requires a JVM-capable IDE"),
+        )
+        return try {
+            val req = JsonCodec.parseHierarchyRequest(body)
+            HttpResult(200, JsonCodec.toJson(provider.typeHierarchy(req)))
+        } catch (e: BackendException) {
+            HttpResult(200, JsonCodec.error(e.code, e.message ?: e.code))
+        } catch (e: IllegalArgumentException) {
+            HttpResult(200, JsonCodec.error("INTERNAL", e.message ?: "bad request"))
+        } catch (e: Exception) {
+            log.warn("type_hierarchy endpoint failed", e)
+            HttpResult(500, JsonCodec.error("INTERNAL", e.message ?: "internal error"))
+        }
     }
 
-    private fun dispatchOverview(body: String): HttpResult = try {
-        val req = JsonCodec.parseFileRequest(body)
-        HttpResult(200, JsonCodec.toJson(structureHandlers.symbolsOverview(req)))
-    } catch (e: BackendException) {
-        HttpResult(200, JsonCodec.error(e.code, e.message ?: e.code))
-    } catch (e: IllegalArgumentException) {
-        HttpResult(200, JsonCodec.error("INTERNAL", e.message ?: "bad request"))
-    } catch (e: Exception) {
-        log.warn("symbols_overview endpoint failed", e)
-        HttpResult(500, JsonCodec.error("INTERNAL", e.message ?: "internal error"))
+    private fun dispatchOverview(body: String): HttpResult {
+        val provider = structureProvider ?: return HttpResult(
+            200,
+            JsonCodec.error("UNSUPPORTED_LANGUAGE", "symbols_overview via IDE-PSI requires a JVM-capable IDE"),
+        )
+        return try {
+            val req = JsonCodec.parseFileRequest(body)
+            HttpResult(200, JsonCodec.toJson(provider.symbolsOverview(req)))
+        } catch (e: BackendException) {
+            HttpResult(200, JsonCodec.error(e.code, e.message ?: e.code))
+        } catch (e: IllegalArgumentException) {
+            HttpResult(200, JsonCodec.error("INTERNAL", e.message ?: "bad request"))
+        } catch (e: Exception) {
+            log.warn("symbols_overview endpoint failed", e)
+            HttpResult(500, JsonCodec.error("INTERNAL", e.message ?: "internal error"))
+        }
     }
 
     private fun dispatchInspections(body: String): HttpResult = try {

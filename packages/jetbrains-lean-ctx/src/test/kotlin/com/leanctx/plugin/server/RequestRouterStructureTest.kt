@@ -66,4 +66,19 @@ class RequestRouterStructureTest : BasePlatformTestCase() {
         assertEquals(200, res.status)
         assertTrue(res.body.contains("FILE_NOT_FOUND"))
     }
+
+    fun testTypeHierarchyDegradesWhenNoProvider() {
+        val router = RequestRouter("tok", "RR-2026.1", project.name, project, structureProvider = null)
+        val body = """{"path":"x.rs","line":0,"character":0,"direction":"supertypes"}"""
+        val res = router.route("POST", "/type_hierarchy", "tok", body)
+        assertEquals("body=${res.body}", 200, res.status)
+        assertTrue("body=${res.body}", res.body.contains("UNSUPPORTED_LANGUAGE"))
+    }
+
+    fun testSymbolsOverviewDegradesWhenNoProvider() {
+        val router = RequestRouter("tok", "RR-2026.1", project.name, project, structureProvider = null)
+        val res = router.route("POST", "/symbols_overview", "tok", """{"path":"x.rs"}""")
+        assertEquals("body=${res.body}", 200, res.status)
+        assertTrue("body=${res.body}", res.body.contains("UNSUPPORTED_LANGUAGE"))
+    }
 }
