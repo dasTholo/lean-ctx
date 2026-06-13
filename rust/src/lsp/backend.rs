@@ -224,6 +224,51 @@ pub struct SafeDeleteApply {
     pub propagate: bool,
 }
 
+/// Phase-1 `inline` request: resolved source span. `keep_definition` maps to the
+/// IntelliJ inline processors' "inline all and keep declaration" flag (spec §3,
+/// Befund 2). The trait never sees a `name_path` — exactly like move/safe_delete.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlineQuery {
+    pub abs_path: String,
+    pub rel_path: String,
+    pub src_range: TextRange0Based,
+    pub keep_definition: bool,
+}
+
+/// Phase-2 `inline` request. NO `force` field — inline conflicts are partly
+/// non-overridable (spec §5.2, Entscheidung 4); the Rust gate is final.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlineApply {
+    pub query: InlineQuery,
+}
+
+/// Reformat scope (spec §5.3): the address is already resolved in `ctx_refactor`;
+/// the trait sees only File / Region{range} / Symbol{range}, never a `name_path`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReformatScope {
+    File,
+    Region { range: TextRange0Based },
+    Symbol { range: TextRange0Based },
+}
+
+/// Single-Phase `reformat` request (spec §5.3): no usages, no plan_hash.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReformatQuery {
+    pub abs_path: String,
+    pub rel_path: String,
+    pub scope: ReformatScope,
+    pub optimize_imports: bool,
+}
+
+/// Outcome of `reformat`: which files changed (Single-File in practice). A
+/// dedicated type makes "reformat has no usage concept" explicit in the type
+/// system (spec §5.4 Empfehlung).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReformatResult {
+    pub applied: bool,
+    pub changed_paths: Vec<String>,
+}
+
 /// Code-intelligence backend. `Send` so instances can live in the global
 /// `BACKENDS` cache (`Mutex<HashMap<String, Box<dyn LspBackend>>>`).
 pub trait LspBackend: Send {
@@ -330,6 +375,23 @@ pub trait LspBackend: Send {
     /// deleteEvenIfUsed) as ONE Undo transaction. DEFAULT = `Err(BACKEND_REQUIRED)`.
     fn safe_delete_apply(&mut self, _req: &SafeDeleteApply) -> Result<RenameResult, String> {
         Err("BACKEND_REQUIRED: safe_delete requires a running JetBrains IDE".to_string())
+    }
+
+    /// Phase 1 of the Two-Phase inline: resolve all substitution sites + conflicts.
+    /// DEFAULT = `Err(BACKEND_REQUIRED)` — only Backing B (live IDE) overrides (spec §5.4).
+    fn inline_preview(&mut self, _req: &InlineQuery) -> Result<RenamePlan, String> {
+        Err("BACKEND_REQUIRED: inline requires a running JetBrains IDE".to_string())
+    }
+    /// Phase 2 of the Two-Phase inline: substitute at every call site as ONE Undo
+    /// transaction. Hard refusal (recursive, multiple returns, override) → UNSUPPORTED
+    /// at the backend. DEFAULT = `Err(BACKEND_REQUIRED)`.
+    fn inline_apply(&mut self, _req: &InlineApply) -> Result<RenameResult, String> {
+        Err("BACKEND_REQUIRED: inline requires a running JetBrains IDE".to_string())
+    }
+    /// Single-Phase reformat (spec §5.3): no preview, no plan_hash.
+    /// DEFAULT = `Err(BACKEND_REQUIRED)`.
+    fn reformat(&mut self, _req: &ReformatQuery) -> Result<ReformatResult, String> {
+        Err("BACKEND_REQUIRED: reformat requires a running JetBrains IDE".to_string())
     }
 
     // ── Self-management (liveness) ──
@@ -456,6 +518,54 @@ mod tests {
         assert_eq!(sa.query, sq);
         assert!(sa.force);
         assert!(!sa.propagate);
+    }
+
+    #[test]
+    fn inline_and_reformat_types_construct_and_clone() {
+        let range = TextRange0Based { start_line: 1, start_char: 0, end_line: 1, end_char: 9 };
+        let iq = InlineQuery {
+            abs_path: "/p/Calc.kt".into(),
+            rel_path: "Calc.kt".into(),
+            src_range: range,
+            keep_definition: false,
+        };
+        assert_eq!(iq.clone(), iq);
+        let ia = InlineApply { query: iq.clone() };
+        assert_eq!(ia.clone().query.keep_definition, false);
+        let rq = ReformatQuery {
+            abs_path: "/p/M.kt".into(),
+            rel_path: "M.kt".into(),
+            scope: ReformatScope::File,
+            optimize_imports: true,
+        };
+        assert_eq!(rq.clone(), rq);
+        assert!(matches!(
+            ReformatQuery { scope: ReformatScope::Region { range }, ..rq.clone() }.scope,
+            ReformatScope::Region { .. }
+        ));
+        let rr = ReformatResult { applied: true, changed_paths: vec!["M.kt".into()] };
+        assert_eq!(rr.clone(), rr);
+    }
+
+    #[test]
+    fn headless_inline_and_reformat_default_is_backend_required() {
+        struct Bare2;
+        // minimal LspBackend impl reusing the existing `Bare` pattern (mandatory methods only)
+        impl LspBackend for Bare2 {
+            fn open_file(&mut self, _u: &Uri, _l: &str, _t: &str) -> Result<(), String> { Ok(()) }
+            fn references(&mut self, _u: &Uri, _p: Position, _s: &str) -> Result<Vec<Location>, String> { Ok(vec![]) }
+            fn definition(&mut self, _u: &Uri, _p: Position) -> Result<GotoDefinitionResponse, String> {
+                Ok(GotoDefinitionResponse::Array(vec![]))
+            }
+            fn implementations(&mut self, _u: &Uri, _p: Position, _s: &str) -> Result<Vec<Location>, String> { Ok(vec![]) }
+            fn rename(&mut self, _u: &Uri, _p: Position, _n: &str) -> Result<Option<WorkspaceEdit>, String> { Ok(None) }
+        }
+        let q = InlineQuery { abs_path: "/a".into(), rel_path: "a".into(),
+            src_range: TextRange0Based { start_line: 0, start_char: 0, end_line: 0, end_char: 0 }, keep_definition: false };
+        assert!(Bare2.inline_preview(&q).unwrap_err().contains("BACKEND_REQUIRED"));
+        assert!(Bare2.inline_apply(&InlineApply { query: q.clone() }).unwrap_err().contains("BACKEND_REQUIRED"));
+        let rq = ReformatQuery { abs_path: "/a".into(), rel_path: "a".into(), scope: ReformatScope::File, optimize_imports: false };
+        assert!(Bare2.reformat(&rq).unwrap_err().contains("BACKEND_REQUIRED"));
     }
 
     #[test]
