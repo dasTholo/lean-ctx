@@ -36,8 +36,19 @@ impl ModeGuard {
 
 impl Drop for ModeGuard {
     fn drop(&mut self) {
-        CURRENT_MODE.with(|m| *m.borrow_mut() = None);
-        CURRENT_DETAIL.with(|d| *d.borrow_mut() = None);
+        // Must be panic-free: a `borrow_mut` panic while the thread is already
+        // unwinding another panic would escalate to a process abort (#378). Use
+        // `try_borrow_mut` and silently skip if the slot is somehow in use.
+        CURRENT_MODE.with(|m| {
+            if let Ok(mut slot) = m.try_borrow_mut() {
+                *slot = None;
+            }
+        });
+        CURRENT_DETAIL.with(|d| {
+            if let Ok(mut slot) = d.try_borrow_mut() {
+                *slot = None;
+            }
+        });
     }
 }
 
@@ -312,7 +323,10 @@ mod tests {
             "should contain box-drawing: {result}"
         );
 
+        // Restore ALL touched env — leaking LEAN_CTX_SAVINGS_FOOTER=always
+        // made footers visible in unrelated tests (GL #556 flakiness).
         std::env::remove_var("LEAN_CTX_SHOW_SAVINGS");
+        std::env::remove_var("LEAN_CTX_SAVINGS_FOOTER");
     }
 
     #[test]

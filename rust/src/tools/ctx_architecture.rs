@@ -390,7 +390,7 @@ fn handle_communities(root: &str, fmt: OutputFormat) -> String {
         Err(e) => return e,
     };
 
-    let result = crate::core::community::detect_communities(graph.connection());
+    let result = crate::core::community::detect_communities_stable(graph.connection(), root);
 
     match fmt {
         OutputFormat::Json => {
@@ -743,7 +743,13 @@ fn handle_hotspots(root: &str, fmt: OutputFormat) -> String {
             result.push_str(&format!("  {}\n", "-".repeat(82)));
             for (file, score, rank, edges, smells) in hotspots.iter().take(limit) {
                 let display = if file.len() > 48 {
-                    format!("...{}", &file[file.len() - 45..])
+                    // Suffix cut must land on a char boundary — multibyte
+                    // paths panic on byte-indexed slicing (GitHub #386).
+                    let mut start = file.len() - 45;
+                    while start < file.len() && !file.is_char_boundary(start) {
+                        start += 1;
+                    }
+                    format!("...{}", &file[start..])
                 } else {
                     file.clone()
                 };
@@ -772,7 +778,7 @@ fn handle_health(root: &str, fmt: OutputFormat) -> String {
         Err(e) => return e,
     };
 
-    let communities = crate::core::community::detect_communities(graph.connection());
+    let communities = crate::core::community::detect_communities_stable(graph.connection(), root);
     let cfg = crate::core::smells::SmellConfig::default();
     let findings = crate::core::smells::scan_all(graph.connection(), &cfg);
     let summary = crate::core::smells::summarize(&findings);

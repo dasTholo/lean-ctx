@@ -2,8 +2,11 @@
 
 mod checks;
 mod common;
+mod deprecations;
 mod fix;
 mod integrations;
+mod migrate;
+mod overhead;
 mod workspace_scope;
 
 #[allow(clippy::wildcard_imports)]
@@ -208,6 +211,13 @@ pub fn run() {
     }
     print_check(&allowlist_outcome);
 
+    // 5b2) Path jail (effective state + dead allow_paths entries, GH #392)
+    let path_jail = path_jail_outcome();
+    if path_jail.ok {
+        passed += 1;
+    }
+    print_check(&path_jail);
+
     // 5c) Compact-format passthrough (preserve already-compact TOON output, #342)
     let passthrough_outcome = compact_format_passthrough_outcome();
     if passthrough_outcome.ok {
@@ -270,8 +280,13 @@ pub fn run() {
     #[cfg(unix)]
     let daemon_outcome = {
         let autostart = crate::daemon_autostart::is_installed();
+        // GH #394: surface the exact service file so users can audit/edit it
+        // and know the unit name for systemctl/launchctl without searching.
         let autostart_tag = if autostart {
-            format!("  {DIM}[autostart: on]{RST}")
+            match crate::daemon_autostart::service_file_path() {
+                Some(p) => format!("  {DIM}[autostart: on — {}]{RST}", p.display()),
+                None => format!("  {DIM}[autostart: on]{RST}"),
+            }
         } else {
             String::new()
         };
@@ -499,6 +514,23 @@ pub fn run() {
         print_check(check);
     }
 
+    // 21) Claude Pro/Max subscription routed through the proxy without an API key
+    let subscription_conflict = proxy_subscription_conflict_outcome();
+    if let Some(ref check) = subscription_conflict {
+        if check.ok {
+            passed += 1;
+        }
+        print_check(check);
+    }
+
+    // 22) Deprecation register (CONTRACTS.md policy, GL #394): warn about
+    // every surface this build deprecates, with replacement and removal floor.
+    let deprecation_check = deprecations::deprecations_outcome();
+    if deprecation_check.ok {
+        passed += 1;
+    }
+    print_check(&deprecation_check);
+
     // LSP servers (optional, informational)
     println!("\n  {BOLD}{WHITE}LSP (optional — for ctx_refactor):{RST}");
     let lsp_outcomes = lsp_server_outcomes();
@@ -508,8 +540,10 @@ pub fn run() {
 
     let mut effective_total = total + 10; // session_state + integrity + cache_safety + bm25_health + archive_footprint + daemon + mem_profile + mem_cleanup + ram_guardian + proxy_health
     effective_total += 1; // shell_allowlist (#341)
+    effective_total += 1; // path_jail (GH #392)
     effective_total += 1; // compact_format_passthrough (#342)
     effective_total += 1; // permission_inheritance
+    effective_total += 1; // deprecations (#394)
     effective_total += cap_warnings.len() as u32;
     effective_total += docker_outcomes.len() as u32;
     if pi.is_some() {
@@ -519,6 +553,9 @@ pub fn run() {
         effective_total += 1;
     }
     if stale_env.is_some() {
+        effective_total += 1;
+    }
+    if subscription_conflict.is_some() {
         effective_total += 1;
     }
     if workspace_scope.is_some() {
@@ -581,19 +618,31 @@ pub fn run_compact() {
 pub fn run_cli(args: &[String]) -> i32 {
     let (sub, rest) = match args.first().map(String::as_str) {
         Some("integrations") => ("integrations", &args[1..]),
+        Some("overhead") => ("overhead", &args[1..]),
         _ => ("", args),
     };
 
     let fix = rest.iter().any(|a| a == "--fix");
     let json = rest.iter().any(|a| a == "--json");
+    let migrate_check = rest.iter().any(|a| a == "--migrate-check");
     let help = rest.iter().any(|a| a == "--help" || a == "-h");
 
     if help {
         println!("Usage:");
         println!("  lean-ctx doctor");
+        println!("  lean-ctx doctor overhead [--json]   Fixed context cost per session");
         println!("  lean-ctx doctor integrations [--json]");
         println!("  lean-ctx doctor --fix [--json]");
+        println!("  lean-ctx doctor --migrate-check [--json]");
         return 0;
+    }
+
+    if sub == "overhead" {
+        return overhead::run_overhead(json);
+    }
+
+    if migrate_check {
+        return migrate::run_migrate_check(json);
     }
 
     if sub == "integrations" {

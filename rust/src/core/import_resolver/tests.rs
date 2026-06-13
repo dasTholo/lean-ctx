@@ -2,13 +2,19 @@ use super::*;
 use crate::core::deep_queries::{ImportInfo, ImportKind};
 
 fn make_ctx(files: &[&str]) -> ResolverContext {
+    let file_paths: Vec<String> = files.iter().map(std::string::ToString::to_string).collect();
     ResolverContext {
         project_root: PathBuf::from("/project"),
-        file_paths: files.iter().map(std::string::ToString::to_string).collect(),
+        file_paths: file_paths.clone(),
         tsconfig_paths: HashMap::new(),
         go_module: None,
         dart_package: None,
-        file_set: files.iter().map(std::string::ToString::to_string).collect(),
+        file_set: file_paths.iter().cloned().collect(),
+        csharp_ns_index: build_csharp_namespace_index(
+            &PathBuf::from("/project"),
+            &file_paths,
+            &HashMap::new(),
+        ),
     }
 }
 
@@ -348,6 +354,207 @@ fn kotlin_import_resolves_java_file() {
     assert_eq!(
         results[0].resolved_path.as_deref(),
         Some("src/main/java/com/example/LegacyUtil.java")
+    );
+    assert!(!results[0].is_external);
+}
+
+// --- C# ---
+
+#[test]
+fn csharp_using_resolves_namespace_folder_with_root_prefix() {
+    // `using App.Services` must resolve even though files live under `src/`
+    // (root-prefix tolerant suffix match), and even though the namespace maps to
+    // a folder containing several files (a representative is returned).
+    let ctx = make_ctx(&[
+        "src/App/Services/UserService.cs",
+        "src/App/Services/OrderService.cs",
+        "src/App/Program.cs",
+    ]);
+    let imp = make_import("App.Services");
+    let results = resolve_imports(&[imp], "src/App/Program.cs", "cs", &ctx);
+    assert_eq!(
+        results[0].resolved_path.as_deref(),
+        Some("src/App/Services/OrderService.cs"),
+        "smallest path is the deterministic representative"
+    );
+    assert!(!results[0].is_external);
+}
+
+#[test]
+fn csharp_using_type_falls_back_to_parent_namespace() {
+    // `using App.Services.UserService` references a *type*; the folder is the
+    // parent namespace `App/Services`.
+    let ctx = make_ctx(&["App/Services/UserService.cs", "App/Program.cs"]);
+    let imp = make_import("App.Services.UserService");
+    let results = resolve_imports(&[imp], "App/Program.cs", "cs", &ctx);
+    assert_eq!(
+        results[0].resolved_path.as_deref(),
+        Some("App/Services/UserService.cs")
+    );
+    assert!(!results[0].is_external);
+}
+
+#[test]
+fn csharp_bcl_and_nuget_namespaces_are_external() {
+    let ctx = make_ctx(&["App/Program.cs"]);
+    for ns in [
+        "System.Text",
+        "System.Collections.Generic",
+        "Microsoft.Extensions.DependencyInjection",
+        "Newtonsoft.Json",
+    ] {
+        let results = resolve_imports(&[make_import(ns)], "App/Program.cs", "cs", &ctx);
+        assert!(results[0].is_external, "{ns} should be external");
+        assert!(results[0].resolved_path.is_none());
+    }
+}
+
+#[test]
+fn csharp_unknown_internal_namespace_is_external_without_phantom_edge() {
+    let ctx = make_ctx(&["App/Program.cs"]);
+    let imp = make_import("Some.Other.Project");
+    let results = resolve_imports(&[imp], "App/Program.cs", "cs", &ctx);
+    assert!(results[0].is_external);
+    assert!(results[0].resolved_path.is_none());
+}
+
+#[test]
+fn csharp_using_drops_root_namespace_not_mirrored_as_folder() {
+    // The RootNamespace (`MyApp`) is the assembly default namespace, NOT a folder:
+    // sources live directly in `Models/` and `Services/`. `using MyApp.Models`
+    // must still resolve by dropping the leading (non-folder) root segment.
+    let ctx = make_ctx(&["Services/Greeter.cs", "Models/User.cs", "Models/Order.cs"]);
+    let imp = make_import("MyApp.Models");
+    let results = resolve_imports(&[imp], "Services/Greeter.cs", "cs", &ctx);
+    assert_eq!(
+        results[0].resolved_path.as_deref(),
+        Some("Models/Order.cs"),
+        "drops non-folder root `MyApp`, matches `Models/` (smallest file)"
+    );
+    assert!(!results[0].is_external);
+}
+
+#[test]
+fn csharp_using_drops_multi_segment_root_namespace() {
+    // A multi-segment default namespace (`Acme.MyApp`) is likewise not a folder.
+    let ctx = make_ctx(&["Models/User.cs", "Program.cs"]);
+    let imp = make_import("Acme.MyApp.Models");
+    let results = resolve_imports(&[imp], "Program.cs", "cs", &ctx);
+    assert_eq!(results[0].resolved_path.as_deref(), Some("Models/User.cs"));
+    assert!(!results[0].is_external);
+}
+
+#[test]
+fn csharp_bcl_tail_colliding_with_local_folder_stays_external() {
+    // Hardening: a local `Text/` folder must NOT capture `using System.Text`.
+    // The external-root check runs before any suffix probing.
+    let ctx = make_ctx(&["Text/Formatter.cs", "Program.cs"]);
+    let imp = make_import("System.Text");
+    let results = resolve_imports(&[imp], "Program.cs", "cs", &ctx);
+    assert!(
+        results[0].is_external,
+        "System.Text must not match a local Text/ folder"
+    );
+    assert!(results[0].resolved_path.is_none());
+}
+
+#[test]
+fn csharp_longest_namespace_suffix_wins() {
+    // When both a nested and a shallow folder match, the most specific
+    // (longest) suffix is chosen.
+    let ctx = make_ctx(&["Api/Models/Dto.cs", "Models/User.cs", "Program.cs"]);
+    let imp = make_import("MyApp.Api.Models");
+    let results = resolve_imports(&[imp], "Program.cs", "cs", &ctx);
+    assert_eq!(
+        results[0].resolved_path.as_deref(),
+        Some("Api/Models/Dto.cs"),
+        "`Api/Models` (len 2) beats the shallow `Models` (len 1)"
+    );
+    assert!(!results[0].is_external);
+}
+
+// --- GDScript (Godot) ---
+
+#[test]
+fn gd_extends_res_gd_resolves() {
+    let ctx = make_ctx(&["actors/Base.gd", "actors/Player.gd"]);
+    let imp = make_import("res://actors/Base.gd");
+    let results = resolve_imports(&[imp], "actors/Player.gd", "gd", &ctx);
+    assert_eq!(results[0].resolved_path.as_deref(), Some("actors/Base.gd"));
+    assert!(!results[0].is_external);
+}
+
+#[test]
+fn gd_preload_res_tscn_resolves_when_indexed() {
+    // #315: a `.tscn` that *is* in the index resolves verbatim.
+    let ctx = make_ctx(&["scenes/Enemy.tscn", "actors/Spawner.gd"]);
+    let imp = make_import("res://scenes/Enemy.tscn");
+    let results = resolve_imports(&[imp], "actors/Spawner.gd", "gd", &ctx);
+    assert_eq!(
+        results[0].resolved_path.as_deref(),
+        Some("scenes/Enemy.tscn")
+    );
+    assert!(!results[0].is_external);
+}
+
+#[test]
+fn gd_extensionless_probes_tscn_then_tres() {
+    // #315: `extends "res://actors/Player"` (no extension) probes .gd/.tscn/.tres.
+    let ctx = make_ctx(&["actors/Player.tscn", "main.gd"]);
+    let imp = make_import("res://actors/Player");
+    let results = resolve_imports(&[imp], "main.gd", "gd", &ctx);
+    assert_eq!(
+        results[0].resolved_path.as_deref(),
+        Some("actors/Player.tscn")
+    );
+    assert!(!results[0].is_external);
+}
+
+#[test]
+fn gd_unresolved_but_valid_res_path_still_creates_edge() {
+    // #315: a concrete `res://…tscn` that isn't indexed yet (before scene
+    // indexing) still yields an edge to the declared path — never external.
+    let ctx = make_ctx(&["main.gd"]);
+    let imp = make_import("res://scenes/Main.tscn");
+    let results = resolve_imports(&[imp], "main.gd", "gd", &ctx);
+    assert_eq!(
+        results[0].resolved_path.as_deref(),
+        Some("scenes/Main.tscn")
+    );
+    assert!(!results[0].is_external);
+}
+
+#[test]
+fn gd_res_without_extension_unresolved_makes_no_edge() {
+    // A bare `res://foo` (no resource extension) that resolves to nothing is not
+    // a concrete reference: no phantom edge, but still intra-project (not external).
+    let ctx = make_ctx(&["main.gd"]);
+    let imp = make_import("res://autoload/Globals");
+    let results = resolve_imports(&[imp], "main.gd", "gd", &ctx);
+    assert!(results[0].resolved_path.is_none());
+    assert!(!results[0].is_external);
+}
+
+#[test]
+fn gd_user_path_is_external() {
+    // `user://` is a runtime data path, never a project source file.
+    let ctx = make_ctx(&["main.gd"]);
+    let imp = make_import("user://savegame.tres");
+    let results = resolve_imports(&[imp], "main.gd", "gd", &ctx);
+    assert!(results[0].resolved_path.is_none());
+    assert!(results[0].is_external);
+}
+
+#[test]
+fn tscn_ext_resolves_script_via_gd_resolver() {
+    // #316: `.tscn` files dispatch to the GDScript resolver, so an ext_resource
+    // `res://…gd` script reference resolves to the indexed script.
+    let ctx = make_ctx(&["scenes/Main.tscn", "actors/Player.gd"]);
+    let imp = make_import("res://actors/Player.gd");
+    let results = resolve_imports(&[imp], "scenes/Main.tscn", "tscn", &ctx);
+    assert_eq!(
+        results[0].resolved_path.as_deref(),
+        Some("actors/Player.gd")
     );
     assert!(!results[0].is_external);
 }

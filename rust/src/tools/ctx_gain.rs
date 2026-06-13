@@ -39,6 +39,7 @@ pub(crate) fn render_wrapped(period: &str, compact: bool) -> String {
 
 fn format_summary(engine: &GainEngine, model: Option<&str>) -> String {
     let s = engine.summary(model);
+    let bridge = crate::core::gain::bridge_status::BridgeStatus::detect();
     let saved = format_tokens(s.tokens_saved);
     let input = format_tokens(s.input_tokens);
     let out = format_tokens(s.output_tokens);
@@ -55,14 +56,16 @@ fn format_summary(engine: &GainEngine, model: Option<&str>) -> String {
         crate::core::gain::gain_score::Trend::Declining => "declining",
     };
 
-    format!(
+    let mut report = format!(
         "lean-ctx gain\n\
          ────────────\n\
+         {bridge_line}\n\
          Score: {total}/100  (compression {comp}, cost {cost}, quality {qual}, consistency {cons})  trend={trend}\n\
          Tokens: {input} in → {out} out  | saved {saved}  ({rate:.1}%)\n\
          Gain: {avoided} avoided  | tool spend {spend}  | ROI {roi}\n\
          Impact: {energy} grid energy avoided  | {co2} CO₂e (est.)\n\
          Pricing: model={model_key} ({match_kind:?}) in=${in_m:.2}/M out=${out_m:.2}/M\n",
+        bridge_line = bridge.summary_line(),
         total = s.score.total,
         comp = s.score.compression,
         cost = s.score.cost_efficiency,
@@ -73,7 +76,15 @@ fn format_summary(engine: &GainEngine, model: Option<&str>) -> String {
         match_kind = s.model.match_kind,
         in_m = s.model.cost.input_per_m,
         out_m = s.model.cost.output_per_m,
-    )
+    );
+
+    if let Some(reason) = bridge.zero_savings_reason(s.tokens_saved) {
+        report.push('\n');
+        report.push_str(&reason);
+        report.push('\n');
+    }
+
+    report
 }
 
 fn format_score(engine: &GainEngine, model: Option<&str>) -> String {
@@ -165,11 +176,13 @@ fn format_agents(engine: &GainEngine, limit: usize) -> String {
 fn format_json(engine: &GainEngine, model: Option<&str>, limit: usize) -> String {
     #[derive(serde::Serialize)]
     struct Payload {
+        bridge: crate::core::gain::bridge_status::BridgeStatus,
         summary: crate::core::gain::GainSummary,
         tasks: Vec<crate::core::gain::TaskGainRow>,
         heatmap: Vec<crate::core::gain::FileGainRow>,
     }
     let payload = Payload {
+        bridge: crate::core::gain::bridge_status::BridgeStatus::detect(),
         summary: engine.summary(model),
         tasks: engine.task_breakdown(),
         heatmap: engine.heatmap_gains(limit),
@@ -494,11 +507,39 @@ fn format_heatmap_themed(
     out.push(format!("  {}", t.box_bottom_square(w)));
 }
 
+/// Longest prefix of `s` that is at most `max_bytes` bytes and ends on a char
+/// boundary. Byte-indexed slicing (`&s[..n]`) panics mid-codepoint — paths and
+/// agent ids regularly carry multibyte characters (umlauts, CJK, emoji), which
+/// crashed `gain --deep` (GitHub #386).
+fn safe_prefix(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
+/// Longest suffix of `s` that is at most `max_bytes` bytes and starts on a
+/// char boundary.
+fn safe_suffix(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut start = s.len() - max_bytes;
+    while start < s.len() && !s.is_char_boundary(start) {
+        start += 1;
+    }
+    &s[start..]
+}
+
 fn truncate_str(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.to_string()
     } else {
-        format!("{}…", &s[..max - 1])
+        format!("{}…", safe_prefix(s, max.saturating_sub(1)))
     }
 }
 
@@ -508,12 +549,82 @@ fn shorten_path(path: &str, max: usize) -> String {
     }
     if let Some(pos) = path.rfind('/') {
         let file = &path[pos + 1..];
-        if file.len() >= max - 3 {
-            return format!("…{}", &file[file.len() - (max - 1)..]);
+        // `file.len() + 3 >= max` (not `file.len() >= max - 3`): the
+        // subtraction underflows for max < 3.
+        if file.len() + 3 >= max {
+            return format!("…{}", safe_suffix(file, max.saturating_sub(1)));
         }
-        let remaining = max - file.len() - 4;
-        let start = &path[..remaining.min(path.len())];
+        let remaining = max.saturating_sub(file.len() + 4);
+        let start = safe_prefix(path, remaining);
         return format!("{start}…/{file}");
     }
-    format!("{}…", &path[..max - 1])
+    format!("{}…", safe_prefix(path, max.saturating_sub(1)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn status_report_surfaces_bridge_precondition() {
+        let _lock = crate::core::data_dir::test_env_lock();
+        // The agent/benchmark-facing status + report actions must always state
+        // the bridge precondition (connected + tool-count) so a `0` saved is
+        // never silent (#307 / GitHub #361).
+        for action in ["status", "report", ""] {
+            let out = handle(action, None, None, None);
+            assert!(
+                out.contains("Bridge:"),
+                "action '{action}' must surface the bridge status line, got:\n{out}"
+            );
+        }
+    }
+
+    #[test]
+    fn json_action_embeds_bridge_engagement() {
+        let _lock = crate::core::data_dir::test_env_lock();
+        let out = handle("json", None, None, Some(5));
+        let val: serde_json::Value =
+            serde_json::from_str(&out).expect("json action must emit valid JSON");
+        let engagement = val
+            .get("bridge")
+            .and_then(|b| b.get("engagement"))
+            .and_then(serde_json::Value::as_str)
+            .expect("bridge.engagement must be present");
+        assert!(
+            matches!(engagement, "proxy_down" | "no_requests" | "engaged"),
+            "unexpected engagement tag: {engagement}"
+        );
+    }
+
+    #[test]
+    fn truncation_is_char_boundary_safe() {
+        // GitHub #386: byte-indexed truncation panicked mid-codepoint when
+        // paths/agent ids contained multibyte characters. Sweep every cut
+        // position across multibyte inputs — must never panic.
+        let samples = [
+            "/Users/müller/Projekte/größe/mod.rs",
+            "/home/用户/プロジェクト/файл.rs",
+            "agent-🚀🔥-ünïcödé-identifier",
+            "ä",
+            "",
+            "no-multibyte-at-all/plain.rs",
+        ];
+        for s in samples {
+            for max in 0..=s.len() + 2 {
+                let _ = truncate_str(s, max);
+                let _ = shorten_path(s, max);
+            }
+        }
+    }
+
+    #[test]
+    fn truncation_keeps_ascii_behaviour() {
+        assert_eq!(truncate_str("short", 10), "short");
+        assert_eq!(truncate_str("exactly-ten", 11), "exactly-ten");
+        assert_eq!(truncate_str("longer-than-max", 8), "longer-…");
+        assert_eq!(shorten_path("/a/b/file.rs", 50), "/a/b/file.rs");
+        let p = shorten_path("/very/long/path/to/some/file.rs", 20);
+        assert!(p.contains('…') && p.ends_with("file.rs"), "got: {p}");
+    }
 }

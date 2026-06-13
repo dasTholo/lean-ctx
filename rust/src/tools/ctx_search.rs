@@ -3,6 +3,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use glob::Pattern;
 use ignore::WalkBuilder;
 use regex::RegexBuilder;
 
@@ -14,6 +15,45 @@ use crate::tools::CrpMode;
 pub(crate) const MAX_FILE_SIZE: u64 = 512_000;
 pub(crate) const MAX_WALK_DEPTH: usize = 20;
 const MAX_MATCH_LINE_WIDTH: usize = 150;
+
+/// Modeled baseline for the *estimated* savings series (GL #479 D1): a native
+/// agent grep tool ships matches with surrounding context lines, per-file
+/// headers and line numbers, which is roughly 2.5x the tokens of the bare
+/// match lines lean-ctx observes. This factor is a documented model
+/// assumption — it feeds `stats.json` ("estimated") only. The signed savings
+/// ledger ("verified") records `observed_tokens` without any factor applied.
+pub const NATIVE_GREP_BASELINE_FACTOR: f64 = 2.5;
+
+/// Result of a search: the rendered output plus both baseline figures.
+pub struct SearchOutcome {
+    /// Rendered, compressed search output.
+    pub text: String,
+    /// Modeled native-tool baseline (`observed_tokens` x [`NATIVE_GREP_BASELINE_FACTOR`]).
+    /// Feeds the estimated stats series.
+    pub modeled_baseline: usize,
+    /// Tokens actually measured in the raw match lines — no model applied.
+    /// Feeds the verified savings ledger.
+    pub observed_tokens: usize,
+}
+
+impl SearchOutcome {
+    fn error(text: String) -> Self {
+        Self {
+            text,
+            modeled_baseline: 0,
+            observed_tokens: 0,
+        }
+    }
+
+    fn from_observed(text: String, observed_tokens: usize) -> Self {
+        let modeled = (observed_tokens as f64 * NATIVE_GREP_BASELINE_FACTOR).ceil() as usize;
+        Self {
+            text,
+            modeled_baseline: modeled.max(observed_tokens),
+            observed_tokens,
+        }
+    }
+}
 
 /// Wall-clock budget for a single `ctx_search` call. The regular-file guard in
 /// the read loop removes the known infinite block — `read_to_string` on a
@@ -34,25 +74,27 @@ fn search_deadline() -> Option<Duration> {
 pub fn handle(
     pattern: &str,
     dir: &str,
-    ext_filter: Option<&str>,
+    include: Option<&str>,
     max_results: usize,
     _crp_mode: CrpMode,
     respect_gitignore: bool,
     allow_secret_paths: bool,
-) -> (String, usize) {
-    let ext_filter = ext_filter.map(|e| e.strip_prefix('.').unwrap_or(e));
+) -> SearchOutcome {
+    // `include` is a glob matched against each file's path *relative to* `dir`
+    // (e.g. `*.ts`, `*.{rs,ts}`, `src/**/*.tsx`). Brace alternation is expanded
+    // here because the `glob` crate has no native support for it. An empty result
+    // (no `include`, or only unparsable globs) means "no filter", so a typo never
+    // silently drops every match.
+    let include_patterns = compile_include(include);
     const MAX_PATTERN_LEN: usize = 1024;
     const MAX_REGEX_SIZE: usize = 1 << 20; // 1 MiB DFA limit
 
     let redact = crate::core::redaction::redaction_enabled_for_active_role();
     if pattern.len() > MAX_PATTERN_LEN {
-        return (
-            format!(
-                "ERROR: pattern too long ({} > {MAX_PATTERN_LEN} chars)",
-                pattern.len()
-            ),
-            0,
-        );
+        return SearchOutcome::error(format!(
+            "ERROR: pattern too long ({} > {MAX_PATTERN_LEN} chars)",
+            pattern.len()
+        ));
     }
     let re = match RegexBuilder::new(pattern)
         .size_limit(MAX_REGEX_SIZE)
@@ -60,12 +102,17 @@ pub fn handle(
         .build()
     {
         Ok(r) => r,
-        Err(e) => return (format!("ERROR: invalid regex: {e}"), 0),
+        Err(e) => return SearchOutcome::error(format!("ERROR: invalid regex: {e}")),
     };
 
     let root = Path::new(dir);
     if !root.exists() {
-        return (format!("ERROR: {dir} does not exist"), 0);
+        return SearchOutcome::error(format!("ERROR: {dir} does not exist"));
+    }
+    // Broad-root guard (#356 class): with cwd == $HOME a defaulted `path`
+    // would walk the whole home dir and trip macOS TCC privacy prompts.
+    if let Some(err) = crate::tools::walk_guard::deny_unsafe_walk_root(dir) {
+        return SearchOutcome::error(err);
     }
 
     let mut files: Vec<PathBuf> = Vec::new();
@@ -87,20 +134,31 @@ pub fn handle(
     let used_index = if let Some(idx) =
         crate::core::search_index::get_fresh(dir, respect_gitignore, allow_secret_paths)
     {
-        files = idx.candidate_paths(pattern, ext_filter).into_paths();
+        files = idx
+            .candidate_paths(pattern, &include_patterns, root)
+            .into_paths();
         true
     } else {
         false
     };
 
     if !used_index {
+        // Vendor dirs (node_modules, …) follow the gitignore toggle: explicitly
+        // disabling gitignore is the escape hatch to look inside them (#400).
         let walker = WalkBuilder::new(root)
             .hidden(true)
             .max_depth(Some(MAX_WALK_DEPTH))
             .git_ignore(respect_gitignore)
             .git_global(respect_gitignore)
             .git_exclude(respect_gitignore)
-            .filter_entry(crate::core::cloud_files::keep_entry)
+            .require_git(false)
+            .filter_entry(move |e| {
+                if respect_gitignore {
+                    crate::core::walk_filter::keep_entry(e)
+                } else {
+                    crate::core::cloud_files::keep_entry(e)
+                }
+            })
             .build();
 
         for entry in walker.filter_map(std::result::Result::ok) {
@@ -123,9 +181,10 @@ pub fn handle(
                 continue;
             }
 
-            if let Some(ext) = ext_filter {
-                let file_ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-                if file_ext != ext {
+            if !include_patterns.is_empty() {
+                let rel = path.strip_prefix(root).unwrap_or(path);
+                let rel_str = rel.to_string_lossy();
+                if !include_patterns.iter().any(|p| p.matches(&rel_str)) {
                     continue;
                 }
             }
@@ -245,7 +304,7 @@ pub fn handle(
                 " (search stopped at the time budget — refine the pattern or scope with path=)",
             );
         }
-        return (msg, 0);
+        return SearchOutcome::error(msg);
     }
 
     // Prefix-cache-friendly: structural file list before per-query match content
@@ -308,29 +367,20 @@ pub fn handle(
         ));
     }
 
-    let scope_hint = {
-        static SHOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-        if SHOWN.load(std::sync::atomic::Ordering::Relaxed) {
-            None
-        } else {
-            let hint = monorepo_scope_hint(&matches, dir);
-            if hint.is_some() {
-                SHOWN.store(true, std::sync::atomic::Ordering::Relaxed);
-            }
-            hint
-        }
-    };
+    // Determinism contract (#498): the hint must be a pure function of the
+    // results. A show-once AtomicBool here made the first call differ from
+    // every repeat, breaking byte-stability for provider prompt caches.
+    let scope_hint = monorepo_scope_hint(&matches, dir);
 
     if let Some(delta) = crate::core::search_delta::compute_delta(pattern, &matches) {
-        let native_estimate = (raw_tokens_accum as f64 * 2.5).ceil() as usize;
-        let original = native_estimate.max(raw_tokens_accum);
-        return (delta, original);
+        return SearchOutcome::from_observed(delta, raw_tokens_accum);
     }
 
     if symbol_map::substitution_enabled() {
-        let file_ext = ext_filter.unwrap_or("rs");
+        let exts = extract_extensions(include);
+        let ext_refs: Vec<&str> = exts.iter().map(String::as_str).collect();
         let mut sym = SymbolMap::new();
-        let idents = symbol_map::extract_identifiers(&result, file_ext);
+        let idents = symbol_map::extract_identifiers(&result, &ext_refs);
         for ident in &idents {
             sym.register(ident);
         }
@@ -350,10 +400,7 @@ pub fn handle(
         result.push_str(&hint);
     }
 
-    let native_estimate = (raw_tokens_accum as f64 * 2.5).ceil() as usize;
-    let original = native_estimate.max(raw_tokens_accum);
-
-    (result, original)
+    SearchOutcome::from_observed(result, raw_tokens_accum)
 }
 
 pub(crate) fn is_binary_ext(path: &Path) -> bool {
@@ -416,6 +463,88 @@ pub(crate) fn is_generated_file(path: &Path) -> bool {
         || name.ends_with(".css.map")
 }
 
+/// Upper bound on the number of globs a single `include` may expand to, so a
+/// pathological brace pattern (`{a,b}{c,d}{e,f}…`) can never blow up.
+const MAX_INCLUDE_GLOBS: usize = 64;
+
+/// Compile an `include` filter into one or more matchers.
+///
+/// Brace alternation (`*.{rs,ts}`) is expanded to multiple globs (`*.rs`,
+/// `*.ts`) because the `glob` crate matches `{` / `}` literally. A file is
+/// included when it matches *any* of the returned patterns. An empty vec means
+/// "no filter": `include` was `None`, or every expansion failed to parse.
+fn compile_include(include: Option<&str>) -> Vec<Pattern> {
+    let Some(raw) = include else {
+        return Vec::new();
+    };
+    expand_braces(raw)
+        .into_iter()
+        .take(MAX_INCLUDE_GLOBS)
+        .filter_map(|g| Pattern::new(&g).ok())
+        .collect()
+}
+
+/// Expand one or more `{a,b,c}` brace groups into the cartesian set of concrete
+/// globs. Patterns without braces (or with an unbalanced brace) are returned
+/// unchanged, so this is safe to call on any input.
+fn expand_braces(pattern: &str) -> Vec<String> {
+    let Some(open) = pattern.find('{') else {
+        return vec![pattern.to_string()];
+    };
+    let Some(close_rel) = pattern[open..].find('}') else {
+        return vec![pattern.to_string()];
+    };
+    let close = open + close_rel;
+    let prefix = &pattern[..open];
+    let inner = &pattern[open + 1..close];
+    let suffix = &pattern[close + 1..];
+
+    let mut out = Vec::new();
+    for alt in inner.split(',') {
+        let alt = alt.trim();
+        for expanded_suffix in expand_braces(suffix) {
+            out.push(format!("{prefix}{alt}{expanded_suffix}"));
+            if out.len() >= MAX_INCLUDE_GLOBS {
+                return out;
+            }
+        }
+    }
+    out
+}
+
+/// Extract the file extensions referenced by an `include` glob, used by the
+/// symbol-substitution pass (which keyword-filters per language).
+///
+/// Only the final path component is inspected, so dots inside directory
+/// segments never leak in. Handles a single trailing extension (`*.rs` → `rs`)
+/// and brace expansion (`*.{rs,ts}` → `rs`, `ts`); a glob without an extension
+/// (`src/**/*`) yields an empty list. Unknown extensions are returned verbatim —
+/// `symbol_map::is_keyword` simply treats them as "no keywords", so no allowlist
+/// has to be kept in sync here.
+fn extract_extensions(include: Option<&str>) -> Vec<String> {
+    let Some(pattern) = include else {
+        return Vec::new();
+    };
+    let filename = pattern.rsplit('/').next().unwrap_or(pattern);
+    let Some(dot) = filename.rfind('.') else {
+        return Vec::new();
+    };
+    let ext_part = &filename[dot + 1..];
+
+    if let Some(inner) = ext_part.strip_prefix('{').and_then(|s| s.strip_suffix('}')) {
+        return inner
+            .split(',')
+            .map(|e| e.trim().to_string())
+            .filter(|e| !e.is_empty())
+            .collect();
+    }
+
+    if ext_part.is_empty() {
+        return Vec::new();
+    }
+    vec![ext_part.to_string()]
+}
+
 /// Extract file path from a grep match line, handling Windows drive letters (e.g. "C:").
 fn extract_file_from_match(line: &str) -> &str {
     let start = if line.len() >= 2
@@ -472,6 +601,24 @@ mod tests {
     use super::*;
     use crate::tools::CrpMode;
 
+    /// Determinism contract (#498): identical search over identical files
+    /// must produce byte-identical output — a prerequisite for provider
+    /// prompt-cache hits on repeated tool results.
+    #[test]
+    fn search_output_is_byte_stable_across_calls() {
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..5 {
+            std::fs::write(
+                dir.path().join(format!("f{i}.rs")),
+                format!("fn target_{i}() {{}}\nfn other() {{}}\n"),
+            )
+            .unwrap();
+        }
+        let root = dir.path().to_string_lossy().into_owned();
+        let run = || handle("target", &root, Some("*.rs"), 20, CrpMode::Off, true, true).text;
+        assert_eq!(run(), run(), "search output must be deterministic");
+    }
+
     #[test]
     fn search_results_are_deterministically_ordered_by_path() {
         let dir = tempfile::tempdir().unwrap();
@@ -480,15 +627,16 @@ mod tests {
         std::fs::write(&b, "match\n").unwrap();
         std::fs::write(&a, "match\n").unwrap();
 
-        let (out, _orig) = handle(
+        let out = handle(
             "match",
             dir.path().to_string_lossy().as_ref(),
-            Some("txt"),
+            Some("*.txt"),
             10,
             CrpMode::Off,
             true,
             true,
-        );
+        )
+        .text;
 
         let mut match_lines: Vec<&str> = out
             .lines()
@@ -532,7 +680,7 @@ mod tests {
             "index should warm for a small clean corpus"
         );
 
-        let (out, _orig) = handle("authenticate", &root, None, 10, CrpMode::Off, true, false);
+        let out = handle("authenticate", &root, None, 10, CrpMode::Off, true, false).text;
         assert!(
             out.contains("a.rs"),
             "warm-index + cache search must find the match: {out}"
@@ -559,15 +707,16 @@ mod tests {
         )
         .unwrap();
 
-        let (out, _orig) = handle(
+        let out = handle(
             "longIdentifier",
             dir.path().to_string_lossy().as_ref(),
-            Some("rs"),
+            Some("*.rs"),
             10,
             CrpMode::Off,
             true,
             true,
-        );
+        )
+        .text;
 
         assert!(
             !out.contains("§MAP"),
@@ -591,7 +740,7 @@ mod tests {
         std::fs::write(&secret, "match\n").unwrap();
         std::fs::write(&ok, "match\n").unwrap();
 
-        let (out, _orig) = handle(
+        let out = handle(
             "match",
             dir.path().to_string_lossy().as_ref(),
             None,
@@ -599,7 +748,8 @@ mod tests {
             CrpMode::Off,
             true,
             false,
-        );
+        )
+        .text;
 
         assert!(out.contains("ok.txt:"), "expected ok.txt match, got: {out}");
         assert!(
@@ -635,10 +785,10 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
             // Fresh temp dir → no warm index yet, so this exercises the walk path.
-            let out = handle("needle_here", &dir_path, None, 10, CrpMode::Off, true, true);
+            let out = handle("needle_here", &dir_path, None, 10, CrpMode::Off, true, true).text;
             let _ = tx.send(out);
         });
-        let (out, _orig) = rx
+        let out = rx
             .recv_timeout(Duration::from_secs(5))
             .expect("ctx_search hung on a FIFO (#336 regression)");
 
@@ -664,6 +814,103 @@ mod tests {
             search_deadline(),
             Some(Duration::from_secs(10)),
             "default budget is 10s"
+        );
+    }
+
+    #[test]
+    fn extract_extensions_handles_single_brace_and_none() {
+        assert_eq!(extract_extensions(Some("*.rs")), vec!["rs"]);
+        assert_eq!(extract_extensions(Some("src/**/*.tsx")), vec!["tsx"]);
+        assert_eq!(extract_extensions(Some("*.{rs,ts}")), vec!["rs", "ts"]);
+        assert_eq!(
+            extract_extensions(Some("*.{rs, ts , js}")),
+            vec!["rs", "ts", "js"]
+        );
+        assert_eq!(extract_extensions(None), Vec::<String>::new());
+    }
+
+    #[test]
+    fn extract_extensions_ignores_dots_in_directory_segments() {
+        // A dot in a directory name must not be mistaken for the extension.
+        assert_eq!(
+            extract_extensions(Some("config.v2/src/**/*.rs")),
+            vec!["rs"]
+        );
+        assert_eq!(extract_extensions(Some("src/v2.0/*.module.ts")), vec!["ts"]);
+        // No extension on the final component → empty.
+        assert_eq!(extract_extensions(Some("src/**/*")), Vec::<String>::new());
+        assert_eq!(
+            extract_extensions(Some("config.v2/Makefile")),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn include_glob_filters_by_brace_expansion() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "needle\n").unwrap();
+        std::fs::write(dir.path().join("b.ts"), "needle\n").unwrap();
+        std::fs::write(dir.path().join("c.py"), "needle\n").unwrap();
+
+        let out = handle(
+            "needle",
+            dir.path().to_string_lossy().as_ref(),
+            Some("*.{rs,ts}"),
+            10,
+            CrpMode::Off,
+            true,
+            true,
+        )
+        .text;
+
+        assert!(out.contains("a.rs"), "rs file must match: {out}");
+        assert!(out.contains("b.ts"), "ts file must match: {out}");
+        assert!(!out.contains("c.py"), "py file must be excluded: {out}");
+    }
+
+    #[test]
+    fn include_glob_recursive_path_pattern() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("src/inner")).unwrap();
+        std::fs::write(dir.path().join("src/inner/deep.rs"), "needle\n").unwrap();
+        std::fs::write(dir.path().join("top.rs"), "needle\n").unwrap();
+
+        let out = handle(
+            "needle",
+            dir.path().to_string_lossy().as_ref(),
+            Some("src/**/*.rs"),
+            10,
+            CrpMode::Off,
+            true,
+            true,
+        )
+        .text;
+
+        assert!(out.contains("deep.rs"), "nested match expected: {out}");
+        assert!(
+            !out.contains("top.rs"),
+            "root file outside src/ must be excluded: {out}"
+        );
+    }
+
+    #[test]
+    fn search_refuses_home_directory_root() {
+        // #356 class: the MCP server often runs with cwd == $HOME; a defaulted
+        // `path` must never walk the whole home dir (macOS TCC prompts).
+        let home = dirs::home_dir().expect("home dir in test env");
+        let out = handle(
+            "needle",
+            home.to_string_lossy().as_ref(),
+            None,
+            10,
+            CrpMode::Off,
+            true,
+            true,
+        )
+        .text;
+        assert!(
+            out.starts_with("ERROR:") && out.contains("refusing to scan"),
+            "home root must be refused: {out}"
         );
     }
 }

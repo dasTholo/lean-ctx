@@ -61,7 +61,7 @@ impl McpTool for CtxExecuteTool {
     ) -> Result<ToolOutput, ErrorData> {
         let action = get_str(args, "action").unwrap_or_default();
 
-        let result = if action == "batch" {
+        let (result, outcome) = if action == "batch" {
             let items_str = get_str(args, "items")
                 .ok_or_else(|| ErrorData::invalid_params("items is required for batch", None))?;
             let items: Vec<serde_json::Value> = serde_json::from_str(&items_str)
@@ -90,7 +90,7 @@ impl McpTool for CtxExecuteTool {
             let code = get_str(args, "code")
                 .ok_or_else(|| ErrorData::invalid_params("code is required", None))?;
             let intent = get_str(args, "intent");
-            let timeout = get_int(args, "timeout").map(|t| t as u64);
+            let timeout = get_int(args, "timeout").and_then(|t| u64::try_from(t).ok());
             crate::tools::ctx_execute::handle(&language, &code, intent.as_deref(), timeout)
         };
 
@@ -102,6 +102,7 @@ impl McpTool for CtxExecuteTool {
             mode: Some(action),
             path: None,
             changed: false,
+            shell_outcome: Some(outcome),
         })
     }
 }

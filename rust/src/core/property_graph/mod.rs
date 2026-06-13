@@ -11,6 +11,7 @@ mod meta;
 mod node;
 mod queries;
 mod schema;
+pub mod snapshot;
 
 pub use edge::{Edge, EdgeKind};
 pub use file_catalog::FileCatalogEntry;
@@ -210,6 +211,7 @@ impl CodeGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::data_dir::test_env_lock;
 
     fn test_graph() -> CodeGraph {
         CodeGraph::open_in_memory().unwrap()
@@ -419,12 +421,6 @@ mod tests {
         );
     }
 
-    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        LOCK.lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
-
     #[test]
     fn graph_dir_uses_data_dir_when_set() {
         let tmp = tempfile::tempdir().unwrap();
@@ -434,7 +430,7 @@ mod tests {
         let data_dir = tmp.path().join("data");
         std::fs::create_dir_all(&data_dir).unwrap();
 
-        let _guard = env_lock();
+        let _guard = test_env_lock();
         std::env::set_var("LEAN_CTX_DATA_DIR", data_dir.to_str().unwrap());
 
         let dir = graph_dir(project.to_str().unwrap());
@@ -453,7 +449,7 @@ mod tests {
         let data_dir = tmp.path().join("data2");
         std::fs::create_dir_all(&data_dir).unwrap();
 
-        let _guard = env_lock();
+        let _guard = test_env_lock();
         std::env::set_var("LEAN_CTX_DATA_DIR", data_dir.to_str().unwrap());
 
         let dir1 = graph_dir(project.to_str().unwrap());
@@ -518,7 +514,7 @@ mod tests {
         let data_dir = tmp.path().join("xdata");
         std::fs::create_dir_all(&data_dir).unwrap();
 
-        let _guard = env_lock();
+        let _guard = test_env_lock();
         std::env::set_var("LEAN_CTX_DATA_DIR", data_dir.to_str().unwrap());
 
         let g = CodeGraph::open(project.to_str().unwrap()).unwrap();
@@ -537,7 +533,7 @@ mod tests {
         let data_dir = tmp.path().join("mdata");
         std::fs::create_dir_all(&data_dir).unwrap();
 
-        let _guard = env_lock();
+        let _guard = test_env_lock();
         std::env::set_var("LEAN_CTX_DATA_DIR", data_dir.to_str().unwrap());
 
         let mp = meta::meta_path(project.to_str().unwrap());

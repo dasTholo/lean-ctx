@@ -35,23 +35,17 @@ impl McpTool for CtxReadTool {
         tool_def(
             "ctx_read",
             "Read a file. Prefer over native Read/cat/head/tail (cached, compressed).\n\
-             Unchanged re-reads cost ~13 tokens. Auto-selects mode (full|map|signatures|diff|aggressive|entropy|task|reference|lines:N-M). fresh=true forces a disk re-read.",
+             Unchanged re-reads cost ~13 tokens. Auto-selects mode. fresh=true forces a disk re-read.",
             json!({
                 "type": "object",
                 "properties": {
-                    "path": { "type": "string", "description": "Absolute file path to read" },
+                    "path": { "type": "string", "description": "Absolute file path" },
                     "mode": {
                         "type": "string",
-                        "description": "Compression mode (default: auto — resolved per file type/size). Explicit 'full' for guaranteed complete content. Use 'map' for context-only files. For line ranges: 'lines:N-M' (e.g. 'lines:400-500')."
+                        "description": "auto (default)|full|raw (no header/footer)|map|signatures|diff|task|reference|aggressive|entropy|lines:N-M|density:0.X"
                     },
-                    "start_line": {
-                        "type": "integer",
-                        "description": "Start reading from this line (only used when no explicit mode is set, or with mode=lines). Does NOT override explicit modes like map/signatures."
-                    },
-                    "fresh": {
-                        "type": "boolean",
-                        "description": "Bypass cache and force a full re-read. Use when running as a subagent that may not have the parent's context."
-                    }
+                    "start_line": { "type": "integer", "description": "Read from this line on" },
+                    "fresh": { "type": "boolean", "description": "Bypass cache, force disk re-read" }
                 },
                 "required": ["path"]
             }),
@@ -409,6 +403,7 @@ impl CtxReadTool {
 
         // Session updates (bounded lock — 10s timeout, read already succeeded)
         let mut ensured_root: Option<String> = None;
+        let mut traversal_working_set: Vec<String> = Vec::new();
         let project_root_snapshot;
         {
             let rt = tokio::runtime::Handle::current();
@@ -418,6 +413,10 @@ impl CtxReadTool {
             ));
             if let Ok(mut session) = session_guard {
                 session.touch_file(path, file_ref.as_deref(), &resolved_mode, original);
+                // Capture the recent working set (under the lock) so the
+                // background thread can record a traversal/co-access edge (#289).
+                traversal_working_set =
+                    crate::core::tool_lifecycle::recent_working_set(&session, path);
                 // Auto-generate file summary from output content
                 let file_summary = extract_file_summary(&output, path);
                 if !file_summary.is_empty() {
@@ -479,47 +478,65 @@ impl CtxReadTool {
             let project_root_bg = project_root_snapshot.clone();
             let (turns, hits) = cache_stats;
             std::thread::spawn(move || {
-                crate::core::heatmap::record_file_access(&path_bg, original, saved);
+                // A panic in telemetry must not poison locks or leave a zombie thread;
+                // it never affects the already-returned read response.
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                    crate::core::heatmap::record_file_access(&path_bg, original, saved);
 
-                let sig = crate::core::mode_predictor::FileSignature::from_path(&path_bg, original);
-                let density = if output_tokens > 0 {
-                    original as f64 / output_tokens as f64
-                } else {
-                    1.0
-                };
-                let outcome = crate::core::mode_predictor::ModeOutcome {
-                    mode: resolved_mode_bg,
-                    tokens_in: original,
-                    tokens_out: output_tokens,
-                    density: density.min(1.0),
-                };
-                let mut predictor = crate::core::mode_predictor::ModePredictor::new();
-                predictor.set_project_root(&project_root_bg);
-                predictor.record(sig, outcome);
-                predictor.save();
+                    // Traversal/co-access edge: this read fired together with the
+                    // recent working set captured under the session lock (#289).
+                    if let Some(root) =
+                        crate::core::tool_lifecycle::usable_root(Some(project_root_bg.as_str()))
+                    {
+                        crate::core::cooccurrence::record_focus_access(
+                            root,
+                            &path_bg,
+                            &traversal_working_set,
+                        );
+                    }
 
-                let ext = std::path::Path::new(&path_bg)
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .unwrap_or("")
-                    .to_string();
-                let thresholds = crate::core::adaptive_thresholds::thresholds_for_path(&path_bg);
-                let feedback_outcome = crate::core::feedback::CompressionOutcome {
-                    session_id: format!("{}", std::process::id()),
-                    language: ext,
-                    entropy_threshold: thresholds.bpe_entropy,
-                    jaccard_threshold: thresholds.jaccard,
-                    total_turns: turns as u32,
-                    tokens_saved: saved as u64,
-                    tokens_original: original as u64,
-                    cache_hits: hits as u32,
-                    total_reads: turns as u32,
-                    task_completed: true,
-                    timestamp: chrono::Local::now().to_rfc3339(),
-                };
-                let mut store = crate::core::feedback::FeedbackStore::load();
-                store.project_root = Some(project_root_bg);
-                store.record_outcome(feedback_outcome);
+                    let sig =
+                        crate::core::mode_predictor::FileSignature::from_path(&path_bg, original);
+                    let density = if output_tokens > 0 {
+                        original as f64 / output_tokens as f64
+                    } else {
+                        1.0
+                    };
+                    let outcome = crate::core::mode_predictor::ModeOutcome {
+                        mode: resolved_mode_bg,
+                        tokens_in: original,
+                        tokens_out: output_tokens,
+                        density: density.min(1.0),
+                    };
+                    let mut predictor = crate::core::mode_predictor::ModePredictor::new();
+                    predictor.set_project_root(&project_root_bg);
+                    predictor.record(sig, outcome);
+                    predictor.save();
+
+                    let ext = std::path::Path::new(&path_bg)
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let thresholds =
+                        crate::core::adaptive_thresholds::thresholds_for_path(&path_bg);
+                    let feedback_outcome = crate::core::feedback::CompressionOutcome {
+                        session_id: format!("{}", std::process::id()),
+                        language: ext,
+                        entropy_threshold: thresholds.bpe_entropy,
+                        jaccard_threshold: thresholds.jaccard,
+                        total_turns: turns as u32,
+                        tokens_saved: saved as u64,
+                        tokens_original: original as u64,
+                        cache_hits: hits as u32,
+                        total_reads: turns as u32,
+                        task_completed: true,
+                        timestamp: chrono::Local::now().to_rfc3339(),
+                    };
+                    let mut store = crate::core::feedback::FeedbackStore::load();
+                    store.project_root = Some(project_root_bg);
+                    store.record_outcome(feedback_outcome);
+                }));
             });
         }
 
@@ -569,6 +586,7 @@ impl CtxReadTool {
             mode: Some(resolved_mode),
             path: Some(path.to_string()),
             changed: false,
+            shell_outcome: None,
         })
     }
 }

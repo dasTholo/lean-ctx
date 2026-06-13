@@ -180,6 +180,9 @@ fn integration_generic(
                 data_dir,
             ));
         }
+        crate::core::editor_registry::types::ConfigType::OpenClaw => {
+            checks.push(check_openclaw_config(&target.config_path, binary, data_dir));
+        }
     }
 
     if let Some(rules_path) = rules_path_for(target.name, home) {
@@ -246,17 +249,34 @@ fn integration_claude(home: &std::path::Path, binary: &str, data_dir: &str) -> I
     let settings_path = crate::core::editor_registry::claude_state_dir(home).join("settings.json");
     checks.push(check_claude_hooks(&settings_path, binary));
 
-    let rules_path = crate::core::editor_registry::claude_rules_dir(home).join("lean-ctx.md");
-    let has_rules = rules_path.exists();
-    checks.push(NamedCheck {
-        name: "Rules file".to_string(),
-        ok: has_rules,
-        detail: if has_rules {
-            rules_path.display().to_string()
-        } else {
-            format!("missing ({})", rules_path.display())
-        },
-    });
+    // v3 layout (GL #555, GH #396): instructions live in the CLAUDE.md block +
+    // on-demand skill; `setup` removes the legacy rules file. Same detector as
+    // the main doctor check, so the two views can never disagree again.
+    {
+        use super::common::ClaudeInstructionsState as S;
+        let cfg = crate::core::config::Config::load();
+        let state = super::common::claude_instructions_state(
+            home,
+            cfg.rules_scope_effective(),
+            cfg.rules_injection_effective(),
+        );
+        let claude_md = crate::core::editor_registry::claude_state_dir(home).join("CLAUDE.md");
+        let detail = match state {
+            S::ProjectScope => "project scope (global instructions intentionally absent)".into(),
+            S::InjectionOff => "rules injection off (intentionally not installed)".into(),
+            S::DedicatedWithSkill => "dedicated injection + skill".into(),
+            S::DedicatedMissingSkill => "skill missing (run: lean-ctx setup)".into(),
+            S::BlockAndSkill => format!("{} block + skill", claude_md.display()),
+            S::BlockOnly => format!("{} block", claude_md.display()),
+            S::LegacyRules => "legacy rules file (migrates on next setup)".into(),
+            S::Missing => "missing (run: lean-ctx setup)".into(),
+        };
+        checks.push(NamedCheck {
+            name: "Instructions".to_string(),
+            ok: state.ok(),
+            detail,
+        });
+    }
 
     let ok = checks.iter().all(|c| c.ok);
     IntegrationStatus {
@@ -722,6 +742,76 @@ fn check_crush_config(path: &std::path::Path, binary: &str, data_dir: &str) -> N
     let ok = cmd_ok && env_ok;
     NamedCheck {
         name: "Crush MCP".to_string(),
+        ok,
+        detail: if ok {
+            format!("ok ({})", path.display())
+        } else {
+            format!("drift ({})", path.display())
+        },
+    }
+}
+
+/// OpenClaw (GitHub #390): the entry must live under the nested `mcp.servers`
+/// schema (2026.6.1+). A leftover top-level `mcpServers` block is flagged even
+/// when the nested entry is fine — OpenClaw's strict validator rejects the
+/// whole config over it on every hot-reload.
+fn check_openclaw_config(path: &std::path::Path, binary: &str, data_dir: &str) -> NamedCheck {
+    let name = "OpenClaw MCP".to_string();
+    if !path.exists() {
+        return NamedCheck {
+            name,
+            ok: false,
+            detail: format!("missing ({})", path.display()),
+        };
+    }
+    let content = std::fs::read_to_string(path).unwrap_or_default();
+    let Some(v) = crate::core::jsonc::parse_jsonc(&content).ok() else {
+        return NamedCheck {
+            name,
+            ok: false,
+            detail: format!("invalid JSON ({})", path.display()),
+        };
+    };
+
+    let stale_legacy = v
+        .get("mcpServers")
+        .and_then(|s| s.get("lean-ctx"))
+        .is_some();
+    if stale_legacy {
+        return NamedCheck {
+            name,
+            ok: false,
+            detail: format!(
+                "stale top-level mcpServers block breaks OpenClaw 2026.6.1+ hot-reload ({})",
+                path.display()
+            ),
+        };
+    }
+
+    let Some(e) = v
+        .get("mcp")
+        .and_then(|m| m.get("servers"))
+        .and_then(|s| s.get("lean-ctx"))
+    else {
+        return NamedCheck {
+            name,
+            ok: false,
+            detail: format!("lean-ctx missing under mcp.servers ({})", path.display()),
+        };
+    };
+
+    let cmd_ok = e
+        .get("command")
+        .and_then(|c| c.as_str())
+        .is_some_and(|c| cmd_matches_expected(c, binary));
+    let env_ok = e
+        .get("env")
+        .and_then(|env| env.get("LEAN_CTX_DATA_DIR"))
+        .and_then(|d| d.as_str())
+        .is_some_and(|d| d.trim() == data_dir.trim());
+    let ok = cmd_ok && env_ok;
+    NamedCheck {
+        name,
         ok,
         detail: if ok {
             format!("ok ({})", path.display())

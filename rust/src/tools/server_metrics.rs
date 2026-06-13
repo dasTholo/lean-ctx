@@ -84,6 +84,21 @@ impl LeanCtxServer {
 
         let output_tokens = original.saturating_sub(saved);
         crate::core::stats::record(tool, original, output_tokens);
+        // Shell output compression is measured (observed bytes in vs out), so it
+        // belongs in the verified ledger. Reads are ledgered via the heatmap
+        // chokepoint and ctx_search ledgers itself — only shell is added here
+        // to avoid double counting.
+        if tool == "ctx_shell" {
+            crate::core::savings_ledger::record_tool_event("ctx_shell", original, saved);
+        }
+
+        // MCP shell savings are measured (raw vs compressed output), so they are
+        // ledger-grade (GL #479 D2). ctx_search is intentionally NOT recorded
+        // here: its `original` carries the 2.5x counterfactual estimate — the
+        // search tool itself appends a raw-baseline ledger event instead.
+        if tool == "ctx_shell" {
+            crate::core::savings_ledger::record_tool_event(tool, original, output_tokens);
+        }
 
         let mut session = self.session.write().await;
         session.record_tool_call(saved as u64, original as u64);
@@ -129,6 +144,8 @@ impl LeanCtxServer {
         let session_summary = session.format_compact();
         let has_insights = !session.findings.is_empty() || !session.decisions.is_empty();
         let project_root = session.project_root.clone();
+        // Snapshot the session under the lock; persist the summary off the hot path.
+        let summary_candidate = crate::core::session_summary::build_candidate(&session);
         drop(session);
 
         if has_insights {
@@ -138,6 +155,15 @@ impl LeanCtxServer {
                     auto_consolidate_knowledge(&root);
                 });
             }
+        }
+
+        // Periodically record a recallable AI session summary (#292), off-thread.
+        if let Some(ref root) = project_root {
+            let root = root.clone();
+            std::thread::spawn(move || {
+                let _ =
+                    crate::core::session_summary::maybe_record_periodic(&root, summary_candidate);
+            });
         }
 
         let multi_agent_block = self
@@ -290,7 +316,13 @@ impl LeanCtxServer {
             calls.iter().filter_map(|c| c.mode.as_deref()).collect();
         let mode_diversity = (modes_used.len() as f64 / 10.0).min(1.0);
         let cache_util = stats.hit_rate() / 100.0;
-        let cep_score = cache_util * 0.3 + mode_diversity * 0.2 + compression_rate * 0.5;
+        // Output efficiency (#501): 1 - avg echo ratio. An agent that keeps
+        // re-quoting delivered content burns the input savings on output.
+        let output_efficiency = 1.0 - crate::core::output_echo::current_avg_ratio();
+        let cep_score = cache_util * 0.25
+            + mode_diversity * 0.15
+            + compression_rate * 0.45
+            + output_efficiency * 0.15;
 
         let mut mode_counts: std::collections::HashMap<String, u64> =
             std::collections::HashMap::new();

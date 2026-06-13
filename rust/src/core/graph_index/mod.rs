@@ -27,6 +27,39 @@ fn is_filesystem_root(path: &str) -> bool {
     p.parent().is_none() || (cfg!(windows) && p.parent() == Some(Path::new("")))
 }
 
+/// Project markers that mark a directory as a legitimate project root.
+const PROJECT_MARKERS: &[&str] = &[
+    ".git",
+    "Cargo.toml",
+    "package.json",
+    "go.mod",
+    "pyproject.toml",
+];
+
+fn dir_has_project_marker(dir: &Path) -> bool {
+    PROJECT_MARKERS.iter().any(|m| dir.join(m).exists())
+}
+
+/// True if `p` or any ancestor strictly *below* `stop` contains a project
+/// marker. Subdirectories of a real project (e.g. `repo/rust/src`) are
+/// legitimate scan roots even though the marker lives at the repo root —
+/// refusing them produced WARN noise on every grep/ls inside ~/Documents
+/// projects (GL#438). `stop` itself is never checked, so a marker-less
+/// `~/Documents` stays refused.
+fn has_marker_in_ancestry(p: &Path, stop: &Path) -> bool {
+    let mut cur = Some(p);
+    while let Some(dir) = cur {
+        if dir == stop {
+            return false;
+        }
+        if dir_has_project_marker(dir) {
+            return true;
+        }
+        cur = dir.parent();
+    }
+    false
+}
+
 fn is_safe_scan_root(path: &str) -> bool {
     let normalized = normalize_project_root(path);
     let p = Path::new(&normalized);
@@ -90,9 +123,11 @@ fn is_safe_scan_root(path: &str) -> bool {
         for blocked in BLOCKED_HOME_SUBDIRS {
             let blocked_path = home_path.join(blocked);
             let is_inside_blocked = p == blocked_path || p.starts_with(&blocked_path);
-            let has_marker = p.join(".git").exists()
-                || p.join("Cargo.toml").exists()
-                || p.join("package.json").exists();
+            // Markers may live in an *ancestor*: `repo/rust/src` is a legitimate
+            // scan root of the project rooted at `repo` (GL#438). Walk up to (but
+            // not past) the blocked dir itself, so `~/Documents` without any
+            // project stays refused.
+            let has_marker = has_marker_in_ancestry(p, &blocked_path);
             if is_inside_blocked
                 && !has_marker
                 && !crate::core::pathutil::has_multi_repo_children(p)
@@ -107,19 +142,15 @@ fn is_safe_scan_root(path: &str) -> bool {
 
         // Block directories that are direct children of home without project markers
         // (but allow multi-repo workspace parents like ~/code/)
-        if p.parent() == Some(home_path) {
-            let has_marker = p.join(".git").exists()
-                || p.join("Cargo.toml").exists()
-                || p.join("package.json").exists()
-                || p.join("go.mod").exists()
-                || p.join("pyproject.toml").exists();
-            if !has_marker && !crate::core::pathutil::has_multi_repo_children(p) {
-                tracing::warn!(
-                    "[graph_index: refusing to scan {normalized} — \
-                     direct child of home without project markers]"
-                );
-                return false;
-            }
+        if p.parent() == Some(home_path)
+            && !dir_has_project_marker(p)
+            && !crate::core::pathutil::has_multi_repo_children(p)
+        {
+            tracing::warn!(
+                "[graph_index: refusing to scan {normalized} — \
+                 direct child of home without project markers]"
+            );
+            return false;
         }
     }
 
@@ -138,7 +169,7 @@ fn is_safe_scan_root(path: &str) -> bool {
         "go.work",
     ];
 
-    if !breadth_markers.iter().any(|m| p.join(m).exists()) {
+    if !breadth_markers.iter().any(|m| p.join(m).exists()) && !dir_has_dotnet_project(p) {
         // Multi-repo workspace parent: >=2 children with project markers is always safe
         if crate::core::pathutil::has_multi_repo_children(p) {
             return true;
@@ -159,6 +190,25 @@ fn is_safe_scan_root(path: &str) -> bool {
     }
 
     true
+}
+
+/// True if the directory contains a .NET project/solution file (`*.csproj`,
+/// `*.sln`, `*.fsproj`, `*.vbproj`). Filenames vary, so we match by extension —
+/// these are strong project-root markers even when there is no `.git`.
+fn dir_has_dotnet_project(dir: &Path) -> bool {
+    std::fs::read_dir(dir).is_ok_and(|rd| {
+        rd.filter_map(Result::ok).any(|e| {
+            e.path()
+                .extension()
+                .and_then(|x| x.to_str())
+                .is_some_and(|x| {
+                    matches!(
+                        x.to_ascii_lowercase().as_str(),
+                        "csproj" | "sln" | "fsproj" | "vbproj"
+                    )
+                })
+        })
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -536,7 +586,111 @@ fn index_looks_stale(index: &ProjectIndex, root_abs: &str) -> bool {
         }
     }
 
+    // Content-aware staleness: rescan only when source *content* actually
+    // changed. mtime is a cheap prefilter; the change is then confirmed against
+    // the stored content hash so a `touch`/checkout/format that leaves bytes
+    // unchanged never forces a needless rescan (covers edits and new files).
+    if source_content_changed_since_index(index, root_abs) {
+        tracing::info!("[graph_index: source content changed since last scan — marking stale]");
+        return true;
+    }
+
     false
+}
+
+/// Modified time of the persisted index artifact, if one exists.
+fn index_file_mtime(root_abs: &str) -> Option<std::time::SystemTime> {
+    let dir = ProjectIndex::index_dir(root_abs)?;
+    for name in ["index.json.zst", "index.json"] {
+        if let Ok(meta) = std::fs::metadata(dir.join(name)) {
+            if let Ok(modified) = meta.modified() {
+                return Some(modified);
+            }
+        }
+    }
+    None
+}
+
+/// Bounded staleness check that confirms *content* changes, not just mtimes.
+///
+/// An mtime newer than the persisted index only flags a *candidate*; the change
+/// is then confirmed by comparing the file's content hash against the stored
+/// `FileEntry.hash` (same `compute_hash` + `read_to_string` the scan uses, so
+/// the comparison is exact). This means a `touch`, `git checkout`, or formatter
+/// rewrite that leaves bytes unchanged no longer forces a needless rescan, while
+/// genuine edits and newly added files still mark the index stale.
+///
+/// Both the traversal and the number of confirming reads are capped: exceeding
+/// the read cap returns `true` (conservatively stale) instead of reading an
+/// unbounded amount. Removed files are handled by the earlier existence check.
+fn source_content_changed_since_index(index: &ProjectIndex, root_abs: &str) -> bool {
+    let Some(index_mtime) = index_file_mtime(root_abs) else {
+        // No persisted index yet — the existence/TTL checks above already decided.
+        return false;
+    };
+    let walker = ignore::WalkBuilder::new(root_abs)
+        .hidden(true)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .require_git(false)
+        .max_depth(Some(20))
+        .filter_entry(crate::core::walk_filter::keep_entry)
+        .build();
+    const MAX_VISIT: usize = 50_000;
+    const MAX_CONFIRM_READS: usize = 4_000;
+    let mut visited = 0usize;
+    let mut confirm_reads = 0usize;
+    for entry in walker.filter_map(std::result::Result::ok) {
+        visited += 1;
+        if visited > MAX_VISIT {
+            break;
+        }
+        if !entry.file_type().is_some_and(|ft| ft.is_file()) {
+            continue;
+        }
+        let path = entry.path();
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        if !is_indexable_ext(ext) {
+            continue;
+        }
+        // mtime prefilter: only files touched after the index are candidates.
+        let Ok(meta) = entry.metadata() else { continue };
+        let Ok(modified) = meta.modified() else {
+            continue;
+        };
+        if modified <= index_mtime {
+            continue;
+        }
+        // Candidate: confirm against the stored content hash.
+        let rel = make_relative(&path.to_string_lossy(), root_abs);
+        let Some(file_entry) = index.files.get(&rel) else {
+            // A newly added indexable file is genuinely new content.
+            return true;
+        };
+        confirm_reads += 1;
+        if confirm_reads > MAX_CONFIRM_READS {
+            // Too many candidates to verify cheaply — assume stale.
+            return true;
+        }
+        match std::fs::read_to_string(path) {
+            // Bytes unchanged despite a newer mtime → not a real change.
+            Ok(content) if compute_hash(&content) == file_entry.hash => {}
+            // Edited content, or no longer readable as it was at scan time.
+            _ => return true,
+        }
+    }
+    false
+}
+
+/// Delete the persisted graph-index artifacts for a project so the next scan
+/// rebuilds from scratch. Backs `graph build --force`.
+pub fn purge_index(project_root: &str) {
+    if let Some(dir) = ProjectIndex::index_dir(project_root) {
+        for name in ["index.json.zst", "index.json", "call_graph.json.zst"] {
+            let _ = std::fs::remove_file(dir.join(name));
+        }
+    }
 }
 
 pub fn scan(project_root: &str) -> ProjectIndex {
@@ -605,8 +759,9 @@ fn scan_inner(project_root: &str) -> (ProjectIndex, HashMap<String, String>) {
         .git_ignore(true)
         .git_global(true)
         .git_exclude(true)
+        .require_git(false)
         .max_depth(Some(20))
-        .filter_entry(crate::core::cloud_files::keep_entry)
+        .filter_entry(crate::core::walk_filter::keep_entry)
         .build();
 
     let cfg = crate::core::config::Config::load();

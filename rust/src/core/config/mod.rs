@@ -19,13 +19,15 @@ pub use sections::*;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use defaults_allowlist::default_shell_allowlist;
+pub(crate) use defaults_allowlist::{cloud_infra_commands, default_shell_allowlist};
 pub use enums::{
     CompressionLevel, OutputDensity, PermissionInheritance, ResponseVerbosity, RulesInjection,
     RulesScope, TeeMode, TerseAgent,
 };
 pub use memory::{MemoryCleanup, MemoryGuardConfig, MemoryProfile, SavingsFooter};
-pub use proxy::{is_local_proxy_url, normalize_url, normalize_url_opt, ProxyConfig, ProxyProvider};
+pub use proxy::{
+    is_local_proxy_url, normalize_url, normalize_url_opt, HistoryMode, ProxyConfig, ProxyProvider,
+};
 pub use shell_activation::ShellActivation;
 
 /// Default BM25 cache cap from config (also used by `bm25_index` heuristics).
@@ -144,9 +146,11 @@ pub struct Config {
     #[serde(default)]
     pub rules_scope: Option<String>,
     /// Controls how rules are injected for shared-instruction-file agents.
-    /// Values: "shared" (default, marker block in CLAUDE.md/AGENTS.md/GEMINI.md)
-    /// or "dedicated" (never touch those files; use each agent's config-driven
-    /// auto-load: SessionStart hook / instructions[] / context.fileName). See #343.
+    /// Values: "shared" (default, marker block in CLAUDE.md/AGENTS.md/GEMINI.md),
+    /// "dedicated" (never touch those files; use each agent's config-driven
+    /// auto-load: SessionStart hook / instructions[] / context.fileName, #343), or
+    /// "off" (write no rules file at all — for hosts that supply their own
+    /// tool-steering workflow or phase-isolated/non-caching harnesses, #361).
     /// Override via LEAN_CTX_RULES_INJECTION env var.
     #[serde(default)]
     pub rules_injection: Option<String>,
@@ -183,6 +187,12 @@ pub struct Config {
     /// Override via LEAN_CTX_ALLOW_PATH env var (path-list separator).
     #[serde(default)]
     pub allow_paths: Vec<String>,
+    /// Allow jailed tool access to home-level IDE config dirs (~/.cursor,
+    /// ~/.claude, …). Default false: those dirs expose other projects'
+    /// sessions, MCP configs and credentials. `~/.lean-ctx` (own data dir)
+    /// is always allowed. Override via LEAN_CTX_ALLOW_IDE_DIRS=1.
+    #[serde(default)]
+    pub allow_ide_config_dirs: bool,
     /// Extra project roots for multi-root workspaces.
     /// Tools like ctx_tree and ctx_search can scan across all roots in a single call.
     /// These paths are automatically added to PathJail's allow-list.
@@ -208,6 +218,17 @@ pub struct Config {
     /// Override via LEAN_CTX_TEAM_URL env var.
     #[serde(default)]
     pub team_url: Option<String>,
+    /// Bearer token for the team server (Authorization header on savings push /
+    /// pull). Set via `lean-ctx config set team_token <tok>` or `team_token` in
+    /// config.toml. Override via the LEAN_CTX_TEAM_TOKEN env var.
+    #[serde(default)]
+    pub team_token: Option<String>,
+    /// Opt-in: when true, the running daemon periodically pushes this machine's
+    /// signed savings batch to `team_url` so the team roll-up fills itself (no
+    /// manual `savings push` per dev). Off by default; requires `team_url` +
+    /// `team_token`. Set via `lean-ctx config set team_auto_push true`.
+    #[serde(default)]
+    pub team_auto_push: bool,
     /// Enable human-readable activity journal (~/.lean-ctx/journal.md).
     #[serde(default)]
     pub journal_enabled: bool,
@@ -217,6 +238,15 @@ pub struct Config {
     /// Hybrid search weights (BM25/dense/candidates).
     #[serde(default)]
     pub search: crate::core::hybrid_search::HybridConfig,
+    /// Code-graph settings, including traversal (co-access) edges (#289).
+    #[serde(default)]
+    pub graph: GraphConfig,
+    /// Skillify miner settings (#290): codify recurring patterns into rules.
+    #[serde(default)]
+    pub skillify: SkillifyConfig,
+    /// AI session-summary settings (#292): periodic, semantically-recallable summaries.
+    #[serde(default)]
+    pub summaries: SummariesConfig,
     /// Optional LLM enhancement (query expansion, contradiction explanation).
     #[serde(default)]
     pub llm: crate::core::llm_enhance::LlmConfig,
@@ -423,14 +453,20 @@ impl Default for Config {
             archive: ArchiveConfig::default(),
             memory: MemoryPolicy::default(),
             allow_paths: Vec::new(),
+            allow_ide_config_dirs: false,
             extra_roots: Vec::new(),
             content_defined_chunking: false,
             minimal_overhead: true,
             symbol_map_auto: false,
             team_url: None,
+            team_token: None,
+            team_auto_push: false,
             journal_enabled: true,
             auto_capture: true,
             search: crate::core::hybrid_search::HybridConfig::default(),
+            graph: GraphConfig::default(),
+            skillify: SkillifyConfig::default(),
+            summaries: SummariesConfig::default(),
             llm: crate::core::llm_enhance::LlmConfig::default(),
             embedding: EmbeddingConfig::default(),
             shell_hook_disabled: false,
@@ -513,6 +549,7 @@ impl Config {
             .unwrap_or_default();
         match raw.trim().to_lowercase().as_str() {
             "dedicated" => RulesInjection::Dedicated,
+            "off" | "none" | "disabled" => RulesInjection::Off,
             _ => RulesInjection::Shared,
         }
     }

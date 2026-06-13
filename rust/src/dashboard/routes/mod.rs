@@ -5,8 +5,11 @@ mod context;
 mod graph;
 pub mod helpers;
 mod knowledge;
+mod learning;
 mod memory;
 mod risk;
+mod roi;
+mod signals;
 mod stats;
 mod system;
 mod tools;
@@ -24,11 +27,17 @@ fn match_component_path(path: &str) -> Option<String> {
         "/static/components/cockpit-memory.js" => super::COCKPIT_COMPONENT_MEMORY_JS,
         "/static/components/cockpit-search.js" => super::COCKPIT_COMPONENT_SEARCH_JS,
         "/static/components/cockpit-compression.js" => super::COCKPIT_COMPONENT_COMPRESSION_JS,
+        "/static/components/cockpit-tour.js" => super::COCKPIT_COMPONENT_TOUR_JS,
         "/static/components/cockpit-graph.js" => super::COCKPIT_COMPONENT_GRAPH_JS,
+        "/static/components/cockpit-architecture.js" => super::COCKPIT_COMPONENT_ARCHITECTURE_JS,
+        "/static/components/cockpit-explorer.js" => super::COCKPIT_COMPONENT_EXPLORER_JS,
         "/static/components/cockpit-health.js" => super::COCKPIT_COMPONENT_HEALTH_JS,
         "/static/components/cockpit-remaining.js" => super::COCKPIT_COMPONENT_REMAINING_JS,
         "/static/components/cockpit-commander.js" => super::COCKPIT_COMPONENT_COMMANDER_JS,
         "/static/components/cockpit-palette.js" => super::COCKPIT_COMPONENT_PALETTE_JS,
+        "/static/components/cockpit-roi.js" => super::COCKPIT_COMPONENT_ROI_JS,
+        "/static/components/cockpit-area-tabs.js" => super::COCKPIT_COMPONENT_AREA_TABS_JS,
+        "/static/components/cockpit-protection.js" => super::COCKPIT_COMPONENT_PROTECTION_JS,
         _ => return None,
     };
     Some(content.to_string())
@@ -137,9 +146,12 @@ pub fn route_response(
     }
 
     stats::handle(path, query_str, method, body)
+        .or_else(|| signals::handle(path, query_str, method, body))
         .or_else(|| context::handle(path, query_str, method, body))
         .or_else(|| risk::handle(path, query_str, method, body))
+        .or_else(|| roi::handle(path, query_str, method, body))
         .or_else(|| knowledge::handle(path, query_str, method, body))
+        .or_else(|| learning::handle(path, query_str, method, body))
         .or_else(|| memory::handle(path, query_str, method, body))
         .or_else(|| graph::handle(path, query_str, method, body))
         .or_else(|| agents::handle(path, query_str, method, body))

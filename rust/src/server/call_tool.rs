@@ -200,9 +200,9 @@ impl LeanCtxServer {
         }
 
         let tool_start = std::time::Instant::now();
-        let (mut result_text, tool_saved_tokens) =
+        let (mut result_text, tool_saved_tokens, shell_outcome) =
             match self.dispatch_tool(name, args, minimal).await {
-                Ok(pair) => pair,
+                Ok(triple) => triple,
                 Err(e) => {
                     if let Ok(mut detector) = tokio::time::timeout(
                         std::time::Duration::from_secs(1),
@@ -503,69 +503,76 @@ impl LeanCtxServer {
                     );
                 }
 
-                // Ledger update — fire-and-forget to avoid blocking concurrent reads
-                let ledger_clone = self.ledger.clone();
-                let session_clone = self.session.clone();
-                let peer_clone = self.peer.clone();
-                let read_path_owned = read_path.clone();
-                let project_root_owned = project_root.clone();
-                let mode_used =
-                    helpers::get_str(args, "mode").unwrap_or_else(|| "auto".to_string());
-                let out_tok = output_tokens as usize;
-                let sent_tok = crate::core::tokens::count_tokens(&result_text);
-                let wants_eviction = true;
-                let wants_elicitation = profile_hints.elicitation_hint();
-                tokio::spawn(async move {
-                    let result = std::panic::AssertUnwindSafe(async {
-                        let active_task = {
-                            let session = session_clone.read().await;
-                            session.task.as_ref().map(|t| t.description.clone())
-                        };
-                        let mut ledger = ledger_clone.write().await;
-                        let overlay = crate::core::context_overlay::OverlayStore::load_project(
-                            &std::path::PathBuf::from(project_root_owned.as_deref().unwrap_or(".")),
-                        );
-                        let gate_result = context_gate::post_dispatch_record_with_task(
-                            &read_path_owned,
-                            &mode_used,
-                            out_tok,
-                            sent_tok,
-                            &mut ledger,
-                            &overlay,
-                            active_task.as_deref(),
-                        );
-                        drop(ledger);
-                        if wants_eviction {
-                            if let Some(hint) = &gate_result.eviction_hint {
-                                tracing::debug!("deferred eviction hint: {hint}");
+                // Ledger update — fire-and-forget to avoid blocking concurrent reads.
+                // Only real files belong in the context ledger (GL #512): a
+                // ctx_read on "." or a directory returns an overview, not file
+                // content, and must not appear in the pressure table as a file.
+                if std::path::Path::new(&read_path).is_file() {
+                    let ledger_clone = self.ledger.clone();
+                    let session_clone = self.session.clone();
+                    let peer_clone = self.peer.clone();
+                    let read_path_owned = read_path.clone();
+                    let project_root_owned = project_root.clone();
+                    let mode_used =
+                        helpers::get_str(args, "mode").unwrap_or_else(|| "auto".to_string());
+                    let out_tok = output_tokens as usize;
+                    let sent_tok = crate::core::tokens::count_tokens(&result_text);
+                    let wants_eviction = true;
+                    let wants_elicitation = profile_hints.elicitation_hint();
+                    tokio::spawn(async move {
+                        let result = std::panic::AssertUnwindSafe(async {
+                            let active_task = {
+                                let session = session_clone.read().await;
+                                session.task.as_ref().map(|t| t.description.clone())
+                            };
+                            let mut ledger = ledger_clone.write().await;
+                            let overlay = crate::core::context_overlay::OverlayStore::load_project(
+                                &std::path::PathBuf::from(
+                                    project_root_owned.as_deref().unwrap_or("."),
+                                ),
+                            );
+                            let gate_result = context_gate::post_dispatch_record_with_task(
+                                &read_path_owned,
+                                &mode_used,
+                                out_tok,
+                                sent_tok,
+                                &mut ledger,
+                                &overlay,
+                                active_task.as_deref(),
+                            );
+                            drop(ledger);
+                            if wants_eviction {
+                                if let Some(hint) = &gate_result.eviction_hint {
+                                    tracing::debug!("deferred eviction hint: {hint}");
+                                }
                             }
-                        }
-                        if wants_elicitation {
-                            if let Some(hint) = &gate_result.elicitation_hint {
-                                tracing::debug!("deferred elicitation hint: {hint}");
+                            if wants_elicitation {
+                                if let Some(hint) = &gate_result.elicitation_hint {
+                                    tracing::debug!("deferred elicitation hint: {hint}");
+                                }
                             }
-                        }
-                        if gate_result.resource_changed {
-                            if let Some(peer) = peer_clone.read().await.as_ref() {
-                                notifications::send_resource_updated(
-                                    peer,
-                                    notifications::RESOURCE_URI_SUMMARY,
-                                )
-                                .await;
+                            if gate_result.resource_changed {
+                                if let Some(peer) = peer_clone.read().await.as_ref() {
+                                    notifications::send_resource_updated(
+                                        peer,
+                                        notifications::RESOURCE_URI_SUMMARY,
+                                    )
+                                    .await;
+                                }
                             }
+                        })
+                        .catch_unwind()
+                        .await;
+                        if let Err(e) = result {
+                            let msg = e
+                                .downcast_ref::<String>()
+                                .map(String::as_str)
+                                .or_else(|| e.downcast_ref::<&str>().copied())
+                                .unwrap_or("unknown");
+                            tracing::error!("background post_dispatch panicked: {msg}");
                         }
-                    })
-                    .catch_unwind()
-                    .await;
-                    if let Err(e) = result {
-                        let msg = e
-                            .downcast_ref::<String>()
-                            .map(String::as_str)
-                            .or_else(|| e.downcast_ref::<&str>().copied())
-                            .unwrap_or("unknown");
-                        tracing::error!("background post_dispatch panicked: {msg}");
-                    }
-                });
+                    });
+                }
             }
         }
 
@@ -749,15 +756,23 @@ impl LeanCtxServer {
                     | "ctx_workflow"
             );
 
+        // Output-echo nudge (#501): when the agent keeps re-quoting delivered
+        // content, tell it once (cooldown-limited, stable text per #498).
+        if !skip_checkpoint && crate::core::protocol::meta_visible() {
+            if let Some(nudge) = crate::core::output_echo::take_pending_nudge() {
+                result_text.push_str(&nudge);
+            }
+        }
+
         if !skip_checkpoint && self.increment_and_check() {
             if let Some(checkpoint) = self.auto_checkpoint().await {
-                let interval = LeanCtxServer::checkpoint_interval_effective();
                 let hints = crate::core::profiles::active_profile().output_hints;
                 if hints.checkpoint_in_output() && crate::core::protocol::meta_visible() {
-                    let combined = format!(
-                        "{result_text}\n\n--- AUTO CHECKPOINT (every {interval} calls) ---\n{checkpoint}"
-                    );
-                    return Ok(CallToolResult::success(vec![Content::text(combined)]));
+                    // Stable header (#498): no interval interpolation — dynamic
+                    // text in repeated markers degrades provider prompt caching.
+                    let combined =
+                        format!("{result_text}\n\n--- AUTO CHECKPOINT ---\n{checkpoint}");
+                    return Ok(finalize_call_result(combined, shell_outcome));
                 }
             }
         }
@@ -784,7 +799,7 @@ impl LeanCtxServer {
             }
         }
 
-        Ok(CallToolResult::success(vec![Content::text(result_text)]))
+        Ok(finalize_call_result(result_text, shell_outcome))
     }
 
     /// Resolve project root from MCP client roots (once per session).
@@ -864,5 +879,105 @@ impl LeanCtxServer {
         // Indices warm lazily on first use of a tool that needs them (#152) —
         // the dispatch path for this very call handles it via
         // `index_orchestrator::ensure_warm_for_tool`, so no eager scan here.
+    }
+}
+
+/// Build the final `CallToolResult`, surfacing shell failures in MCP metadata
+/// (GitHub #389): a non-zero exit or a blocked command sets `isError: true`
+/// and a `structuredContent` payload (`{"exitCode": N}` / `{"blocked": true}`),
+/// so clients no longer have to regex-parse the `[exit:N]` text footer. The
+/// text content is identical in both cases — only the metadata changes.
+fn finalize_call_result(
+    result_text: String,
+    shell_outcome: Option<crate::server::tool_trait::ShellOutcome>,
+) -> CallToolResult {
+    let mut result = CallToolResult::success(vec![Content::text(result_text)]);
+    if let Some(outcome) = shell_outcome {
+        if outcome.is_error() {
+            result.is_error = Some(true);
+        }
+        if let Some(structured) = outcome.structured() {
+            result.structured_content = Some(structured);
+        }
+    }
+    result
+}
+
+#[cfg(test)]
+mod shell_outcome_tests {
+    use super::*;
+    use crate::server::tool_trait::ShellOutcome;
+
+    fn text_of(result: &CallToolResult) -> String {
+        result
+            .content
+            .first()
+            .and_then(|c| c.as_text())
+            .map(|t| t.text.clone())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn success_exit_is_not_an_error() {
+        let r = finalize_call_result("ok".into(), Some(ShellOutcome::Exit(0)));
+        assert_ne!(r.is_error, Some(true), "exit 0 must not set isError");
+        assert!(
+            r.structured_content.is_none(),
+            "happy path stays token-neutral: no structuredContent on exit 0"
+        );
+        assert_eq!(text_of(&r), "ok");
+    }
+
+    #[test]
+    fn nonzero_exit_sets_is_error_and_structured_exit_code() {
+        let r = finalize_call_result("boom\n[exit:1]".into(), Some(ShellOutcome::Exit(1)));
+        assert_eq!(
+            r.is_error,
+            Some(true),
+            "non-zero exit must set isError (#389)"
+        );
+        assert_eq!(
+            r.structured_content,
+            Some(serde_json::json!({ "exitCode": 1 })),
+            "guards must be able to read exitCode without text parsing"
+        );
+        assert_eq!(
+            text_of(&r),
+            "boom\n[exit:1]",
+            "text content must be preserved"
+        );
+    }
+
+    #[test]
+    fn negative_exit_codes_are_reported() {
+        // Signal terminations are mapped to negative/128+n codes by execute();
+        // whatever the value, non-zero must surface as an error.
+        let r = finalize_call_result("killed".into(), Some(ShellOutcome::Exit(-1)));
+        assert_eq!(r.is_error, Some(true));
+        assert_eq!(
+            r.structured_content,
+            Some(serde_json::json!({ "exitCode": -1 }))
+        );
+    }
+
+    #[test]
+    fn blocked_command_sets_is_error_and_blocked_marker() {
+        let r = finalize_call_result("[BLOCKED] nope".into(), Some(ShellOutcome::Blocked));
+        assert_eq!(
+            r.is_error,
+            Some(true),
+            "blocked commands never ran — that is a failure"
+        );
+        assert_eq!(
+            r.structured_content,
+            Some(serde_json::json!({ "blocked": true }))
+        );
+    }
+
+    #[test]
+    fn non_shell_tools_are_unaffected() {
+        let r = finalize_call_result("file contents".into(), None);
+        assert_ne!(r.is_error, Some(true));
+        assert!(r.structured_content.is_none());
     }
 }

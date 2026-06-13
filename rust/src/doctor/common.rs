@@ -325,10 +325,22 @@ pub(super) fn mcp_config_locations(home: &std::path::Path) -> Vec<McpLocation> {
     }
     #[cfg(target_os = "linux")]
     {
-        let vscode_mcp = home.join(".config/Code/User/mcp.json");
+        let user_dirs = [
+            home.join(".config/Code/User"),
+            home.join(".config/Code - Insiders/User"),
+            home.join(".vscode-server/data/User"),
+        ];
+        let user_dir = user_dirs
+            .iter()
+            .find(|p| p.exists())
+            .cloned()
+            .unwrap_or_else(|| user_dirs[0].clone());
+        let vscode_mcp = user_dir.join("mcp.json");
+        let display = vscode_mcp.strip_prefix(home).unwrap_or(&vscode_mcp);
+        let display_str = format!("~/{}", display.display());
         locations.push(McpLocation {
             name: "VS Code",
-            display: "~/.config/Code/User/mcp.json".into(),
+            display: display_str,
             path: vscode_mcp,
         });
     }
@@ -439,6 +451,82 @@ pub(super) fn proxy_auth_probe(port: u16) -> bool {
     };
     let response = String::from_utf8_lossy(&buf[..n]);
     response.contains("200") || response.contains("ok")
+}
+
+/// How Claude Code currently receives the full lean-ctx instructions.
+///
+/// Single source of truth for the main doctor check *and* `doctor integrations`
+/// (GH #396: both previously demanded the retired `~/.claude/rules/lean-ctx.md`,
+/// which `setup` deletes since the v3 layout — GL #555).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ClaudeInstructionsState {
+    /// rules_scope=project: global instructions are intentionally absent.
+    ProjectScope,
+    /// rules_injection=off: user opted out of instructions entirely (GH #361).
+    InjectionOff,
+    /// rules_injection=dedicated: SessionStart hook injects, skill on disk.
+    DedicatedWithSkill,
+    /// rules_injection=dedicated but the skill is missing.
+    DedicatedMissingSkill,
+    /// CLAUDE.md block + on-demand skill (post-3.8 default layout).
+    BlockAndSkill,
+    /// CLAUDE.md block present, skill missing (still functional).
+    BlockOnly,
+    /// Legacy rules file from a pre-3.8 install (works until next setup).
+    LegacyRules,
+    /// Nothing installed — Claude only sees the 2048-char-capped MCP instructions.
+    Missing,
+}
+
+impl ClaudeInstructionsState {
+    pub(super) fn ok(self) -> bool {
+        !matches!(self, Self::DedicatedMissingSkill | Self::Missing)
+    }
+}
+
+pub(super) fn claude_instructions_state(
+    home: &std::path::Path,
+    scope: crate::core::config::RulesScope,
+    injection: crate::core::config::RulesInjection,
+) -> ClaudeInstructionsState {
+    use ClaudeInstructionsState as S;
+
+    if scope == crate::core::config::RulesScope::Project {
+        return S::ProjectScope;
+    }
+    if injection == crate::core::config::RulesInjection::Off {
+        return S::InjectionOff;
+    }
+
+    let has_skill = home.join(".claude/skills/lean-ctx/SKILL.md").exists();
+
+    if injection == crate::core::config::RulesInjection::Dedicated {
+        return if has_skill {
+            S::DedicatedWithSkill
+        } else {
+            S::DedicatedMissingSkill
+        };
+    }
+
+    let claude_md = crate::core::editor_registry::claude_state_dir(home).join("CLAUDE.md");
+    let has_block = std::fs::read_to_string(&claude_md)
+        .is_ok_and(|c| c.contains(crate::hooks::agents::CLAUDE_MD_BLOCK_START));
+    if has_block {
+        return if has_skill {
+            S::BlockAndSkill
+        } else {
+            S::BlockOnly
+        };
+    }
+
+    let has_rules = crate::core::editor_registry::claude_rules_dir(home)
+        .join("lean-ctx.md")
+        .exists();
+    if has_rules {
+        return S::LegacyRules;
+    }
+
+    S::Missing
 }
 
 pub(super) fn claude_binary_exists() -> bool {

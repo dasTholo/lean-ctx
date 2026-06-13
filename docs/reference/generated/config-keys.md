@@ -48,11 +48,11 @@ Top-level configuration keys
 - `redirect_exclude` (string[], default `[]`) — URL patterns to exclude from proxy redirection
 - `reference_results` (bool, default `false` — env `LEAN_CTX_REFERENCE_RESULTS`) — Store large tool outputs as references instead of inline content
 - `response_verbosity` (enum: normal | compact | minimal, default `normal` — env `LEAN_CTX_RESPONSE_VERBOSITY`) — Controls how verbose tool responses are
-- `rules_injection` (enum: shared | dedicated, default `shared`) — How rules load for CLAUDE.md/AGENTS.md/GEMINI.md agents: shared block, or dedicated (no shared-file edits; SessionStart hook / instructions[] / context.fileName). Override via LEAN_CTX_RULES_INJECTION
+- `rules_injection` (enum: shared | dedicated | off, default `shared`) — How rules load for CLAUDE.md/AGENTS.md/GEMINI.md agents: shared block, dedicated (no shared-file edits; SessionStart hook / instructions[] / context.fileName), or off (write no rules file — for hosts that supply their own steering or phase-isolated/non-caching harnesses). Override via LEAN_CTX_RULES_INJECTION
 - `rules_scope` (enum: both | global | project, default `both`) — Where agent rule files are installed. Override via LEAN_CTX_RULES_SCOPE
 - `sandbox_level` (u8, default `0` — env `LEAN_CTX_SANDBOX_LEVEL`) — Sandbox strictness level (0=default, 1=strict, 2=paranoid)
 - `savings_footer` (enum: auto | always | never, default `always` — env `LEAN_CTX_SAVINGS_FOOTER`) — Controls visibility of token savings footers: always (default, show on every response), never, auto (context-dependent). Also: LEAN_CTX_SHOW_SAVINGS=1|0
-- `shadow_mode` (bool, default `false` — env `LEAN_CTX_SHADOW_MODE`) — Transparently intercept native Read/Grep/Shell calls via hooks and route them through lean-ctx
+- `shadow_mode` (bool, default `false` — env `LEAN_CTX_SHADOW_MODE`) — Opt-in (default off): transparently route native Read/Grep/Edit/Shell through lean-ctx — via hooks for hook-based agents, via the interception plugin for OpenCode
 - `shell_activation` (enum: always | agents-only | off, default `always` — env `LEAN_CTX_SHELL_ACTIVATION`) — Controls when the shell hook auto-activates aliases
 - `shell_allowlist` (array, default `[]` — env `LEAN_CTX_SHELL_ALLOWLIST`) — Optional shell command allowlist. When non-empty, only listed binaries are permitted
 - `shell_allowlist_extra` (array, default `[]`) — Commands merged on top of shell_allowlist without replacing the defaults. Managed via `lean-ctx allow <cmd>`
@@ -60,6 +60,9 @@ Top-level configuration keys
 - `shell_strict_mode` (bool, default `false`) — Block $(), backticks, <() in shell arguments. Default false = warn only.
 - `slow_command_threshold_ms` (u64, default `5000`) — Commands taking longer than this (ms) are recorded in the slow log. Set to 0 to disable
 - `symbol_map_auto` (bool, default `false`) — Opt-in: α-code identifier substitution in aggressive reads (>50-file projects). Off by default — abbreviated symbols hinder editing/refactoring
+- `team_auto_push` (bool, default `false`) — Opt-in: daemon periodically pushes your signed savings batch to team_url (off by default; requires team_url + team_token)
+- `team_token` (string?, default `null`) — Bearer token for the team server (push needs a member token; pull/auto-push needs the configured team token)
+- `team_url` (string?, default `null`) — Team server base URL for the opt-in savings roll-up (push/pull)
 - `tee_mode` (enum: never | failures | always, default `failures`) — Controls when shell output is tee'd to disk for later retrieval
 - `terse_agent` (enum: off | lite | full | ultra, default `off` — env `LEAN_CTX_TERSE_AGENT`) — Controls agent output verbosity via instructions injection
 - `theme` (string, default `default`) — Dashboard color theme
@@ -109,6 +112,7 @@ Cross-project boundary and access control policies
 
 Cloud feature settings
 
+- `auto_sync` (bool, default `false`) — Push the Personal Cloud (knowledge, commands, CEP, gotchas, buddy, feedback) silently once per day at session end (Pro; toggle: `lean-ctx cloud autosync on|off`)
 - `contribute_enabled` (bool, default `false`) — Enable contributing anonymized stats to lean-ctx cloud
 
 ## `[custom_aliases]`
@@ -122,7 +126,9 @@ Custom command aliases (array of {command, alias} entries). Note: field names ar
 
 Semantic-embedding engine settings (model selection for ctx_semantic_search)
 
-- `model` (string, default `minilm` — env `LEAN_CTX_EMBEDDING_MODEL`) — Local ONNX embedding model for ctx_semantic_search. One of: minilm (all-MiniLM-L6-v2, 384d, default), jina-code-v2 (768d, code-optimized), nomic (768d). Switching models re-indexes once on the next search.
+- `auto_download` (bool, default `null` — env `LEAN_CTX_EMBEDDINGS_AUTO_DOWNLOAD`) — Download the embedding model in the background on first semantic need (default: allowed). Set false for air-gapped machines; semantic features then stay off until a model is provided manually.
+- `dimensions` (integer, default `null`) — Declared embedding width for hf: custom models (fallback only — the real width is probed from the ONNX graph at load time). Built-in models ignore this key.
+- `model` (string, default `minilm` — env `LEAN_CTX_EMBEDDING_MODEL`) — Local ONNX embedding model for ctx_semantic_search. One of: minilm (all-MiniLM-L6-v2, 384d, default), jina-code-v2 (768d, code-optimized), nomic (768d) — or any HuggingFace repo with an ONNX export via hf:org/repo[@revision]. Switching models re-indexes once on the next search.
 
 ## `[gain]`
 
@@ -131,6 +137,7 @@ Token-savings recap publishing (gain --publish / auto-publish)
 - `auto_publish` (bool, default `false`) — Automatically (re)publish your Wrapped recap when you run `lean-ctx gain` (opt-in, off by default; throttled and sends only an aggregate payload)
 - `auto_publish_interval_hours` (u64, default `24`) — Minimum hours between automatic publishes (throttle; default 24)
 - `display_name` (string?, default `null`) — Optional display name shown on your published card / leaderboard entry
+- `last_auto_publish` (string?, default `null`) — Timestamp of the last automatic publish (written by lean-ctx for throttling — not meant to be edited)
 - `leaderboard` (bool, default `true`) — When auto-publishing, also list the card on the public opt-in leaderboard
 
 ## `[gateway]`
@@ -154,6 +161,12 @@ Downstream MCP servers (array of tables: `[[gateway.servers]]`)
 - `name` (string, default `""`) — Stable server id; becomes the catalog namespace (`name::tool`)
 - `transport` (string, default `stdio`) — Transport: stdio (spawn command) or http (connect to url)
 - `url` (string, default `""`) — Streamable-HTTP endpoint (http transport)
+
+## `[graph]`
+
+Code-graph settings, including traversal (co-access) edges learned from sessions
+
+- `traversal_edges` (bool, default `true`) — Learn co-access edges from real sessions (files surfaced together), surface them as decaying `co_access` graph edges, and boost recall by them. Set false for a purely static AST-only graph.
 
 ## `[ide_paths]`
 
@@ -266,6 +279,7 @@ Proxy upstream configuration for API routing
 
 - `anthropic_upstream` (string?, default `null`) — Custom upstream URL for Anthropic API proxy
 - `gemini_upstream` (string?, default `null`) — Custom upstream URL for Gemini API proxy
+- `history_mode` (enum: cache-aware | rolling | off, default `cache-aware` — env `LEAN_CTX_PROXY_HISTORY_MODE`) — History pruning strategy. cache-aware: frozen boundaries that keep provider prompt caches valid (default). rolling: legacy moving window (max raw savings, breaks prompt caching). off: never prune
 - `openai_upstream` (string?, default `null`) — Custom upstream URL for OpenAI API proxy
 
 ## `[search]`
@@ -301,6 +315,23 @@ Controls what lean-ctx injects during setup and updates. Fresh installs default 
 - `auto_inject_rules` (bool?, default `null`) — Inject agent rule files during setup/update. null=auto (inject if already present), true=always, false=never
 - `auto_inject_skills` (bool?, default `null`) — Install SKILL.md files during setup/update. null=auto (install if rules present), true=always, false=never
 - `auto_update_mcp` (bool, default `true`) — Register lean-ctx MCP server in editor configs during setup/update
+
+## `[skillify]`
+
+Skillify miner: distill recurring session diary + knowledge patterns into rules
+
+- `enabled` (bool, default `true`) — Master switch for the skillify miner (codify recurring session patterns into .cursor/rules). Only acts when explicitly invoked.
+- `min_confidence` (f32, default `0.699999988079071`) — Minimum confidence for a single curated knowledge fact to be codified without repetition (0.0..=1.0).
+- `min_recurrence` (u32, default `2`) — Minimum reinforcements (confirmations / repeated mentions) before a sub-threshold-confidence pattern is codified.
+- `scope` (enum: project | global, default `project`) — Where generated rules are written: project (<repo>/.cursor/rules, git-committable) or global (~/.cursor/rules).
+
+## `[summaries]`
+
+AI session summaries: periodic, semantically-recallable session digests
+
+- `enabled` (bool, default `true`) — Record periodic, semantically-recallable AI session summaries (what was done, files, decisions).
+- `every_n_turns` (u32, default `25`) — Tool calls between automatic session summaries (gated by the auto-checkpoint cadence).
+- `max_kept` (u32, default `100`) — Maximum session summaries kept per project (oldest pruned first).
 
 ## `[updates]`
 

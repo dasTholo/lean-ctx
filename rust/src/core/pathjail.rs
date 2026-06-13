@@ -17,48 +17,113 @@ const IDE_CONFIG_DIRS: &[&str] = &[
     ".continue",
 ];
 
+/// Expands `~`, `$VAR` and `${VAR}` in a config-supplied path entry.
+///
+/// `allow_paths` / `extra_roots` come from `config.toml`, where no shell ever
+/// runs — users writing `"$HOME/code"` or `"~/code"` got a literal,
+/// never-matching prefix and concluded the whole option was broken (GH #392).
+/// Unset variables are left verbatim (and warned about) so the entry fails
+/// loudly in `lean-ctx doctor` instead of silently matching something else.
+pub fn expand_user_path(raw: &str) -> PathBuf {
+    let mut s = raw.to_string();
+
+    if s == "~" || s.starts_with("~/") {
+        if let Some(home) = dirs::home_dir() {
+            s = format!("{}{}", home.to_string_lossy(), &s[1..]);
+        }
+    }
+
+    while let Some(start) = s.find('$') {
+        let rest = &s[start + 1..];
+        let (name, token_len) = if let Some(stripped) = rest.strip_prefix('{') {
+            match stripped.find('}') {
+                Some(end) => (stripped[..end].to_string(), end + 3),
+                None => break,
+            }
+        } else {
+            let end = rest
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                .unwrap_or(rest.len());
+            (rest[..end].to_string(), end + 1)
+        };
+        if name.is_empty() {
+            break;
+        }
+        if let Ok(val) = std::env::var(&name) {
+            s.replace_range(start..start + token_len, &val);
+        } else {
+            tracing::warn!(
+                "allow_paths/extra_roots entry '{raw}' references unset variable ${name} — entry will never match"
+            );
+            break;
+        }
+    }
+
+    PathBuf::from(s)
+}
+
 pub fn allow_paths_from_env_and_config() -> Vec<PathBuf> {
     let mut out = Vec::new();
+    let cfg = crate::core::config::Config::load();
 
     if let Ok(data_dir) = crate::core::data_dir::lean_ctx_data_dir() {
         out.push(canonicalize_or_self(&data_dir));
     }
 
     if let Some(home) = dirs::home_dir() {
-        for dir in IDE_CONFIG_DIRS {
-            let p = home.join(dir);
-            if p.exists() {
-                out.push(canonicalize_or_self(&p));
-            }
-        }
+        let ide_dirs_allowed = cfg.allow_ide_config_dirs
+            || std::env::var("LEAN_CTX_ALLOW_IDE_DIRS").is_ok_and(|v| v == "1");
+        out.extend(home_allow_dirs(&home, ide_dirs_allowed));
     }
 
-    let cfg = crate::core::config::Config::load();
     for p in &cfg.allow_paths {
-        let pb = PathBuf::from(p);
-        out.push(canonicalize_or_self(&pb));
+        out.push(canonicalize_or_self(&expand_user_path(p)));
     }
     for p in &cfg.extra_roots {
-        let pb = PathBuf::from(p);
-        out.push(canonicalize_or_self(&pb));
+        out.push(canonicalize_or_self(&expand_user_path(p)));
     }
 
+    // Env entries are expanded too: MCP host configs pass env blocks verbatim
+    // (no shell), so "$HOME/code" arrives literally there as well.
     let v = std::env::var("LCTX_ALLOW_PATH")
         .or_else(|_| std::env::var("LEAN_CTX_ALLOW_PATH"))
         .unwrap_or_default();
     if !v.trim().is_empty() {
         for p in std::env::split_paths(&v) {
-            out.push(canonicalize_or_self(&p));
+            out.push(canonicalize_or_self(&expand_user_path(
+                &p.to_string_lossy(),
+            )));
         }
     }
 
     let extra = std::env::var("LEAN_CTX_EXTRA_ROOTS").unwrap_or_default();
     if !extra.trim().is_empty() {
         for p in std::env::split_paths(&extra) {
-            out.push(canonicalize_or_self(&p));
+            out.push(canonicalize_or_self(&expand_user_path(
+                &p.to_string_lossy(),
+            )));
         }
     }
 
+    out
+}
+
+/// Home-level allow-dirs for the jail. `~/.lean-ctx` (own state) is always
+/// allowed; the *other* IDE config dirs (~/.cursor, ~/.claude, …) expose
+/// foreign projects' sessions, MCP configs and credentials to any agent, so
+/// they are opt-in only (config `allow_ide_config_dirs = true` or
+/// `LEAN_CTX_ALLOW_IDE_DIRS=1`).
+fn home_allow_dirs(home: &Path, ide_dirs_allowed: bool) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for dir in IDE_CONFIG_DIRS {
+        if *dir != ".lean-ctx" && !ide_dirs_allowed {
+            continue;
+        }
+        let p = home.join(dir);
+        if p.exists() {
+            out.push(canonicalize_or_self(&p));
+        }
+    }
     out
 }
 
@@ -194,7 +259,9 @@ fn normalize_windows_path(s: &str) -> String {
 #[cfg(windows)]
 fn reject_symlink_on_windows(path: &Path) -> Result<(), String> {
     if let Ok(meta) = std::fs::symlink_metadata(path) {
-        if meta.is_symlink() {
+        // Junctions and other reparse points redirect like symlinks but are
+        // invisible to `is_symlink()` — reject them too (GL#442).
+        if super::pathutil::is_symlink_or_reparse(&meta) {
             return Err(format!(
                 "symlink not allowed in jailed path: {}",
                 path.display()
@@ -266,6 +333,27 @@ mod tests {
         assert!(IDE_CONFIG_DIRS.contains(&".gemini"));
     }
 
+    // P0-10 (#422): home-level IDE config dirs are opt-in; only ~/.lean-ctx
+    // is allowed unconditionally.
+    #[test]
+    fn ide_config_dirs_are_excluded_by_default() {
+        let home = tempfile::tempdir().unwrap();
+        for d in [".lean-ctx", ".cursor", ".claude", ".codex"] {
+            std::fs::create_dir_all(home.path().join(d)).unwrap();
+        }
+
+        let denied = home_allow_dirs(home.path(), false);
+        assert_eq!(
+            denied.len(),
+            1,
+            "only ~/.lean-ctx may be allowed: {denied:?}"
+        );
+        assert!(denied[0].ends_with(".lean-ctx"));
+
+        let allowed = home_allow_dirs(home.path(), true);
+        assert_eq!(allowed.len(), 4, "opt-in must allow all existing IDE dirs");
+    }
+
     #[test]
     fn canonicalize_or_self_strips_verbatim() {
         let tmp = tempfile::tempdir().unwrap();
@@ -308,8 +396,62 @@ mod tests {
         );
     }
 
+    // GH #392: config entries like "$HOME/code" or "~/code" were taken
+    // literally and never matched.
+    #[test]
+    fn expand_user_path_expands_tilde_and_vars() {
+        let home = dirs::home_dir().expect("home dir");
+        let home_s = home.to_string_lossy().to_string();
+
+        assert_eq!(expand_user_path("~"), home);
+        assert_eq!(expand_user_path("~/code"), home.join("code"));
+        assert_eq!(expand_user_path("$HOME/code"), home.join("code"));
+        assert_eq!(expand_user_path("${HOME}/code"), home.join("code"));
+        // Multiple variables in one entry.
+        std::env::set_var("LEAN_CTX_TEST_SUB", "sub");
+        assert_eq!(
+            expand_user_path("$HOME/$LEAN_CTX_TEST_SUB/x"),
+            PathBuf::from(format!("{home_s}/sub/x"))
+        );
+        std::env::remove_var("LEAN_CTX_TEST_SUB");
+        // Absolute paths pass through untouched.
+        assert_eq!(expand_user_path("/etc"), PathBuf::from("/etc"));
+    }
+
+    #[test]
+    fn expand_user_path_leaves_unset_vars_verbatim() {
+        std::env::remove_var("LEAN_CTX_TEST_UNSET_VAR");
+        let p = expand_user_path("$LEAN_CTX_TEST_UNSET_VAR/code");
+        assert_eq!(p, PathBuf::from("$LEAN_CTX_TEST_UNSET_VAR/code"));
+    }
+
+    /// Serializes tests that mutate `LEAN_CTX_ALLOW_PATH` — cargo runs tests in
+    /// parallel threads and `set_var`/`remove_var` are process-global.
+    static ALLOW_PATH_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    // GH #392: `allow_paths = ["/"]` (via the same env-var channel) must grant
+    // access to any absolute path — "/" is a prefix of everything.
+    #[cfg(unix)]
+    #[test]
+    fn allow_path_root_slash_permits_everything() {
+        let _guard = ALLOW_PATH_ENV_LOCK.lock().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("root");
+        let other = tmp.path().join("other");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(other.join("b.txt"), "allowed").unwrap();
+
+        std::env::set_var("LEAN_CTX_ALLOW_PATH", "/");
+        let result = jail_path(&other.join("b.txt"), &root);
+        std::env::remove_var("LEAN_CTX_ALLOW_PATH");
+
+        assert!(result.is_ok(), "allow path '/' must permit all: {result:?}");
+    }
+
     #[test]
     fn allow_path_env_permits_outside_root() {
+        let _guard = ALLOW_PATH_ENV_LOCK.lock().unwrap();
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().join("root");
         let other = tmp.path().join("other");

@@ -40,7 +40,6 @@ When you see `[CHECKPOINT]` in tool output → document current task status imme
 - `cargo clippy -- -W clippy::all` must be clean
 - `cargo test --lib` must pass
 - Use `lean-ctx dev-install` for atomic build+install
-
 <!-- lean-ctx-compression -->
 OUTPUT STYLE: dense
 - Each statement = one atomic fact line

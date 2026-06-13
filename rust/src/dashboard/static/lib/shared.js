@@ -8,9 +8,10 @@
   function escHtml(s) {
     const F = window.LctxFmt;
     if (F && typeof F.esc === 'function') return F.esc(String(s));
-    const d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
+    // Attribute-safe fallback: quotes must be escaped too.
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return '&#' + c.charCodeAt(0) + ';';
+    });
   }
 
   function fmtNum(n) {
@@ -451,11 +452,11 @@
     pipeline: 'Compression pipeline layers and their input/output token throughput.',
     active_intent: 'Auto-detected task type and target files based on recent tool activity.',
     overlay_history: 'Chronological log of all manual overlay operations in this project.',
-    total_tokens_saved: 'Lifetime total of tokens saved through all compression modes since installation.',
-    cost_saved: 'Estimated dollar savings based on average LLM token pricing ($2.50/1M input tokens).',
-    energy_saved: 'Estimated inference energy never burned, at ~0.4 J per saved token (same basis as the community leaderboard at leanctx.com/metrics). An estimate — real figures vary by model and hardware.',
-    compression_rate: 'Average compression ratio across all file reads in this session.',
-    gain_score: 'Overall efficiency score combining compression rate, cache hits, and mode diversity.',
+    total_tokens_saved: 'Estimate of what your agents would have loaded without lean-ctx, minus what was actually sent. Counts every read at full file size (incl. re-reads served from cache) and search/grep at a modeled native-tool baseline (~2.5\u00d7 the observed matches). For the strictly measured, cryptographically signed count see ROI & Plan.',
+    cost_saved: 'The estimated tokens saved priced at average LLM input rates ($2.50/1M tokens). Inherits the estimate methodology above \u2014 ROI & Plan shows the verified (signed-ledger) figure.',
+    energy_saved: 'Estimated inference energy never burned, at ~0.4 J per saved token applied to the estimated savings (same basis as the community leaderboard at leanctx.com/metrics). Real figures vary by model and hardware.',
+    compression_rate: 'Share of estimated input tokens removed before sending, all-time (estimated saved \u00f7 estimated input).',
+    gain_score: 'One number (0\u2013100) for how well lean-ctx works for you: 35% compression, 25% cost efficiency, 20% quality, 20% consistency. 80+ is excellent.',
     total_calls: 'Total number of tool calls (reads, searches, commands) processed by LeanCTX.',
     cumulative_savings: '30-day chart showing cumulative token savings growth over time.',
     cost_analysis: 'Side-by-side comparison of original vs. compressed token costs.',
@@ -463,6 +464,7 @@
     slo_compliance: 'Service Level Objectives: response time and compression accuracy targets.',
     verification: 'Compression accuracy verification \u2013 ensures no information loss.',
     property_graph: 'Visual knowledge graph of project entities and their relationships.',
+    knowledge_facts_list: 'Every fact lean-ctx has learned, in plain text. Search, filter by category, and click a fact for full details \u2014 the graph above shows how they connect.',
     daily_activity: 'Daily distribution of tool call volume over recent history.',
     savings_rate: 'Token savings rate trend over time \u2013 higher is better.',
     mcp_vs_shell: 'Comparison of MCP tool calls vs. shell hook invocations by volume.',
@@ -547,6 +549,7 @@
 
   function shortenPath(p) {
     if (!p) return '';
+    if (p === '.' || p === './') return 'project root';
     var parts = p.replace(/\\/g, '/').split('/');
     if (parts.length <= 3) return parts.join('/');
     return '\u2026/' + parts.slice(-3).join('/');
@@ -557,6 +560,36 @@
     if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
     if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
     return String(n);
+  }
+
+  /**
+   * Tiny inline SVG sparkline for 0..1 series (#507). The last point is
+   * dotted so "today" is readable. Color follows the latest value:
+   * falling/low = green, high = red.
+   */
+  function sparklineSvg(values, width, height) {
+    if (!Array.isArray(values) || values.length < 2) return '';
+    var w = width || 120;
+    var h = height || 26;
+    var pad = 3;
+    var n = values.length;
+    var pts = values.map(function (v, i) {
+      var x = pad + (i / (n - 1)) * (w - 2 * pad);
+      var clamped = Math.max(0, Math.min(1, v));
+      var y = h - pad - clamped * (h - 2 * pad);
+      return [x, y];
+    });
+    var d = pts.map(function (p, i) {
+      return (i === 0 ? 'M' : 'L') + p[0].toFixed(1) + ' ' + p[1].toFixed(1);
+    }).join(' ');
+    var last = values[n - 1];
+    var color = last <= 0.15 ? 'var(--green)' : last <= 0.35 ? 'var(--yellow)' : 'var(--red)';
+    var dot = pts[n - 1];
+    return '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" ' +
+      'style="flex-shrink:0" aria-hidden="true">' +
+      '<path d="' + d + '" fill="none" stroke="' + color + '" stroke-width="1.5" stroke-linejoin="round"/>' +
+      '<circle cx="' + dot[0].toFixed(1) + '" cy="' + dot[1].toFixed(1) + '" r="2" fill="' + color + '"/>' +
+      '</svg>';
   }
 
   window.LctxShared = {
@@ -591,5 +624,6 @@
     fmtTokens,
     escHtml,
     fmtNum,
+    sparklineSvg,
   };
 })();

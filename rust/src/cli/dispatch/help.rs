@@ -140,6 +140,7 @@ COMMANDS:
     gain --unpublish[=<id>]        Remove a published permalink (most recent if no id)
     config set gain.auto_publish true  Auto-(re)publish your recap on each `gain` (opt-in, throttled, off by default)
     savings [summary|verify|export|sign|verify-batch] Verified savings ledger (local, signed)
+    learning [status|export|import]  Adaptive-learning state: inspect, share with team, merge
          token-report [--json]          Token + memory report (project + session + CEP)
     pack --pr                      PR Context Pack (changed files, impact, tests, artifacts)
     index <status|build|build-full|watch>  Codebase index utilities
@@ -150,8 +151,8 @@ COMMANDS:
     serve [--host H] [--port N]    MCP over HTTP (Streamable HTTP, local-first)
     proxy start [--port=4444]      API proxy: compress tool_results before LLM API
     proxy status                   Show proxy statistics
-    daemon start|stop|status       IPC daemon management
-    daemon enable|disable          Auto-start daemon on login (systemd/LaunchAgent)
+    daemon start|stop|restart|status  IPC daemon management
+    daemon enable|disable          Auto-start daemon on login (systemd/LaunchAgent; prints service file)
     cache [list|clear|stats]       Show/manage file read cache
     sessions [list|show|cleanup]   Manage saved CCP session snapshots (alias: session-store)
     benchmark run [path] [--json]  Run real benchmark on project files
@@ -205,6 +206,7 @@ COMMANDS:
     buddy [show|stats|ascii|json]  Token Guardian: your data-driven coding companion
     doctor integrations [--json]   Integration health checks (Cursor/Claude Code)
     doctor [--fix] [--json]        Run diagnostics (and optionally repair)
+    doctor --migrate-check         v1.0 migration readiness audit (config, deprecations, data)
     smells [scan|summary|rules|file] [--rule=<r>] [--path=<p>] [--json]
                                    Code smell detection (Property Graph, 8 rules)
     control <action> [--target=<t>] Context field manipulation (exclude/pin/priority)
@@ -215,6 +217,7 @@ COMMANDS:
                                    Manage lean-ctx plugins
     rules sync|diff|lint|status|init
                                    ContextOps: cross-agent rules governance
+    policy list|show|validate|coverage  Context policy packs (governance presets as code)
     uninstall [--keep-config] [--keep-binary] [--dry-run]
                                    Full clean removal: stops all processes, removes hooks,
                                    MCP configs, rules, autostart, data, AND the binary itself.
@@ -320,15 +323,18 @@ GRAPH (project analysis):
     lean-ctx graph status          Show graph index statistics
     lean-ctx graph related <file>  List files related to a given file
     lean-ctx graph impact <file>   Show files impacted by changes to a file
-    lean-ctx graph symbol <spec>   Inspect a symbol (format: file.rs::fn_name)
+    lean-ctx graph symbol <spec>   Inspect a symbol (format: <file>::<symbol>, or bare <symbol>)
     lean-ctx graph context <query> Query the property graph for a concept
 
 CLOUD:
     cloud status                   Show cloud connection status
+    cloud upgrade                  Subscribe to Pro (Personal Cloud) or Team
     login <email>                  Log into existing LeanCTX Cloud account
     register <email>               Create a new LeanCTX Cloud account
     forgot-password <email>        Send password reset email
-    sync                           Upload local stats to cloud dashboard
+    sync                           Sync stats (free) + your context (Pro: knowledge, commands, CEP, …)
+    sync index <push|pull|status>  Hosted Personal Index (Pro): encrypted cross-device retrieval index
+    cloud autosync <on|off|status> Daily background Personal Cloud push (Pro, opt-in)
     contribute                     Share anonymized compression data
 
 TROUBLESHOOTING:

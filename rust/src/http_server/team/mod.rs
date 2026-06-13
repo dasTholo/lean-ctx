@@ -72,6 +72,17 @@ pub struct TeamServerConfig {
     pub stateful_mode: bool,
     #[serde(default = "default_true")]
     pub json_response: bool,
+    /// Hosted-storage quota in bytes (`storageQuotaBytes` in `team.json`),
+    /// rendered per plan by the control plane's provisioning bridge (#282).
+    /// Omitted ⇒ the server defaults to the Team tier's 5 GiB; the
+    /// `LEANCTX_TEAM_STORAGE_QUOTA_BYTES` env var overrides both.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub storage_quota_bytes: Option<u64>,
+    /// Slack/Discord/generic webhook for the weekly team-ROI summary
+    /// (`roiWebhookUrl` in `team.json`, GL #388). HTTPS only — the server
+    /// refuses to start with a plaintext URL. Omitted ⇒ no webhook posts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub roi_webhook_url: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -257,6 +268,10 @@ pub struct TeamState {
     engine: Arc<TeamContextEngine>,
     audit: Arc<tokio::sync::Mutex<tokio::fs::File>>,
     pub savings_store_dir: Arc<tokio::sync::Mutex<std::path::PathBuf>>,
+    /// Measurement roots for the billing-plane storage report (GL #463).
+    pub storage_roots: super::team_billing::StorageRoots,
+    /// 60 s cache for the measured storage report.
+    pub storage_cache: Arc<tokio::sync::Mutex<super::team_billing::StorageCache>>,
 }
 
 #[derive(Clone)]
@@ -607,6 +622,28 @@ fn required_scopes(tool_name: &str, args: Option<&Value>) -> Option<BTreeSet<Tea
     }
 }
 
+/// Records latency and server-error outcome of every team API request into
+/// the process-global SLO store (GL #391). Runs as the outermost layer so the
+/// measured latency matches what a client (or the synthetic probe) observes —
+/// auth, rate limiting and the handler itself are all included. `/health` and
+/// MCP fallback traffic stay unmeasured: the SLO gate is defined over the
+/// `/v1` HTTP surface.
+async fn team_slo_middleware(req: Request<Body>, next: Next) -> Response {
+    let measured = {
+        let p = req.uri().path();
+        p.starts_with("/v1/") || p.starts_with("/api/v1/")
+    };
+    let start = std::time::Instant::now();
+    let res = next.run(req).await;
+    if measured {
+        crate::core::team_slo::global().record_request(
+            u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
+            !res.status().is_server_error(),
+        );
+    }
+    res
+}
+
 async fn team_rate_limit_middleware(
     State(state): State<TeamAppState>,
     req: Request<Body>,
@@ -743,6 +780,37 @@ async fn team_auth_middleware(
             &workspace_id_for_audit,
             None,
             Some("metrics"),
+            allow,
+            if allow { None } else { Some("scope_denied") },
+            None,
+        )
+        .await;
+        if !allow {
+            return super::json_error(
+                StatusCode::FORBIDDEN,
+                "scope_denied",
+                "token lacks required scope: audit",
+            );
+        }
+    }
+
+    // Billing-plane reads (savings roll-up, storage/usage reports) share the
+    // audit sensitivity class: owner/admin + the control plane's audit token.
+    let audit_gated = match path0 {
+        "/v1/savings/summary" => Some("savings_summary"),
+        "/v1/storage" => Some("storage"),
+        "/v1/usage" => Some("usage"),
+        p if p.starts_with("/v1/savings/member/") => Some("savings_member"),
+        _ => None,
+    };
+    if let Some(action) = audit_gated {
+        let allow = tok_scopes.contains(&TeamScope::Audit);
+        let _ = audit_write(
+            &state.team.audit,
+            &tok.id,
+            &workspace_id_for_audit,
+            None,
+            Some(action),
             allow,
             if allow { None } else { Some("scope_denied") },
             None,
@@ -1008,6 +1076,11 @@ async fn v1_tool_call(
     }
 
     let required = required_scopes(&body.name, Some(&args));
+    // Index-mutating calls (anything requiring the Index scope) reset the
+    // hosted-index freshness baseline once they succeed (GL #391).
+    let mutates_index = required
+        .as_ref()
+        .is_some_and(|reqs| reqs.contains(&TeamScope::Index));
     let allowed = match required {
         None => false,
         Some(reqs) => reqs.is_subset(&auth.scopes),
@@ -1043,6 +1116,9 @@ async fn v1_tool_call(
 
     match call {
         Ok(Ok(v)) => {
+            if mutates_index {
+                crate::core::team_slo::global().record_index_write();
+            }
             let _ = audit_write(
                 &state.team.audit,
                 &auth.token_id,
@@ -1206,13 +1282,42 @@ async fn v1_events(
     Sse::new(guarded).keep_alive(KeepAlive::new().interval(Duration::from_secs(15)))
 }
 
-async fn v1_team_metrics(State(_state): State<TeamAppState>) -> impl IntoResponse {
+#[derive(Debug, Deserialize)]
+struct MetricsQuery {
+    /// `?format=prometheus` switches to text exposition for scrape agents
+    /// (Datadog openmetrics check, Prometheus, Grafana Alloy …).
+    #[serde(default)]
+    format: Option<String>,
+}
+
+async fn v1_team_metrics(
+    State(_state): State<TeamAppState>,
+    Query(q): Query<MetricsQuery>,
+) -> Response {
+    let slo = crate::core::team_slo::global().snapshot();
+
+    if q.format.as_deref() == Some("prometheus") {
+        return (
+            StatusCode::OK,
+            [(
+                axum::http::header::CONTENT_TYPE,
+                "text/plain; version=0.0.4",
+            )],
+            slo.to_prometheus(),
+        )
+            .into_response();
+    }
+
     let rt = crate::core::context_os::runtime();
     let snap = rt.metrics.snapshot();
-    (
-        StatusCode::OK,
-        Json(serde_json::to_value(snap).unwrap_or_default()),
-    )
+    let mut v = serde_json::to_value(snap).unwrap_or_default();
+    if let Value::Object(ref mut m) = v {
+        m.insert(
+            "slo".to_string(),
+            serde_json::to_value(&slo).unwrap_or_default(),
+        );
+    }
+    (StatusCode::OK, Json(v)).into_response()
 }
 
 fn streamable_http_config(cfg: &TeamServerConfig) -> rmcp::transport::StreamableHttpServerConfig {
@@ -1265,11 +1370,24 @@ pub async fn serve_team(cfg: TeamServerConfig) -> Result<()> {
         .parent()
         .unwrap_or(std::path::Path::new("."))
         .join("savings");
+    let workspace_roots: Vec<(String, std::path::PathBuf)> = cfg
+        .workspaces
+        .iter()
+        .map(|w| (w.id.clone(), w.root.clone()))
+        .collect();
     let team = Arc::new(TeamState {
         auth: Arc::new(cfg.tokens.clone()),
         engine,
         audit: Arc::new(tokio::sync::Mutex::new(audit_file)),
         savings_store_dir: Arc::new(tokio::sync::Mutex::new(savings_dir)),
+        storage_roots: super::team_billing::storage_roots_from_config(
+            &cfg.audit_log_path,
+            &workspace_roots,
+            cfg.storage_quota_bytes,
+        ),
+        storage_cache: Arc::new(tokio::sync::Mutex::new(
+            super::team_billing::StorageCache::default(),
+        )),
     });
 
     let state = TeamAppState {
@@ -1289,6 +1407,15 @@ pub async fn serve_team(cfg: TeamServerConfig) -> Result<()> {
         ),
         streamable_http_config(&cfg),
     );
+
+    // Weekly team-ROI webhook (GL #388): validated at boot so a bad URL is a
+    // loud startup error, not a silent weekly no-op.
+    if let Some(url) = &cfg.roi_webhook_url {
+        super::roi_webhook::validate_webhook_url(url)
+            .map_err(|e| anyhow!("invalid roiWebhookUrl in team config: {e}"))?;
+        super::roi_webhook::spawn_weekly_roi_webhook(state.clone(), url.clone());
+        tracing::info!("team ROI webhook enabled (weekly)");
+    }
 
     let app = Router::new()
         .route("/health", get(super::health))
@@ -1310,6 +1437,16 @@ pub async fn serve_team(cfg: TeamServerConfig) -> Result<()> {
         )
         .route("/v1/metrics", get(v1_team_metrics))
         .route(
+            "/v1/savings/summary",
+            get(super::savings_summary::v1_savings_summary),
+        )
+        .route(
+            "/v1/savings/member/{signer}",
+            get(super::savings_summary::v1_savings_member),
+        )
+        .route("/v1/storage", get(super::team_billing::v1_storage))
+        .route("/v1/usage", get(super::team_billing::v1_usage))
+        .route(
             "/api/v1/savings/ingest",
             axum::routing::post(super::savings_ingest::v1_savings_ingest),
         )
@@ -1327,7 +1464,11 @@ pub async fn serve_team(cfg: TeamServerConfig) -> Result<()> {
             state.clone(),
             team_auth_middleware,
         ))
+        // Outermost: SLO measurement sees the full client-observed latency.
+        .layer(middleware::from_fn(team_slo_middleware))
         .with_state(state);
+
+    crate::core::team_slo::global().mark_started();
 
     let listener = tokio::net::TcpListener::bind(addr)
         .await

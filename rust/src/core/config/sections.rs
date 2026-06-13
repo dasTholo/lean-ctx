@@ -407,6 +407,19 @@ pub struct CloudConfig {
     pub last_sync: Option<String>,
     pub last_gain_sync: Option<String>,
     pub last_model_pull: Option<String>,
+    /// Auto-push the Pro Personal-Cloud surfaces (knowledge, commands, CEP,
+    /// gotchas, buddy, feedback) from the background task — opt-in, once per
+    /// day, offline-tolerant (GL #384). Toggle: `lean-ctx cloud autosync on`.
+    pub auto_sync: bool,
+    pub last_auto_sync: Option<String>,
+    /// Auto-push the project's encrypted retrieval-index bundle (hosted
+    /// Personal Index, GL #392) alongside the daily auto-sync — separate
+    /// opt-in because index bundles are orders of magnitude larger than the
+    /// other surfaces. Toggle: `lean-ctx cloud autoindex on`.
+    pub auto_index: bool,
+    /// Per-project debounce: `project_hash → YYYY-MM-DD` of the last
+    /// successful background index push.
+    pub last_index_push: std::collections::HashMap<String, String>,
 }
 
 /// Settings for publishing your token-savings recap (`gain --publish` / auto-publish).
@@ -440,6 +453,94 @@ impl Default for GainConfig {
             display_name: None,
             auto_publish_interval_hours: 24,
             last_auto_publish: None,
+        }
+    }
+}
+
+/// Settings for the code graph — in particular the *traversal* (co-access) edges
+/// learned from real agent sessions (#289).
+///
+/// The static AST/import graph captures how code is wired structurally; it cannot
+/// see which files an agent actually opens *together* while solving a task.
+/// Traversal edges add that behavioural signal: files surfaced together are
+/// associated with a decaying weight (Hebbian co-access), folded into the graph
+/// as `co_access` edges and mixed into recall. The store is bounded and decays,
+/// so stale associations fade.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GraphConfig {
+    /// Record co-access between files surfaced together in a session, surface them
+    /// as decaying `co_access` edges in the graph, and boost recall by them.
+    /// On by default; set to `false` for a purely static (AST-only) graph.
+    pub traversal_edges: bool,
+}
+
+impl Default for GraphConfig {
+    fn default() -> Self {
+        Self {
+            traversal_edges: true,
+        }
+    }
+}
+
+/// Skillify (#290): mine the project's session diary + knowledge facts into
+/// versioned, git-committable `.cursor/rules/skillify-*.mdc` rule files.
+///
+/// The miner is precision-biased — it only codifies recurring or high-confidence
+/// patterns and never invents content. Runs on demand (`ctx_skillify` /
+/// `lean-ctx skillify`); re-running merges (bumps version) only when the distilled
+/// content actually changes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SkillifyConfig {
+    /// Master switch for the skillify miner. On by default; the miner only ever
+    /// acts when explicitly invoked, so this never writes files unprompted.
+    pub enabled: bool,
+    /// Where generated rules are written: `project` (`<repo>/.cursor/rules`,
+    /// git-committable, default) or `global` (`~/.cursor/rules`).
+    pub scope: String,
+    /// Minimum confidence for a single curated knowledge fact to be codified even
+    /// without repetition. 0.0..=1.0.
+    pub min_confidence: f32,
+    /// Minimum number of reinforcements (confirmations / repeated mentions) before
+    /// a pattern is codified when its confidence is below `min_confidence`.
+    pub min_recurrence: u32,
+}
+
+impl Default for SkillifyConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            scope: "project".to_string(),
+            min_confidence: 0.7,
+            min_recurrence: 2,
+        }
+    }
+}
+
+/// AI session summaries (#292): periodically distil the working session into a
+/// compact, *semantically recallable* summary so a future session can answer
+/// "what did I do last time on X?". Deterministic and local-first — recall uses
+/// embeddings when the `embeddings` feature is on, else a lexical fallback.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SummariesConfig {
+    /// Record periodic session summaries. On by default; recording is cheap and
+    /// happens at most once per `every_n_turns` tool calls.
+    pub enabled: bool,
+    /// Tool calls between automatic summaries. The auto-checkpoint cadence still
+    /// gates the check, so the effective minimum is the checkpoint interval.
+    pub every_n_turns: u32,
+    /// Maximum summaries kept per project (oldest pruned first).
+    pub max_kept: u32,
+}
+
+impl Default for SummariesConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            every_n_turns: 25,
+            max_kept: 100,
         }
     }
 }
@@ -486,12 +587,25 @@ impl Default for LoopDetectionConfig {
 /// `model` selects which local ONNX embedding model lean-ctx downloads and uses for
 /// `ctx_semantic_search`. Accepts the same aliases as the `LEAN_CTX_EMBEDDING_MODEL` env
 /// var: `minilm` (all-MiniLM-L6-v2, 384d — the default), `jina-code-v2` (768d,
-/// code-optimized) or `nomic` (768d). When the env var is set it takes precedence; an
+/// code-optimized), `nomic` (768d) — or any HuggingFace repo with an ONNX export via
+/// `hf:org/repo[@revision]` (GL #397). When the env var is set it takes precedence; an
 /// unset/`None` value uses the default model. Switching models triggers a one-time
 /// re-index on the next semantic search (vector dimensions follow from the model).
+///
+/// `dimensions` is only consulted for `hf:` custom models as the declared fallback
+/// width; the real width is probed from the ONNX graph at load time. Built-ins ignore it.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EmbeddingConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dimensions: Option<usize>,
+    /// Allow downloading the embedding model on first semantic need (#551).
+    /// `None` (unset) means **allowed** — the soft default that activates the
+    /// semantic features without manual setup. Set `false` for air-gapped
+    /// machines. The `LEAN_CTX_EMBEDDINGS_AUTO_DOWNLOAD` env var, when set,
+    /// overrides this in either direction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_download: Option<bool>,
 }

@@ -59,12 +59,14 @@ fn extract_imports_gd(root: Node, src: &str) -> Vec<ImportInfo> {
         }
     }
 
-    walk_gd_preload(root, src, &mut imports);
+    crate::core::ast_walk::for_each_descendant(root, |node| {
+        collect_gd_preload(node, src, &mut imports);
+    });
     imports
 }
 
 #[cfg(feature = "tree-sitter")]
-fn walk_gd_preload(node: Node, src: &str, imports: &mut Vec<ImportInfo>) {
+fn collect_gd_preload(node: Node, src: &str, imports: &mut Vec<ImportInfo>) {
     if node.kind() == "call" {
         if let Some(callee) = find_child_by_kind(node, "identifier") {
             let name = node_text(callee, src);
@@ -85,10 +87,6 @@ fn walk_gd_preload(node: Node, src: &str, imports: &mut Vec<ImportInfo>) {
                 }
             }
         }
-    }
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        walk_gd_preload(child, src, imports);
     }
 }
 
@@ -151,29 +149,58 @@ fn extract_imports_ruby(root: Node, src: &str) -> Vec<ImportInfo> {
 
 #[cfg(feature = "tree-sitter")]
 fn extract_imports_csharp(root: Node, src: &str) -> Vec<ImportInfo> {
+    // `using` directives appear at file scope, inside `namespace { ... }` blocks,
+    // and as `global using` — so the whole tree is walked rather than only the root.
     let mut imports = Vec::new();
-    let mut cursor = root.walk();
-    for node in root.children(&mut cursor) {
-        if node.kind() == "using_directive" {
-            let text = node_text(node, src)
-                .trim()
-                .trim_start_matches("using")
-                .trim()
-                .trim_end_matches(';')
-                .trim()
-                .to_string();
-            if !text.is_empty() {
-                imports.push(ImportInfo {
-                    source: text,
-                    names: Vec::new(),
-                    kind: ImportKind::Named,
-                    line: node.start_position().row + 1,
-                    is_type_only: false,
-                });
-            }
+    crate::core::ast_walk::for_each_descendant(root, |node| {
+        collect_csharp_using(node, src, &mut imports);
+    });
+    imports
+}
+
+#[cfg(feature = "tree-sitter")]
+fn collect_csharp_using(node: Node, src: &str, imports: &mut Vec<ImportInfo>) {
+    if node.kind() == "using_directive" {
+        if let Some(info) = parse_csharp_using(node, src) {
+            imports.push(info);
         }
     }
-    imports
+}
+
+/// Normalize a `using_directive` to the imported namespace, handling every form:
+/// `using X.Y;`, `global using X.Y;`, `using static X.Y;`, and the alias form
+/// `using Alias = X.Y;` (where the right-hand side is the real dependency).
+#[cfg(feature = "tree-sitter")]
+fn parse_csharp_using(node: Node, src: &str) -> Option<ImportInfo> {
+    let raw = node_text(node, src).trim().trim_end_matches(';').trim();
+
+    // Strip leading `global` / `using` / `static` keywords without touching the
+    // namespace path (token-wise, so a namespace segment is never mangled).
+    let mut rest: Vec<&str> = Vec::new();
+    for tok in raw.split_whitespace() {
+        if rest.is_empty() && matches!(tok, "global" | "using" | "static") {
+            continue;
+        }
+        rest.push(tok);
+    }
+    let joined = rest.join(" ");
+
+    // Alias form `Alias = Namespace.Path` -> keep the right-hand dependency.
+    let source = joined
+        .split_once('=')
+        .map_or_else(|| joined.trim(), |(_, rhs)| rhs.trim())
+        .to_string();
+
+    if source.is_empty() {
+        return None;
+    }
+    Some(ImportInfo {
+        source,
+        names: Vec::new(),
+        kind: ImportKind::Named,
+        line: node.start_position().row + 1,
+        is_type_only: false,
+    })
 }
 
 #[cfg(feature = "tree-sitter")]
@@ -438,7 +465,9 @@ fn extract_imports_ts(root: Node, src: &str) -> Vec<ImportInfo> {
         }
     }
 
-    walk_for_dynamic_imports(root, src, &mut imports);
+    crate::core::ast_walk::for_each_descendant(root, |node| {
+        collect_dynamic_import(node, src, &mut imports);
+    });
 
     imports
 }
@@ -513,7 +542,7 @@ fn classify_ts_import_clause(clause: Node, src: &str) -> (ImportKind, Vec<String
 }
 
 #[cfg(feature = "tree-sitter")]
-fn walk_for_dynamic_imports(node: Node, src: &str, imports: &mut Vec<ImportInfo>) {
+fn collect_dynamic_import(node: Node, src: &str, imports: &mut Vec<ImportInfo>) {
     if node.kind() == "call_expression" {
         let callee = find_child_by_kind(node, "import");
         if callee.is_some() {
@@ -562,10 +591,6 @@ fn walk_for_dynamic_imports(node: Node, src: &str, imports: &mut Vec<ImportInfo>
                 }
             }
         }
-    }
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        walk_for_dynamic_imports(child, src, imports);
     }
 }
 

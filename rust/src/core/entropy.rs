@@ -230,6 +230,15 @@ pub fn entropy_compress(content: &str) -> EntropyResult {
     entropy_compress_with_thresholds(content, BPE_ENTROPY_THRESHOLD, 0.7)
 }
 
+/// Entropy compression with the opportunistic semantic redundancy filter
+/// (#544) pinned OFF. The regular path uses the shared embedding engine
+/// whenever it happens to be loaded, so its output depends on runtime state.
+/// Benchmarks and the scorecard (#211) need run-to-run and machine-to-machine
+/// reproducibility, so they must go through this entry point.
+pub fn entropy_compress_deterministic(content: &str) -> EntropyResult {
+    entropy_compress_inner(content, BPE_ENTROPY_THRESHOLD, 0.7, &[], false)
+}
+
 /// Entropy compression with file-type-adaptive thresholds and event emission.
 pub fn entropy_compress_adaptive(content: &str, path: &str) -> EntropyResult {
     let thresholds = super::adaptive_thresholds::adaptive_thresholds(path, content);
@@ -284,11 +293,78 @@ pub fn entropy_compress_task_conditioned(
     result
 }
 
+/// Real line embedder for the semantic redundancy filter (#544): uses the
+/// shared neural engine only when it is ALREADY loaded (never blocks a read
+/// on a model load) and only for files small enough that per-line embedding
+/// stays within the read-path latency budget. Embeddings are cached by line
+/// hash so re-reads cost nothing.
+#[cfg(feature = "embeddings")]
+fn line_embedder(line_count: usize) -> impl Fn(&str) -> Option<Vec<f32>> {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    const MAX_LINES_FOR_SEMANTIC: usize = 400;
+    const CACHE_CAP: usize = 8192;
+    static LINE_EMBED_CACHE: Mutex<Option<HashMap<u64, Vec<f32>>>> = Mutex::new(None);
+
+    let engine = if line_count <= MAX_LINES_FOR_SEMANTIC {
+        crate::tools::ctx_knowledge::embeddings::embedding_engine_nonblocking()
+    } else {
+        None
+    };
+
+    move |line: &str| {
+        let engine = engine?;
+        if line.len() < 8 {
+            return None;
+        }
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        std::hash::Hash::hash(&line, &mut hasher);
+        let key = std::hash::Hasher::finish(&hasher);
+
+        if let Ok(mut guard) = LINE_EMBED_CACHE.lock() {
+            if let Some(hit) = guard.get_or_insert_with(HashMap::new).get(&key) {
+                return Some(hit.clone());
+            }
+        }
+        let emb = engine.embed(line).ok()?;
+        if let Ok(mut guard) = LINE_EMBED_CACHE.lock() {
+            let map = guard.get_or_insert_with(HashMap::new);
+            if map.len() >= CACHE_CAP {
+                map.clear();
+            }
+            map.insert(key, emb.clone());
+        }
+        Some(emb)
+    }
+}
+
+#[cfg(not(feature = "embeddings"))]
+fn line_embedder(_line_count: usize) -> impl Fn(&str) -> Option<Vec<f32>> {
+    |_: &str| None
+}
+
 fn entropy_compress_with_task(
     content: &str,
     entropy_threshold: f64,
     jaccard_threshold: f64,
     task_keywords: &[String],
+) -> EntropyResult {
+    entropy_compress_inner(
+        content,
+        entropy_threshold,
+        jaccard_threshold,
+        task_keywords,
+        true,
+    )
+}
+
+fn entropy_compress_inner(
+    content: &str,
+    entropy_threshold: f64,
+    jaccard_threshold: f64,
+    task_keywords: &[String],
+    semantic: bool,
 ) -> EntropyResult {
     let original_tokens = count_tokens(content);
     let mut lines: Vec<&str> = content.lines().collect();
@@ -297,9 +373,22 @@ fn entropy_compress_with_task(
     let kw_lower: Vec<String> = task_keywords.iter().map(|k| k.to_lowercase()).collect();
     let original_count = lines.len();
     let mut task_rescued = 0usize;
+    // Semantic redundancy (#544): when the embedding engine is already
+    // loaded, kept lines that embed near-identically to earlier kept lines
+    // are dropped (MMR). Without the engine the closure returns None and the
+    // decision path is byte-identical to the Zipf-only filter.
+    // `semantic=false` (deterministic contract) requests an embedder above
+    // the size cutoff, which never resolves an engine.
+    let embed = line_embedder(if semantic { original_count } else { usize::MAX });
+    let mut scoring_ctx = super::surprise::ScoringCtx::new();
     lines.retain(|line| {
         let trimmed = line.trim();
-        if super::surprise::should_keep_line(trimmed, entropy_threshold) {
+        if super::surprise::should_keep_line_semantic(
+            trimmed,
+            entropy_threshold,
+            &embed,
+            &mut scoring_ctx,
+        ) {
             return true;
         }
         // Task-conditioned rescue: keep low-entropy lines that mention task keywords.
@@ -392,6 +481,88 @@ fn entropy_compress_with_thresholds(
     jaccard_threshold: f64,
 ) -> EntropyResult {
     entropy_compress_with_task(content, entropy_threshold, jaccard_threshold, &[])
+}
+
+/// Budget-based compression to a target density (SDE principle: aim for a
+/// *target* information density instead of maximum compression).
+///
+/// Keeps the highest-entropy lines — in original order — until the BPE token
+/// budget `original_tokens * target` is exhausted. Deterministic: ties break
+/// on line index. `target` is clamped to [0.05, 1.0]; the top-scored line is
+/// always kept so output is never empty for non-empty input.
+pub fn entropy_compress_to_density(content: &str, target: f64) -> EntropyResult {
+    let target = target.clamp(0.05, 1.0);
+    let original_tokens = count_tokens(content);
+    if content.is_empty() || original_tokens == 0 {
+        return EntropyResult {
+            output: String::new(),
+            original_tokens,
+            compressed_tokens: 0,
+            techniques: vec![format!("density target={target:.2} (empty input)")],
+        };
+    }
+
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let budget = ((original_tokens as f64) * target).ceil() as usize;
+
+    let lines: Vec<&str> = content.lines().collect();
+    let mut scored: Vec<(usize, f64, usize)> = lines
+        .iter()
+        .enumerate()
+        .map(|(i, l)| {
+            let trimmed = l.trim();
+            // +1 approximates the newline token; keeps the per-line sum close
+            // to the whole-file count so the budget is meaningful.
+            let toks = count_tokens(trimmed).max(1);
+            (i, token_entropy(trimmed), toks)
+        })
+        .collect();
+    scored.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.0.cmp(&b.0))
+    });
+
+    let mut keep = vec![false; lines.len()];
+    let mut used = 0usize;
+    let mut kept_count = 0usize;
+    // The single most informative line is always kept, even if it alone
+    // exceeds the budget — a density target that drops the highest-signal
+    // line would be self-defeating. Everything else fills greedily.
+    if let Some(&(idx, _, toks)) = scored.first() {
+        keep[idx] = true;
+        used += toks;
+        kept_count += 1;
+    }
+    for &(idx, _h, toks) in scored.iter().skip(1) {
+        if used + toks > budget {
+            // Greedy knapsack: skip lines that overshoot, smaller ones may fit.
+            continue;
+        }
+        keep[idx] = true;
+        used += toks;
+        kept_count += 1;
+    }
+
+    let mut out_lines: Vec<&str> = Vec::with_capacity(kept_count);
+    for (i, line) in lines.iter().enumerate() {
+        if keep[i] {
+            out_lines.push(line);
+        }
+    }
+    let output = out_lines.join("\n");
+    let compressed_tokens = count_tokens(&output);
+
+    let dropped = lines.len() - kept_count;
+    EntropyResult {
+        output,
+        original_tokens,
+        compressed_tokens,
+        techniques: vec![format!(
+            "density target={target:.2} budget={budget} tok, kept {kept_count}/{} lines (⊘ {dropped})",
+            lines.len()
+        )],
+    }
 }
 
 /// Per-line entropy statistics for a block of content.
@@ -699,6 +870,82 @@ mod tests {
         assert!(
             kolmogorov_proxy(&diverse) > kolmogorov_proxy(&rep),
             "diverse content should have higher K"
+        );
+    }
+
+    fn density_fixture() -> String {
+        (0..120)
+            .map(|i| {
+                if i % 3 == 0 {
+                    format!(
+                        "fn compute_value_{i}(input: &str, flags: u32) -> Result<Output, Error> {{"
+                    )
+                } else if i % 3 == 1 {
+                    format!("    let intermediate_{i} = transform(input, flags ^ {i});")
+                } else {
+                    "}".to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn density_respects_token_budget() {
+        let content = density_fixture();
+        let orig = count_tokens(&content);
+        for target in [0.3, 0.5, 0.7] {
+            let r = entropy_compress_to_density(&content, target);
+            let actual = r.compressed_tokens as f64 / orig as f64;
+            assert!(
+                actual <= target + 0.10,
+                "target {target}: actual density {actual:.2} exceeds budget"
+            );
+            assert!(!r.output.is_empty());
+        }
+    }
+
+    #[test]
+    fn density_is_deterministic() {
+        let content = density_fixture();
+        let a = entropy_compress_to_density(&content, 0.4);
+        let b = entropy_compress_to_density(&content, 0.4);
+        assert_eq!(a.output, b.output);
+        assert_eq!(a.compressed_tokens, b.compressed_tokens);
+    }
+
+    #[test]
+    fn density_target_one_keeps_everything() {
+        let content = density_fixture();
+        let r = entropy_compress_to_density(&content, 1.0);
+        assert_eq!(r.output, content);
+    }
+
+    #[test]
+    fn density_clamps_out_of_range_target() {
+        let content = density_fixture();
+        let low = entropy_compress_to_density(&content, 0.0);
+        assert!(!low.output.is_empty(), "clamped to 0.05, never empty");
+        let high = entropy_compress_to_density(&content, 5.0);
+        assert_eq!(high.output, content, "clamped to 1.0 keeps all");
+    }
+
+    #[test]
+    fn density_empty_input() {
+        let r = entropy_compress_to_density("", 0.5);
+        assert_eq!(r.compressed_tokens, 0);
+        assert!(r.output.is_empty());
+    }
+
+    #[test]
+    fn density_prefers_high_entropy_lines() {
+        let content =
+            "}\n}\n}\nlet complex_result = compute_unique_hash(seed, nonce, payload);\n}\n}";
+        let r = entropy_compress_to_density(content, 0.6);
+        assert!(
+            r.output.contains("compute_unique_hash"),
+            "high-entropy line must survive: {}",
+            r.output
         );
     }
 }

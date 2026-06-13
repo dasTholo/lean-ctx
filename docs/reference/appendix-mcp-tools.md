@@ -1,4 +1,4 @@
-# Appendix — MCP Tool Map (all 72 tools)
+# Appendix — MCP Tool Map (all 76 tools)
 
 Every tool lean-ctx registers via `rust/src/server/registry.rs`. Your AI editor
 calls these instead of its native file/search tools. The **Profile** column
@@ -14,14 +14,14 @@ shows the smallest tool profile that exposes the tool (`M` minimal, `S` standard
 |---------|-------|--------------|
 | **minimal** | 6 | Lowest context overhead; the absolute essentials |
 | **standard** | 22 | Balanced default for most coding workflows |
-| **power** | 72 | Everything (default for existing installs) |
+| **power** | 75 | Everything (default for existing installs) |
 
 - **minimal (6):** `ctx_read`, `ctx_shell`, `shell`, `ctx_search`, `ctx_tree`, `ctx_session`
 - **standard (+16):** + `ctx_semantic_search`, `ctx_knowledge`, `ctx_overview`,
   `ctx_repomap`, `ctx_callgraph`, `ctx_impact`, `ctx_compress`, `ctx_multi_read`,
   `ctx_delta`, `ctx_edit`, `ctx_agent`, `ctx_architecture`, `ctx_pack`,
   `ctx_routes`, `ctx_refactor`, `ctx_url_read`
-- **power (+49):** all remaining tools.
+- **power (+53):** all remaining tools.
 
 ---
 
@@ -29,7 +29,7 @@ shows the smallest tool profile that exposes the tool (`M` minimal, `S` standard
 
 | Tool | Purpose | Key params / actions | Profile |
 |------|---------|----------------------|---------|
-| `ctx_read` | Read a file with session cache + compression; re-reads ~13 tokens when unchanged | `path`*, `mode` (full\|map\|signatures\|diff\|aggressive\|entropy\|task\|reference\|lines:N-M\|auto), `start_line`, `fresh` | M |
+| `ctx_read` | Read a file with session cache + compression; re-reads ~13 tokens when unchanged | `path`*, `mode` (full\|raw\|map\|signatures\|diff\|aggressive\|entropy\|task\|reference\|lines:N-M\|auto), `start_line`, `fresh` | M |
 | `ctx_multi_read` | Read many files in one call (same modes) | `paths[]`*, `mode`, `fresh` | S |
 | `ctx_smart_read` | Auto-pick the optimal read mode for a file | `path`* | P |
 | `ctx_delta` | Incremental diff — only lines changed since last read | `path`* | S |
@@ -40,7 +40,8 @@ shows the smallest tool profile that exposes the tool (`M` minimal, `S` standard
 | `ctx_retrieve` | Fetch uncompressed original from cache (CCR) | `path`*, `query` | P |
 | `ctx_shell` | Run shell commands with pattern compression | `command`*, `raw`, `cwd` | M |
 | `shell` | Alias of `ctx_shell` (same compression) for clients whose model reaches for a native `shell`/`bash` tool — e.g. Codex Desktop / Codex Cloud | `command`*, `raw`, `cwd` | M |
-| `ctx_search` | Regex search across the codebase, token-efficient | `pattern`*, `path`, `ext`, `max_results`, `ignore_gitignore` | M |
+| `ctx_search` | Regex search across the codebase, token-efficient | `pattern`*, `path`, `include` (glob, e.g. `*.{rs,ts}`), `ext` (deprecated alias), `max_results`, `ignore_gitignore` | M |
+| `ctx_glob` | Find files by glob pattern (path match), gitignore-aware, multi-root, deterministically sorted | `pattern`*, `path`, `paths[]`, `max_results`, `ignore_gitignore` | P |
 | `ctx_tree` | Compact directory tree with file counts | `path`, `depth`, `show_hidden` | M |
 | `ctx_semantic_search` | Semantic search (BM25 + embeddings / hybrid) | `query`*, `action` (search\|reindex\|find_related), `mode` (bm25\|dense\|hybrid), `top_k` | S |
 | `ctx_compose` | Task composer: keywords + ranked files + matches + top symbol | `task`*, `path` | P |
@@ -110,6 +111,9 @@ shows the smallest tool profile that exposes the tool (`M` minimal, `S` standard
 | `ctx_tools` | MCP Tool-Catalog Gateway — route/proxy unlimited downstream MCP servers at constant context cost | find\|call\|list\|refresh | P |
 | `ctx_plugins` | Plugin management | list\|enable\|disable\|info\|hooks | P |
 | `ctx_rules` | Cross-agent rules governance (ContextOps) | sync\|diff\|lint\|status\|init | P |
+| `ctx_skillify` | Codify recurring session-diary + knowledge patterns into versioned, git-committable `.cursor/rules/skillify-*.mdc` (precision-biased, idempotent) | mine\|list\|status\|promote; `slug` | P |
+| `ctx_summary` | Record + recall AI session summaries (semantic when warm, else lexical); auto-captured on the checkpoint cadence | recall\|record\|list; `query`, `top_k` | P |
+| `ctx_package` | Save/resume portable context packages (session + summaries + knowledge bundle) for agent handoffs or session persistence | save\|resume\|list\|info; `path`, `description` | P |
 | `ctx_overview` | Task-relevant project map — ideal at session start | `task`, `path` | S |
 | `ctx_preload` | Proactively load task-relevant files; compact L-curve summary | `task`*, `path` | P |
 | `ctx_prefetch` | Predictive prefetch for blast-radius files | `root`, `task`, `changed_files[]`, `budget_tokens` | P |
@@ -136,9 +140,9 @@ shows the smallest tool profile that exposes the tool (`M` minimal, `S` standard
 
 ## Notes
 
-1. `power` enables all 72 tools; `ToolProfile::is_tool_enabled()` returns `true`
+1. `power` enables all 76 tools; `ToolProfile::is_tool_enabled()` returns `true`
    for everything under power.
 2. `ctx_load_tools` controls *dynamic* categories (`arch`, `debug`, `memory`,
    `metrics`, `session`) independently of the static profile filter.
 3. Lazy clients use `ctx_call` + `ctx_discover_tools` + `ctx_load_tools` to reach
-   tools not in their active profile without listing all 72 upfront.
+   tools not in their active profile without listing all 76 upfront.

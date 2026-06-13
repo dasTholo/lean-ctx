@@ -15,8 +15,7 @@ impl McpTool for CtxSearchTool {
     fn tool_def(&self) -> Tool {
         tool_def(
             "ctx_search",
-            "Search code by regex. Prefer over native Grep/rg/find (compact output).\n\
-             Respects .gitignore; supports multi-root via `paths` array. Secret-like files skipped unless role allows.",
+            "Regex code search. Prefer over native Grep/rg/find (compact, .gitignore-aware).",
             json!({
                 "type": "object",
                 "properties": {
@@ -25,11 +24,12 @@ impl McpTool for CtxSearchTool {
                     "paths": {
                         "type": "array",
                         "items": { "type": "string" },
-                        "description": "Multiple directories to search (alternative to path)"
+                        "description": "Multiple roots (alternative to path)"
                     },
-                    "ext": { "type": "string", "description": "File extension filter" },
-                    "max_results": { "type": "integer", "description": "Max results (default: 20)" },
-                    "ignore_gitignore": { "type": "boolean", "description": "Set true to scan ALL files including .gitignore'd paths (default: false). Requires role policy (e.g. admin)." }
+                    "include": { "type": "string", "description": "Glob filter, e.g. *.ts, src/**/*.rs" },
+                    "ext": { "type": "string", "description": "Deprecated; use include" },
+                    "max_results": { "type": "integer", "description": "Default 20" },
+                    "ignore_gitignore": { "type": "boolean", "description": "Also scan gitignored files (needs role)" }
                 },
                 "required": ["pattern"]
             }),
@@ -44,7 +44,10 @@ impl McpTool for CtxSearchTool {
         let pattern = get_str(args, "pattern")
             .ok_or_else(|| ErrorData::invalid_params("pattern is required", None))?;
         let resolved = crate::server::multi_path::resolve_tool_paths(args, ctx);
-        let ext = get_str(args, "ext");
+        // `include` is the canonical glob filter; `ext` is the deprecated alias
+        // (bare extension → `*.{ext}`). `include` wins when both are supplied.
+        let include =
+            get_str(args, "include").or_else(|| get_str(args, "ext").map(|e| ext_to_include(&e)));
         let max = (get_int(args, "max_results").unwrap_or(20) as usize).min(500);
         let no_gitignore = get_bool(args, "ignore_gitignore").unwrap_or(false);
 
@@ -63,7 +66,7 @@ impl McpTool for CtxSearchTool {
             return search_single(
                 &pattern,
                 &resolved.roots[0],
-                ext.as_deref(),
+                include.as_deref(),
                 max,
                 crp,
                 respect,
@@ -74,20 +77,20 @@ impl McpTool for CtxSearchTool {
         let _mode_guard = crate::core::savings_footer::ModeGuard::new("search");
         let per_root_max = (max / resolved.roots.len()).max(5);
         let mut combined = String::new();
-        let mut total_original: usize = 0;
+        let mut total_observed: usize = 0;
         let mut total_sent: usize = 0;
 
         for root in &resolved.roots {
             let pat = pattern.clone();
             let r = root.clone();
-            let e = ext.clone();
+            let inc = include.clone();
 
             let search_result = tokio::task::block_in_place(|| {
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     crate::tools::ctx_search::handle(
                         &pat,
                         &r,
-                        e.as_deref(),
+                        inc.as_deref(),
                         per_root_max,
                         crp,
                         respect,
@@ -97,10 +100,11 @@ impl McpTool for CtxSearchTool {
                 .ok()
             });
 
-            let Some((result, original)) = search_result else {
+            let Some(outcome) = search_result else {
                 combined.push_str(&format!("── {root} ──\nERROR: search panicked\n\n"));
                 continue;
             };
+            let result = outcome.text;
 
             if result.starts_with("ERROR:") || result.trim().is_empty() {
                 if !result.trim().is_empty() {
@@ -110,7 +114,7 @@ impl McpTool for CtxSearchTool {
             }
 
             combined.push_str(&format!("── {root} ──\n{result}\n\n"));
-            total_original += original;
+            total_observed += outcome.observed_tokens;
             total_sent += crate::core::tokens::count_tokens(&result);
         }
 
@@ -118,17 +122,23 @@ impl McpTool for CtxSearchTool {
             combined = "No matches found across any root.".to_string();
         }
 
+        // Dashboard, footer and verified ledger all use *observed* tokens —
+        // the modeled 2.5x native-grep baseline never inflates user-facing
+        // numbers (GL #573). It only feeds the explicitly-estimated stats
+        // series via `tool_lifecycle::record_search`.
         let final_out =
-            crate::core::protocol::append_savings(&combined, total_original, total_sent);
-        let saved = total_original.saturating_sub(total_sent);
+            crate::core::protocol::append_savings(&combined, total_observed, total_sent);
+        let saved = total_observed.saturating_sub(total_sent);
+        crate::core::savings_ledger::record_tool_event("ctx_search", total_observed, saved);
 
         Ok(ToolOutput {
             text: final_out,
-            original_tokens: total_original,
+            original_tokens: total_observed,
             saved_tokens: saved,
             mode: None,
             path: None,
             changed: false,
+            shell_outcome: None,
         })
     }
 }
@@ -136,7 +146,7 @@ impl McpTool for CtxSearchTool {
 fn search_single(
     pattern: &str,
     path: &str,
-    ext: Option<&str>,
+    include: Option<&str>,
     max: usize,
     crp: crate::tools::CrpMode,
     respect_gitignore: bool,
@@ -151,7 +161,7 @@ fn search_single(
             crate::tools::ctx_search::handle(
                 &pattern_clone,
                 &path_clone,
-                ext,
+                include,
                 max,
                 crp,
                 respect_gitignore,
@@ -164,7 +174,7 @@ fn search_single(
         }
     });
 
-    let (result, original) = match search_result {
+    let outcome = match search_result {
         Ok(r) => r,
         Err(e) => {
             return Err(ErrorData::internal_error(
@@ -173,21 +183,67 @@ fn search_single(
             ));
         }
     };
+    let result = outcome.text;
+    // Observed tokens only — the modeled native-grep baseline stays out of
+    // dashboard/footer/ledger (GL #573); see the multi-root branch above.
+    let observed = outcome.observed_tokens;
 
     if result.starts_with("ERROR:") {
         return Err(ErrorData::invalid_params(result, None));
     }
 
     let sent = crate::core::tokens::count_tokens(&result);
-    let saved = original.saturating_sub(sent);
-    let final_out = crate::core::protocol::append_savings(&result, original, sent);
+    let saved = observed.saturating_sub(sent);
+    let final_out = crate::core::protocol::append_savings(&result, observed, sent);
+    crate::core::savings_ledger::record_tool_event("ctx_search", observed, saved);
 
     Ok(ToolOutput {
         text: final_out,
-        original_tokens: original,
+        original_tokens: observed,
         saved_tokens: saved,
         mode: None,
         path: Some(path.to_string()),
         changed: false,
+        shell_outcome: None,
     })
+}
+
+/// Translate the deprecated `ext` parameter into an `include` glob.
+///
+/// The historical `ext` accepted a bare extension (`rs` or `.rs`) and matched it
+/// exactly; the equivalent glob is `*.{ext}` (the `glob` crate's `*` spans path
+/// separators, so it still matches at any depth, preserving the old behaviour).
+/// A value that already looks like a glob/path (`*`, `{`, `?`, `/`) is passed
+/// through untouched so any power user who put a pattern in `ext` keeps working.
+fn ext_to_include(ext: &str) -> String {
+    if ext.contains(['*', '{', '?', '/']) {
+        return ext.to_string();
+    }
+    let bare = ext.strip_prefix('.').unwrap_or(ext);
+    format!("*.{bare}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ext_to_include;
+
+    #[test]
+    fn ext_alias_bare_extension_becomes_glob() {
+        assert_eq!(ext_to_include("rs"), "*.rs");
+        assert_eq!(ext_to_include("ts"), "*.ts");
+    }
+
+    #[test]
+    fn ext_alias_strips_leading_dot() {
+        assert_eq!(ext_to_include(".rs"), "*.rs");
+        assert_eq!(ext_to_include(".tsx"), "*.tsx");
+    }
+
+    #[test]
+    fn ext_alias_passes_through_glob_like_values() {
+        // Already a glob/path → keep verbatim, don't double-wrap.
+        assert_eq!(ext_to_include("*.rs"), "*.rs");
+        assert_eq!(ext_to_include("*.{rs,ts}"), "*.{rs,ts}");
+        assert_eq!(ext_to_include("src/**/*.tsx"), "src/**/*.tsx");
+    }
 }

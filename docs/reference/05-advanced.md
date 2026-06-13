@@ -49,10 +49,45 @@ started — run `lean-ctx proxy start` (or rely on the LaunchAgent/systemd unit)
 (`OPENAI_BASE_URL`), and installs `com.leanctx.proxy.plist` (macOS) or a systemd
 user unit (Linux). Upstreams are configurable in `[proxy]`.
 
+**Plays nice with provider prompt caching.** Anthropic's `cache_control` and
+OpenAI's automatic prompt caching bill cached prefix tokens at a fraction of
+the base rate — but only for *byte-identical* prefixes. The proxy therefore
+mutates history exclusively in cache-stable ways: tool-result compression is
+content-deterministic (the same result compresses identically on every turn),
+and old tool results are summarized only at **frozen compaction boundaries**
+that advance in large deterministic strides instead of a per-turn rolling
+window. Between boundary jumps your request prefix stays byte-identical, so
+cache reads keep hitting; a jump costs one re-write and then caching resumes
+on the smaller history. Tune via `[proxy].history_mode` (or
+`LEAN_CTX_PROXY_HISTORY_MODE`):
+
+| Mode | Behaviour | Use when |
+|------|-----------|----------|
+| `cache-aware` *(default)* | Prune at frozen 16-message strides, ≥8 recent messages always intact | You use prompt caching (Claude Code, Cursor, most clients) |
+| `rolling` | Legacy: summarize everything older than the last 6 messages, every turn | Maximum raw-token reduction, no prompt caching in play |
+| `off` | Never prune history (compression still applies) | Debugging, or the client manages history itself |
+
 > **Heads-up (community-reported):** `proxy enable` modifies your shell RC. If a
 > base URL "defaults to the wrong provider," check the exported `*_BASE_URL`
 > values in your RC and `lean-ctx proxy status`. The unmodified RC is preserved
 > as a `*.lean-ctx.bak` backup.
+
+> **Claude Pro/Max subscriptions need an API key for the proxy.** The proxy
+> forwards your credential upstream but never *injects* one. A Claude Pro/Max
+> subscription authenticates via OAuth directly against `api.anthropic.com`, and
+> that token is rejected by any custom `ANTHROPIC_BASE_URL` — routing it through
+> the proxy produces a login loop / 401. Therefore `proxy enable` **skips the
+> Claude redirect when no `ANTHROPIC_API_KEY` is detected** (env or
+> `~/.claude/settings.json`) and leaves Claude Code talking to Anthropic directly.
+> `lean-ctx doctor` flags the conflict if a stale redirect remains.
+>
+> - **On a subscription?** Keep the proxy disabled for Claude and get savings from
+>   the lean-ctx MCP tools instead (`ctx_read` / `ctx_search` / `ctx_shell`).
+>   Other providers (OpenAI/Codex, Gemini, Ollama) are still routed through the
+>   proxy.
+> - **Pay-as-you-go?** Export `ANTHROPIC_API_KEY=…`, then run
+>   `lean-ctx proxy enable` (or `--force` to override detection). Claude traffic is
+>   then compressed by the proxy.
 
 ---
 

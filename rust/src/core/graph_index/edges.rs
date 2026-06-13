@@ -29,7 +29,8 @@ fn build_edges_with_cache(index: &mut ProjectIndex, content_cache: &HashMap<Stri
     let mut file_paths: Vec<String> = index.files.keys().cloned().collect();
     file_paths.sort();
 
-    let resolver_ctx = import_resolver::ResolverContext::new(root_path, file_paths.clone());
+    let resolver_ctx =
+        import_resolver::ResolverContext::new(root_path, file_paths.clone(), content_cache);
 
     const MAX_FILE_SIZE_FOR_EDGES: u64 = 2 * 1024 * 1024;
 
@@ -62,22 +63,38 @@ fn build_edges_with_cache(index: &mut ProjectIndex, content_cache: &HashMap<Stri
             .and_then(|e| e.to_str())
             .unwrap_or("");
 
-        let resolve_ext = match ext {
-            "vue" | "svelte" => "ts",
-            _ => ext,
-        };
+        // Godot scenes carry their dependencies in `[ext_resource]` headers, not
+        // in source-code import statements, so they bypass tree-sitter analysis
+        // and use the dedicated PackedScene parser. `res://` paths resolve via
+        // the GDScript resolver. (#316)
+        let (resolve_ext, imports) = if ext == "tscn" {
+            (
+                "tscn",
+                crate::core::godot::scene::extract_scene_imports(&content),
+            )
+        } else {
+            let resolve_ext = match ext {
+                "vue" | "svelte" => "ts",
+                _ => ext,
+            };
 
-        let analysis_content = if ext == "vue" || ext == "svelte" {
-            if let Some(script) = crate::core::signatures_ts::sfc::extract_script_block(&content) {
-                std::borrow::Cow::Owned(script)
+            let analysis_content = if ext == "vue" || ext == "svelte" {
+                if let Some(script) =
+                    crate::core::signatures_ts::sfc::extract_script_block(&content)
+                {
+                    std::borrow::Cow::Owned(script)
+                } else {
+                    content
+                }
             } else {
                 content
-            }
-        } else {
-            content
+            };
+
+            let imports =
+                crate::core::deep_queries::analyze(&analysis_content, resolve_ext).imports;
+            (resolve_ext, imports)
         };
 
-        let imports = crate::core::deep_queries::analyze(&analysis_content, resolve_ext).imports;
         if imports.is_empty() {
             continue;
         }
@@ -148,7 +165,90 @@ fn build_implicit_edges_with_cache(
         }
     }
 
+    // C# namespace cohesion is computed in a single pass over all `.cs` files
+    // (grouping needs every file), rather than per-file inside the loop above.
+    collect_csharp_namespace_edges(&file_paths, index, &mut new_edges, content_cache);
+
     index.edges.extend(new_edges);
+}
+
+/// Link C# files that declare the same namespace so namespace-cohesive code
+/// (including `partial` classes split across files) forms a connected component
+/// even without a direct `using`. Files in a namespace are chained
+/// deterministically (`a -> b -> c`), yielding `n-1` edges per group.
+fn collect_csharp_namespace_edges(
+    file_paths: &[String],
+    index: &ProjectIndex,
+    edges: &mut Vec<IndexEdge>,
+    content_cache: &HashMap<String, String>,
+) {
+    let mut by_namespace: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+
+    for file in file_paths {
+        if Path::new(file.as_str())
+            .extension()
+            .and_then(|e| e.to_str())
+            != Some("cs")
+        {
+            continue;
+        }
+
+        let content = if let Some(cached) = content_cache.get(file) {
+            std::borrow::Cow::Borrowed(cached.as_str())
+        } else {
+            let full_path = Path::new(&index.project_root).join(file);
+            match std::fs::read_to_string(&full_path) {
+                Ok(c) => std::borrow::Cow::Owned(c),
+                Err(_) => continue,
+            }
+        };
+
+        if let Some(namespace) = csharp_primary_namespace(&content) {
+            by_namespace
+                .entry(namespace)
+                .or_default()
+                .push(file.clone());
+        }
+    }
+
+    for (_namespace, mut files) in by_namespace {
+        files.sort();
+        files.dedup();
+        if files.len() < 2 {
+            continue;
+        }
+        for pair in files.windows(2) {
+            edges.push(IndexEdge {
+                from: pair[0].clone(),
+                to: pair[1].clone(),
+                kind: "namespace".to_string(),
+                weight: 0.6,
+            });
+        }
+    }
+}
+
+/// First namespace declared in a C# file — block `namespace X.Y { }` or
+/// file-scoped `namespace X.Y;`. Comment lines are skipped so a commented-out
+/// declaration is never mistaken for the real one.
+fn csharp_primary_namespace(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("//") || trimmed.starts_with('*') || trimmed.starts_with("/*") {
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("namespace ") {
+            let namespace: String = rest
+                .chars()
+                .take_while(|c| !c.is_whitespace() && *c != '{' && *c != ';')
+                .collect();
+            if !namespace.is_empty() {
+                return Some(namespace);
+            }
+        }
+    }
+    None
 }
 
 fn collect_rust_mod_edges_cached(

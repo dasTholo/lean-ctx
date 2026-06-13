@@ -375,12 +375,39 @@ fn map_mode_includes_signature_line_ranges() {
         "map output should include API: {result}"
     );
     assert!(
-        result.contains("cl ⊛ Config @L1"),
+        result.contains("struct pub Config @L1"),
         "struct signature should include line suffix: {result}"
     );
     assert!(
-        result.contains("fn ⊛ build() → Config @L3"),
+        result.contains("fn pub build() → Config @L3"),
         "function signature should include line suffix: {result}"
+    );
+}
+
+#[test]
+fn tdd_map_output_carries_symbol_legend() {
+    // GL #580: symbol notation must be self-describing for vanilla agents.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("lib.rs");
+    let p = path.to_string_lossy().to_string();
+    std::fs::write(
+        &path,
+        "pub struct Config {}\n\npub fn build() -> Config { Config {} }\n",
+    )
+    .unwrap();
+
+    let mut cache = SessionCache::new();
+    let result = handle(&mut cache, &p, "map", CrpMode::Tdd);
+    assert!(
+        result.contains("[λ=fn §=class +=pub]"),
+        "TDD map output must carry the symbol legend: {result}"
+    );
+
+    let mut cache2 = SessionCache::new();
+    let sigs = handle(&mut cache2, &p, "signatures", CrpMode::Tdd);
+    assert!(
+        sigs.contains("[λ=fn §=class +=pub]"),
+        "TDD signatures output must carry the symbol legend: {sigs}"
     );
 }
 
@@ -414,4 +441,109 @@ fn resolve_auto_mode_returns_full_for_instruction_files() {
 
     let mode = resolve_auto_mode("/workspace/.cursorrules", 2000, None);
     assert_eq!(mode, "full", ".cursorrules must always be read in full");
+}
+
+#[test]
+fn raw_mode_returns_exact_file_content() {
+    let _lock = crate::core::data_dir::test_env_lock();
+    let content = "fn main() {\n    println!(\"hello\");\n}\n";
+    let (output, _sent) = render::process_mode(
+        content,
+        "raw",
+        "F1",
+        "main.rs",
+        "rs",
+        100,
+        CrpMode::Off,
+        "/tmp/main.rs",
+        None,
+    );
+    assert_eq!(
+        output, content,
+        "raw mode must return exact file content with zero overhead"
+    );
+    assert!(
+        !output.contains("main.rs"),
+        "raw mode must not contain filename header"
+    );
+    assert!(!output.contains("deps"), "raw mode must not contain deps");
+}
+
+/// Determinism contract (#498): tool output must be a pure function of
+/// (content, mode, crp_mode, task). Timestamps, counters or random hints in
+/// the body would make otherwise-identical outputs unique and defeat
+/// provider-side prompt caching.
+#[test]
+fn process_mode_output_is_byte_stable_across_calls() {
+    // Fresh, empty data dir (GL #556): the shared per-process test sandbox
+    // accumulates feedback/bandit/session stores from parallel tests, which
+    // feed adaptive_thresholds() and make entropy-mode output drift between
+    // two calls. Purity only holds against a stable learning state.
+    let _iso = crate::core::data_dir::isolated_data_dir();
+    // Footer visibility must be the default (`never`) for purity: with a
+    // visible footer, the process-global session accumulator appends a
+    // `session: N saved` line every 10th call across ALL tests. Other tests
+    // leaked `LEAN_CTX_SAVINGS_FOOTER=always` here in the past — neutralize
+    // defensively while we hold the env lock.
+    std::env::remove_var("LEAN_CTX_SAVINGS_FOOTER");
+    std::env::remove_var("LEAN_CTX_SHOW_SAVINGS");
+    std::env::remove_var("LEAN_CTX_QUIET");
+    let content: String = (0..120)
+        .map(|i| format!("pub fn handler_{i}(x: u32) -> u32 {{ x * {i} }}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let tokens = count_tokens(&content);
+
+    for mode in [
+        "map",
+        "signatures",
+        "reference",
+        "aggressive",
+        "entropy",
+        "raw",
+        "lines:5-20",
+    ] {
+        let run = || {
+            render::process_mode(
+                &content,
+                mode,
+                "F1",
+                "stable.rs",
+                "rs",
+                tokens,
+                CrpMode::Off,
+                "/tmp/stable.rs",
+                None,
+            )
+            .0
+        };
+        let first = run();
+        let second = run();
+        assert_eq!(
+            first, second,
+            "mode '{mode}' produced non-deterministic output"
+        );
+    }
+}
+
+#[test]
+fn raw_mode_no_savings_footer() {
+    let _lock = crate::core::data_dir::test_env_lock();
+    let content = "x = 1\n";
+    let (output, _) = render::process_mode(
+        content,
+        "raw",
+        "F1",
+        "tiny.py",
+        "py",
+        50,
+        CrpMode::Off,
+        "/tmp/tiny.py",
+        None,
+    );
+    assert!(
+        !output.contains('\u{2500}'),
+        "raw mode must not contain savings footer box-drawing chars"
+    );
+    assert_eq!(output, content);
 }

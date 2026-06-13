@@ -38,6 +38,77 @@ pub(super) fn shell_allowlist_outcome() -> Outcome {
     }
 }
 
+/// Reports the effective PathJail state (GH #392): which knob (if any)
+/// disabled it, and whether configured `allow_paths`/`extra_roots` entries
+/// actually resolve — the silent failure mode behind "allow_paths has no
+/// effect" reports (unexpanded `$VAR`, typos, paths that don't exist).
+pub(super) fn path_jail_outcome() -> Outcome {
+    if cfg!(feature = "no-jail") {
+        return Outcome {
+            ok: true,
+            line: format!(
+                "{BOLD}Path jail{RST}  {YELLOW}disabled at compile time{RST}  {DIM}(built with the no-jail feature){RST}"
+            ),
+        };
+    }
+
+    let cfg = crate::core::config::Config::load();
+    if cfg.path_jail == Some(false) {
+        return Outcome {
+            ok: true,
+            line: format!(
+                "{BOLD}Path jail{RST}  {YELLOW}disabled{RST}  {DIM}(path_jail = false in config.toml — all tool paths allowed){RST}"
+            ),
+        };
+    }
+
+    let entries: Vec<&String> = cfg
+        .allow_paths
+        .iter()
+        .chain(cfg.extra_roots.iter())
+        .collect();
+    let mut grants_everything = false;
+    let mut dead: Vec<String> = Vec::new();
+    for raw in &entries {
+        let expanded = crate::core::pathjail::expand_user_path(raw);
+        if expanded == std::path::Path::new("/") {
+            grants_everything = true;
+        }
+        if !expanded.exists() {
+            dead.push((*raw).clone());
+        }
+    }
+
+    if grants_everything {
+        return Outcome {
+            ok: true,
+            line: format!(
+                "{BOLD}Path jail{RST}  {YELLOW}active, but allow_paths contains \"/\"{RST}  {DIM}(grants everything — prefer the explicit `path_jail = false`){RST}"
+            ),
+        };
+    }
+    if !dead.is_empty() {
+        return Outcome {
+            ok: false,
+            line: format!(
+                "{BOLD}Path jail{RST}  {RED}{} allow_paths entr{} never match{RST}  {DIM}({} — unset $VAR or missing path){RST}",
+                dead.len(),
+                if dead.len() == 1 { "y will" } else { "ies will" },
+                dead.join(", ")
+            ),
+        };
+    }
+    let detail = if entries.is_empty() {
+        "project root only; extend via allow_paths in ~/.lean-ctx/config.toml".to_string()
+    } else {
+        format!("project root + {} configured allow path(s)", entries.len())
+    };
+    Outcome {
+        ok: true,
+        line: format!("{BOLD}Path jail{RST}  {GREEN}active{RST}  {DIM}({detail}){RST}"),
+    }
+}
+
 /// Reports the format-aware passthrough (#342): output already in a compact,
 /// token-oriented format (TOON by default) is preserved verbatim instead of
 /// recompressed, so an agent's proof-of-output-shape survives intact.
@@ -671,6 +742,54 @@ pub(super) fn stale_proxy_env_outcome() -> Option<Outcome> {
     })
 }
 
+/// Detects the Claude Pro/Max subscription + proxy conflict: the proxy is enabled and
+/// Claude Code's `ANTHROPIC_BASE_URL` points at the local proxy, but no Anthropic API
+/// key is available. A subscription OAuth token only authenticates against
+/// `api.anthropic.com`, so routing it through the proxy causes a login loop / 401.
+/// Returns `None` when not applicable, `Some(Outcome)` when the conflict is present.
+pub(super) fn proxy_subscription_conflict_outcome() -> Option<Outcome> {
+    use crate::core::config::Config;
+
+    let home = dirs::home_dir()?;
+    let cfg = Config::load();
+
+    // Only relevant when the proxy is actively enabled.
+    if cfg.proxy_enabled != Some(true) {
+        return None;
+    }
+
+    let settings_path = crate::core::editor_registry::claude_state_dir(&home).join("settings.json");
+    let content = std::fs::read_to_string(&settings_path).ok()?;
+    let doc: serde_json::Value = crate::core::jsonc::parse_jsonc(&content).ok()?;
+
+    let base_url = doc
+        .get("env")
+        .and_then(|e| e.get("ANTHROPIC_BASE_URL"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    // No local redirect → nothing to warn about.
+    if !crate::proxy_setup::is_local_lean_ctx_url(base_url) {
+        return None;
+    }
+
+    // API key present → the proxy can forward it, redirect is fine.
+    if crate::proxy_setup::anthropic_api_key_available(&home) {
+        return None;
+    }
+
+    Some(Outcome {
+        ok: false,
+        line: format!(
+            "{BOLD}Claude auth{RST}  {RED}ANTHROPIC_BASE_URL → proxy but no ANTHROPIC_API_KEY (Pro/Max subscription){RST}\n\
+             {DIM}         A subscription token only authenticates against api.anthropic.com; routing it{RST}\n\
+             {DIM}         through the proxy causes a login loop / 401. Fix one of:{RST}\n\
+             {YELLOW}           lean-ctx proxy disable     {DIM}(keep your subscription; use ctx_* MCP tools for savings){RST}\n\
+             {YELLOW}           export ANTHROPIC_API_KEY=…  {DIM}then: lean-ctx proxy enable  (pay-as-you-go via proxy){RST}"
+        ),
+    })
+}
+
 pub(super) fn proxy_upstream_outcome() -> Outcome {
     use crate::core::config::{is_local_proxy_url, Config, ProxyProvider};
 
@@ -795,33 +914,60 @@ pub(super) fn claude_truncation_outcome() -> Option<Outcome> {
         return None;
     }
 
-    let rules_path = crate::core::editor_registry::claude_rules_dir(&home).join("lean-ctx.md");
-    let skill_path = home.join(".claude/skills/lean-ctx/SKILL.md");
+    let cfg = crate::core::config::Config::load();
+    Some(claude_instructions_check(
+        &home,
+        cfg.rules_scope_effective(),
+        cfg.rules_injection_effective(),
+    ))
+}
 
-    let has_rules = rules_path.exists();
-    let has_skill = skill_path.exists();
+/// Verify Claude Code receives the full lean-ctx instructions despite the
+/// 2048-char MCP instructions cap.
+///
+/// The v3 layout (GL #555) replaced the always-loaded `~/.claude/rules/lean-ctx.md`
+/// with a CLAUDE.md block + on-demand skill — `setup` actively *removes* the rules
+/// file. The check therefore accepts every layout `setup` can produce (GH #396:
+/// the old check demanded the retired rules file right after setup deleted it,
+/// and its suggested fix could not recreate one). Layout detection lives in
+/// `common::claude_instructions_state`, shared with `doctor integrations`.
+fn claude_instructions_check(
+    home: &std::path::Path,
+    scope: crate::core::config::RulesScope,
+    injection: crate::core::config::RulesInjection,
+) -> Outcome {
+    use super::common::ClaudeInstructionsState as S;
 
-    if has_rules && has_skill {
-        Some(Outcome {
-            ok: true,
-            line: format!(
-                "{BOLD}Claude Code instructions{RST}  {GREEN}rules + skill installed{RST}  {DIM}(MCP instructions capped at 2048 chars — full content via rules file){RST}"
-            ),
-        })
-    } else if has_rules {
-        Some(Outcome {
-            ok: true,
-            line: format!(
-                "{BOLD}Claude Code instructions{RST}  {GREEN}rules file installed{RST}  {DIM}(MCP instructions capped at 2048 chars — full content via rules file){RST}"
-            ),
-        })
-    } else {
-        Some(Outcome {
-            ok: false,
-            line: format!(
-                "{BOLD}Claude Code instructions{RST}  {YELLOW}MCP instructions truncated at 2048 chars, no rules file found{RST}  {DIM}(run: lean-ctx init --agent claude){RST}"
-            ),
-        })
+    let state = super::common::claude_instructions_state(home, scope, injection);
+    let line = match state {
+        S::ProjectScope => format!(
+            "{BOLD}Claude Code instructions{RST}  {GREEN}project scope{RST}  {DIM}(global instructions intentionally absent; project files carry them){RST}"
+        ),
+        S::InjectionOff => format!(
+            "{BOLD}Claude Code instructions{RST}  {GREEN}rules injection off{RST}  {DIM}(instructions intentionally not installed — config rules_injection=off){RST}"
+        ),
+        S::DedicatedWithSkill => format!(
+            "{BOLD}Claude Code instructions{RST}  {GREEN}dedicated injection + skill installed{RST}  {DIM}(SessionStart hook injects instructions){RST}"
+        ),
+        S::DedicatedMissingSkill => format!(
+            "{BOLD}Claude Code instructions{RST}  {YELLOW}lean-ctx skill missing{RST}  {DIM}(run: lean-ctx setup){RST}"
+        ),
+        S::BlockAndSkill => format!(
+            "{BOLD}Claude Code instructions{RST}  {GREEN}CLAUDE.md block + skill installed{RST}  {DIM}(MCP instructions capped at 2048 chars — full content via CLAUDE.md){RST}"
+        ),
+        S::BlockOnly => format!(
+            "{BOLD}Claude Code instructions{RST}  {GREEN}CLAUDE.md block installed{RST}  {DIM}(MCP instructions capped at 2048 chars — full content via CLAUDE.md){RST}"
+        ),
+        S::LegacyRules => format!(
+            "{BOLD}Claude Code instructions{RST}  {GREEN}legacy rules file installed{RST}  {DIM}(next `lean-ctx setup` migrates it to the CLAUDE.md block + skill){RST}"
+        ),
+        S::Missing => format!(
+            "{BOLD}Claude Code instructions{RST}  {YELLOW}no CLAUDE.md block or rules file found — MCP instructions truncated at 2048 chars{RST}  {DIM}(run: lean-ctx setup){RST}"
+        ),
+    };
+    Outcome {
+        ok: state.ok(),
+        line,
     }
 }
 
@@ -1385,4 +1531,99 @@ pub(super) fn lsp_server_outcomes() -> Vec<Outcome> {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::config::{RulesInjection, RulesScope};
+    use std::path::Path;
+
+    fn write(home: &Path, rel: &str, content: &str) {
+        let p = home.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, content).unwrap();
+    }
+
+    fn check(home: &Path, scope: RulesScope, injection: RulesInjection) -> Outcome {
+        claude_instructions_check(home, scope, injection)
+    }
+
+    // GH #396: the exact post-`setup` state — CLAUDE.md block + skill, rules
+    // file removed by setup. Must pass, not demand the retired rules file.
+    #[test]
+    fn v3_layout_block_and_skill_passes() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            ".claude/CLAUDE.md",
+            "<!-- lean-ctx -->\ncontent\n<!-- /lean-ctx -->",
+        );
+        write(tmp.path(), ".claude/skills/lean-ctx/SKILL.md", "skill");
+        let out = check(tmp.path(), RulesScope::Global, RulesInjection::Shared);
+        assert!(out.ok, "post-setup layout must pass: {}", out.line);
+        assert!(out.line.contains("CLAUDE.md block + skill"));
+    }
+
+    #[test]
+    fn block_without_skill_still_passes() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(tmp.path(), ".claude/CLAUDE.md", "<!-- lean-ctx -->\nx");
+        let out = check(tmp.path(), RulesScope::Global, RulesInjection::Shared);
+        assert!(out.ok, "{}", out.line);
+    }
+
+    #[test]
+    fn legacy_rules_file_passes() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(tmp.path(), ".claude/rules/lean-ctx.md", "rules");
+        let out = check(tmp.path(), RulesScope::Global, RulesInjection::Shared);
+        assert!(out.ok, "{}", out.line);
+        assert!(out.line.contains("legacy rules file"));
+    }
+
+    #[test]
+    fn nothing_installed_fails_and_suggests_setup() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = check(tmp.path(), RulesScope::Global, RulesInjection::Shared);
+        assert!(!out.ok);
+        assert!(
+            out.line.contains("lean-ctx setup"),
+            "must suggest a command that actually fixes it: {}",
+            out.line
+        );
+        assert!(
+            !out.line.contains("init --agent claude"),
+            "init --agent claude no longer creates a Claude rules target"
+        );
+    }
+
+    #[test]
+    fn dedicated_injection_with_skill_passes_without_block() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(tmp.path(), ".claude/skills/lean-ctx/SKILL.md", "skill");
+        let out = check(tmp.path(), RulesScope::Global, RulesInjection::Dedicated);
+        assert!(out.ok, "{}", out.line);
+    }
+
+    #[test]
+    fn dedicated_injection_without_skill_fails() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = check(tmp.path(), RulesScope::Global, RulesInjection::Dedicated);
+        assert!(!out.ok);
+    }
+
+    #[test]
+    fn project_scope_passes_without_global_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = check(tmp.path(), RulesScope::Project, RulesInjection::Shared);
+        assert!(out.ok, "{}", out.line);
+    }
+
+    #[test]
+    fn injection_off_passes_without_any_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = check(tmp.path(), RulesScope::Global, RulesInjection::Off);
+        assert!(out.ok, "{}", out.line);
+    }
 }

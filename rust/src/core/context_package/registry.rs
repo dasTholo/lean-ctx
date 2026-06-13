@@ -171,7 +171,7 @@ impl LocalRegistry {
         let content: PackageContent =
             serde_json::from_str(&content_json).map_err(|e| format!("parse content: {e}"))?;
 
-        verify_integrity(&manifest, &content)?;
+        verify_integrity(&manifest, &content_json)?;
 
         Ok((manifest, content))
     }
@@ -199,6 +199,33 @@ impl LocalRegistry {
 
     pub fn export_to_file(&self, name: &str, version: &str, output: &Path) -> Result<u64, String> {
         let (manifest, content) = self.load_package(name, version)?;
+
+        let bundle = ExportBundle { manifest, content };
+        let json = serde_json::to_string_pretty(&bundle).map_err(|e| e.to_string())?;
+        let bytes = json.as_bytes();
+
+        atomic_write(output, bytes)?;
+        Ok(bytes.len() as u64)
+    }
+
+    /// Export with a fresh ed25519 signature over the manifest (GL #406) —
+    /// required by the hosted registry. The stored package stays untouched;
+    /// only the exported bundle carries the signature. `private` stamps
+    /// `visibility=private` into the bundle for the hosted registry (#524).
+    pub fn export_to_file_signed(
+        &self,
+        name: &str,
+        version: &str,
+        output: &Path,
+        signing_key: &ed25519_dalek::SigningKey,
+        private: bool,
+    ) -> Result<u64, String> {
+        let (mut manifest, content) = self.load_package(name, version)?;
+
+        if private {
+            manifest.visibility = Some("private".to_string());
+        }
+        super::signing::sign_package(&mut manifest, &content, signing_key);
 
         let bundle = ExportBundle { manifest, content };
         let json = serde_json::to_string_pretty(&bundle).map_err(|e| e.to_string())?;
@@ -236,7 +263,20 @@ impl LocalRegistry {
 
         bundle.manifest.validate().map_err(|errs| errs.join("; "))?;
 
-        verify_integrity(&bundle.manifest, &bundle.content)?;
+        let content_text = extract_top_level_value_text(&json, "content")
+            .ok_or_else(|| "package has no top-level content member".to_string())?;
+        verify_integrity(&bundle.manifest, content_text)?;
+
+        // A present-but-invalid signature is always tampering (the file was
+        // modified after signing) — reject. Unsigned packages stay importable
+        // for local workflows; registries enforce signing at publish time.
+        if bundle.manifest.signature.is_some()
+            && !super::signing::verify_signature(&bundle.manifest)?
+        {
+            return Err(
+                "signature verification failed — the package was modified after signing".into(),
+            );
+        }
 
         self.install(&bundle.manifest, &bundle.content)?;
         Ok(bundle.manifest)
@@ -267,8 +307,13 @@ struct ExportBundle {
     content: PackageContent,
 }
 
-fn verify_integrity(manifest: &PackageManifest, content: &PackageContent) -> Result<(), String> {
-    let canonical = serde_json::to_string(content).map_err(|e| e.to_string())?;
+use super::verify::{compact_json_text, extract_top_level_value_text};
+
+/// Verify integrity against the writer's bytes: `content_text` is the exact
+/// document text of the content member (pretty or compact — compaction
+/// normalizes whitespace without touching value literals).
+fn verify_integrity(manifest: &PackageManifest, content_text: &str) -> Result<(), String> {
+    let canonical = compact_json_text(content_text);
     let content_bytes = canonical.as_bytes();
 
     let mut h1 = Sha256::new();
@@ -356,6 +401,7 @@ mod tests {
             layers: vec![super::super::manifest::PackageLayer::Knowledge],
             dependencies: vec![],
             tags: vec!["rust".into()],
+            visibility: None,
             integrity: {
                 let c = PackageContent::default();
                 let j = serde_json::to_string(&c).unwrap();
@@ -424,6 +470,7 @@ mod tests {
             layers: vec![super::super::manifest::PackageLayer::Knowledge],
             dependencies: vec![],
             tags: vec![],
+            visibility: None,
             integrity: {
                 let composite = format!("export-test:2.0.0:{content_hash}");
                 let mut h2 = Sha256::new();
@@ -462,6 +509,83 @@ mod tests {
     }
 
     #[test]
+    fn import_rejects_tampered_signature() {
+        let dir = tempfile::tempdir().unwrap();
+        let reg = LocalRegistry::open_at(dir.path()).unwrap();
+
+        let content = PackageContent::default();
+        let content_json = serde_json::to_string(&content).unwrap();
+        let mut h = Sha256::new();
+        h.update(content_json.as_bytes());
+        let content_hash = format!("{:x}", h.finalize());
+        let composite = format!("signed-test:1.0.0:{content_hash}");
+        let mut h2 = Sha256::new();
+        h2.update(composite.as_bytes());
+
+        let mut manifest = PackageManifest {
+            schema_version: crate::core::contracts::CONTEXT_PACKAGE_V1_SCHEMA_VERSION,
+            conformance_level: None,
+            name: "signed-test".into(),
+            version: "1.0.0".into(),
+            description: "signature gate test".into(),
+            author: None,
+            scope: None,
+            created_at: Utc::now(),
+            updated_at: None,
+            layers: vec![super::super::manifest::PackageLayer::Knowledge],
+            dependencies: vec![],
+            tags: vec![],
+            visibility: None,
+            integrity: super::super::manifest::PackageIntegrity {
+                sha256: format!("{:x}", h2.finalize()),
+                content_hash,
+                byte_size: content_json.len() as u64,
+            },
+            provenance: super::super::manifest::PackageProvenance {
+                tool: "lean-ctx".into(),
+                tool_version: "0.0.0".into(),
+                project_hash: None,
+                source_session_id: None,
+            },
+            compatibility: CompatibilitySpec::default(),
+            stats: PackageStats::default(),
+            signature: None,
+            graph_summary: None,
+            marketplace: None,
+        };
+
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+        super::super::signing::sign_package(&mut manifest, &content, &signing_key);
+
+        // Valid signature imports fine.
+        let bundle = ExportBundle {
+            manifest: manifest.clone(),
+            content: content.clone(),
+        };
+        let good = dir.path().join("good.ctxpkg");
+        std::fs::write(&good, serde_json::to_string(&bundle).unwrap()).unwrap();
+        let reg_good = LocalRegistry::open_at(&dir.path().join("good-reg")).unwrap();
+        assert!(reg_good.import_from_file(&good).is_ok());
+
+        // Corrupted signature value must be rejected.
+        let mut tampered = manifest.clone();
+        if let Some(sig) = tampered.signature.as_mut() {
+            sig.value = format!("0000{}", &sig.value[4..]);
+        }
+        let bundle = ExportBundle {
+            manifest: tampered,
+            content,
+        };
+        let bad = dir.path().join("bad.ctxpkg");
+        std::fs::write(&bad, serde_json::to_string(&bundle).unwrap()).unwrap();
+        let err = reg.import_from_file(&bad).unwrap_err();
+        assert!(
+            err.contains("signature verification failed"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
     fn legacy_lctxpkg_extension_accepted() {
         let dir = tempfile::tempdir().unwrap();
         let reg = LocalRegistry::open_at(dir.path()).unwrap();
@@ -488,6 +612,7 @@ mod tests {
             layers: vec![super::super::manifest::PackageLayer::Knowledge],
             dependencies: vec![],
             tags: vec![],
+            visibility: None,
             integrity: super::super::manifest::PackageIntegrity {
                 sha256: format!("{:x}", h2.finalize()),
                 content_hash,

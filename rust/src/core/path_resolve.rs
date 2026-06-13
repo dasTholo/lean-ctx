@@ -18,10 +18,15 @@ pub use crate::core::pathutil::has_project_marker;
 /// secret-screened absolute path.
 ///
 /// Resolution order for relative inputs:
-/// 1. absolute or already-existing path → used as-is
+/// 1. absolute path → used as-is
 /// 2. `<project_root>/<path>` if it exists
 /// 3. `<shell_cwd>/<path>` if a shell cwd is known
 /// 4. `<jail_root>/<path>` as a last resort
+///
+/// Relative inputs are NEVER resolved against the process CWD: the daemon's
+/// CWD is not the project, so a CWD `exists()` probe made resolution
+/// nondeterministic across MCP/daemon/CLI contexts (and could pick a
+/// same-named file outside the project).
 ///
 /// `jail_root` is `project_root`, else `shell_cwd`, else `"."`. The result is
 /// confined to the jail root via [`crate::core::pathjail::jail_path`] and
@@ -42,7 +47,7 @@ pub fn resolve_tool_path(
     let p = Path::new(&normalized);
     let jail_root = project_root.or(shell_cwd).unwrap_or(".").to_string();
 
-    let resolved: PathBuf = if p.is_absolute() || p.exists() {
+    let resolved: PathBuf = if p.is_absolute() {
         PathBuf::from(&normalized)
     } else if let Some(root) = project_root {
         let joined = Path::new(root).join(&normalized);
@@ -116,6 +121,47 @@ mod tests {
         let _ = fs::remove_dir_all(&base);
     }
 
+    // P0-3 (#415): a relative path that happens to exist in the *process CWD*
+    // must NOT short-circuit resolution. `Cargo.toml` exists in the package
+    // root (cargo test's CWD) but not in this empty project root — before the
+    // fix the CWD probe returned it as-is, now it must resolve into the root.
+    #[test]
+    fn relative_path_never_resolves_against_process_cwd() {
+        let cwd = std::env::current_dir().unwrap();
+        assert!(
+            cwd.join("Cargo.toml").exists(),
+            "test premise: CWD contains Cargo.toml"
+        );
+
+        let tmp = std::env::temp_dir().join(format!("lc_pr_nocwd_{}", std::process::id()));
+        fs::create_dir_all(&tmp).unwrap();
+        let root = tmp.to_string_lossy().to_string();
+
+        let out = resolve_tool_path(Some(&root), None, "Cargo.toml").unwrap();
+        // Canonicalize BOTH sides before comparing: on macOS temp_dir() is a
+        // symlink (/var → /private/var) and on Windows it may carry 8.3 short
+        // names (RUNNER~1), so comparing raw strings is platform-flaky. The
+        // resolved file itself does not exist, but its parent does — compare
+        // the canonicalized parents.
+        let canonical_root = crate::core::pathjail::canonicalize_or_self(&tmp);
+        let out_parent = crate::core::pathjail::canonicalize_or_self(
+            Path::new(&out)
+                .parent()
+                .expect("resolved path has a parent"),
+        );
+        assert_eq!(
+            out_parent, canonical_root,
+            "resolved {out} must live under the project root, not the process CWD"
+        );
+        let canonical_cwd = crate::core::pathjail::canonicalize_or_self(&cwd);
+        assert_ne!(
+            out_parent, canonical_cwd,
+            "resolved {out} must not resolve against the process CWD"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
     #[test]
     fn tool_context_shape_project_root_only() {
         // Mirrors ToolContext::resolve_path_sync (shell_cwd = None).
@@ -125,5 +171,27 @@ mod tests {
         let out = resolve_tool_path(Some(&root), None, "missing.rs").unwrap();
         assert!(out.ends_with("missing.rs"), "got {out}");
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    // GH #397: on Unix an absolute path under a single-letter root (`/c/…`)
+    // was rewritten to `C:/…`, which `Path::is_absolute()` rejects on Unix —
+    // the path was then re-joined under the (also-translated) project root,
+    // producing the doubled `C:/root/C:/root/file` form from the report.
+    // `/c` cannot be created in this test environment, so the jail may still
+    // reject the path as nonexistent — the regression assertion is that no
+    // `C:/` drive form appears anywhere in the outcome (Ok or Err).
+    #[cfg(not(windows))]
+    #[test]
+    fn single_letter_root_is_never_drive_translated_on_unix() {
+        for raw in ["/c/Users/me/proj/src/app.ts", "src/app.ts"] {
+            let rendered = match resolve_tool_path(Some("/c/Users/me/proj"), None, raw) {
+                Ok(p) => p,
+                Err(e) => e,
+            };
+            assert!(
+                !rendered.contains("C:/"),
+                "drive translation must not run on unix hosts (raw={raw}): {rendered}"
+            );
+        }
     }
 }

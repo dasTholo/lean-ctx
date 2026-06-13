@@ -120,7 +120,7 @@ class CockpitSearch extends HTMLElement {
 
   render() {
     var F = fmtLib();
-    var esc = F.esc || function (s) { return String(s); };
+    var esc = F.esc || function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; }); };
     var fmt = F.fmt || function (n) { return String(n); };
 
     var body = '';
@@ -135,7 +135,7 @@ class CockpitSearch extends HTMLElement {
 
   _renderSearchBar(esc) {
     var F = fmtLib();
-    var escFn = esc || F.esc || function (s) { return String(s); };
+    var escFn = esc || F.esc || function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; }); };
     var val = this._query ? escFn(this._query) : '';
 
     return (
@@ -161,14 +161,19 @@ class CockpitSearch extends HTMLElement {
     }
 
     var F = fmtLib();
-    var esc = F.esc || function (s) { return String(s); };
+    var esc = F.esc || function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; }); };
     var fmt = F.fmt || function (n) { return String(n); };
 
     var indexed = stats.doc_count != null ? fmt(stats.doc_count) : (stats.indexed_files != null ? fmt(stats.indexed_files) : '—');
     var symbols = stats.chunk_count != null ? fmt(stats.chunk_count) : (stats.total_symbols != null ? fmt(stats.total_symbols) : '—');
-    var lastIndexed = stats.last_indexed
-      ? String(stats.last_indexed).replace('T', ' ').slice(0, 19)
-      : '—';
+    // Only show "Last indexed" when the backend actually reports it —
+    // a permanent em-dash just looks broken.
+    var lastIndexedCell = stats.last_indexed
+      ? '<div class="cks-stat">' +
+        '<span class="sl">Last indexed</span>' +
+        '<span class="sv">' + esc(String(stats.last_indexed).replace('T', ' ').slice(0, 19)) + '</span>' +
+        '</div>'
+      : '';
 
     container.innerHTML =
       '<div class="card" style="margin-bottom:16px">' +
@@ -181,10 +186,7 @@ class CockpitSearch extends HTMLElement {
       '<span class="sl">Total symbols</span>' +
       '<span class="sv">' + esc(symbols) + '</span>' +
       '</div>' +
-      '<div class="cks-stat">' +
-      '<span class="sl">Last indexed</span>' +
-      '<span class="sv">' + esc(lastIndexed) + '</span>' +
-      '</div>' +
+      lastIndexedCell +
       '</div>' +
       '</div>';
   }
@@ -194,8 +196,7 @@ class CockpitSearch extends HTMLElement {
     if (!container) return;
 
     var F = fmtLib();
-    var _e = document.createElement('span');
-    var esc = F.esc || function (s) { _e.textContent = s; return _e.innerHTML; };
+    var esc = F.esc || function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; }); };
     var fmt = F.fmt || function (n) { return String(n); };
 
     if (this._loading) {
@@ -237,24 +238,40 @@ class CockpitSearch extends HTMLElement {
     var meta = esc(String(total)) + ' result' + (total !== 1 ? 's' : '') +
       (elapsed ? ' in ' + esc(elapsed) : '');
 
-    var items = this._results.results.map(function (r) {
-      var path = esc(r.file_path || r.path || '—');
+    // Normalize raw BM25 scores to a relative "match" percentage — the top
+    // hit defines 100%. Raw scores (e.g. 48.02) mean nothing to users.
+    var maxScore = 0;
+    this._results.results.forEach(function (r) {
+      if (r.score != null && Number(r.score) > maxScore) maxScore = Number(r.score);
+    });
+
+    var items = this._results.results.map(function (r, idx) {
+      var rawPath = String(r.file_path || r.path || '');
+      var path = esc(rawPath || '—');
       var line = r.start_line != null ? String(r.start_line) : (r.line != null ? String(r.line) : '');
       var symName = r.symbol_name || '';
       var kind = r.kind || '';
       var content = esc(String(r.snippet || r.content || '').trim().slice(0, 300));
-      var score = r.score != null ? Number(r.score).toFixed(2) : '—';
 
       var header = '<code class="cks-result-path">' + path + '</code>';
       if (line) header += '<span class="cks-result-line">:' + esc(line) + '</span>';
       if (symName) header += ' <strong>' + esc(symName) + '</strong>';
       if (kind) header += ' <span class="tag ts">' + esc(kind) + '</span>';
-      header += '<span class="cks-result-score tag tg">' + esc(score) + '</span>';
+      if (r.score != null && maxScore > 0) {
+        var rel = Math.round((Number(r.score) / maxScore) * 100);
+        header += '<span class="cks-result-score tag tg" title="Relevance relative to the best match">' + rel + '%</span>';
+      }
+      header += '<span class="cks-result-chevron" aria-hidden="true">\u25B8</span>';
 
+      // The whole header is the disclosure control for an inline file preview
+      // (GL #478): results used to *look* clickable but did nothing.
       return (
-        '<div class="cks-result-item">' +
-        '<div class="cks-result-header">' + header + '</div>' +
+        '<div class="cks-result-item" data-idx="' + idx + '">' +
+        '<div class="cks-result-header" role="button" tabindex="0" aria-expanded="false" ' +
+        'title="Show file preview" data-path="' + esc(rawPath) + '" data-line="' + esc(line || '1') + '">' +
+        header + '</div>' +
         (content ? '<pre class="cks-result-content">' + content + '</pre>' : '') +
+        '<div class="cks-result-preview" hidden></div>' +
         '</div>'
       );
     }).join('');
@@ -267,6 +284,109 @@ class CockpitSearch extends HTMLElement {
       '</div>' +
       '<div class="cks-results-list">' + items + '</div>' +
       '</div>';
+
+    this._bindResultClicks(container);
+  }
+
+  /* ---- inline file preview on result click (GL #478) ---- */
+
+  _bindResultClicks(container) {
+    var self = this;
+    var headers = container.querySelectorAll('.cks-result-header[role="button"]');
+    headers.forEach(function (h) {
+      h.addEventListener('click', function () { self._togglePreview(h); });
+      h.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          self._togglePreview(h);
+        }
+      });
+    });
+  }
+
+  async _togglePreview(headerEl) {
+    var item = headerEl.closest('.cks-result-item');
+    if (!item) return;
+    var panel = item.querySelector('.cks-result-preview');
+    if (!panel) return;
+
+    if (!panel.hidden) {
+      panel.hidden = true;
+      headerEl.setAttribute('aria-expanded', 'false');
+      item.classList.remove('cks-open');
+      return;
+    }
+
+    headerEl.setAttribute('aria-expanded', 'true');
+    item.classList.add('cks-open');
+    panel.hidden = false;
+
+    if (panel._loaded) return;
+    panel.innerHTML = '<div class="loading-state" style="padding:8px">Loading preview\u2026</div>';
+
+    var fetchJson = api();
+    var path = headerEl.getAttribute('data-path') || '';
+    var line = parseInt(headerEl.getAttribute('data-line') || '1', 10) || 1;
+    if (!fetchJson || !path) {
+      panel.innerHTML = '<p class="hs" style="color:var(--red);padding:8px">No preview available.</p>';
+      return;
+    }
+
+    try {
+      var data = await fetchJson('/api/compression-demo?path=' + encodeURIComponent(path), { timeoutMs: 10000 });
+      if (!data || data.error || typeof data.original !== 'string') {
+        panel.innerHTML = '<p class="hs" style="padding:8px;color:var(--muted)">Preview unavailable: ' +
+          (data && data.error ? String(data.error) : 'no content') + '</p>';
+        panel._loaded = true;
+        return;
+      }
+      panel.innerHTML = this._previewHtml(data.original, line, data.original_lines || 0, path);
+      var labBtn = panel.querySelector('.cks-open-lab');
+      if (labBtn) {
+        labBtn.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          var p = labBtn.getAttribute('data-lab-path');
+          if (!p) return;
+          try { sessionStorage.setItem('lctx_lab_file', p); } catch (e) { /* private mode */ }
+          location.hash = '#compression';
+        });
+      }
+      panel._loaded = true;
+    } catch (e) {
+      panel.innerHTML = '<p class="hs" style="color:var(--red);padding:8px">Preview failed: ' +
+        ((e && e.error) || 'request error') + '</p>';
+    }
+  }
+
+  /** Window of ±12 lines around the hit, line numbers, hit line highlighted. */
+  _previewHtml(content, hitLine, totalLines, path) {
+    var F = fmtLib();
+    var esc = F.esc || function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; }); };
+
+    var lines = String(content).split('\n');
+    var from = Math.max(1, hitLine - 12);
+    var to = Math.min(lines.length, hitLine + 12);
+    var rows = '';
+    for (var i = from; i <= to; i++) {
+      var cls = i === hitLine ? ' class="cks-hitline"' : '';
+      rows += '<tr' + cls + '><td class="cks-ln">' + i + '</td>' +
+        '<td class="cks-code">' + esc(lines[i - 1] != null ? lines[i - 1] : '') + '</td></tr>';
+    }
+    var truncated = lines.length < totalLines
+      ? '<p class="hs" style="margin:6px 8px;color:var(--muted)">Preview covers the first ' +
+        lines.length + ' of ' + totalLines + ' lines.</p>'
+      : '';
+    // Secondary action from the preview: hand the file to the Compression
+    // Lab via sessionStorage (the Lab may not be mounted yet when we navigate).
+    return (
+      '<div class="cks-preview-head"><code>' + esc(path) + '</code>' +
+      '<span class="hs">lines ' + from + '\u2013' + to + '</span>' +
+      '<button type="button" class="cks-open-lab" data-lab-path="' + esc(path) + '" ' +
+      'title="Open in Compression Lab \u2014 see how lean-ctx compresses this file">' +
+      'Open in Lab \u2192</button></div>' +
+      '<table class="cks-preview-table"><tbody>' + rows + '</tbody></table>' +
+      truncated
+    );
   }
 
   _bindInputs() {

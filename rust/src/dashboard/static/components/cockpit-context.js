@@ -1,5 +1,5 @@
 /**
- * Context Manager — single-page context visibility & management.
+ * Context Contents — single-page context visibility & management.
  */
 const VIEW_MODES = [
   'full', 'map', 'signatures', 'diff', 'aggressive',
@@ -78,7 +78,18 @@ function relTime(ts) {
   return Math.floor(sec / 86400) + 'd';
 }
 
-const escFallback = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const escFallback = s => String(s ?? '').replace(/[&<>"']/g, c => '&#' + c.charCodeAt(0) + ';');
+
+// /api/context-summary items carry the sent size as `tokens`; the render code
+// (and CSV-style sorting) speaks `sent_tokens`. Normalize once on ingest so
+// files are never counted as 0 tokens in the usage estimate.
+function normalizeLedgerEntries(items) {
+  return (items || []).map(e =>
+    e && e.sent_tokens == null && e.tokens != null
+      ? Object.assign({}, e, { sent_tokens: e.tokens })
+      : e
+  );
+}
 
 class CockpitContext extends HTMLElement {
   constructor() {
@@ -128,7 +139,7 @@ class CockpitContext extends HTMLElement {
     const h = ok(hist) ? hist : {};
 
     this._data = {
-      ledger: s.ledger ? Object.assign({}, s.ledger, { entries: s.items || [] }) : null,
+      ledger: s.ledger ? Object.assign({}, s.ledger, { entries: normalizeLedgerEntries(s.items) }) : null,
       field: s.field || null,
       control: ok(control) ? control : null,
       history: Array.isArray(overlayHist) ? overlayHist : ok(overlayHist) ? (overlayHist.items || []) : [],
@@ -168,6 +179,11 @@ class CockpitContext extends HTMLElement {
     if (this._error) { this.innerHTML = '<div class="card" style="padding:20px;color:var(--red)">\u26a0 ' + esc(this._error) + '</div>'; return; }
 
     let body = '';
+
+    // Sibling view: Contents shows what is loaded, Triage says what to do.
+    body += '<p class="hs" style="margin:0 0 12px;color:var(--muted)">Too full? ' +
+      '<a href="#commander" style="color:var(--accent)">Context Triage \u2192</a> ' +
+      'tells you what to trim.</p>';
 
     // 1. Context Window (hero)
     body += this._renderContextWindow(esc, ff, pc);
@@ -216,8 +232,15 @@ class CockpitContext extends HTMLElement {
     const rulesTok = (radar?.rules?.total_tokens) || 0;
     const filesTok = entries.reduce((s, e) => s + (e.sent_tokens || 0), 0);
 
+    // Utilization precedence: exact proxy counts > backend pressure (ledger-
+    // based, ignores transcript noise) > local sum. The raw transcript can
+    // exceed the window (the IDE summarizes old messages), which would pin a
+    // naive estimate at 100% while the triage line below says "Healthy".
     const estTotal = proxyActive && pb ? (pb.total_input_tokens || 0) : (rulesTok + filesTok + chatTok);
-    const util = Math.min(1, estTotal / win);
+    const backendUtil = typeof pressure?.utilization === 'number' ? pressure.utilization : null;
+    const util = proxyActive && pb
+      ? Math.min(1, estTotal / win)
+      : (backendUtil ?? Math.min(1, estTotal / win));
     const pctUsed = Math.round(util * 100);
     const col = gaugeColor(util);
 
@@ -250,7 +273,11 @@ class CockpitContext extends HTMLElement {
       let barLeft = 0;
       const rPct = win > 0 ? rulesTok / win * 100 : 0;
       const fPct = win > 0 ? filesTok / win * 100 : 0;
-      const cPct = win > 0 ? Math.min(chatTok, win - rulesTok - filesTok) / win * 100 : 0;
+      // Keep the stacked bar consistent with the hero percentage: the raw
+      // transcript may exceed the window, so the conversation segment only
+      // gets whatever the utilization figure leaves after rules + files.
+      const chatBudget = Math.max(0, util * win - rulesTok - filesTok);
+      const cPct = win > 0 ? Math.min(chatTok, chatBudget) / win * 100 : 0;
       if (rulesTok > 0) { h += '<div style="position:absolute;left:' + barLeft + '%;top:0;height:100%;width:' + Math.max(0.5, rPct) + '%;background:#6b7280" title="Rules: ' + fmtTok(rulesTok) + '"></div>'; barLeft += rPct; }
       if (filesTok > 0) { h += '<div style="position:absolute;left:' + barLeft + '%;top:0;height:100%;width:' + Math.max(0.5, fPct) + '%;background:#10b981" title="Files: ' + fmtTok(filesTok) + '"></div>'; barLeft += fPct; }
       if (chatTok > 0) { h += '<div style="position:absolute;left:' + barLeft + '%;top:0;height:100%;width:' + Math.max(0.5, cPct) + '%;background:#f59e0b" title="Conversation: ' + fmtTok(chatTok) + '"></div>'; }
@@ -323,16 +350,19 @@ class CockpitContext extends HTMLElement {
     }
 
     // Triage banner — turns observation into a next action as pressure rises.
-    h += this._renderTriageBanner(esc, pressure, util);
+    h += this._renderTriageBanner(esc, pressure, util, proxyActive && !!pb);
 
-    // Eviction candidates (from pressure)
+    // Eviction candidates (from pressure). The backend sends plain path
+    // strings (eviction_candidates_by_phi); tolerate object/tuple shapes too.
     const evicts = pressure?.eviction_candidates || [];
     if (evicts.length > 0) {
       h += '<div style="margin-top:12px;font-size:11px"><strong style="color:var(--muted)">Eviction candidates:</strong>';
       for (const e of evicts.slice(0, 3)) {
-        const path = e.path || e[0] || '';
-        const phi = e.phi ?? e[1] ?? 0;
-        h += ' <span style="color:var(--muted);margin-left:6px" title="phi=' + Number(phi).toFixed(3) + '">' + esc(shortenPath(path)) + '</span>';
+        const path = typeof e === 'string' ? e : (e?.path || (Array.isArray(e) ? e[0] : '') || '');
+        if (!path) continue;
+        const phi = typeof e === 'object' && e !== null ? (e.phi ?? (Array.isArray(e) ? e[1] : null)) : null;
+        const phiTitle = Number.isFinite(Number(phi)) && phi !== null ? ' title="phi=' + Number(phi).toFixed(3) + '"' : '';
+        h += ' <span style="color:var(--muted);margin-left:6px"' + phiTitle + '>' + esc(shortenPath(path)) + '</span>';
       }
       h += '</div>';
     }
@@ -342,10 +372,13 @@ class CockpitContext extends HTMLElement {
   }
 
   // Maps the backend pressure band to a concrete operator action.
-  _renderTriageBanner(esc, pressure, util) {
+  _renderTriageBanner(esc, pressure, util, exact) {
     // Prefer the backend recommendation; fall back to the local utilization band.
+    // With exact proxy counts the hero already shows the authoritative number,
+    // so the triage band must use the same value or the card contradicts itself.
     const rec = pressure?.recommendation || '';
-    const u = typeof pressure?.utilization === 'number' ? pressure.utilization : util;
+    const u = exact ? util
+      : (typeof pressure?.utilization === 'number' ? pressure.utilization : util);
     let band;
     if (rec === 'EvictLeastRelevant' || u > 0.9) {
       band = { color: 'var(--red)', label: 'Critical', icon: '\u25cf',
@@ -892,7 +925,10 @@ class CockpitContext extends HTMLElement {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, path }), timeoutMs: 15000,
       });
-      toast(action + ' applied', 'success');
+      // Always name the file — "unpin applied" alone doesn't tell the user
+      // what just changed.
+      const short = String(path || '').split('/').slice(-2).join('/');
+      toast(action + ': ' + (short || path), 'success');
       await this.loadData();
     } catch (err) { toast((err?.error || 'Request failed'), 'error'); }
   }

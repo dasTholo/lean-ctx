@@ -8,10 +8,15 @@ Complete guide to setting up and optimally using lean-ctx with Claude Code (Anth
 |----------|-------|
 | Integration mode | **Hybrid** (MCP reads + shell hooks) |
 | Config file | `~/.claude.json` |
-| Rules file | `~/.claude/rules/lean-ctx.md` (dedicated) |
-| Rules format | DedicatedMarkdown |
-| Skill file | `~/.claude/skills/lean-ctx/SKILL.md` |
+| Instructions | `<!-- lean-ctx -->` block in `~/.claude/CLAUDE.md` |
+| Skill file | `~/.claude/skills/lean-ctx/SKILL.md` (loads on demand) |
 | Setup command | `lean-ctx init --agent claude` |
+
+> **Since 3.8:** there is no `~/.claude/rules/lean-ctx.md` anymore. Claude Code loads every
+> rules file unconditionally at session start, which duplicated the instructions in each
+> session (12k+ token memory footprints). `lean-ctx setup` removes the legacy file and
+> maintains a compact block in `~/.claude/CLAUDE.md` instead; detail docs live in the
+> on-demand skill.
 
 ## Quick Setup
 
@@ -68,53 +73,43 @@ lean-ctx registers itself via `claude mcp add-json --scope user` when available.
 }
 ```
 
-> **Note**: The `autoApprove` list includes all read-only and safe tools so Claude Code doesn't prompt for confirmation on every call. lean-ctx supports 72 tools total — the full list is auto-configured.
+> **Note**: The `autoApprove` list includes all read-only and safe tools so Claude Code doesn't prompt for confirmation on every call. lean-ctx supports 76 tools total — the full list is auto-configured.
 
 If `claude mcp add-json` is not available (older Claude Code versions), lean-ctx falls back to directly writing `~/.claude.json`.
 
-### Step 2: Agent Rules
+### Step 2: Agent Instructions (CLAUDE.md block + skill)
 
-lean-ctx creates `~/.claude/rules/lean-ctx.md` with dedicated rules:
+lean-ctx maintains a marker-delimited block in `~/.claude/CLAUDE.md`:
 
 ```markdown
-# lean-ctx — Context Engineering Layer
-<!-- lean-ctx-rules-v10 -->
+<!-- lean-ctx -->
+<!-- lean-ctx-claude-v3 -->
+## lean-ctx — Context Runtime
 
-## Mode Selection
-1. Editing the file? → `full` first, then `diff` for re-reads
-2. Need API surface only? → `map` or `signatures`
-3. Large file, context only? → `entropy` or `aggressive`
-4. Specific lines? → `lines:N-M`
-5. Active task set? → `task`
-6. Unsure? → `auto` (system selects optimal mode)
+Always prefer lean-ctx MCP tools over native equivalents:
+- `ctx_read` instead of `Read` / `cat` (cached, 10 modes, re-reads ~13 tokens)
+- `ctx_shell` instead of `bash` / `Shell` (95+ compression patterns)
+- `ctx_search` instead of `Grep` / `rg` (compact results)
+- `ctx_tree` instead of `ls` / `find` (compact directory maps)
+- Native Edit/StrReplace stay unchanged. If Edit requires Read and Read is unavailable, use `ctx_edit(path, old_string, new_string)` instead.
+- Write, Delete, Glob — use normally.
 
-Anti-pattern: NEVER use `full` for files you won't edit — use `map` or `signatures`.
-
-## File Editing
-Use native Edit/StrReplace if available. If Edit requires Read and Read is unavailable, use ctx_edit.
-Write, Delete, Glob → use normally. NEVER loop on Edit failures — switch to ctx_edit immediately.
-
-## Proactive (use without being asked)
-- `ctx_overview(task)` at session start
-- `ctx_compress` when context grows large
-
-## Session Documentation
-After significant work, document progress:
-- ctx_knowledge(action=remember, category=decision, content=what and why)
-- ctx_session(action=task, value=task description with progress)
-When you see [CHECKPOINT] → document current status immediately.
-
-Fallback only if a lean-ctx tool is unavailable: use native equivalents.
+Read modes: full (edit), map (overview), signatures (API), diff (post-edit), lines:N-M (range), auto.
+Details live in the `lean-ctx` skill (loads on demand — keep this file lean).
 <!-- /lean-ctx -->
 ```
 
-To manually create this file:
+Detail documentation (mode selection, session memory, proactive tools) lives in the
+skill at `~/.claude/skills/lean-ctx/SKILL.md`, which Claude loads only when needed.
+
+Both are written automatically:
 
 ```bash
-mkdir -p ~/.claude/rules
-# lean-ctx setup will write the content automatically
 lean-ctx setup
 ```
+
+If a legacy `~/.claude/rules/lean-ctx.md` from an older install still exists, `setup`
+removes it (it would be loaded in *every* session on top of the CLAUDE.md block).
 
 ### Step 3: Shell Hook
 
@@ -227,7 +222,7 @@ shell_activation = "always"      # or "agents-only"
 
 ### Per-Project Rules
 
-In addition to global rules (`~/.claude/rules/lean-ctx.md`), you can add project-specific rules in `CLAUDE.md` at your project root. lean-ctx will append its shared rules section if not already present.
+In addition to the global block in `~/.claude/CLAUDE.md`, you can add project-specific rules in `CLAUDE.md` at your project root. lean-ctx will append its shared rules section if not already present.
 
 ### CLAUDE.md Integration
 
@@ -266,16 +261,16 @@ echo '{"jsonrpc":"2.0","method":"initialize","params":{"capabilities":{}},"id":1
 lean-ctx init --agent claude
 ```
 
-### Rules not being applied
+### Instructions not being applied
 
 ```bash
-# Check rules file exists
-cat ~/.claude/rules/lean-ctx.md
+# Check the CLAUDE.md block exists
+grep -A2 'lean-ctx' ~/.claude/CLAUDE.md
 
-# Check rules version
-grep "lean-ctx-rules-v" ~/.claude/rules/lean-ctx.md
+# Check the on-demand skill exists
+ls ~/.claude/skills/lean-ctx/SKILL.md
 
-# Update rules to latest version
+# Reinstall block + skill
 lean-ctx setup
 ```
 

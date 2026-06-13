@@ -248,7 +248,10 @@ fn measure_mode(content: &str, ext: &str, mode: &str, raw_tokens: usize) -> Mode
                 .join("\n")
         }
         "aggressive" => compressor::aggressive_compress(content, Some(ext)),
-        "entropy" => entropy::entropy_compress(content).output,
+        // Deterministic variant: benchmark numbers feed the scorecard's
+        // reproducibility digest (#211) and must not depend on whether the
+        // shared embedding engine happens to be loaded in this process.
+        "entropy" => entropy::entropy_compress_deterministic(content).output,
         "cache_hit" => format!(
             "F1=src/file.{ext} [unchanged, {}L, use cached context]",
             content.lines().count()
@@ -442,6 +445,16 @@ fn aggregate_modes(files: &[FileMeasurement]) -> Vec<ModeSummary> {
 
 // ── Session Simulation ──────────────────────────────────────
 
+/// Honest CCP resume size (GL #573): measure what `ctx_session load` actually
+/// emits for the latest real session instead of asserting a constant. The
+/// model value is the documented fallback for machines without session history.
+fn measured_ccp_resume_tokens() -> usize {
+    const RESUME_CCP_MODEL_TOKENS: usize = 400;
+    crate::core::session::SessionState::load_latest().map_or(RESUME_CCP_MODEL_TOKENS, |s| {
+        crate::core::tokens::count_tokens(&format!("Session loaded.\n{}", s.format_compact()))
+    })
+}
+
 fn simulate_session(files: &[FileMeasurement]) -> SessionSimResult {
     if files.is_empty() {
         return SessionSimResult {
@@ -492,7 +505,7 @@ fn simulate_session(files: &[FileMeasurement]) -> SessionSimResult {
                 .map_or(f.raw_tokens, |m| m.tokens)
         })
         .sum();
-    let resume_ccp = 400usize;
+    let resume_ccp = measured_ccp_resume_tokens();
 
     let raw_total = first_read_raw + cache_raw + shell_raw + resume_raw;
     let lean_total = first_read_lean + cache_lean + shell_lean + resume_lean;

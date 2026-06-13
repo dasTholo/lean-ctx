@@ -40,6 +40,7 @@ pub(crate) fn cmd_pack(args: &[String]) {
         "remove" | "rm" => cmd_pack_remove(args),
         "export" => cmd_pack_export(args),
         "import" => cmd_pack_import(args, &project_root),
+        "verify" => cmd_pack_verify(args),
         "auto-load" => cmd_pack_auto_load(args),
         "publish" => cmd_pack_publish(args),
         "send" => cmd_pack_send(args, &project_root),
@@ -143,11 +144,17 @@ fn cmd_pack_create(args: &[String], project_root: &str) {
     let mut layers_str: Option<String> = None;
     let mut level: u32 = 1;
     let mut scope: Option<String> = None;
+    let mut private = false;
 
     let mut i = 0;
     while i < args.len() {
         let a = &args[i];
         if a == "create" {
+            i += 1;
+            continue;
+        }
+        if a == "--private" {
+            private = true;
             i += 1;
             continue;
         }
@@ -221,6 +228,9 @@ fn cmd_pack_create(args: &[String], project_root: &str) {
     }
     if let Some(ref s) = scope {
         builder = builder.scope(s);
+    }
+    if private {
+        builder = builder.private();
     }
 
     let phash = crate::core::project_hash::hash_project_root(project_root);
@@ -305,6 +315,20 @@ fn cmd_pack_create(args: &[String], project_root: &str) {
                         &manifest.integrity.sha256[56..]
                     );
                     println!("  Stored:  {}", dir.display());
+
+                    // Early warning — export blocks these, the registry hard-rejects them.
+                    if let Ok(reg) = crate::core::context_package::LocalRegistry::open() {
+                        let findings =
+                            scan_package_content(&reg, &manifest.name, &manifest.version);
+                        if !findings.is_empty() {
+                            eprintln!(
+                                "\nWARNING: {} credential-shaped string(s) in the package content:",
+                                findings.len()
+                            );
+                            print_secret_findings(&findings);
+                            eprintln!("  Remove them and re-create — export and ctxpkg.com publishing will refuse this pack.");
+                        }
+                    }
                 }
                 Err(e) => eprintln!("ERROR: install failed: {e}"),
             }
@@ -356,8 +380,23 @@ fn cmd_pack_install(args: &[String], project_root: &str) {
     let Some(name) = pkg_name else {
         eprintln!("ERROR: package name is required");
         eprintln!("Usage: lean-ctx pack install <name>[@version] [--file=path]");
+        eprintln!("       lean-ctx pack install <ns>/<name>[@version] [--registry <url>]");
         return;
     };
+
+    // `ns/name` (or `@ns/name`) → hosted-registry install (GL #406).
+    if crate::core::context_package::remote::parse_remote_ref(&name).is_some() {
+        let raw_ref = match pkg_version {
+            Some(v) => format!("{name}@{v}"),
+            None => name,
+        };
+        cmd_pack_install_remote(
+            &raw_ref,
+            parse_flag(args, "--registry").as_deref(),
+            project_root,
+        );
+        return;
+    }
 
     let registry = match crate::core::context_package::LocalRegistry::open() {
         Ok(r) => r,
@@ -593,9 +632,37 @@ fn cmd_pack_remove(args: &[String]) {
     }
 }
 
+/// Serialize a stored package's content and run the built-in secret scanner
+/// over it — the same patterns the hosted registry hard-blocks at publish.
+fn scan_package_content(
+    registry: &crate::core::context_package::LocalRegistry,
+    name: &str,
+    version: &str,
+) -> Vec<crate::core::secret_detection::SecretMatch> {
+    let Ok((_, content)) = registry.load_package(name, version) else {
+        return Vec::new();
+    };
+    let Ok(json) = serde_json::to_string_pretty(&content) else {
+        return Vec::new();
+    };
+    crate::core::secret_detection::detect_secrets(&json)
+}
+
+fn print_secret_findings(findings: &[crate::core::secret_detection::SecretMatch]) {
+    for f in findings.iter().take(10) {
+        eprintln!("    {:<22} {}", f.pattern_name, f.redacted_preview);
+    }
+    if findings.len() > 10 {
+        eprintln!("    … and {} more", findings.len() - 10);
+    }
+}
+
 fn cmd_pack_export(args: &[String]) {
     let mut pkg_ref: Option<&str> = None;
     let mut output: Option<String> = None;
+    let mut sign = false;
+    let mut private = false;
+    let mut allow_secrets = false;
 
     for a in args {
         if a == "export" {
@@ -605,15 +672,27 @@ fn cmd_pack_export(args: &[String]) {
             output = Some(v.to_string());
         } else if let Some(v) = a.strip_prefix("-o=") {
             output = Some(v.to_string());
+        } else if a == "--sign" {
+            sign = true;
+        } else if a == "--private" {
+            private = true;
+        } else if a == "--allow-secrets" {
+            allow_secrets = true;
         } else if !a.starts_with("--") && pkg_ref.is_none() {
             pkg_ref = Some(a.as_str());
         }
     }
 
     let Some(pkg_ref) = pkg_ref else {
-        eprintln!("Usage: lean-ctx pack export <name>[@version] [--output=path]");
+        eprintln!(
+            "Usage: lean-ctx pack export <name>[@version] [--output=path] [--sign] [--private] [--allow-secrets]"
+        );
         return;
     };
+    if private && !sign {
+        eprintln!("ERROR: --private only applies to signed exports — add --sign");
+        return;
+    }
 
     let (parsed_name, parsed_ver) = parse_pkg_ref(pkg_ref);
     let (name, version) = if let Some(v) = parsed_ver {
@@ -650,6 +729,62 @@ fn cmd_pack_export(args: &[String]) {
             return;
         }
     };
+
+    // Pre-flight secret scan — same patterns the hosted registry enforces.
+    let findings = scan_package_content(&registry, &name, &version);
+    if !findings.is_empty() {
+        eprintln!(
+            "Secret scan: {} credential-shaped string(s) in {name}@{version}:",
+            findings.len()
+        );
+        print_secret_findings(&findings);
+        if !allow_secrets {
+            eprintln!("ERROR: export blocked.");
+            eprintln!("  Remove the secrets (e.g. `lean-ctx knowledge remove --category <cat> --key <key>`),");
+            eprintln!("  rotate them if they were live, then re-create and export.");
+            eprintln!("  `--allow-secrets` forces a local-only export — ctxpkg.com rejects it at publish anyway.");
+            return;
+        }
+        eprintln!("WARNING: continuing because of --allow-secrets — do NOT publish this artifact.");
+    }
+
+    if sign {
+        let (key, created) = match crate::core::context_package::keys::load_or_create() {
+            Ok(k) => k,
+            Err(e) => {
+                eprintln!("ERROR: signing key: {e}");
+                return;
+            }
+        };
+        if created {
+            println!(
+                "Generated a new ed25519 signing key at ~/.lean-ctx/{}",
+                crate::core::context_package::keys::KEY_REL_PATH
+            );
+            println!("This key IS your publisher identity — back it up.");
+        }
+        match registry.export_to_file_signed(
+            &name,
+            &version,
+            &PathBuf::from(&out_path),
+            &key,
+            private,
+        ) {
+            Ok(bytes) => {
+                let vis = if private { ", private" } else { "" };
+                println!(
+                    "Exported (signed{vis}): {out_path} ({})",
+                    format_bytes(bytes)
+                );
+                println!(
+                    "Signer public key: {}",
+                    crate::core::context_package::keys::public_key_hex(&key)
+                );
+            }
+            Err(e) => eprintln!("ERROR: {e}"),
+        }
+        return;
+    }
 
     match registry.export_to_file(&name, &version, &PathBuf::from(&out_path)) {
         Ok(bytes) => {
@@ -698,6 +833,64 @@ fn cmd_pack_import(args: &[String], project_root: &str) {
             }
         }
         Err(e) => eprintln!("ERROR: import failed: {e}"),
+    }
+}
+
+/// `pack verify` — standalone conformance check (spec §8/§9), no install.
+/// Exit code 0 = all files valid, 1 = any failure (CI-friendly).
+fn cmd_pack_verify(args: &[String]) {
+    use crate::core::context_package::verify::{verify_package_file, CheckOutcome};
+
+    let files: Vec<&String> = args
+        .iter()
+        .filter(|a| !a.starts_with("--") && *a != "verify")
+        .collect();
+    if files.is_empty() {
+        eprintln!("Usage: lean-ctx pack verify <file.ctxpkg> [more files...]");
+        std::process::exit(2);
+    }
+
+    let label = |o: CheckOutcome| match o {
+        CheckOutcome::Pass => "pass",
+        CheckOutcome::Fail => "FAIL",
+        CheckOutcome::Skipped => "skipped",
+    };
+
+    let mut all_valid = true;
+    for file in files {
+        match verify_package_file(std::path::Path::new(file)) {
+            Ok(report) => {
+                let verdict = if report.valid() { "VALID" } else { "INVALID" };
+                let subject = match (&report.name, &report.version) {
+                    (Some(n), Some(v)) => format!("{n}@{v}"),
+                    _ => "(unparseable manifest)".into(),
+                };
+                println!("{verdict}  {file}  {subject}");
+                println!("  structure      {}", label(report.structure));
+                println!("  content hash   {}", label(report.content_hash));
+                println!("  package hash   {}", label(report.package_hash));
+                let sig = if report.signature == CheckOutcome::Skipped {
+                    "skipped (unsigned)"
+                } else {
+                    label(report.signature)
+                };
+                println!("  signature      {sig}");
+                for err in &report.errors {
+                    println!("    - {err}");
+                }
+                if !report.valid() {
+                    all_valid = false;
+                }
+            }
+            Err(e) => {
+                println!("ERROR    {file}");
+                println!("    - {e}");
+                all_valid = false;
+            }
+        }
+    }
+    if !all_valid {
+        std::process::exit(1);
     }
 }
 
@@ -793,33 +986,166 @@ fn format_bytes(bytes: u64) -> String {
 }
 
 fn cmd_pack_publish(args: &[String]) {
-    let file = args.iter().find(|a| a.ends_with(".ctxpkg"));
+    use crate::core::context_package::remote;
 
+    let file = args.iter().find(|a| a.ends_with(".ctxpkg"));
     let Some(file) = file else {
-        eprintln!("Usage: lean-ctx pack publish <file.ctxpkg> [--registry <url>]");
+        eprintln!(
+            "Usage: lean-ctx pack publish <file.ctxpkg> [--registry <url>] [--token <ctxp_…>]"
+        );
         eprintln!();
-        eprintln!("Publish is not yet available. The CTXPKG Registry is in development.");
-        eprintln!("Follow progress at https://ctxpkg.com");
+        eprintln!("The token comes from your ctxpkg.com account (ctxpkg.com/account) or");
+        eprintln!("the CTXPKG_TOKEN environment variable. Packages must be signed and");
+        eprintln!("scoped (@namespace/name) — see `lean-ctx pack export --sign`.");
         return;
     };
 
-    let registry_url = args
-        .windows(2)
-        .find(|w| w[0] == "--registry")
-        .map_or("https://registry.ctxpkg.com", |w| w[1].as_str());
-
     let path = std::path::Path::new(file);
-    if !path.exists() {
-        eprintln!("File not found: {file}");
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("ERROR: read {file}: {e}");
+            return;
+        }
+    };
+
+    // Fail locally before any network call: parse, verify signature, check scope.
+    let (ns, name, version) = match remote::preflight_bundle(&bytes) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("ERROR: {e}");
+            return;
+        }
+    };
+
+    let base = remote::registry_base(parse_flag(args, "--registry").as_deref());
+    let Some(token) = remote::publish_token(parse_flag(args, "--token").as_deref()) else {
+        eprintln!("ERROR: no publish token — pass --token or set CTXPKG_TOKEN");
+        eprintln!("Mint one at ctxpkg.com/account (sign in, then Tokens → Mint).");
+        return;
+    };
+    if token.starts_with("ctxr_") {
+        eprintln!(
+            "ERROR: this is a read-only install token (ctxr_) — publishing needs a ctxp_ token"
+        );
         return;
     }
 
-    eprintln!("Publishing to {registry_url} is not yet available.");
-    eprintln!("The CTXPKG Registry is in development at https://ctxpkg.com");
-    eprintln!();
-    eprintln!("In the meantime, you can share packages using:");
-    eprintln!("  lean-ctx pack send {file} --target=<url>");
-    eprintln!("  lean-ctx pack export <name>");
+    println!("Publishing @{ns}/{name}@{version} to {base} …");
+    match remote::publish(&base, &token, &ns, &name, &version, &bytes) {
+        Ok(receipt) => {
+            println!("Published: {}", receipt.published);
+            println!("Artifact SHA-256: {}", receipt.artifact_sha256);
+            println!("Install with: lean-ctx pack install {ns}/{name}");
+        }
+        Err(e) => eprintln!("ERROR: {e}"),
+    }
+}
+
+/// Install `ns/name[@version]` from the hosted registry: resolve the version,
+/// download, verify the artifact hash against the index, then run the normal
+/// import path (manifest validation + content integrity + local signature
+/// re-verification) and pin the result in `.lean-ctx/ctxpkg.lock`.
+fn cmd_pack_install_remote(raw_ref: &str, registry_flag: Option<&str>, project_root: &str) {
+    use crate::core::context_package::{lockfile, remote, LocalRegistry};
+
+    let Some(remote_ref) = remote::parse_remote_ref(raw_ref) else {
+        eprintln!("ERROR: '{raw_ref}' is not a valid ns/name[@version] reference");
+        return;
+    };
+    let base = remote::registry_base(registry_flag);
+    let ns = &remote_ref.namespace;
+    let name = &remote_ref.name;
+    // CTXPKG_TOKEN (ctxp_ or read-only ctxr_) unlocks private packages (#524).
+    let token = remote::publish_token(None);
+
+    println!("Resolving @{ns}/{name} via {base} …");
+    let versions = match remote::fetch_versions(&base, ns, name, token.as_deref()) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("ERROR: {e}");
+            return;
+        }
+    };
+    let info = match remote::select_version(&versions, remote_ref.version.as_deref()) {
+        Ok(i) => i,
+        Err(e) => {
+            eprintln!("ERROR: {e}");
+            return;
+        }
+    };
+    if info.yanked {
+        eprintln!(
+            "WARNING: @{ns}/{name}@{} is YANKED — installing only because the version \
+             was pinned explicitly",
+            info.version
+        );
+    }
+
+    let bytes = match remote::download_verified(&base, ns, name, info, token.as_deref()) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("ERROR: {e}");
+            return;
+        }
+    };
+    println!(
+        "Downloaded @{ns}/{name}@{} ({}, sha256 verified)",
+        info.version,
+        format_bytes(bytes.len() as u64)
+    );
+
+    // Hand the artifact to the standard import path via a temp file so every
+    // local gate (extension, size cap, manifest validation, content integrity)
+    // applies identically to remote and local installs.
+    let tmp = std::env::temp_dir().join(format!("ctxpkg-install-{}.ctxpkg", std::process::id()));
+    if let Err(e) = std::fs::write(&tmp, &bytes) {
+        eprintln!("ERROR: stage artifact: {e}");
+        return;
+    }
+    let imported = (|| {
+        let registry = LocalRegistry::open()?;
+        registry.import_from_file(&tmp)
+    })();
+    std::fs::remove_file(&tmp).ok();
+
+    let manifest = match imported {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("ERROR: import failed: {e}");
+            return;
+        }
+    };
+
+    // Registry compromise ≠ client compromise: re-verify the signature locally.
+    match crate::core::context_package::verify_signature(&manifest) {
+        Ok(true) => println!("Signature: ed25519 verified locally"),
+        Ok(false) => {
+            eprintln!(
+                "WARNING: package is unsigned — the hosted registry should not have accepted it"
+            );
+        }
+        Err(e) => {
+            eprintln!("ERROR: signature verification failed: {e}");
+            return;
+        }
+    }
+
+    if let Err(e) = lockfile::upsert(
+        std::path::Path::new(project_root),
+        lockfile::LockedPackage {
+            name: manifest.name.clone(),
+            version: manifest.version.clone(),
+            artifact_sha256: info.artifact_sha256.clone(),
+            registry: base,
+        },
+    ) {
+        eprintln!("WARNING: could not update ctxpkg.lock: {e}");
+    } else {
+        println!("Pinned in {}", lockfile::LOCKFILE_REL_PATH);
+    }
+
+    apply_package(&manifest.name, &manifest.version, project_root);
 }
 
 fn cmd_pack_send(args: &[String], project_root: &str) {
@@ -1051,10 +1377,13 @@ fn print_usage() {
          \x20 remove   <name>[@version]  Remove a package\n\
          \n\
          Share & Distribute:\n\
-         \x20 export   <name>[@version] [--output=<path>]  Export to .{ext} file\n\
+         \x20 export   <name>[@version] [--output=<path>] [--sign] [--private] [--allow-secrets]  Export to .{ext} file (--sign: ed25519, required for publish; --private: hidden on the hosted registry; secret scan blocks credential-shaped content unless --allow-secrets)\n\
          \x20 import   <file.{ext}> [--apply]            Import from file\n\
+         \x20 verify   <file.{ext}> [...]                Verify integrity + signature, no install (spec \u{a7}8/\u{a7}9; exit 1 on failure)\n\
          \x20 install  <name>[@version] [--file=<path>]    Apply package to current project\n\
-         \x20 publish  <file.{ext}> [--registry <url>]   Publish to registry (coming soon)\n\
+         \x20 install  <ns>/<name>[@version]              Install from the hosted registry\n\
+         \x20                                             (ctxpkg.com; verifies sha256 + signature, pins in ctxpkg.lock)\n\
+         \x20 publish  <file.{ext}> [--registry <url>] [--token <ctxp_…>]  Publish (signed, scoped @ns/name)\n\
          \n\
          A2A Transport:\n\
          \x20 send     <file.{ext}> [--target <url>] [--to <agent>] [--secret <key>]\n\

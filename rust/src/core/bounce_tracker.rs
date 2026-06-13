@@ -77,6 +77,11 @@ impl BounceTracker {
         if !compressed {
             self.detect_bounce(&norm, seq);
         }
+        if self.persist {
+            // Keep the long-term majority rule honest: clean reads dilute
+            // historical bounces (#496).
+            crate::core::path_mode_memory::record_read_if_tracked(&norm);
+        }
 
         let events = self.recent_reads.entry(norm).or_default();
         events.push(ReadEvent {
@@ -120,6 +125,26 @@ impl BounceTracker {
 
                 if self.persist {
                     crate::core::savings_ledger::record_bounce_event(wasted);
+                    // Long-term per-path memory (#496): remember which exact
+                    // files keep bouncing so auto-mode learns across restarts.
+                    crate::core::path_mode_memory::record_bounce(norm_path);
+                    // Quality signal (#538): bounces push the learned entropy
+                    // threshold down for this extension (compress less).
+                    crate::core::threshold_learning::record_signal(
+                        norm_path,
+                        crate::core::threshold_learning::QualitySignal::Bounce,
+                    );
+                    // Stigmergy (#540): a bounce marks this path as Stuck so
+                    // other agents see friction here. Background: lock may block.
+                    let scent_path = norm_path.to_string();
+                    std::thread::spawn(move || {
+                        crate::core::scent_field::deposit(
+                            crate::core::scent_field::scent_agent_id(),
+                            crate::core::scent_field::ScentKind::Stuck,
+                            &scent_path,
+                            0.5,
+                        );
+                    });
                 }
             }
         }

@@ -107,6 +107,7 @@ impl McpTool for CtxRefactorTool {
                     | "move_apply"
                     | "safe_delete_apply"
             ),
+            shell_outcome: None,
         })
     }
 }

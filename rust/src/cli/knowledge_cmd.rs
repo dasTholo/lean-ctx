@@ -41,6 +41,7 @@ pub(crate) fn cmd_knowledge(args: &[String]) {
                 None,
                 None,
                 None,
+                None,
             );
             println!("{out}");
         }
@@ -67,6 +68,38 @@ pub(crate) fn cmd_knowledge(args: &[String]) {
                 None,
                 None,
                 &cli_session_id(),
+                None,
+                None,
+                None,
+                None,
+                None,
+            );
+            println!("{out}");
+        }
+        Some("lifecycle") => {
+            #[cfg(unix)]
+            {
+                #[cfg(unix)]
+                if let Some(out) = crate::daemon_client::try_daemon_tool_call_blocking_text(
+                    "ctx_knowledge",
+                    Some(serde_json::json!({
+                        "action": "lifecycle_report",
+                        "project_root": project_root,
+                    })),
+                ) {
+                    println!("{out}");
+                    return;
+                }
+            }
+            let out = ctx_knowledge::handle(
+                &project_root,
+                "lifecycle_report",
+                None,
+                None,
+                None,
+                None,
+                &cli_session_id(),
+                None,
                 None,
                 None,
                 None,
@@ -129,6 +162,7 @@ fn cmd_remember(args: &[String], project_root: &str) {
         None,
         confidence,
         None,
+        None,
     );
     println!("{out}");
 }
@@ -136,6 +170,7 @@ fn cmd_remember(args: &[String], project_root: &str) {
 fn cmd_recall(args: &[String], project_root: &str) {
     let category = value_arg(args, "--category").or_else(|| value_arg(args, "-c"));
     let mode = value_arg(args, "--mode").or_else(|| value_arg(args, "-m"));
+    let as_of = value_arg(args, "--as-of");
     let query = positional_after(args, "recall");
 
     // Machine-readable path (editor extensions): a bare `recall --json` lists the
@@ -147,8 +182,9 @@ fn cmd_recall(args: &[String], project_root: &str) {
     }
 
     if category.is_none() && query.is_none() {
-        eprintln!("Usage: lean-ctx knowledge recall [query] [--category <cat>] [--mode auto|semantic|hybrid]");
+        eprintln!("Usage: lean-ctx knowledge recall [query] [--category <cat>] [--mode auto|semantic|hybrid] [--as-of <YYYY-MM-DD|RFC3339>]");
         eprintln!("Example: lean-ctx knowledge recall \"auth\" --category security");
+        eprintln!("Example: lean-ctx knowledge recall \"auth\" --as-of 2026-05-01   (time travel)");
         std::process::exit(1);
     }
 
@@ -163,6 +199,7 @@ fn cmd_recall(args: &[String], project_root: &str) {
                 "category": category,
                 "query": query,
                 "mode": mode,
+                "as_of": as_of,
             })),
         ) {
             println!("{out}");
@@ -182,6 +219,7 @@ fn cmd_recall(args: &[String], project_root: &str) {
         None,
         None,
         mode.as_deref(),
+        as_of.as_deref(),
     );
     println!("{out}");
 }
@@ -218,6 +256,7 @@ fn cmd_search(args: &[String]) {
         None,
         query.as_deref(),
         &cli_session_id(),
+        None,
         None,
         None,
         None,
@@ -321,6 +360,7 @@ fn cmd_remove(args: &[String], project_root: &str) {
         None,
         None,
         &cli_session_id(),
+        None,
         None,
         None,
         None,
@@ -554,13 +594,14 @@ lean-ctx knowledge — Project knowledge base
 
 Usage:
   lean-ctx knowledge remember <value> --category <cat> --key <key> [--confidence <0-1>]
-  lean-ctx knowledge recall [query] [--category <cat>] [--mode auto|semantic|hybrid]
+  lean-ctx knowledge recall [query] [--category <cat>] [--mode auto|semantic|hybrid] [--as-of <date>]
   lean-ctx knowledge search <query>
   lean-ctx knowledge export [--format json|jsonl|simple] [--output <path>]
   lean-ctx knowledge import <path> [--merge replace|append|skip-existing] [--dry-run]
   lean-ctx knowledge remove --category <cat> --key <key>
   lean-ctx knowledge status
   lean-ctx knowledge health
+  lean-ctx knowledge lifecycle
 
 Examples:
   lean-ctx knowledge remember \"Uses JWT tokens\" --category auth --key token-type

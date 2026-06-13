@@ -3,9 +3,642 @@
 All notable changes to lean-ctx are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [3.8.3] — 2026-06-13
 
 ### Added
+- **`lean-ctx doctor overhead` (#572)**: per-client fixed-cost report — how many
+  tokens your editor pays *every session* for tool schemas, instructions and
+  rules files, with duplicate detection across CLAUDE.md/.cursorrules/AGENTS.md.
+- **`lean-ctx rules dedup [--apply]` (#578)**: finds and removes lean-ctx-owned
+  duplicate rule files and stale marked blocks across editors. The
+  `.cursorrules` template is now a pointer to the canonical rules, and the
+  compression block is no longer double-injected for Cursor.
+
+### Changed
+- **Token-efficiency epic, phase 1 (#571)** — fixed per-session overhead cut
+  from ~13.7K to ~6.0K tokens on a typical setup:
+  - **Lean default tool surface (#575)**: setup no longer pins a
+    `tool_profile`; the default surface is 13 lazy-core tools instead of 61.
+    `lean-ctx tools lean`/`reset` manage it explicitly.
+  - **Schema diet (#576)**: core tool descriptions and schemas trimmed
+    3031→1935 tokens (−36%); large action enums folded into pipe-delimited
+    descriptions; a budget regression test keeps it from creeping back.
+  - **Instructions cap (#579)**: the static instruction skeleton stays ≤400
+    tokens (Off/Compact CRP) / ≤500 (TDD); the decoder block is mode-aware and
+    canonical rule blocks were condensed.
+  - **Honest metrics (#573)**: dashboard, footer and ledger report observed
+    tokens only — the modeled 2.5× grep baseline moves to the *estimated*
+    series; `ctx_cost` splits cached vs uncached input at cache-read pricing;
+    the benchmark measures the real CCP resume payload.
+  - **Self-describing outputs (#580)**: plain notation uses real language
+    keywords (`struct`/`trait`/`pub`), and TDD symbol outputs carry a minimal
+    inline legend (≤15 tokens) so agents never guess the notation.
+- **Codex hook: native rewrite instead of block-and-retry (#399, community
+  contribution)**: on Codex ≥ 0.20 the `PreToolUse` hook now returns
+  `updatedInput` to rewrite shell commands through lean-ctx in place — no more
+  deny + model-retry round-trip per command.
+
+### Security
+- Bumped the postgres crate family past three fresh RUSTSEC advisories
+  (unbounded SCRAM iteration DoS, `hstore`/`DataRow` decode panics) — found by
+  `cargo-deny` the moment they were published; lean-ctx never exposed the
+  vulnerable paths to untrusted servers (#399).
+
+### Fixed
+- **`lean-ctx overview` flooded the terminal with thousands of `node_modules`
+  entries on projects without a top-level `.git` (#400)**: the `ignore` crate
+  only applies `.gitignore` files *inside* git repositories — in a monorepo
+  whose subprojects carry their own `.gitignore` but whose root is not a git
+  repo, every scanner walked `node_modules` wholesale (74k+ files in the
+  report). Two-part fix, applied to **all 15 directory walkers** (graph/BM25/
+  trigram index builders, `ctx_impact`, `ctx_search`/`ctx_tree`/`ctx_glob`,
+  CLI scans): a shared `walk_filter` now prunes unambiguous vendor dirs
+  (`node_modules`, `__pycache__`, `bower_components`, virtualenvs with a
+  `pyvenv.cfg`) regardless of git state, and `require_git(false)` makes
+  `.gitignore` files effective without a `.git` directory. Explicit roots
+  stay reachable (`ctx_tree node_modules/react` works), and
+  `respect_gitignore=false` remains the escape hatch for searching inside
+  vendor dirs.
+- **macOS privacy prompts ("lean-ctx would like to access …") fired repeatedly
+  while the MCP server was running (#356 follow-up)**: editors spawn the
+  user-level MCP server with `cwd == $HOME`. A `ctx_search`/`ctx_tree`/
+  `ctx_glob` call whose `path` fell back to `"."` then walked the **entire
+  home directory** — every `stat` under `~/Library`, `~/Desktop`, `~/Pictures`
+  trips a TCC prompt (Calendar/Reminders/AddressBook/Photos), and the walk
+  burned 10–20 s per call. The index builders already refused broad roots;
+  the direct walk fallbacks did not. All three walk tools now share that same
+  root policy (new `walk_guard`): relative paths are absolutized against the
+  process cwd first — so `lean-ctx grep`/`ls` inside a real project keep
+  working — and broad or privacy-protected roots (`$HOME`, `/`, `~/Library`,
+  TCC dirs without project markers) return an actionable error telling the
+  agent to pass an explicit project `path` instead of silently scanning.
+- **`ctx_impact` reported C# classes as leaf nodes when consumers had no
+  `using` directive (#398)**: C# resolves types in the same namespace without
+  any import, and DI-style code never `new`s its dependencies — so a class
+  consumed only as a *type* (constructor parameter, field, property, base
+  class, generic argument) produced **zero** graph edges and a false-negative
+  "no files depend on X". The property-graph builder now extracts **type
+  usages** from the AST (fields, parameters, returns, base lists, generics,
+  casts, `typeof`) for C# and Java — the two supported languages with implicit
+  same-namespace/package visibility — and links consumer files to defining
+  files with `type_ref` edges, which `impact_analysis` already traverses.
+  Names defined in more than 3 files are skipped as too generic to attribute.
+- **Same root cause, second symptom**: classes consumed only as a type were
+  flagged by the `dead_code` smell — its SQL already exempted `type_ref`
+  targets, but nothing ever *created* those edges. The builder now also emits
+  symbol-level `type_ref` edges, so DI-consumed classes no longer show up as
+  dead code while genuinely unreferenced ones still do.
+- Both property-graph builder paths (default and minimal) now share one
+  analysis pass and definition index, so the fix applies regardless of build
+  features.
+
+## [3.8.2] — 2026-06-12
+
+### Fixed
+- **Codex PreToolUse shell compression no longer blocks with a manual re-run
+  prompt**: Codex now supports native `updatedInput` rewrites for `PreToolUse`
+  hooks, so `hook codex-pretooluse` emits the documented allow+rewrite JSON on
+  stdout instead of exiting 2 with "Re-run with ..." feedback. Rewritable Bash
+  commands are transparently replaced with the `lean-ctx -c ...` command while
+  preserving normal tool execution.
+- **Linux: `ctx_*` tools broke for projects under `/c/…` and other
+  single-letter roots (#397)**: the MSYS2/Git-Bash drive mapping
+  (`/c/Users/…` → `C:/Users/…`) in the MCP path normalizer ran
+  **unconditionally** — on Linux/macOS, where `/c/…` is a literal directory,
+  every file-addressing tool then failed with `file not found` on a
+  nonexistent `C:/…` path (and absolute arguments were re-joined under the
+  already-translated root, doubling it). The mapping is now gated on Windows
+  hosts (`cfg!(windows)`) — that is the only platform where MSYS2/Git-Bash
+  clients hand POSIX drive paths to a native Windows binary. On other hosts,
+  `/c/…` passes through untouched; regression tests cover both sides.
+- **`lean-ctx doctor` reported "no rules file found" right after `lean-ctx setup`
+  (#396)**: the 3.8 layout (GL #555) intentionally replaced the always-loaded
+  `~/.claude/rules/lean-ctx.md` with a CLAUDE.md block + on-demand skill — setup
+  even *removes* the legacy file — but the doctor check still demanded it, so a
+  clean install could never reach a full pass and the suggested fix
+  (`init --agent claude`) couldn't recreate the file either. Both doctor views
+  (`doctor` and `doctor integrations`) now share one layout detector
+  (`claude_instructions_state`) that accepts every state setup can produce:
+  CLAUDE.md block (+ skill), dedicated injection (SessionStart hook + skill),
+  legacy rules file, project scope, and `rules_injection=off`. Docs that still
+  described the retired rules file were updated as well.
+- **macOS still prompted "lean-ctx would like to access files in your Documents
+  folder" on every upgrade (#356, reopened)**: the first fix (3.8.0) removed the
+  *scan-heuristic* probes, but the prompt actually came from the **launchd
+  daemon's boot path** — a process that is its own TCC identity, and whose
+  grant is invalidated by every update (binary swap → new cdhash → re-prompt).
+  Traced empirically with a deny-sandbox + crash-stack bisection; two
+  independent boot-time offenders fixed:
+  1. `serve` booted with cwd `/` and walked **every stored session**, stat-ing
+     each session's `project_root`/`shell_cwd` (project-marker probes +
+     `canonicalize`) — paths that usually live under `~/Documents`. Broad
+     roots ("/", HOME, agent sandboxes) now bail out *before* the scan — they
+     can never own a session (this also stops `shell_cwd.starts_with("/")`
+     from leaking an arbitrary project's session into the daemon default).
+  2. `ContextLedger::load → prune` ran `realpath` over every persisted ledger
+     entry at boot for its dedupe key; the key is now lexical-only.
+  Defense in depth: launchd-owned processes (ppid 1) are detected as
+  *TCC-standalone* and never stat/canonicalize paths under
+  `~/Documents`/`Desktop`/`Downloads` in heuristics (`has_project_marker`,
+  session-root matching, `normalize_tool_path`); editor/CLI children inherit
+  their host's TCC grant and keep full behavior. Verified with a
+  SIGKILL-on-Documents-access sandbox: daemon boot (30 s soak), proxy boot,
+  and the full `lean-ctx update` rewire now run clean against a real data dir
+  with 600+ sessions rooted under `~/Documents`.
+- **Pi: `ctx_grep`/`ctx_find`/`ctx_ls` silently searched the wrong directory
+  (#395)**: `path` was optional and fell back to the extension's cwd, so an
+  agent working elsewhere got results from the wrong tree and was derailed;
+  the calls also rendered without their arguments. `path` is now **required**
+  (schema + description make the scope explicit), and the three tools reuse
+  Pi's native call renderers so every invocation shows its pattern and
+  directory in the transcript.
+- **OpenCode × ChatGPT-OAuth broke behind the proxy (#366)**: `proxy enable`
+  exported `OPENAI_BASE_URL` without the `/v1` suffix the OpenAI SDK convention
+  expects (default is `https://api.openai.com/v1`). OpenCode therefore sent
+  Responses-API calls to `…:4444/responses` — a path its ChatGPT-OAuth plugin
+  does not recognize (it matches `/v1/responses`), so subscription traffic
+  leaked through the proxy to the platform API with the wrong credential:
+  *"Missing scopes: api.responses.write"*. The shell exports and the Codex CLI
+  config now advertise `http://127.0.0.1:<port>/v1`; with that base, OpenCode's
+  OAuth plugin correctly routes ChatGPT-subscription requests directly to
+  `chatgpt.com` (analogous to the Claude Pro/Max guard), while API-key traffic
+  keeps flowing through the proxy. Stale `/v1`-less entries in Codex
+  `config.toml` are migrated on the next `proxy enable`; the proxy also
+  collapses accidental `/v1/v1/…` double prefixes from clients that append
+  `/v1` themselves. Verified end-to-end against OpenCode 1.2.15.
+- **Dashboard token race**: `lean-ctx dashboard` persisted its fresh auth token
+  *before* binding the port. Two racing starts both wrote `dashboard.token`;
+  the bind loser exited, leaving a token on disk the surviving server never
+  accepted — every "already running" browser open then hit silent 401s. The
+  token is now saved only after a successful bind.
+- **Live Activity feed masked errors as "No events recorded yet"**: a failed
+  `/api/events` poll (daemon restart, expired token, timeout) was rendered as
+  an empty feed. The dashboard now keeps the last known events and shows the
+  actual error with a recovery hint instead.
+- **Status bar showed "No session" while agents were active**: `/api/session`
+  matched sessions against the dashboard process's own cwd (usually HOME — a
+  broad root that rightly matches nothing). It now falls back to the most
+  recently updated session rooted in a real project.
+
+### Performance
+- **`/api/events` no longer re-parses the event log on every poll**: the
+  file-backed event load is cached on (path, mtime, length) — the 3-second
+  dashboard poll now costs a `stat()` instead of reading and parsing up to
+  10k JSONL lines.
+
+## [3.8.1] — 2026-06-12
+
+> **The Field-Report Patch.** Five issues straight from users' terminals, fixed
+> the same week v3.8.0 shipped: `daemon enable --help` no longer *installs the
+> service it was asked to explain* (#393), `allow_paths` finally expands `~`
+> and `$VAR` instead of matching them literally (#392), and `ctx_shell` closes
+> the download-to-file, xargs-delegation and "strict mode that only warned"
+> gaps from the #391 security report. Plus: service file paths are printed
+> where you need them with a new `daemon restart` (#394), and `/reopen` works
+> anywhere in a comment (#388).
+
+### Added
+- **`lean-ctx daemon restart`** (GH #394): stops the supervised service and/or a
+  manually started daemon, then starts it again through whichever channel was
+  active before.
+- **Service file paths are printed** on `daemon enable`/`disable`, shown in
+  `daemon status` and `lean-ctx doctor` (GH #394): the exact LaunchAgent plist /
+  systemd user unit path plus the unit name, so `systemctl --user` /
+  `launchctl` targets are obvious without searching.
+- **`lean-ctx doctor` Path-jail check** (GH #392): reports the effective jail
+  state (active / `path_jail = false` / compile-time `no-jail`), flags
+  `allow_paths` entries that can never match (unset `$VAR`, missing directory)
+  and the `allow_paths = ["/"]` pattern.
+- **Consolidated filesystem-boundary reference** (GH #392):
+  `docs/reference/appendix-paths-and-config.md` §5 documents `path_jail` vs
+  `allow_paths` vs `extra_roots`, the `no-jail` cargo feature and the removed
+  `LEAN_CTX_NO_JAIL` env var; SECURITY.md cross-links it.
+
+### Fixed
+- **`daemon enable --help` executed instead of showing help** (GH #393):
+  `--help`/`-h`/`help` anywhere in `lean-ctx daemon …`, `lean-ctx proxy …` or
+  `lean-ctx allow …` now prints usage and never executes the verb (an agent in
+  read-only plan mode installed the systemd service by asking for help).
+- **`allow_paths` / `extra_roots` entries with `~`, `$VAR` or `${VAR}` were
+  matched literally** (GH #392): config files see no shell, so
+  `"$HOME/code"` silently never matched and PathJail kept rejecting paths the
+  user had explicitly allowed. Entries (and the `LEAN_CTX_ALLOW_PATH` /
+  `LEAN_CTX_EXTRA_ROOTS` env lists, which MCP hosts pass shell-less too) are
+  now expanded; unset variables warn and are reported by doctor.
+
+### Security
+- **`ctx_shell` hardening** (GH #391): download-to-file flags are now treated
+  as file writes (`curl -o/-O/--output/--remote-name`, `wget`'s default
+  file-download mode — `wget -qO-`/`--spider` stay allowed, `dd of=` except
+  `/dev/null`); `xargs`/`nohup` join the delegation-aware checks so
+  `… | xargs bash -c '…'` cannot smuggle inline code past the interpreter
+  block in either allowlist or blocklist-only mode; `shell_strict_mode = true`
+  now actually **blocks** command substitution in arguments and
+  pipe-to-bare-interpreter (both previously only logged a warning while
+  claiming to block); substitution detection now also covers double-quoted
+  `"$(…)"` (single quotes still exempt — the shell doesn't expand there).
+  SECURITY.md states the ctx_shell threat model explicitly: defense in depth
+  for agent mistakes, **not** an OS sandbox — kernel-grade isolation belongs
+  to containers/seccomp and the agent's own permission model.
+
+### Changed
+- **`/reopen` matches anywhere in a comment** (GH #388): "Please /reopen"
+  works now; previously the comment had to *start* with the command.
+
+## [3.8.0] — 2026-06-12
+
+> **The Governance & Proof release.** Agents become accountable identities,
+> context gets enforceable policy, and savings become auditable evidence:
+> Ed25519-bound agent registry, deterministic evidence bundles with an
+> offline verifier, EU AI Act / ISO 42001 / SOC 2 coverage reports, context
+> policy packs, org SSO (OIDC) + org audit log, and a FinOps surface that
+> exports the signed ledger to Datadog, CloudZero, Vantage and FOCUS.
+> The Context OS opens up — WASM extensions, personas, plugin tools,
+> Python/TS/Rust SDKs with a lockstep conformance matrix — while the
+> dashboard reorganizes around the four jobs (decides · remembers · guards ·
+> proves). Underneath: a P0 security hardening series, attribute-safe
+> dashboard escaping, MCP failures that finally set `isError` (#389),
+> a cache-aware proxy that stops defeating provider prompt caching (#534),
+> and a long tail of field-reported crash and correctness fixes.
+
+### Added
+- **First-class agent identities** (GL #433, H3 Epic D):
+  `core/agent_registry.rs` + `lean-ctx agent
+  register/list/show/heartbeat/suspend/resume/decommission/offboard-owner/check`.
+  Agents become registered identities with a mandatory human owner
+  (accountability principle), Ed25519 key binding, lifecycle states
+  (decommission is final and audit-closed), best-effort attestation
+  (binary + role-config hash, drift surfaces on heartbeat with exit 3)
+  and SPIFFE-compatible workload ids
+  (`spiffe://<domain>/agent/<role>/<id>`). Owner offboarding suspends all
+  of an owner's active agents in one locked transaction (SCIM hook for
+  ENT-2); every transition writes tamper-evident audit entries via four
+  new additive OCP Part 4 event types. Registry is cross-process safe
+  (advisory file lock). Docs: `docs/enterprise/agent-identity.md` with an
+  honest attestation threat model.
+- **Evidence Bundle v1 + standalone offline verifier** (GL #425, H3
+  Epic A): `lean-ctx audit evidence --from --to [--framework]` exports a
+  deterministic ZIP (`evidence-bundle-v1` contract) — audit-chain segment,
+  resolved policy pack, CGB + framework coverage reports, Ed25519-signed
+  manifest; identical inputs produce byte-identical bundles. New
+  independent verifier `packages/leanctx-verify` (no engine code, no
+  network, 4 deps) replays the hash chain and validates signatures in
+  five auditor-readable PASS/FAIL steps; mutation tests prove 1-byte
+  flips, truncation and wrong keys are detected. Auditor guide:
+  `docs/enterprise/reading-evidence.md`.
+- **Framework compliance reports — EU AI Act, ISO 42001, SOC 2**
+  (GL #424, H3 Epic A): machine-readable mapping matrices under
+  `compliance/mappings/*.toml` (framework-edition pinned, semi-annual
+  review cycle, explicit residual gaps) and three new builtin policy packs
+  implementing the enforceable slice of each framework
+  (`eu-ai-act-deployer`, `iso42001-aligned`, `soc2-context`). New
+  `lean-ctx policy coverage --framework <id> [pack]` renders the
+  audit-conversation artifact: every control as
+  ENFORCED (live-verified against the resolved pack) / ENGINE (CI-proven
+  guarantee) / GAP (documented organisational duty) — for the EU AI Act
+  reference setup that is 11 of 14 controls technically enforced. Honesty
+  is mechanized: every `full` claim must name a CI test
+  (`tests/compliance_frameworks.rs` proves enforcement AND that violations
+  are detectable — tampered logs fail verification, weak packs downgrade
+  to NOT-ENFORCED), and a drift test fails the build when claims and tests
+  diverge. Not legal advice; aligned ≠ certified.
+- **Business plan — $149/mo flat, self-serve governance** (GL #533,
+  contract `billing-plane-v3`): new tier between Team and Enterprise with
+  50 flat seats, 20 GB hosted index, 10 managed connectors, private
+  registry, **org SSO via OIDC** (new `sso_oidc` entitlement key, additive
+  on every plan) and 365-day audit retention. Self-serve via
+  `lean-ctx cloud upgrade --plan business`; existing subscribers are
+  switched in place (prorated) instead of double-billed. SAML/SCIM
+  (`sso_scim`) stays Enterprise. `billing-plane-v1` remains frozen — v3 is
+  a purely additive catalog delta.
+- **Datadog/Prometheus FinOps export — metrics contract + scrape token**
+  (GL #401): `/metrics` now exposes verified ledger savings
+  (`lean_ctx_ledger_tokens_saved_total`, `lean_ctx_cost_saved_usd_total`,
+  30 s cache over the hash-chained ledger) and a `lean_ctx_info` series
+  carrying `project`/`profile`/`agent_role`/`model`/`version` tags
+  (kube-state-metrics `_info` idiom — one series per process, no
+  cardinality explosion). New `LEAN_CTX_SCRAPE_TOKEN` env: a read-only
+  Bearer token valid **only** for `GET /metrics`, so monitoring agents
+  never hold the dashboard credential. The exposition surface is frozen in
+  `docs/reference/metrics-contract.json`, enforced by
+  `rust/tests/metrics_contract.rs` (update via
+  `LEANCTX_UPDATE_METRICS_CONTRACT=1`). Ready-to-import Datadog assets:
+  `integrations/datadog/` (OpenMetrics `conf.yaml`, Token-Economy
+  dashboard, savings-drop + SLO-violation monitors), guide:
+  `docs/integrations/datadog.md`.
+- **`lean-ctx finops export` — CloudZero, Vantage & FOCUS cost export**
+  (GL #402): turns the hash-chained savings ledger into daily showback rows
+  (day × project × agent × model × tool) with the model price pinned per
+  event — no pricing table to maintain, reproducible forever. Targets:
+  `--target=focus` (FOCUS 1.2 CSV, all 21 Mandatory columns + 1.0 compat
+  set, **passes the official FinOps Foundation `focus-validator`**),
+  `--target=cbf` (CloudZero AnyCost; `--upload` posts per-month Stream
+  drops with `replace_drop` = idempotent re-runs), `--target=vantage`
+  (custom-provider CSV; `--upload` posts multipart, additive semantics
+  documented). Savings are emitted as `Credit`/`Discount` rows with
+  negative cost — Usage spend stays clean for budgets. Guide:
+  `docs/integrations/finops.md`.
+- **Agentless Datadog push** (GL #401): opt-in direct submit to the Datadog
+  Metrics API v2 — `LEAN_CTX_DATADOG_PUSH=1` **and** `DD_API_KEY` required
+  (a stray API key alone never enables egress), `DD_SITE` +
+  `LEAN_CTX_DATADOG_INTERVAL_SECS` optional. Counters go out as
+  per-interval deltas (baseline cycle first — lifetime totals never spike
+  a graph), gauges every cycle, all series tagged
+  `project/profile/agent_role/model/version`. Runs as a background loop in
+  `lean-ctx dashboard`.
+- **Quality loop v1 — edit failures teach mode selection** (GL #494):
+  `ctx_edit` outcomes are now correlated with the last read mode of the
+  file. An `old_string` miss after a compressed read (a) escalates the
+  next auto read of that file to `full` (one-shot, 1 h TTL) and (b) feeds
+  a per-(extension × mode) failure rate; pairs crossing the documented
+  risky threshold (≥2 fails and ≥25 % fail rate, hysteresis exit <15 %)
+  resolve to `full` until they recover. New resolver sources
+  `edit_fail_escalation` / `edit_quality_penalty`, persisted in
+  `~/.lean-ctx/edit_quality.json` (bounded, 30 d decay), surfaced in
+  `ctx_metrics` under "Edit quality". Contract:
+  `docs/contracts/quality-loop-v1.md`. Golden test:
+  `rust/tests/quality_loop_golden.rs`.
+- **ctxpkg hosted registry — client side** (GL #406): `lean-ctx pack
+  publish` is real — preflight (parse, ed25519 signature, scoped-name
+  check) then `PUT` to the registry at ctxpkg.com with a `ctxp_…` token
+  (`--token`/`CTXPKG_TOKEN`). `lean-ctx pack install ns/name[@version]`
+  resolves, downloads, verifies the artifact SHA-256 against the index,
+  runs the standard import gates, re-verifies the signature locally and
+  pins the result in `.lean-ctx/ctxpkg.lock`. `lean-ctx pack export
+  --sign` signs bundles with an auto-managed ed25519 key
+  (`~/.lean-ctx/keys/ctxpkg-ed25519.key`, 0600). Edge: account routes for
+  namespace claim + publish-token lifecycle. Contract:
+  `docs/contracts/ctxpkg-registry-v1.md`.
+- **`lean-ctx policy coverage` — automated partial CGB assessment**
+  (GL #426): statically grades a resolved policy pack against the Context
+  Governance Benchmark v1.0-draft — credential fixtures vs. redaction
+  patterns, regulated-identifier classes, budget cap, retention, tool
+  posture, egress restriction. PASS/FAIL/INCONCLUSIVE per aspect, `--json`
+  for CI gating (exit 1 on FAIL), and an explicit honesty line instead of a
+  maturity grade: 7 of 32 controls are statically checkable, the rest need
+  the manual assessment.
+- **Context Governance Benchmark — spec + self-assessment** (GL #426): CGB
+  v1.0-draft published as its own tool-neutral spec repo
+  (`context-governance-benchmark`): 32 measurable controls in 6 domains
+  (sensitivity/redaction, provenance, budget, audit/evidence, access
+  scoping, lifecycle/retention), three levels (Basic/Hardened/Audited),
+  maturity grades C1–C4, CC-BY-4.0, RFC-light governance and a CI wordlist
+  lint that bans product names from normative text. LeanCTX's own honest
+  self-assessment lands in `docs/compliance/cgb-self-assessment.md`:
+  **C2 — Managed** (Basic 96%, Hardened 80%, Audited 50%), with declared
+  gaps incl. no independent redaction verification and no one-step egress
+  inventory — graded down where claims couldn't be hard-verified.
+- **Dashboard: one tabbed page per job area** (GL #487, Redesign P2): the
+  sidebar now carries six destinations — Home plus one entry per four-jobs
+  area (Context, Memory, Protection, Proof, Project Map) — and each area is a
+  single page whose views are tabs with canonical `#area/tab` deep links
+  (`#context/triage`, `#proof/roi`, …). Every pre-#487 hash (`#live`,
+  `#health`, `#graph`, …) still resolves and is rewritten to its canonical
+  form; the last-used tab per area is remembered. New Protection area: the
+  Guards tab hosts the existing reliability view, the new Risk & Policies tab
+  shows live session-risk warnings (`/api/context-risk`) and the OWASP
+  agentic-risk coverage map served by the new `/api/owasp` endpoint (same data
+  as `lean-ctx audit`). The in-component Project-Map tab bar was removed in
+  favour of the area strip.
+- **Dashboard: four-jobs language pass** (GL #488, Redesign P3): onboarding
+  modal tells the four-jobs story (decides · remembers · guards · proves)
+  with token savings framed as the receipt, includes Protection, and the
+  status bar links the estimated figure to the signed ledger in Proof.
+- **Agent-task benchmark v1 harness** (GL #493): outcome evidence instead of
+  token arithmetic — does lean-ctx change task success rate and cost per
+  solved task? `bench/agent-task/` runs two identical Claude-Code-headless
+  arms (native vs. lean-ctx MCP, fresh HOME per run, hard-pinned MCP surface
+  via `--strict-mcp-config`) over a deterministic SWE-bench-Verified subset
+  (sorted round-robin by repo, frozen as `tasks.lock.json`), judged by the
+  official SWE-bench evaluation; usage/cost come from the runtime's own final
+  report — nothing is estimated. Pre-registered protocol with numbered
+  amendments (`PROTOCOL.md`), self-hashing result artifact ready for
+  `ssh-keygen -Y sign`; negative results publish unchanged.
+- **LoCoMo memory benchmark harness** (#291): a model-free, deterministic
+  retrieval-recall benchmark over LoCoMo-style long conversations — every
+  turn is stored as a memory, every question recalls top-k and is scored
+  against the gold answers (answer containment, token-F1, exact match,
+  recalled-context vs. full-transcript tokens). Ships a committed
+  `reference-suite` with publishable numbers (`benchmark/locomo/LOCOMO.md`:
+  100% containment@5 at 29.4% token reduction), a `locomo_bench` binary for
+  full-dataset runs, and a CI smoke test.
+- **Context policy packs** (GL #489): governance presets as code. A pack pins
+  a team's context-governance expectations in reviewable TOML — default read
+  mode, allowed/denied tools, named redaction regexes, audit-retention
+  expectation, context-budget cap — with single inheritance (`extends`) whose
+  semantics are security-first: denies and redaction accumulate down the
+  chain, scalars override, allowlists replace deliberately. Five curated
+  built-ins ship embedded (`baseline`, `strict-redaction`, `finance-eu`,
+  `healthcare`, `open-source`); `lean-ctx policy list|show|validate` lists,
+  resolves and lints packs (project pack: `.lean-ctx/policy.toml`). v1 is the
+  format + tooling; runtime enforcement follows. Contract:
+  `docs/contracts/context-policy-packs-v1.md`; guide:
+  `docs/guides/policy-packs.md`.
+- **Org audit log + retention** (GL #484): a unified, append-only governance
+  audit log for orgs, surfaced to the owner at `/account/audit` with a
+  filterable table and CSV export. Every governance path now writes
+  best-effort events (SSO config/verify/enforce/remove/login, invite
+  create/redeem/revoke) into one `org_audit_log`; the retired SSO-only table
+  is migrated and dropped by an idempotent boot migration. Retention is the
+  owner-plan window from the `billing-plane-v1` SSOT (Team 90 days, Enterprise
+  ~10 years) and is enforced server-side both by a daily fleet sweep and on
+  read, so an owner never sees a row older than they're entitled to keep. Reads
+  are owner-only, cursor-paginated, and bounded. Contract:
+  `docs/contracts/org-audit-log-v1.md`.
+- **Org SSO (OIDC)** (GL #482): self-serve single sign-on for Team and
+  Enterprise orgs. Owners configure an OIDC provider (Okta, Entra ID, Google
+  Workspace, any compliant OP) under Account → Billing, prove domain ownership
+  via a DNS-TXT record (checked over DNS-over-HTTPS), and optionally require
+  SSO for everyone — the owner stays password-exempt (break-glass). Members
+  click *Continue with SSO*, authenticate at the IdP, and land in a normal
+  session with just-in-time user + org-membership provisioning. Edge runs the
+  Relying Party (Authorization Code + PKCE, discovery/JWKS cache, ID-token
+  verification with nonce binding and HS*/none rejection); the control plane
+  is the system of record (AEAD-sealed client secret, append-only
+  `billing_sso_audit`). API keys never touch URLs — a single-use 60-second
+  handoff code carries the session to the browser. Contract:
+  `docs/contracts/org-sso-oidc-v1.md`; setup guide:
+  `docs/guides/org-sso-setup.md`.
+- **Team invite links** (GL #385): owners mint one-time links
+  (`leanctx.com/join/?code=…`) instead of copy-pasting tokens. Codes are
+  256-bit, stored hashed, expire after 7 days, and redeem exactly once
+  (atomic claim; a failed seat check releases the claim for retry). The
+  public join page issues the member token once, with prefilled CLI + MCP
+  setup snippets; pending invites are revocable from the dashboard like
+  member tokens. Redeem endpoint is rate-limited per IP and answers every
+  dead code with one neutral 404. Contract:
+  `docs/contracts/team-invite-links-v1.md`.
+- **Device overview** (GL #387): every authenticated Personal-Cloud push now
+  carries an `X-Device-Label` header (the machine's hostname), tracked
+  server-side as fire-and-forget display metadata — never auth, quota, or
+  billing input. `/account/cloud` lists each machine with last sync, last
+  surface and push count, plus a per-row Forget control
+  (`GET/DELETE /api/account/devices`). Contract:
+  `docs/contracts/device-overview-v1.md`.
+- **Supporters wall + dashboard badge** (GL #393): the public supporters wall
+  is live end-to-end — Stripe checkout fields (display name, message, opt-in)
+  are captured idempotently by the billing webhook, clamped to 60/140 chars,
+  profanity-gated and served via the public `GET /api/supporters` edge;
+  `leanctx.com/support/` renders the wall client-side (plaintext-only,
+  tier pills, newest first). Cancelling the subscription hides the entry on
+  the next `subscription.deleted` webhook, and an internal-key moderation API
+  (`GET …/supporters/moderation`, `PATCH …/supporters/{id}`) provides an
+  audited kill-switch. Locally, the dashboard's support bar now swaps its ask
+  for a thank-you when the machine is linked to a supporting account — served
+  by the new `/api/billing-badge` endpoint from the cached plan only (no
+  network, purely cosmetic, never gates a local capability).
+- **Email digests** (GL #386): the cloud server now sends a monthly Pro digest
+  (tokens saved, agent actions, sessions, CEP score — from synced snapshots)
+  and a weekly Team digest (net tokens, USD, actions, top model/tool — from
+  the hosted server's savings summary). Idempotent per period with automatic
+  catch-up and SMTP retry; silent when a period has no real data. Every email
+  carries a one-click, login-free unsubscribe (hashed, rotating tokens);
+  `GET/PUT /api/account/digest` exposes the preference to the dashboard.
+  Contract: `docs/contracts/email-digest-v1.md`. Cloud-server CORS now allows
+  `PUT`/`PATCH` (digest toggle + team settings).
+- **Weekly team-ROI webhook** (GL #388): team servers post a weekly savings
+  summary (net tokens, USD, measured actions, 7-day window, top mover, top
+  model/tool) to Slack, Discord, or any JSON webhook. Configured via
+  `roiWebhookUrl` in `team.json` (https-only, validated at boot) or self-serve
+  through the team dashboard's new Integrations card
+  (`PUT /api/account/team/settings` → control plane re-renders the config).
+  Posts once per ISO week with retry-on-failure; weeks without reported data
+  stay silent — no synthetic numbers. Payload shape auto-detects the vendor
+  (Slack `text`, Discord `content`, generic both).
+- **Per-member savings drilldown** (GL #389): new audit-scoped team-server
+  endpoint `GET /v1/savings/member/{signer}` — one member's latest totals,
+  model/tool breakdowns and a member-only 90-day cumulative series (carry-
+  forward replay of that signer's snapshot history). Signer ids are validated
+  against `[A-Za-z0-9_-]{1,64}` before any filesystem access; unknown signers
+  are a clean 404. Proxied through the control plane
+  (`/api/billing/team/{id}/savings/member/{signer}`) and the account edge
+  (`/api/account/team/savings/member/{signer}`); the team dashboard's member
+  rows are now clickable and open an inline drilldown panel (own series chart,
+  top models, top tools). Contract: `docs/contracts/billing-plane-v2.md`.
+- **model2vec static-embedding support** (GL #452): the embedding engine now
+  drives EmbeddingBag-topology ONNX graphs (model2vec exports like
+  `hf:minishlab/potion-base-8M`) next to classic transformers. Topology is
+  detected from the graph's input signature (`input_ids` + `offsets`) at load
+  time; the adapter feeds flat ids + batch offsets, skips mean-pooling (the
+  graph pools internally) and probes dimensions off the rank-2 output. ~500x
+  faster inference at ~30 MB — built for initial indexing of large repos and
+  semantic search on weak hardware. Live-verified end-to-end (256d, L2-normed,
+  semantic sanity); guide section in `docs/guides/custom-embeddings.md`.
+- **Minimal org model on the cloud plane** (GL #468): team checkouts now
+  create an organization with the buyer as owner; memberships inherit the
+  owners' best active plan at the entitlements edge (never downgrading a
+  personal plan) and `/api/account/entitlements` carries the org
+  `{id, name, role}` for the dashboard's new organization section.
+- **Zero-knowledge Personal Cloud vaults** (GL #467): knowledge *and* gotchas
+  now sync as client-side-encrypted blobs (XChaCha20-Poly1305, domain-separated
+  HKDF keys `knowledge-vault-v1` / `gotcha-vault-v1` derived from the account
+  API key the server only stores hashed). The first vault push purges the
+  account's legacy plaintext rows; dashboards read the client-declared
+  `entry_count` from blob metadata. Contract:
+  `docs/contracts/personal-cloud-encryption-v1.md`.
+- **Team server billing-plane endpoints** (GL #463): `GET /v1/storage` reports
+  the hosted workspace footprint (allocated-blocks sizing, hard links counted
+  once, symlinks never followed, 60 s cache; `camelCase` per
+  `billing-plane-v2`) and `GET /v1/usage` serves the unified snapshot —
+  signed-ledger savings roll-up, measured `toolCalls`, and a `snake_case`
+  `storage` block. Both audit-scope-gated like `/v1/metrics`; quota via
+  `LEANCTX_TEAM_STORAGE_QUOTA_BYTES`. Unblocks the control plane's hourly
+  Stripe metering job and threshold mails against real team servers.
+- **`lean-ctx doctor --migrate-check`** (GL #396): v1.0 migration-readiness
+  audit — config.toml keys validated against the schema (free-form sections
+  like `ide_paths` respected), active deprecations, data-layout writability,
+  frozen-contract set. `--json` for fleet rollouts; exit 0 = "ready for 1.0".
+  Plus the launch program docs: `docs/releases/v1.0-runbook.md` (RC/freeze/
+  bug-bash/rollback/launch-day plan), `docs/releases/migration-1.0.md`
+  (zero-breaking-changes guide) and `marketing/launch-v1/` (Show HN + Product
+  Hunt drafts with tokbench-informed Q&A prep).
+- **Custom embedding models** (GL #397, upstream #328): `ctx_semantic_search` can now
+  load any HuggingFace repo with an ONNX export via `model = "hf:org/repo[@revision]"`
+  (`[embedding]` in `config.toml` or `LEAN_CTX_EMBEDDING_MODEL`). Includes revision
+  pinning with an unpinned-warning, automatic dimension probing from the ONNX graph
+  (`[embedding].dimensions` as declared fallback), per-repo+revision storage isolation,
+  and SHA-256 lockfiles (`model.lock.json`, trust-on-first-use) that reject silent
+  upstream content swaps. Model or revision changes trigger the established one-shot
+  re-index. New guide: `docs/guides/custom-embeddings.md`.
+- **SDK conformance matrix** (GL #395): all three first-party SDKs (`leanctx`
+  on PyPI, `@leanctx/sdk` on npm, `lean-ctx-client` on crates.io) now cover the
+  **entire** public `/v1` surface — added `context_summary`, `search_events`,
+  `event_lineage` and `metrics` to every client. The shared conformance kit
+  grows from 4 to 14 lockstep checks, including two drift gates:
+  `route_coverage` (a server route without an SDK method fails within one CI
+  run) and `engine_compat` (SDK declares its supported `http_mcp` contract
+  versions). New CI job `sdk-conformance` runs all three kits against a real
+  `lean-ctx serve` build via `scripts/sdk-conformance.sh` and publishes
+  `docs/reference/sdk-conformance-matrix.md` (current state: 3/3 SDKs,
+  14/14 checks PASS). SDK majors follow the engine contract major.
+  Completing the audit: live adapter smoke tests (OpenAI/LangChain/
+  LlamaIndex/CrewAI run one real tool round trip each against the live
+  server, optional frameworks skip cleanly) and a release gate
+  (`scripts/check-sdk-versions.py`, first job of the release workflow):
+  an engine release fails hard when an SDK cannot speak the shipped
+  `http_mcp` contract version, and warns on >1 minor SDK-family drift.
+- **Contract freeze & SemVer/deprecation policy** (GL #394): all 29 contract
+  docs are now classified `frozen` / `stable` / `experimental` in a stability
+  matrix (CONTRACTS.md, SSOT `core/contracts.rs::contract_docs()`). Two new CI
+  gates enforce the freeze: `tests/contracts_frozen.rs` (every doc classified;
+  frozen docs content-hashed against `docs/contracts/frozen-hashes.json` —
+  semantic changes must land as a new `-v2.md` file) and
+  `tests/openapi_stability.rs` (public `/v1` surface vs.
+  `docs/reference/openapi-v1.snapshot.json`; additive diffs pass, removed or
+  mutated routes fail). `GET /v1/capabilities` additionally returns a
+  `contract_status` map so clients can verify stability guarantees at runtime.
+  The deprecation register `DEPRECATIONS.toml` (compiled into the binary,
+  ≥ 2 minor releases between announcement and removal) feeds a new
+  `lean-ctx doctor` check that warns about every deprecation shipping in the
+  installed build.
+- **Personal-Cloud auto-push** (GL #384): opt-in `lean-ctx cloud autosync on`
+  pushes the Pro surfaces (knowledge, commands, CEP, gotchas, buddy, feedback)
+  silently once per day from the background task — offline keeps the day's
+  slot open for retry, a Pro gate (402) consumes it quietly (no error spam on
+  Free accounts).
+- **Hosted Personal Index for Pro** (GL #392): `lean-ctx sync index
+  push|pull|status` syncs the project's retrieval index (BM25 + embeddings)
+  across devices — a fresh machine gets working `ctx_semantic_search` without
+  a local re-index. Bundles are encrypted client-side (XChaCha20-Poly1305;
+  key HKDF-derived from the account API key, which the backend stores only as
+  a hash): the server holds ciphertext it cannot read. Per-account quota from
+  the plan's `hosted_index_mb` (Pro: 1 GB; open self-hosted deployments:
+  1 GB default), display-first — an over-quota push warns and blocks, it
+  never bills. New backend routes `PUT/GET/DELETE /api/sync/index/{project}`
+  + `GET /api/sync/index`; the Personal-Cloud dashboard payload gains a
+  `hosted_index` block (projects, used bytes, quota). The local index is
+  never gated (Local-Free Invariant; `tests/local_free_invariant.rs`).
+  Contract: `docs/contracts/hosted-personal-index-v1.md`.
+- **Hosted-index SLO gate** (GL #391): the team server now measures every
+  `/v1` request in an outermost middleware and derives the three GA-gate
+  signals — rolling p50/p95/p99 latency, availability (non-5xx share over the
+  last 4096 requests) and index freshness (seconds since the last successful
+  Index-scoped tool call). Exposed via `/v1/metrics` (new `slo` block) and
+  `/v1/metrics?format=prometheus` (`leanctx_team_*` series for Datadog/
+  Prometheus scrape agents). New CLI: `lean-ctx team slo-report --server
+  <url> --token <token> [--json]` renders the gate and exits non-zero on
+  violation (CI-friendly). SLO definitions ship in
+  `docs/examples/team-slos.toml`; the SLO engine understands the new metrics
+  `team_query_p95_ms`, `team_availability_pct`, `team_index_lag_seconds`.
+  Runbook: `docs/guides/hosted-index-slo.md`.
+- **Accuracy conformance checks for lossy read modes** (P1, GL #441):
+  `lean-ctx conformance` now verifies structural invariants of `map`,
+  `signatures`, `aggressive` and `entropy` against a fixed Rust fixture —
+  determinism, symbol retention, body stripping, and real compression. CI
+  gates on regressions in the modes agents rely on for correctness.
+- **Honest metering on phase-isolated / non-caching workloads** (#361): `lean-ctx
+  gain` now states its denominator — savings are compression on
+  *lean-ctx-touched traffic*, not the full provider bill — via a **Methodology**
+  line and a new `injected_overhead_tokens_per_turn` field in `gain --json`
+  (`net bill impact = tokens_saved − injected_overhead_tokens_per_turn × turns`).
+  New `core::context_overhead` measures the fixed per-turn prefix lean-ctx
+  injects (tool schemas + server instructions + rules block). A new
+  `rules_injection = "off"` (also `none`/`disabled`) writes **no** rules file —
+  for hosts that supply their own steering, or phase-isolated/non-caching
+  harnesses where the injected prefix is pure re-billed overhead. The
+  performance-tuning journey gains a "workload fit" section documenting the proxy
+  as the way to reach tool output the `ctx_*` tools can't wrap. Prompted by an
+  independent, reproducible external benchmark.
 - **Team RBAC roles** (Commercial Plane, EPIC 13.2): a `TeamRole`
   (`viewer`/`member`/`admin`/`owner`) layer over the existing fine-grained
   `TeamScope`s. A token's effective scopes are `scopes ∪ role.scopes()`, enforced
@@ -63,7 +696,327 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Per-item sensitivity policy floor** (`[sensitivity]`): classify every context item as `public < internal < confidential < secret` (path heuristics + secret/PII detection incl. Luhn-validated cards and ISO-7064 IBANs) and enforce a uniform **floor** before content ever reaches the model — `redact` (mask the spans) or `drop` (withhold the item). Applied uniformly to tool outputs and knowledge facts. Global-only and **off by default**.
 - **Reproducible scorecard — `lean-ctx benchmark scorecard`**: a deterministic, machine-independent report of compression savings, retrieval recall/MRR, and latency over a synthetic, byte-reproducible corpus. The JSON and human output embed a `determinism_digest`, so two runs of the same code anywhere produce the same fingerprint — the artifact is self-verifying. Wired into CI as an uploaded artifact.
 
+### Changed
+- **Parallel dashboard tracks consolidated** (GL #476–#479, #486, #490): the
+  four-jobs IA from the redesign epic and the incremental UX/data passes that
+  shipped in parallel now live on one branch. The epic layout wins (slim Home,
+  Proof group with ROI & Plan + Trends, Simple = Home only); the data passes
+  win correctness and language — relative search scores (top hit = 100%),
+  the verified-bridge line in the Home hero (estimated ⇄ signed ledger),
+  Context Triage / Context Contents / Episodes labels, estimate-methodology
+  tooltips, per-task episode metrics, the dead Symbols signature column
+  removed and vendor noise filtered from the Compression Lab. Search keeps
+  the inline ±12-line preview and gains an "Open in Lab →" handoff. On the
+  Rust side `ctx_search` now returns a `SearchOutcome` that separates the
+  modeled native-grep baseline (estimated stats) from raw observed tokens
+  (verified ledger), so the two series can never cross-contaminate.
+- **Four-jobs cockpit navigation + slim Home** (GL #470/#486, phase 1): the
+  sidebar now tells the same story as the website — Context *(decides what
+  agents read)*, Memory *(remembers what agents learn)*, Proof *(proves what
+  you save)* and Project Map *(understands your codebase)* — instead of 17
+  flat entries. Simple mode is the 5-second answer: Home only. Home itself
+  slimmed down to status strip + receipt + gauge/triage + one trend + top-3
+  commands (expandable); the cost-analysis card moved to ROI & Plan (labelled
+  as the estimated, all-time view next to the verified-ledger methodology)
+  and the MCP-vs-shell / task-breakdown doughnuts moved to Trends. Every view
+  stays reachable via Advanced mode, deep links and the command palette.
+- **Large modules split by domain** (P1, GL #439, #440):
+  `cli/dispatch/analytics.rs` (1685 LOC) → `analytics/{gain,savings,billing,graph}`,
+  `core/stats/format.rs` (1532) → `format/{util,cep,dashboard,views}`,
+  `rules_inject.rs` (1542) → `rules_inject/{content,targets,detect,write,skills}`.
+  No behavior change; entry-point visibility narrowed to the dispatch layer.
+
 ### Fixed
+- **Scorecard determinism restored** (#211 contract): benchmark `entropy`
+  numbers fed the scorecard's reproducibility digest through the regular
+  compression path, whose opportunistic semantic redundancy filter (#544)
+  kicks in as soon as the shared embedding engine finishes loading — two
+  runs in the same process could disagree (e.g. `entropy=0.00` vs `57.29`
+  on the small corpus). Benchmarks now pin the filter off via the new
+  `entropy_compress_deterministic`, keeping the digest machine-independent
+  (and cutting the determinism test from 25 min to 4 s).
+- **Signed artifacts always embed the key that actually signed them**: every
+  signer that embeds its public key next to the signature (handoff transfer
+  bundles, evidence bundles, `wrapped publish`) previously resolved the
+  keypair twice — once to sign, once to read the public key. If the key store
+  moved or the key was regenerated between the two reads (concurrent
+  data-dir changes, parallel processes), the artifact carried a public key
+  that could never verify its own signature. New atomic
+  `agent_identity::sign_with_public_key` / `sign_bytes_with` APIs resolve the
+  keypair exactly once; all three call sites migrated.
+  (pipeline red since the #551 efficiency program landed): the
+  `try_shared_engine_returns_none_when_not_initialized` unit test asserted
+  on the process-global `SHARED_ENGINE` `OnceLock` while the new #551
+  background activation (triggered by any sibling test touching entropy
+  compression) could load — and in CI even *download* — the model
+  mid-suite. The test now lives in its own integration-test binary
+  (`tests/embeddings_shared_engine.rs`, fresh process = deterministic),
+  `ensure_engine_background()` is a no-op under `cfg!(test)`, and CI
+  exports `LEAN_CTX_EMBEDDINGS_AUTO_DOWNLOAD=0` so the suite is hermetic.
+  Also un-sticks the Coverage job: the silent engine load made
+  `run_project_benchmark("src")` exceed tarpaulin's 180 s timeout.
+- **`ctx_shell`/`ctx_execute` failures now set MCP `isError` +
+  `structuredContent`** (GitHub #389): every tool call returned
+  `CallToolResult::success` regardless of the shell exit code — MCP clients
+  (OpenCode guards, Claude Code, Cursor) had no programmatic way to detect
+  failures and were forced to regex-parse the `[exit:N]` text footer. A new
+  `ShellOutcome` (Exit(code) | Blocked) now flows from the shell tools
+  through dispatch into the MCP result: non-zero exit sets
+  `isError: true` + `structuredContent: {"exitCode": N}`, allowlist/
+  validation rejections set `isError: true` + `{"blocked": true}`.
+  Covered end-to-end: the degraded session-lock path (which previously
+  even dropped the exit footer), the auto-checkpoint early return, the
+  reference-store substitution, `ctx_call` chaining, and `ctx_execute`
+  (single/batch — first failing task fails the batch — and file
+  preconditions). Exit 0 stays byte-identical (no metadata churn).
+- **OpenClaw: `setup --auto` re-injected the legacy `mcpServers` key and
+  broke 2026.6.1+ hot-reload** (GitHub #390): OpenClaw moved to a nested
+  `mcp.servers` schema with strict validation; the editor-registry writer
+  still wrote top-level camelCase `mcpServers`, so every watchdog tick
+  produced `config reload skipped (invalid config): Unrecognized key` —
+  with gateway-down risk on restart if the stale block won. OpenClaw now
+  has a dedicated `ConfigType::OpenClaw` writer: it detects the version
+  via `meta.lastTouchedVersion` (>= 2026.6.1 or an existing `mcp.servers`
+  block → nested schema; older → legacy camelCase), migrates our stale
+  `mcpServers.lean-ctx` entry away (dropping the key when empty, foreign
+  entries preserved), and is strictly idempotent — watchdog re-runs leave
+  the file byte-identical (verified via mtime). `init --agent openclaw`,
+  `setup --auto`, `lean-ctx doctor` (flags stale legacy blocks) and both
+  uninstall paths (editor-registry + textual `lean-ctx uninstall`, which
+  now also strips an emptied `mcpServers {}` leftover) share the same
+  schema logic. Invalid JSON is never text-injected for openclaw.json —
+  a malformed write would take the gateway down.
+- **Shell parser: `>|` noclobber redirect treated as a pipe** (GitHub #387):
+  `date --fsdfs >| out 2>&1` split at the `|`, so the redirect target
+  (`out`) was checked against the shell allowlist as a command and
+  blocked. The segment splitter now recognises `>|` as a redirect
+  operator; file-write targets are never allowlist-checked.
+- **`gain --deep` crash on multibyte paths/agent ids** (GitHub #386):
+  every display truncation helper (`ctx_gain::truncate_str` /
+  `shorten_path`, `stats::format::truncate_cmd`, `ctx_architecture`
+  hotspot paths) sliced at byte offsets and panicked mid-codepoint for
+  umlauts/CJK/emoji; one helper could also underflow for tiny widths.
+  All cuts are now char-boundary-safe (swept 0..=len+2 in tests).
+- **`report-issue` now embeds the crash log** (GitHub #386 follow-up):
+  the last 3 entries of `<data_dir>/logs/crash.log` (location, payload,
+  truncated backtrace) ship with every report, so panic reports are
+  actionable instead of arriving empty.
+- **SIGABRT coredumps from the panic hook itself** (GitHub #378): the
+  process-wide panic hook used `eprintln!`, which panics on I/O errors —
+  when a background worker's stderr was gone (terminal closed → EPIPE),
+  any ordinary panic became a double panic and the runtime aborted the
+  whole process (38 coredumps reported). The hook now writes its message
+  best-effort (`write_all`, errors ignored) and wraps the crash-log write
+  in `catch_unwind`; a panic can never escalate to SIGABRT through the
+  hook anymore.
+- **MCP token footprint: installers no longer force the full toolset**
+  (GitHub #385): every generated MCP config carried
+  `LEAN_CTX_FULL_TOOLS=1`, advertising 69+ tool schemas (~15k tokens)
+  to the client on every turn — lean-ctx showed up as one of the biggest
+  token consumers in users' own usage breakdowns. New installs/refreshes
+  now use the core toolset (13 tools + `ctx_call`/`ctx_expand` for
+  on-demand access); opt back in via `tool_profile = "power"` in
+  config.toml or `LEAN_CTX_FULL_TOOLS=1` in the server env.
+- **Pi: stale `~/.pi/agent/mcp.json` entry defeated the embedded bridge**
+  (GitHub #361, found by the tokbench independent benchmark): Pi has no
+  native MCP adapter, but `init --agent pi` wrote a `lean-ctx` mcp.json
+  entry that older pi-lean-ctx versions read as "adapter configured" and
+  disabled their embedded MCP bridge — the session cache silently never
+  engaged. The installer no longer writes that entry anywhere
+  (hooks path + editor-registry target + setup target all removed) and
+  `init --agent pi` migrates existing configs by deleting the stale
+  entry (file removed entirely when lean-ctx was its only content).
+- **Uninstall: perfect-clean guarantee** (GL #558, Discord report):
+  `lean-ctx uninstall` now leaves zero artifacts behind. Backup sweep
+  covers installer subdirectories (`hooks/`, `rules/`, `skills/`,
+  `steering/`, VS Code `User/`, `.gemini/antigravity-cli`) and
+  project-local CWD config dirs; lean-ctx-owned script backups and
+  orphaned config backups are removed; `{"hooks": {}, "version": 1}`
+  boilerplate shells are deleted instead of kept; now-empty installer
+  directories are swept as the final filesystem step (non-empty dirs
+  survive untouched); platform data dirs (`~/Library/Application
+  Support/lean-ctx`, `%LOCALAPPDATA%\lean-ctx`, `~/.local/share/lean-ctx`)
+  are removed. Verified end-to-end: 8-agent install + proxy enable →
+  uninstall → 0 lean-ctx references, 0 `.bak` files, 0 leftover dirs.
+- **Claude rules file regression** (GL #555 follow-up, GL #558):
+  `rules_inject` still wrote the always-loaded
+  `~/.claude/rules/lean-ctx.md` on `init --agent claude`, undoing the
+  token-footprint fix. Claude Code no longer gets a rules target — the
+  CLAUDE.md block + on-demand skill carry the guidance.
+- **Setup `.bak` churn** (GL #558): re-running setup/init no longer
+  rewrites identical hook scripts, so no backup files pile up for
+  unchanged content.
+- **Audit chain forked under concurrent processes** (found via GL #425
+  E2E): `prev_hash` came from a per-process cache, so two processes
+  appending simultaneously both chained onto the same parent (and could
+  interleave half-written lines). `record()` now takes an exclusive
+  advisory file lock and reads the chain tail from the file itself;
+  regression test runs 4 concurrent writers and demands one valid
+  100-entry chain. The evidence generator additionally splits historic
+  glued lines losslessly and refuses unparseable data inside an attested
+  period.
+- **Claude Code: instruction footprint cut from ~12k to <500 tokens**
+  (GL #555): the `~/.claude/CLAUDE.md` block imported the full ruleset via
+  `@rules/lean-ctx.md` and the project `AGENTS.md` block via `@LEAN-CTX.md`.
+  Claude Code expands `@`-imports inline at launch and loads every rules
+  file without `paths:` frontmatter unconditionally — stacking the same
+  ruleset up to three times per session (field reports: 12.3k tokens of
+  memory files before the first message). The CLAUDE.md block is now
+  self-contained (v3, no imports), the AGENTS.md block carries a 3-line
+  inline mapping with a plain-text pointer, and the always-loaded
+  lean-ctx-owned rules files (`~/.claude/rules/lean-ctx.md`, project
+  `.claude/rules/lean-ctx.md`) are removed on update (marker-checked) —
+  deep documentation lives in the on-demand lean-ctx skill.
+- **Claude Code: compactions now actually reset the re-read cache**
+  (GL #555): every Claude hook payload carries `session_id`, so the generic
+  session catch-all matched before the compaction check —
+  `hook_event_name: "PreCompact"` was never recorded and
+  `sync_if_compacted()` never reset `full_content_delivered` flags. After a
+  host compaction, `ctx_read` kept answering `[unchanged]` stubs that
+  pointed at evicted context, and agents recovered by switching to native
+  `Read` for the rest of the session. PreCompact is now detected ahead of
+  the catch-all (regression-tested with the real payload shape), so the
+  first re-read after compaction delivers full content again.
+- **Tool schemas hardened for strict validators** (GL #545): 20 tool
+  schemas (incl. `ctx_expand`) declared `type: object` + `properties`
+  without an explicit `required` array — valid JSON Schema, but strict
+  Pydantic-based backends (OpenAI, Azure, SGLang) reject it and OpenCode
+  surfaces `Invalid schema for function 'lean-ctx_ctx_expand': None is not
+  of type 'array'`. Every advertised schema (built-ins and plugin
+  manifests) now passes `normalize_for_strict_validators()`: recursive
+  explicit `required: []` on object schemas and `items` on array schemas,
+  at every nesting level. Regression gate:
+  `rust/tests/tool_schema_strictness.rs` walks the whole registry.
+- **Windows: proxy/daemon survive AI-client MCP recycling** (GL #545):
+  the auto-started proxy and daemon were spawned as plain child processes.
+  On Windows they inherit the parent's console and Job object; AI clients
+  (OpenCode, Codex, Claude Code) run MCP servers inside kill-on-close Jobs,
+  so recycling the MCP process silently killed the proxy mid-flight —
+  observed as `Cannot connect to API: The socket connection was closed
+  unexpectedly`, cold-start latency and agents falling back to native
+  tools. Background spawns now use `ipc::process::spawn_detached()`
+  (`DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP |
+  CREATE_BREAKAWAY_FROM_JOB`, graceful fallback when the Job denies
+  breakaway). No behaviour change on macOS/Linux.
+- **Proxy history pruning defeated provider prompt caching** (GL #534): the
+  Anthropic/OpenAI proxy handlers summarized everything older than the last 6
+  messages on *every* request. That rolling boundary rewrote a
+  previously-stable message each turn, so the provider's prefix-matching
+  prompt cache (Anthropic `cache_control`, OpenAI automatic caching) missed
+  from that point on — users saw uncached input jump from ~2–10k to 80–100k+
+  tokens per turn (cache *writes* at 1.25× instead of reads at 0.1×). History
+  is now pruned at a **frozen, cache-aware compaction boundary** that only
+  advances in deterministic 16-message strides (≥8 recent messages always
+  intact): between jumps the request prefix stays byte-identical and the
+  prompt cache keeps hitting; a jump costs one re-write, then caching resumes
+  on the smaller history. Pruning is content-deterministic and preserves
+  `cache_control` breakpoints; tool-result compression is prefix-stable and
+  unchanged. New `[proxy].history_mode` config key /
+  `LEAN_CTX_PROXY_HISTORY_MODE` env: `cache-aware` (default), `rolling`
+  (legacy max-savings), `off`. Invariant locked by a byte-stability test
+  simulating 80 growing turns.
+- **`ctx_edit` evidence diff corrupted by terse post-processing** (GH #382):
+  the `evidence (diff)` block embeds verbatim source lines, but the generic
+  terse stage still ran over `ctx_edit` output — dictionary abbreviation
+  (`return 0` → `ret 0`), blank-line stripping and line-score filtering
+  silently dropped/mangled diff lines, making agents conclude a correct edit
+  went wrong (the file on disk was always right). Two-layer fix: `ctx_edit`
+  joins the read family in the terse exemption, and the terse pipeline itself
+  is now fence-aware — content inside ``` / ~~~ fences passes through
+  byte-exact while surrounding prose still compresses, protecting every
+  current and future tool that embeds code blocks.
+- **CI green again across all three OS runners**: the billing-catalog golden
+  fixture now normalizes CRLF before comparing (Windows autocrlf checkouts),
+  the `path_resolve` CWD-independence test canonicalizes both sides before
+  comparing (macOS `/var` symlink, Windows 8.3 short names), the
+  `team_billing` module doc no longer intra-doc-links a private const
+  (rustdoc `-D warnings`), and the six new org/cloud contract docs are
+  classified (Experimental) in `contract_docs()`. The frozen
+  `team-server-contract-v1.md` is restored byte-exact; its additive
+  `storageQuotaBytes`/`roiWebhookUrl` keys moved to a new
+  `team-server-contract-v2.md` (Stable), per the contract-file rule.
+  Second wave: the CLI fidelity/pipe-guard integration tests pin
+  `LEAN_CTX_ALLOWLIST_WARN_ONLY=1` (they assert compression behavior, not
+  enforcement — on CI stderr is no TTY, so the new agent-mode allowlist
+  blocked their `for`/`while` test scripts with exit 126), the
+  `ISSUER_CACHE`/`ATTEMPTS` statics are documented in LOCK_ORDERING.md
+  (L45/L46), and `docs/reference/generated/mcp-tools.md` is regenerated
+  for the `ctx_agent` brief/return actions and `ctx_knowledge as_of`.
+- **Cockpit backlog triple** (GL #454, #455, #456): the Routes view now
+  understands axum — `.route("/path", get(handler))` incl. chained methods
+  (`get(a).post(b)`), qualified forms (`axum::routing::post`) and module-path
+  handlers — plus hand-rolled `"/api/…" =>` match routers, taking this
+  codebase from 0 to 136 detected routes. The Call Graph starts framed: an
+  initial zoom-to-fit runs once the force layout settles (manual pan/zoom is
+  never overridden) and link opacity now fades with edge density, so 150-node
+  graphs stop rendering as an over-zoomed hairball. And when token auth is on
+  but the browser has none, the first 401 swaps the page for a single
+  centered token prompt (validates against `/api/health`, stores in
+  sessionStorage, reloads) instead of two dozen raw `unauthorized` cards.
+- **Dashboard polish from the function audit** (GL #478): the Explorer tree is
+  now a real WAI-ARIA tree — `role=tree/treeitem/group`, `aria-expanded`,
+  roving tabindex and full keyboard support (arrows expand/collapse/navigate,
+  Enter/Space toggle, Home/End jump) with a visible focus ring. Search results
+  stopped pretending: clicking a hit opens an inline file preview (±12 lines
+  around the match, hit line highlighted) served by the existing
+  `compression-demo` endpoint, with full keyboard access. Procedures now
+  auto-learn: every recorded episode re-runs workflow detection
+  (`procedural_memory::auto_detect_from_episodes`), so recurring tool
+  sequences appear on the Memory page without anyone calling `detect` by
+  hand. The status-bar daemon indicator finally explains itself — the tooltip
+  describes what green/red means and how to recover (`lean-ctx serve -d`).
+- **Data truthfulness** (GL #479): the dashboard now tells the whole story
+  behind its savings numbers. The verified ledger covers measured shell and
+  search compression (`cli_shell`, `ctx_shell`, `ctx_search` events with raw,
+  unmultiplied baselines) instead of only `ctx_read` — closing the unexplained
+  24x gap between Home and the ROI view. The 2.5x native-grep counterfactual
+  used by the *estimated* stats is now a documented, named constant
+  (`NATIVE_SEARCH_BASELINE_FACTOR`), surfaced in the Home tooltips and in a
+  new "Methodology: verified vs. estimated" card on the ROI view. Inferred
+  agent activity no longer shows negative ages on UTC+N machines (event
+  timestamps are local wall-clock and are now interpreted as such).
+- **No more WARN noise when scanning project subdirectories** (P1, GL #438):
+  `graph_index` now walks *ancestors* for project markers, so `repo/rust/src`
+  inside `~/Documents` is a legitimate scan root (the `.git` lives two levels
+  up). Marker-less trees under blocked home dirs stay refused.
+- **Windows symlink parity at every security boundary** (P1, GL #442):
+  `pathjail`, `ctx_edit`, `config_io` and `read_file_nofollow` now reject NTFS
+  junctions and all other reparse points (not just symlinks) via the shared
+  `pathutil::is_symlink_or_reparse` check; non-Unix `read_file_nofollow`
+  previously followed links without any check.
+- **Stale cache stubs can no longer mislead the agent** (P0-7, GL #419):
+  staleness now treats *any* mtime change as stale (backward mtimes from
+  `git checkout` previously read as fresh) and verifies the content hash before
+  serving an `[unchanged]` stub when the mtime claims no change (same-second
+  writes, restored timestamps). Opt out: `LEAN_CTX_CACHE_VERIFY=0`.
+- **Panics are now diagnosable after the fact** (P0-8, GL #420, upstream #378):
+  every panic appends thread, location, payload and backtrace to
+  `~/.lean-ctx/logs/crash.log` (0o600, size-rotated) — stderr-only reporting was
+  lost for daemon/LaunchAgent/MCP-child processes.
+- **Copilot CLI hooks work on Windows** (#381): the generated hook entries
+  carried only a `bash` command — but Copilot CLI runs the `powershell` field on
+  Windows, so the hooks had no runnable command there, errored, and made the CLI
+  reject every tool call. Entries now carry **both** fields, each with a quoted
+  binary path (`bash` gets the MSYS-style conversion; `powershell` uses the call
+  operator — Windows install paths routinely contain spaces). Also, global hooks
+  were written to `~/.github/hooks/hooks.json`, a location Copilot never reads:
+  they now go to the documented user-level `~/.copilot/hooks/hooks.json`
+  (honoring `COPILOT_HOME`), existing pre-#381 configs are upgraded in place
+  (missing-`powershell` detection), and lean-ctx entries are migrated out of the
+  stale legacy file (deleted when it was ours alone, foreign hooks preserved).
+- **Dashboard "ROI & Plan" view is live, not a frozen snapshot** (user-reported):
+  the view fetched `/api/roi` exactly once per navigation — the cockpit's 10 s
+  poll only refreshed the status footer, and the `lctx:refresh` event was only
+  dispatched by the manual ↻ button. Sitting next to the live-updating footer,
+  the static ROI numbers looked broken. The ROI view now re-fetches on the same
+  10 s cadence while it is the active view, **flicker-free** (the "Loading…"
+  placeholder renders only before the first payload; background refreshes swap
+  content in place, guarded against overlapping fetches) and shows a muted
+  "Updated HH:MM:SS · auto-refreshes every 10 s" line so liveness is visible.
+  Drive-by: the Commander view's `lctx:refresh` listener was the only one
+  without an active-view guard (and was never removed on disconnect) — it now
+  follows the standard guarded pattern.
+- **`proxy enable` no longer breaks Claude Pro/Max subscriptions** (community-reported): the proxy *forwards* the caller's credential upstream but never *injects* one, so it can only compress Claude traffic in API-key (pay-as-you-go) mode. A Claude Pro/Max subscription authenticates via OAuth directly against `api.anthropic.com`, and that token is rejected by any custom `ANTHROPIC_BASE_URL` — so unconditionally pointing `~/.claude/settings.json` (and the shell `ANTHROPIC_BASE_URL` export) at the local proxy produced a login loop / 401 the moment Claude Code started, while OpenAI-compatible backends (Ollama, Codex) kept working. `proxy enable` now detects whether an Anthropic API key is available (`ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` in the environment, or an `apiKeyHelper`/key in `~/.claude/settings.json`) via `anthropic_api_key_available()` and, when none is found, **skips the Claude redirect** (leaving Claude Code on Anthropic directly), **omits the `ANTHROPIC_BASE_URL` shell export** (OpenAI/Gemini exports are unaffected), and **repairs any pre-existing stale local redirect**. It prints a clear explanation and points subscription users to the `ctx_*` MCP tools for savings; `--force` overrides for keys stored where we can't probe (e.g. a keychain). `lean-ctx doctor` gained a check that flags an enabled proxy still routing Claude through the proxy without an API key, with the exact fix (`proxy disable`, or export a key + re-enable). Documented in `docs/reference/05-advanced.md`.
 - **Shell-output redirected to a file is always byte-faithful — compression never corrupts `cmd > out`**: when compression was forced (the agent shell hook runs `lean-ctx -c`, and the hook deliberately bypasses its own `[ ! -t 1 ]` pipe guard for agents), the *compressed digest* was written into a real file on a redirect — so `git status --short > files.txt`, `git diff > patch.txt`, `cmd >> log`, etc. landed an abbreviated/deduplicated summary instead of the exact bytes, producing contradictory diffs and silently dropped lines for any downstream tool that re-read the file. `exec()` now detects when stdout is a **regular file** (`fstat`/handle metadata via `std`, no new deps) and passes the output through verbatim even under `LEAN_CTX_COMPRESS`/`-c`. This is enforced at the single exec choke point, so it holds for every caller (shell hook, direct CLI, Pi/MCP bridges) and every redirect form; **pipes** (an agent's captured stdout) and **TTYs** are unaffected and keep compressing. Regression-tested both ways: a redirect-to-file is byte-identical to the raw command while the same command + env stays compressed when piped.
 - **Agent hooks always use an absolute binary path** (#367): generated hook commands (Codex, Cursor, Claude, Gemini, Antigravity, …) emitted a bare `lean-ctx`, which fails with exit 127 when the host runs the hook under a non-login shell whose `PATH` lacks the install dir. `resolve_binary_path()` now always resolves to the absolute path (matching MCP setup / `doctor`); stale bare-command configs are rewritten on the next `init` / `doctor`.
 - **Proxy forwards the `OpenAI-Project` header** (#366): project-scoped OpenAI keys carry their scope via `OpenAI-Project` (sent by OpenCode and the OpenAI SDK on the Responses API). The proxy's request-header whitelist dropped it, so the upstream rejected the call with `Missing scopes: api.responses.write`. `openai-project` (and `openai-organization`) are now forwarded verbatim.
@@ -75,6 +1028,52 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **`ctx_read` is byte-faithful — the terse layer no longer mangles file reads** (reported via a community A/B code-review evaluation): the server's post-dispatch terse stage (prose dictionary `return`→`ret`, `string`→`str`, … plus line-score filtering) was skipped for reads *only when the read had already saved tokens*. A verbatim `mode="full"` (or `lines:`) read saves 0 tokens, so it was silently routed through the prose compressor — abbreviating keywords and dropping repeated lines. This violated the `full` contract ("guaranteed complete content"), corrupted source the agent edits against, and could drop the exact cross-file lines needed for data-flow review. `skip_terse` now skips the whole read family (`ctx_read`, `ctx_multi_read`, `ctx_smart_read`, `ctx_compress`, `ctx_overview`) unconditionally; reads keep only their own mode-aware, structure-preserving compression (`map`/`signatures`/`aggressive`).
 - **An explicit read always returns content, never a stored-reference stub** (same report): the ephemeral context firewall already exempts file reads, but the opt-in `reference_results` path did not — enabling it turned a large `ctx_read` into an `[Reference: …] Output stored …` preview the agent could not edit against. A single `firewall::is_protected_read` predicate is now the source of truth for "an explicit read returns content," honoured by both the firewall and the reference-results path, so `ctx_read`/`ctx_multi_read`/`ctx_smart_read` are never stubbed regardless of config.
 - **Generated artifacts always reference the running build — autostart / MCP / hooks can't diverge** (#2444): `resolve_portable_binary()` (which backs the daemon + proxy autostart plists, the daemon spawn, the MCP server command, agent + shell hooks, and the update scheduler) resolved `which lean-ctx` *first*, so the baked path depended on ambient `PATH` ordering at generation time. On a machine with both a Homebrew and a `~/.local/bin` install this was non-deterministic — the daemon LaunchAgent captured the stale Homebrew copy while the proxy/MCP config captured `~/.local/bin`, silently running two different builds at once. The decision is now a pure, unit-tested `choose_binary_path()` that prefers the currently-running executable (`current_exe()`), falling back to `PATH` only when the running binary lives in a transient Cargo build dir (`cargo run -- setup`, where the installed copy is the intended target). Keeps generated hook commands absolute (#367).
+- **MCP server can no longer go dark — every tool handler runs under a watchdog** (#271): the recurring `TypeError: Cannot read properties of undefined (reading 'invoke')` was the client losing its tool handles after the server stopped replying. Root cause: handlers were dispatched via `tokio::task::block_in_place`, which pins one of the few core async workers and — being synchronous — cannot be interrupted by a `tokio::time::timeout` on the same task, so a handler that blocked (e.g. the nested `block_in_place` inside `ctx_multi_read` exhausting the blocking pool under concurrent reads) silently swallowed the JSON-RPC response. Every handler now runs on the dedicated blocking pool via `spawn_blocking`, awaited under a watchdog deadline (`LEAN_CTX_TOOL_TIMEOUT_SECS`, default 120s; `ctx_shell`/`ctx_execute` exempt): core workers stay free for the stdio loop and on timeout/panic the server returns a clean error instead of dropping the reply. The specific nested `block_in_place` in `ctx_multi_read` is also removed at the source (now `bounded_lock` + panic guard). Covered by a 16-way concurrency stress test through the full dispatch path plus timeout/panic unit tests.
+- **SIGABRT crash in the background indexer — deep ASTs no longer overflow the stack** (#378): graph indexing aborted the whole daemon on files with deeply nested syntax (machine-generated source, deep C/C++ headers, long call chains). The release profile is `panic = "unwind"`, so a worker panic can't `SIGABRT` — the crash was a **stack overflow**, whose handler calls `abort()` and which `catch_unwind` cannot intercept. Every tree-sitter AST walk recursed once per node depth on a ~2 MiB worker stack. New `core::ast_walk` provides iterative, heap-stack pre-order traversal (`for_each_descendant`, `for_each_descendant_pruned`, `find_descendant_by_kind`) — depth is now bounded by the heap, not the call stack, with identical pre-order semantics; every recursive walk on the indexing path (`deep_queries`, `cyclomatic`, swift signature params) was converted. Defense-in-depth: the indexer runs on a named `leanctx-index` thread with a 16 MiB stack + graceful spawn-failure handling, and `ModeGuard::drop` is now panic-free (`try_borrow_mut`) to remove a latent double-panic → abort path. Guarded by 20k-deep and 12k-deep overflow regression tests.
+- **`ctx_read` no longer panics on UTF-8 files with multibyte characters** (#379): the structural-hint and shell-result extractors in `core::auto_findings` truncated labels with raw **byte** slices (`&s[..s.len().min(N)]`), so a cut that landed inside a multibyte codepoint (e.g. a Cyrillic `#`/`///` comment near byte 70) panicked with "byte index N is not a char boundary" — surfacing to the MCP client as a `-32603` error and an empty read. All nine truncation sites now use `str::floor_char_boundary`, which snaps the cut down to a valid boundary while preserving the byte budget. Guarded by multibyte regression tests across every layer (content hint, failed-command/test-result shell paths, and the dedup key).
+
+### Security
+- **Dashboard: attribute-safe HTML escaping everywhere** (CodeQL #61–#65):
+  the central `LctxFmt.esc` used a `textContent`/`innerHTML` round-trip that
+  escapes `&<>` but not quotes, and `cexpEsc` in the explorer did the same —
+  a `"` in a file path, symbol name or knowledge value could break out of
+  `title="…"` / `aria-label="…"` attributes (DOM XSS). All escape helpers
+  (central + every per-component fallback, 35 sites across 15 files) now
+  escape `& < > " '` via numeric entities; the dangerous identity fallbacks
+  (`F.esc || String`) are gone. Verified by a functional breakout test.
+- **CLI shell allowlist is now enforced for agents** (P0-1, GL #413):
+  `lean-ctx -c` blocks allowlist violations (exit 126) whenever the caller is
+  non-interactive (stderr is not a TTY) or in hook-child mode — the CLI path is
+  no longer weaker than the MCP path. Humans at a terminal keep the warn-only
+  behavior; `LEAN_CTX_ALLOWLIST_WARN_ONLY=1` is the explicit opt-out. The block
+  message explains the one-line fix (`lean-ctx allow <cmd>`).
+- **Cloud credentials are written 0o600, atomically** (P0-2, GL #414):
+  `~/.lean-ctx/cloud/credentials.json` is created owner-only (dir 0o700) via
+  tmp+rename; pre-existing world-readable files are tightened on load.
+- **Deterministic path resolution** (P0-3, GL #415): relative tool paths are
+  never resolved against the process CWD anymore (daemon CWD ≠ project);
+  resolution is strictly project_root → shell_cwd → jail_root.
+- **Proxy can no longer start unauthenticated** (P0-4, GL #416):
+  `start_proxy_with_token(None)` now auto-resolves the session token instead of
+  disabling auth. Provider routes still accept provider API keys, so IDE
+  clients need no setup.
+- **Postgres provider validates schema identifiers** (P0-5, GL #417): the
+  agent-controlled `schema` param is restricted to `[A-Za-z_][A-Za-z0-9_$]*`
+  (max 63 chars) before SQL interpolation — closes an injection vector.
+- **ctx_edit rejects symlinks** (P0-6, GL #418): reads open with `O_NOFOLLOW`
+  (plus an lstat pre-check on all platforms) and writes refuse symlink
+  destinations — closes a TOCTOU window where a link planted inside the jail
+  could read or overwrite files outside it.
+- **Cloud/infra CLIs removed from the default shell allowlist** (P0-9, GL #421):
+  terraform, ansible, kubectl, helm, az, aws, gcloud, firebase, heroku, vercel,
+  netlify, fly, wrangler, pulumi now require explicit opt-in
+  (`lean-ctx allow <cmd>`) — they mutate remote infrastructure with ambient
+  credentials. Dev-essential tools (git, cargo, rm, psql, …) are unchanged.
+- **Home-level IDE config dirs are jail-opt-in** (P0-10, GL #422): `~/.cursor`,
+  `~/.claude` & co. are no longer automatically reachable through the PathJail
+  (they expose foreign projects' sessions, MCP configs and tokens). Opt in via
+  `allow_ide_config_dirs = true` or `LEAN_CTX_ALLOW_IDE_DIRS=1`; `~/.lean-ctx`
+  stays allowed.
 
 ## [3.7.5] — 2026-06-06
 

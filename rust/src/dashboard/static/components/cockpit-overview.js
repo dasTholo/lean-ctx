@@ -22,13 +22,9 @@ function tip(k) {
   return window.LctxShared && window.LctxShared.tip ? window.LctxShared.tip(k) : '';
 }
 
-var CKO_CHARTS = [
-  'cko-chartCumSavings',
-  'cko-chartDailyActivity',
-  'cko-chartSavingsRate',
-  'cko-chartMcpShell',
-  'cko-chartTaskBreak',
-];
+// Slim Home (GL #486): one trend chart. Activity/rate/source/task charts
+// live in Proof → Trends now.
+var CKO_CHARTS = ['cko-chartCumSavings'];
 
 function lvlTier(level) {
   if (level >= 30) return 'lvl-t4';
@@ -128,6 +124,7 @@ class CockpitOverview extends HTMLElement {
       '/api/slos',
       '/api/verification',
       '/api/graph/stats',
+      '/api/roi',
     ];
 
     var cached = window.LctxApi && window.LctxApi.cachedFetch ? window.LctxApi.cachedFetch : fetchJson;
@@ -159,6 +156,7 @@ class CockpitOverview extends HTMLElement {
       slos: ok(results[4]),
       verification: ok(results[5]),
       graphStats: ok(results[6]),
+      roi: ok(results[7]),
     };
 
     this._loading = false;
@@ -173,7 +171,7 @@ class CockpitOverview extends HTMLElement {
 
   render() {
     var F = fmtLib();
-    var esc = F.esc || function (s) { return String(s); };
+    var esc = F.esc || function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; }); };
     var ff = F.ff || function (n) { return String(n); };
     var fmt = F.fmt || function (n) { return String(n); };
     var pc = F.pc || function (a, b) { return b > 0 ? Math.round((a / b) * 100) : 0; };
@@ -194,18 +192,20 @@ class CockpitOverview extends HTMLElement {
       return;
     }
 
+    // Slim Home (GL #486): status, receipt, gauge+triage, one trend, top-3.
+    // Deeper charts/tables live in the job areas (Proof → Trends, ROI & Plan).
     var body = '';
     body += this._renderTimeFilter(esc);
     body += this._renderHero(esc, ff, fmt, fu, pc);
     body += this._renderBuddy(esc);
-    body += this._renderChartsRow1(esc, ff, fu);
-    body += this._renderHealthRow(esc);
-    body += this._renderChartsRow2();
+    body += this._renderStatusStrip(esc);
+    body += this._renderTrendRow();
     body += this._renderCommandTable(esc, ff, fmt, pc);
 
     this.innerHTML = body;
     this._bind();
     this._bindContextHealthCard();
+    this._bindVerifiedBridge();
   }
 
   /* ── Time filter bar ───────────────────────────────── */
@@ -217,13 +217,20 @@ class CockpitOverview extends HTMLElement {
       { label: '90d', val: 90 },
       { label: 'All', val: 0 },
     ];
-    var html = '<div class="tf-bar">';
+    // Label makes explicit that the range only affects the charts below —
+    // the hero numbers above stay all-time (audit finding: users assumed 7d
+    // would filter everything).
+    var html = '<div class="tf-bar">' +
+      '<span style="font-size:11px;color:var(--muted);margin-right:6px" ' +
+      'title="The big numbers above are always all-time. These buttons change the time range of the charts below.">' +
+      'Chart range</span>';
     for (var i = 0; i < ranges.length; i++) {
       var r = ranges[i];
       html +=
         '<button type="button" class="tf-btn' +
         (this._range === r.val ? ' active' : '') +
-        '" data-range="' + r.val + '">' +
+        '" data-range="' + r.val + '" ' +
+        'title="Changes the charts below \u2014 the totals above are always all-time">' +
         esc(r.label) + '</button>';
     }
     html += '</div>';
@@ -256,22 +263,30 @@ class CockpitOverview extends HTMLElement {
       ? 'var(--green)' : scoreDash >= 50
         ? 'var(--yellow)' : 'var(--red)';
 
+    var sinceStr = stats && stats.first_use
+      ? String(stats.first_use).slice(0, 10) : '';
+
     return (
       '<div class="hero stagger">' +
 
       '<div class="hero-main">' +
-      '<span class="hl">Total tokens saved' + tip('total_tokens_saved') + '</span>' +
+      '<span class="hl">Total tokens saved' + tip('total_tokens_saved') +
+      '<span class="tag tb" style="margin-left:8px">estimated' +
+      (sinceStr ? ' \u00b7 since ' + esc(sinceStr) : '') + '</span></span>' +
       '<div class="hv" id="cko-vSaved">' + esc(ff(saved)) + '</div>' +
       '<p class="hs">' +
       'From <b>' + esc(ff(totalIn)) + '</b> input to <b>' +
       esc(ff(totalOut)) + '</b> output across <b>' +
       esc(ff(calls)) + '</b> calls</p>' +
+      this._verifiedBridge(esc, ff, fu) +
       '</div>' +
 
       '<div class="hc">' +
       '<span class="hl">Cost saved' + tip('cost_saved') + '</span>' +
       '<div class="hv">' + esc(fu(avoidedUsd)) + '</div>' +
-      '<p class="hs">estimated API cost avoided</p>' +
+      // Input-side only — the cost analysis card below adds the estimated
+      // output savings on top, so the two figures intentionally differ.
+      '<p class="hs">estimated input cost avoided</p>' +
       '</div>' +
 
       '<div class="hc">' +
@@ -309,6 +324,40 @@ class CockpitOverview extends HTMLElement {
     );
   }
 
+  /* ── Verified-ledger bridge line (estimated ⇄ signed, links to ROI) ── */
+
+  _verifiedBridge(esc, ff, fu) {
+    var roiPayload = this._data && this._data.roi;
+    var roi = roiPayload && roiPayload.roi ? roiPayload.roi : null;
+    if (!roi || !roi.total_events) return '';
+
+    var trend = roiPayload.trend || [];
+    var since = trend.length && trend[0] && trend[0][0] ? String(trend[0][0]) : '';
+
+    return (
+      '<p class="hs cko-bridge" id="cko-verifiedBridge" role="link" tabindex="0" ' +
+      'title="Open ROI & Plan" style="cursor:pointer;margin-top:6px">' +
+      '<span class="tag tg">verified</span> ' +
+      'of which <b>' + esc(ff(roi.net_saved_tokens)) + '</b> tokens \u00b7 <b>' +
+      esc(fu(roi.saved_usd)) + '</b> are signed in the local ledger' +
+      (since ? ' (since ' + esc(since) + ')' : '') +
+      ' <span class="hc-health-go">ROI &amp; Plan \u2192</span></p>'
+    );
+  }
+
+  _bindVerifiedBridge() {
+    var el = document.getElementById('cko-verifiedBridge');
+    if (!el || el.dataset.bound === '1') return;
+    el.dataset.bound = '1';
+    var go = function () {
+      if (window.LctxRouter) window.LctxRouter.navigateTo('roi');
+    };
+    el.addEventListener('click', go);
+    el.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); }
+    });
+  }
+
   /* ── Context Health hero card (compact, links to Commander) ───── */
 
   _healthHeroCard(esc, ff) {
@@ -328,7 +377,7 @@ class CockpitOverview extends HTMLElement {
         }).catch(function () {});
       }
       return '<div class="hc hc--link" id="cko-healthCard" role="button" tabindex="0" ' +
-        'title="Open Context Commander">' +
+        'title="Open Context Triage">' +
         '<span class="hl">Context Health' + tip('context_health') + '</span>' +
         '<div class="hv" style="color:var(--muted)">\u2014</div>' +
         '<p class="hs">checking\u2026</p>' +
@@ -336,7 +385,7 @@ class CockpitOverview extends HTMLElement {
     }
 
     return '<div class="hc hc--link" id="cko-healthCard" role="button" tabindex="0" ' +
-      'title="Open Context Commander">' +
+      'title="Open Context Triage">' +
       this._buildHealthHeroInner(esc, ff, this._triageData) + '</div>';
   }
 
@@ -353,12 +402,18 @@ class CockpitOverview extends HTMLElement {
 
     var sub = pct + '% used \u00b7 ' + (s.total_files || 0) + ' files';
     if (s.risk_count > 0) sub += ' \u00b7 ' + s.risk_count + ' at risk';
+    // Live value that drifts quickly while agents work — show the fetch time
+    // so a stale number can't silently contradict the Triage page.
+    var now = new Date();
+    var hh = String(now.getHours()).padStart(2, '0');
+    var mm = String(now.getMinutes()).padStart(2, '0');
+    sub += ' \u00b7 as of ' + hh + ':' + mm;
 
     return '<span class="hl">Context Health' + tip('context_health') + '</span>' +
       '<div class="hv hc-health-v" style="color:' + col + '">' +
       '<span class="hc-health-dot" style="background:' + col + '"></span>' + esc(label) +
       '</div>' +
-      '<p class="hs">' + esc(sub) + '<span class="hc-health-go">Commander \u2192</span></p>';
+      '<p class="hs">' + esc(sub) + '<span class="hc-health-go">Triage \u2192</span></p>';
   }
 
   _bindContextHealthCard() {
@@ -457,61 +512,25 @@ class CockpitOverview extends HTMLElement {
     }, ms);
   }
 
-  /* ── Charts row 1: cumulative savings + cost ───────── */
+  /* ── The one Home trend: cumulative savings ────────── */
+  // Cost analysis moved to Proof → ROI & Plan (GL #486); the per-day
+  // activity/rate charts live in Proof → Trends.
 
-  _renderChartsRow1(esc, ff, fu) {
-    var stats = this._data.stats;
-    var totalIn = stats ? stats.total_input_tokens || 0 : 0;
-    var totalOut = stats ? stats.total_output_tokens || 0 : 0;
-    var calls = stats ? stats.total_commands || 0 : 0;
-
-    var F = fmtLib();
-    var gc = F.gc || function () {
-      return { iW: 0, iC: 0, oW: 0, oC: 0, tW: 0, tC: 0, sv: 0, os: 0 };
-    };
-    var c = gc(totalIn, totalOut, calls);
-
+  _renderTrendRow() {
     return (
-      '<div class="row r21" style="margin-bottom:20px">' +
-
-      '<div class="card">' +
+      '<div class="card" style="margin-bottom:20px">' +
       '<h3>Cumulative token savings' + tip('cumulative_savings') + '</h3>' +
-      '<canvas id="cko-chartCumSavings" height="220"' +
+      '<canvas id="cko-chartCumSavings" height="180"' +
       ' aria-label="Cumulative savings chart"></canvas>' +
-      '</div>' +
-
-      '<div class="card">' +
-      '<h3>Cost analysis' + tip('cost_analysis') + '</h3>' +
-      '<div class="cost-row">' +
-      '<div class="cost-box bad">' +
-      '<div class="amt" style="color:var(--red)">' +
-      esc(fu(c.tW)) + '</div>' +
-      '<div class="lb">Without lean-ctx</div></div>' +
-      '<div class="cost-arrow">\u2192</div>' +
-      '<div class="cost-box good">' +
-      '<div class="amt" style="color:var(--green)">' +
-      esc(fu(c.tC)) + '</div>' +
-      '<div class="lb">With lean-ctx</div></div>' +
-      '</div>' +
-      '<div class="cost-detail">' +
-      '<div class="cd-item"><div class="v" style="color:var(--green)">' +
-      esc(fu(c.sv)) + '</div><div class="l">Total saved</div></div>' +
-      '<div class="cd-item"><div class="v">' +
-      esc(fu(c.iW - c.iC)) + '</div><div class="l">Input saved</div></div>' +
-      '<div class="cd-item"><div class="v">' +
-      esc(fu(c.oW - c.oC)) + '</div><div class="l">Output saved</div></div>' +
-      '<div class="cd-item"><div class="v">' +
-      esc(fu(c.tC)) + '</div><div class="l">Actual cost</div></div>' +
-      '</div>' +
-      '</div>' +
-
       '</div>'
     );
   }
 
-  /* ── Context health row (4 cards) ──────────────────── */
+  /* ── Status strip: session/reliability/verification/graph in one line ── */
+  // Replaces the former 4-card health row (GL #486). Same signals, one
+  // compact strip — full views live in the job areas.
 
-  _renderHealthRow(esc) {
+  _renderStatusStrip(esc) {
     var session = this._data.session;
     var slos = this._data.slos;
     var verif = this._data.verification;
@@ -519,6 +538,8 @@ class CockpitOverview extends HTMLElement {
 
     var taskDesc = session && session.task
       ? session.task.description || '\u2014' : '\u2014';
+    var shortTask = taskDesc.length > 48
+      ? taskDesc.slice(0, 48) + '\u2026' : taskDesc;
     var filesCount = session && session.files_touched
       ? session.files_touched.length : 0;
 
@@ -542,88 +563,23 @@ class CockpitOverview extends HTMLElement {
     var gNodes = graph ? graph.node_count || 0 : 0;
     var gEdges = graph ? graph.edge_count || 0 : 0;
 
-    var shortTask = taskDesc.length > 40
-      ? taskDesc.slice(0, 40) + '\u2026' : taskDesc;
+    function chip(label, value, color, tipKey) {
+      return (
+        '<span class="status-chip">' +
+        '<span class="sl">' + label + (tipKey ? tip(tipKey) : '') + '</span>' +
+        '<span class="sv"' + (color ? ' style="color:' + color + '"' : '') + '>' +
+        value + '</span></span>'
+      );
+    }
 
     return (
-      '<div class="row r4" style="margin-bottom:20px">' +
-
-      '<div class="card">' +
-      '<h3>Session' + tip('session_overview') + '</h3>' +
-      '<div class="sr"><span class="sl">Task</span>' +
-      '<span class="sv" title="' + esc(taskDesc) +
-      '" style="max-width:160px;overflow:hidden;' +
-      'text-overflow:ellipsis;white-space:nowrap">' +
-      esc(shortTask) + '</span></div>' +
-      '<div class="sr"><span class="sl">Files touched</span>' +
-      '<span class="sv">' + filesCount + '</span></div>' +
-      (session && session.terse_mode
-        ? '<div class="sr"><span class="sl">Terse mode</span>' +
-          '<span class="sv"><span class="tag tg">on</span></span></div>'
-        : '') +
-      '</div>' +
-
-      '<div class="card">' +
-      '<h3>Reliability' + tip('slo_compliance') + '</h3>' +
-      '<div class="hv" style="font-size:28px;color:' + sloCol + '">' +
-      sloPct + '%</div>' +
-      '<div class="sr" style="margin-top:8px">' +
-      '<span class="sl">Passed</span>' +
-      '<span class="sv">' + sloPassed + ' / ' + sloTotal + '</span></div>' +
-      '</div>' +
-
-      '<div class="card">' +
-      '<h3>Verification' + tip('verification') + '</h3>' +
-      '<div class="hv" style="font-size:28px;color:' + vCol + '">' +
-      vPct + '%</div>' +
-      '<div class="sr" style="margin-top:8px">' +
-      '<span class="sl">Checks</span>' +
-      '<span class="sv">' + vPassed + ' / ' + vTotal + '</span></div>' +
-      '</div>' +
-
-      '<div class="card">' +
-      '<h3>Relationships' + tip('property_graph') + '</h3>' +
-      '<div class="sr"><span class="sl">Nodes</span>' +
-      '<span class="sv">' + gNodes + '</span></div>' +
-      '<div class="sr"><span class="sl">Edges</span>' +
-      '<span class="sv">' + gEdges + '</span></div>' +
-      '</div>' +
-
-      '</div>'
-    );
-  }
-
-  /* ── Charts row 2 (4 cards) ────────────────────────── */
-
-  _renderChartsRow2() {
-    return (
-      '<div class="row r4" style="margin-bottom:20px">' +
-
-      '<div class="card">' +
-      '<h3>Daily activity' + tip('daily_activity') + '</h3>' +
-      '<canvas id="cko-chartDailyActivity" height="200"' +
-      ' aria-label="Daily activity chart"></canvas>' +
-      '</div>' +
-
-      '<div class="card">' +
-      '<h3>Savings rate' + tip('savings_rate') + '</h3>' +
-      '<canvas id="cko-chartSavingsRate" height="200"' +
-      ' aria-label="Savings rate chart"></canvas>' +
-      '</div>' +
-
-      '<div class="card">' +
-      '<h3>MCP vs Shell' + tip('mcp_vs_shell') + '</h3>' +
-      '<canvas id="cko-chartMcpShell" height="180"' +
-      ' aria-label="MCP vs Shell chart"></canvas>' +
-      '<div id="cko-mcpShellGrid"></div>' +
-      '</div>' +
-
-      '<div class="card">' +
-      '<h3>Task breakdown' + tip('task_breakdown') + '</h3>' +
-      '<canvas id="cko-chartTaskBreak" height="180"' +
-      ' aria-label="Task breakdown chart"></canvas>' +
-      '</div>' +
-
+      '<div class="card status-strip" style="margin-bottom:20px">' +
+      chip('Session', '<span title="' + esc(taskDesc) + '">' + esc(shortTask) + '</span>', null, 'session_overview') +
+      chip('Files touched', String(filesCount), null, null) +
+      chip('Reliability', sloPct + '% <span class="status-chip-sub">(' + sloPassed + '/' + sloTotal + ')</span>', sloCol, 'slo_compliance') +
+      chip('Verification', vPct + '% <span class="status-chip-sub">(' + vPassed + '/' + vTotal + ')</span>', vCol, 'verification') +
+      chip('Graph', gNodes + ' nodes \u00b7 ' + gEdges + ' edges', null, 'property_graph') +
+      (session && session.terse_mode ? chip('Terse', '<span class="tag tg">on</span>', null, null) : '') +
       '</div>'
     );
   }
@@ -681,9 +637,13 @@ class CockpitOverview extends HTMLElement {
       );
     }
 
+    // Slim Home (GL #486): top-3 by default, one click expands the full table.
+    var expanded = this._cmdExpanded === true;
+    var visible = expanded ? rows : rows.slice(0, 3);
+
     var trs = '';
-    for (var j = 0; j < rows.length; j++) {
-      var r = rows[j];
+    for (var j = 0; j < visible.length; j++) {
+      var r = visible[j];
       var barW = maxSaved > 0 ? Math.round((r.saved / maxSaved) * 100) : 0;
       trs +=
         '<tr>' +
@@ -699,10 +659,19 @@ class CockpitOverview extends HTMLElement {
         '</tr>';
     }
 
+    var toggle = rows.length > 3
+      ? '<button type="button" class="cko-cmd-toggle" id="cko-cmdToggle">' +
+        (expanded
+          ? 'Show top 3 only'
+          : 'Show all ' + keys.length + ' commands \u2192') +
+        '</button>'
+      : '';
+
     return (
       '<div class="card">' +
-      '<h3>Command breakdown ' +
-      '<span class="badge">' + keys.length + ' commands</span>' + tip('command_breakdown') + '</h3>' +
+      '<h3>Top commands ' +
+      '<span class="badge">' + (expanded ? keys.length + ' commands' : 'top 3 of ' + keys.length) + '</span>' +
+      tip('command_breakdown') + '</h3>' +
       '<div class="table-scroll"><table>' +
       '<thead><tr>' +
       th('name', 'Command') +
@@ -714,7 +683,7 @@ class CockpitOverview extends HTMLElement {
       '<th>Distribution</th>' +
       '</tr></thead>' +
       '<tbody>' + trs + '</tbody>' +
-      '</table></div></div>'
+      '</table></div>' + toggle + '</div>'
     );
   }
 
@@ -724,10 +693,6 @@ class CockpitOverview extends HTMLElement {
     var self = this;
     requestAnimationFrame(function () {
       try { self._chartCumSavings(); } catch (_) {}
-      try { self._chartDailyActivity(); } catch (_) {}
-      try { self._chartSavingsRate(); } catch (_) {}
-      try { self._chartMcpShell(); } catch (_) {}
-      try { self._chartTaskBreak(); } catch (_) {}
     });
   }
 
@@ -763,145 +728,6 @@ class CockpitOverview extends HTMLElement {
     );
   }
 
-  _chartDailyActivity() {
-    var Ch = chartsLib();
-    if (!Ch.createChart || typeof Chart === 'undefined') return;
-    var daily = this._filteredDaily();
-    if (!daily.length) return;
-
-    var labels = [];
-    var savedArr = [];
-    var sentArr = [];
-    for (var i = 0; i < daily.length; i++) {
-      var d = daily[i];
-      labels.push(String(d.date || '').slice(5));
-      var inp = d.input_tokens || 0;
-      var out = d.output_tokens || 0;
-      savedArr.push(inp - out);
-      sentArr.push(out);
-    }
-
-    Ch.createChart('cko-chartDailyActivity', 'bar', {
-      labels: labels,
-      datasets: [
-        {
-          label: 'Saved',
-          data: savedArr,
-          backgroundColor: 'rgba(52,211,153,0.6)',
-          borderRadius: 3,
-        },
-        {
-          label: 'Sent',
-          data: sentArr,
-          backgroundColor: 'rgba(129,140,248,0.4)',
-          borderRadius: 3,
-        },
-      ],
-    }, {
-      scales: { x: { stacked: true }, y: { stacked: true } },
-      plugins: {
-        legend: {
-          display: true,
-          position: 'bottom',
-          labels: {
-            color: '#6b6b88', font: { size: 9 }, padding: 8,
-            usePointStyle: true, pointStyle: 'circle',
-          },
-        },
-      },
-    });
-  }
-
-  _chartSavingsRate() {
-    var Ch = chartsLib();
-    if (!Ch.lineChart || typeof Chart === 'undefined') return;
-    var daily = this._filteredDaily();
-    if (!daily.length) return;
-
-    var labels = [];
-    var values = [];
-    for (var i = 0; i < daily.length; i++) {
-      var d = daily[i];
-      labels.push(String(d.date || '').slice(5));
-      var inp = d.input_tokens || 0;
-      var out = d.output_tokens || 0;
-      values.push(inp > 0 ? Math.round(((inp - out) / inp) * 100) : 0);
-    }
-
-    Ch.lineChart(
-      'cko-chartSavingsRate', labels, values,
-      '#818cf8', 'rgba(129,140,248,.06)'
-    );
-  }
-
-  _chartMcpShell() {
-    var Ch = chartsLib();
-    if (!Ch.doughnutChart || typeof Chart === 'undefined') return;
-    var stats = this._data && this._data.stats;
-    if (!stats || !stats.commands) return;
-
-    var F = fmtLib();
-    var ss = F.ss || function () {
-      return { m: { c: 0, i: 0, o: 0, s: 0 }, h: { c: 0, i: 0, o: 0, s: 0 } };
-    };
-    var ff = F.ff || function (n) { return String(n); };
-    var fmt = F.fmt || function (n) { return String(n); };
-
-    var entries = [];
-    var cmds = stats.commands;
-    var keys = Object.keys(cmds);
-    for (var i = 0; i < keys.length; i++) {
-      entries.push([keys[i], cmds[keys[i]]]);
-    }
-    var split = ss(entries);
-
-    if (split.m.s + split.h.s > 0) {
-      Ch.doughnutChart(
-        'cko-chartMcpShell',
-        ['MCP', 'Shell Hook'],
-        [split.m.s, split.h.s],
-        ['#818cf8', '#38bdf8']
-      );
-    }
-
-    var grid = document.getElementById('cko-mcpShellGrid');
-    if (grid) {
-      grid.innerHTML =
-        '<div class="src-grid" style="margin-top:12px">' +
-        '<div class="src-item">' +
-        '<h4><span class="d" style="background:var(--purple)"></span> MCP</h4>' +
-        '<div class="sr"><span class="sl">Calls</span>' +
-        '<span class="sv">' + ff(split.m.c) + '</span></div>' +
-        '<div class="sr"><span class="sl">Saved</span>' +
-        '<span class="sv">' + fmt(split.m.s) + '</span></div>' +
-        '</div>' +
-        '<div class="src-item">' +
-        '<h4><span class="d" style="background:var(--blue)"></span> Shell</h4>' +
-        '<div class="sr"><span class="sl">Calls</span>' +
-        '<span class="sv">' + ff(split.h.c) + '</span></div>' +
-        '<div class="sr"><span class="sl">Saved</span>' +
-        '<span class="sv">' + fmt(split.h.s) + '</span></div>' +
-        '</div></div>';
-    }
-  }
-
-  _chartTaskBreak() {
-    var Ch = chartsLib();
-    if (!Ch.doughnutChart || typeof Chart === 'undefined') return;
-    var gain = this._data && this._data.gain;
-    var tasks = gain && Array.isArray(gain.tasks) ? gain.tasks : [];
-    if (!tasks.length) return;
-
-    var labels = [];
-    var values = [];
-    for (var i = 0; i < tasks.length; i++) {
-      labels.push(tasks[i].category || 'Other');
-      values.push(tasks[i].tokens_saved || 0);
-    }
-
-    Ch.doughnutChart('cko-chartTaskBreak', labels, values);
-  }
-
   /* ── Event binding ─────────────────────────────────── */
 
   _bind() {
@@ -919,6 +745,18 @@ class CockpitOverview extends HTMLElement {
         self._startBuddyAnim();
       });
     });
+
+    var cmdToggle = this.querySelector('#cko-cmdToggle');
+    if (cmdToggle) {
+      cmdToggle.addEventListener('click', function () {
+        self._cmdExpanded = self._cmdExpanded !== true;
+        self._stopAnim();
+        self._destroyCharts();
+        self.render();
+        self._renderAllCharts();
+        self._startBuddyAnim();
+      });
+    }
 
     this.querySelectorAll('th[data-cko-sort]').forEach(function (h) {
       h.addEventListener('click', function () {

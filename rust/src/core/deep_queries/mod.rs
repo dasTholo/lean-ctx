@@ -9,6 +9,7 @@
 mod calls;
 mod imports;
 mod type_defs;
+mod type_uses;
 mod types;
 
 pub use types::*;
@@ -47,12 +48,14 @@ fn analyze_with_tree_sitter(content: &str, ext: &str) -> Option<DeepAnalysis> {
     let calls = calls::extract_calls(root, content, ext);
     let types = type_defs::extract_types(root, content, ext);
     let exports = type_defs::extract_exports(root, content, ext);
+    let type_uses = type_uses::extract_type_uses(root, content, ext);
 
     Some(DeepAnalysis {
         imports,
         calls,
         types,
         exports,
+        type_uses,
     })
 }
 
@@ -100,16 +103,8 @@ fn find_child_by_kind<'a>(node: Node<'a>, kind: &str) -> Option<Node<'a>> {
 
 #[cfg(feature = "tree-sitter")]
 fn find_descendant_by_kind<'a>(node: Node<'a>, kind: &str) -> Option<Node<'a>> {
-    if node.kind() == kind {
-        return Some(node);
-    }
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if let Some(found) = find_descendant_by_kind(child, kind) {
-            return Some(found);
-        }
-    }
-    None
+    // Iterative (heap-stack) search — see core::ast_walk (#378 SIGABRT).
+    crate::core::ast_walk::find_descendant_by_kind(node, kind)
 }
 
 // ---------------------------------------------------------------------------
@@ -120,6 +115,26 @@ fn find_descendant_by_kind<'a>(node: Node<'a>, kind: &str) -> Option<Node<'a>> {
 #[cfg(feature = "tree-sitter")]
 mod tests {
     use super::*;
+
+    /// Indexing a deeply nested AST must not overflow the worker-thread stack
+    /// (the #378 SIGABRT) through the real `analyze` entry point. The depth is
+    /// well past what a recursive walk survives on a default stack, yet because
+    /// every walk is iterative now it returns normally. (The dedicated, much
+    /// deeper overflow guard lives in `core::ast_walk`.)
+    #[test]
+    fn deeply_nested_source_does_not_overflow() {
+        let depth = 12_000;
+        // Nested Rust call expressions drive the call walk through the real
+        // entry point at a depth far past what a recursive walk survives on a
+        // default stack; it returns normally because the walks are iterative.
+        let rs = format!(
+            "fn m() {{ let _ = {}0{}; }}",
+            "f(".repeat(depth),
+            ")".repeat(depth)
+        );
+        let analysis = analyze(&rs, "rs");
+        assert!(!analysis.calls.is_empty());
+    }
 
     #[test]
     fn ts_named_import() {
@@ -599,6 +614,206 @@ class Inventory:
         assert!(player.is_exported);
         let state = analysis.types.iter().find(|t| t.name == "State").unwrap();
         assert_eq!(state.kind, TypeDefKind::Enum);
+    }
+
+    #[test]
+    fn csharp_imports_all_using_forms() {
+        let src = r"
+using System;
+using System.Collections.Generic;
+global using MyApp.Core;
+using static System.Math;
+using Json = Newtonsoft.Json;
+namespace MyApp.Services {
+    using MyApp.Data.Repositories;
+}
+";
+        let analysis = analyze(src, "cs");
+        let sources: Vec<&str> = analysis.imports.iter().map(|i| i.source.as_str()).collect();
+        assert!(sources.contains(&"System"), "plain using, got {sources:?}");
+        assert!(
+            sources.contains(&"System.Collections.Generic"),
+            "dotted using, got {sources:?}"
+        );
+        assert!(
+            sources.contains(&"MyApp.Core"),
+            "global using must drop the `global` keyword, got {sources:?}"
+        );
+        assert!(
+            sources.contains(&"System.Math"),
+            "using static must drop the `static` keyword, got {sources:?}"
+        );
+        assert!(
+            sources.contains(&"Newtonsoft.Json"),
+            "alias using must keep the right-hand namespace, got {sources:?}"
+        );
+        assert!(
+            sources.contains(&"MyApp.Data.Repositories"),
+            "using nested inside a namespace block must be found, got {sources:?}"
+        );
+    }
+
+    /// GH #398: types consumed without any `using` (same-namespace visibility)
+    /// must surface as `type_uses` so the property graph can build TypeRef
+    /// edges. Covers fields, ctor parameters, return types, base list,
+    /// generic arguments, casts and `typeof`.
+    #[test]
+    fn csharp_type_uses_without_using_directive() {
+        let src = r"
+namespace App.Core;
+
+public class Motor : VehiclePart, IStartable
+{
+    private readonly Engine _engine;
+    public List<Sensor> Sensors { get; set; }
+
+    public Motor(Engine engine) { _engine = engine; }
+
+    public Gearbox BuildGearbox(Clutch clutch)
+    {
+        var t = typeof(Telemetry);
+        var d = (Dashboard)GetPart();
+        return null;
+    }
+}
+";
+        let analysis = analyze(src, "cs");
+        let names: Vec<&str> = analysis.type_uses.iter().map(|u| u.name.as_str()).collect();
+        for expected in [
+            "Engine",
+            "VehiclePart",
+            "IStartable",
+            "List",
+            "Sensor",
+            "Gearbox",
+            "Clutch",
+            "Telemetry",
+            "Dashboard",
+        ] {
+            assert!(names.contains(&expected), "missing {expected}: {names:?}");
+        }
+        // Predefined types carry no identifier node and must not appear.
+        assert!(!names.contains(&"var"), "var is not a type use: {names:?}");
+    }
+
+    /// GH #398 (Java flavour): same-package types are visible without import;
+    /// `type_identifier` nodes cover fields, params, returns and extends.
+    #[test]
+    fn java_type_uses_without_import() {
+        let src = r"
+package app.core;
+
+public class Motor extends VehiclePart {
+    private Engine engine;
+    public Gearbox build(Clutch clutch) { return null; }
+}
+";
+        let analysis = analyze(src, "java");
+        let names: Vec<&str> = analysis.type_uses.iter().map(|u| u.name.as_str()).collect();
+        for expected in ["VehiclePart", "Engine", "Gearbox", "Clutch"] {
+            assert!(names.contains(&expected), "missing {expected}: {names:?}");
+        }
+    }
+
+    /// Languages with mandatory explicit imports skip type-use extraction —
+    /// their dependencies are fully covered by the import resolver.
+    #[test]
+    fn type_uses_empty_for_import_based_languages() {
+        let rs = analyze("struct Foo { e: Engine }", "rs");
+        assert!(rs.type_uses.is_empty(), "rust: {:?}", rs.type_uses);
+        let ts = analyze("const e: Engine = make();", "ts");
+        assert!(ts.type_uses.is_empty(), "ts: {:?}", ts.type_uses);
+    }
+
+    #[test]
+    fn csharp_types_and_visibility() {
+        let src = r"
+namespace App
+{
+    public class UserService { }
+    internal class Helper { }
+    public interface IRepository { }
+    public struct Point { public int X; }
+    public enum Status { Active, Inactive }
+    public record Money(decimal Amount, string Currency);
+}
+";
+        let analysis = analyze(src, "cs");
+        let names: Vec<&str> = analysis.types.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"UserService"), "class, got {names:?}");
+        assert!(names.contains(&"Helper"), "internal class, got {names:?}");
+        assert!(names.contains(&"IRepository"), "interface, got {names:?}");
+        assert!(names.contains(&"Point"), "struct, got {names:?}");
+        assert!(names.contains(&"Status"), "enum, got {names:?}");
+        assert!(names.contains(&"Money"), "record, got {names:?}");
+
+        let kind_of = |n: &str| {
+            analysis
+                .types
+                .iter()
+                .find(|t| t.name == n)
+                .map(|t| t.kind.clone())
+        };
+        assert_eq!(kind_of("UserService"), Some(TypeDefKind::Class));
+        assert_eq!(kind_of("IRepository"), Some(TypeDefKind::Interface));
+        assert_eq!(kind_of("Point"), Some(TypeDefKind::Struct));
+        assert_eq!(kind_of("Status"), Some(TypeDefKind::Enum));
+        assert_eq!(kind_of("Money"), Some(TypeDefKind::Record));
+
+        let exported = |n: &str| {
+            analysis
+                .types
+                .iter()
+                .find(|t| t.name == n)
+                .is_some_and(|t| t.is_exported)
+        };
+        assert!(exported("UserService"), "public class is exported");
+        assert!(
+            !exported("Helper"),
+            "internal class must not be marked exported"
+        );
+        assert!(analysis.exports.contains(&"UserService".to_string()));
+    }
+
+    #[test]
+    fn csharp_call_sites() {
+        let src = r"
+namespace App
+{
+    public class Boot
+    {
+        public void Run()
+        {
+            Prepare();
+            _repository.Save(user);
+            var engine = new Engine(100);
+            Factory.Create<Widget>();
+        }
+    }
+}
+";
+        let analysis = analyze(src, "cs");
+        let callees: Vec<&str> = analysis.calls.iter().map(|c| c.callee.as_str()).collect();
+        assert!(
+            callees.contains(&"Prepare"),
+            "direct invocation, got {callees:?}"
+        );
+        assert!(
+            callees.contains(&"Save"),
+            "member invocation must resolve to the method name, got {callees:?}"
+        );
+        assert!(
+            callees.contains(&"Engine"),
+            "`new Engine()` should reference the constructed type, got {callees:?}"
+        );
+        assert!(
+            callees.contains(&"Create"),
+            "generic member call must reduce to the identifier, got {callees:?}"
+        );
+
+        let save = analysis.calls.iter().find(|c| c.callee == "Save").unwrap();
+        assert_eq!(save.receiver.as_deref(), Some("_repository"));
+        assert!(save.is_method);
     }
 
     #[test]

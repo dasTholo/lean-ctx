@@ -2,7 +2,7 @@ use rmcp::model::Tool;
 use rmcp::ErrorData;
 use serde_json::{json, Map, Value};
 
-use crate::server::tool_trait::{get_int, get_str, McpTool, ToolContext, ToolOutput};
+use crate::server::tool_trait::{get_str, get_usize, McpTool, ToolContext, ToolOutput};
 use crate::tool_defs::tool_def;
 
 pub struct CtxGraphTool;
@@ -15,32 +15,24 @@ impl McpTool for CtxGraphTool {
     fn tool_def(&self) -> Tool {
         tool_def(
             "ctx_graph",
-            "Unified code graph. Actions: build (index), related (connected files), symbol (def/usages), \
-impact (blast radius), status (stats), enrich (add commits+tests+knowledge), context (task-based query), diagram (Mermaid deps/calls).",
+            "Code graph: dependencies, symbol usages, impact/blast radius, Mermaid diagrams, git-diff impact.",
             json!({
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["build", "related", "symbol", "impact", "status", "enrich", "context", "diagram"],
-                        "description": "Graph operation"
+                        "description": "build|related|symbol|impact|status|enrich|context|diagram|neighbors|path|explain|diff"
                     },
                     "path": {
                         "type": "string",
-                        "description": "File path (related/impact) or file::symbol_name (symbol)"
+                        "description": "File path; file::symbol for action=symbol; FROM file for action=path"
                     },
-                    "depth": {
-                        "type": "integer",
-                        "description": "Optional depth for action=diagram (default: 2)"
-                    },
-                    "kind": {
-                        "type": "string",
-                        "description": "Optional kind for action=diagram: deps|calls"
-                    },
-                    "project_root": {
-                        "type": "string",
-                        "description": "Project root directory (default: .)"
-                    }
+                    "to": { "type": "string", "description": "Target file (action=path)" },
+                    "depth": { "type": "integer", "description": "Traversal depth" },
+                    "kind": { "type": "string", "description": "diagram: deps|calls" },
+                    "format": { "type": "string", "description": "text|json" },
+                    "since": { "type": "string", "description": "Git ref for action=diff (default HEAD~1)" },
+                    "project_root": { "type": "string" }
                 },
                 "required": ["action"]
             }),
@@ -60,11 +52,11 @@ impact (blast radius), status (stats), enrich (add commits+tests+knowledge), con
             get_str(args, "path")
         } else if let Some(p) = ctx.resolved_path("path") {
             Some(p.to_string())
-        } else if ctx.path_error("path").is_some() && get_str(args, "path").is_some() {
-            return Err(ErrorData::invalid_params(
-                format!("path: {}", ctx.path_error("path").unwrap()),
-                None,
-            ));
+        } else if let Some(err) = ctx
+            .path_error("path")
+            .filter(|_| get_str(args, "path").is_some())
+        {
+            return Err(ErrorData::invalid_params(format!("path: {err}"), None));
         } else {
             None
         };
@@ -79,8 +71,21 @@ impact (blast radius), status (stats), enrich (add commits+tests+knowledge), con
         } else {
             ctx.project_root.clone()
         };
-        let depth = get_int(args, "depth").map(|d| d as usize);
+        let depth = get_usize(args, "depth").map(|d| d.min(64));
         let kind = get_str(args, "kind");
+        let format = get_str(args, "format");
+        // `since` is a git ref, not a filesystem path — read it raw (no PathJail).
+        let since = get_str(args, "since");
+        let to = if let Some(p) = ctx.resolved_path("to") {
+            Some(p.to_string())
+        } else if let Some(err) = ctx
+            .path_error("to")
+            .filter(|_| get_str(args, "to").is_some())
+        {
+            return Err(ErrorData::invalid_params(format!("to: {err}"), None));
+        } else {
+            None
+        };
 
         let cache = ctx
             .cache
@@ -99,6 +104,9 @@ impact (blast radius), status (stats), enrich (add commits+tests+knowledge), con
             ctx.crp_mode,
             depth,
             kind.as_deref(),
+            to.as_deref(),
+            format.as_deref(),
+            since.as_deref(),
         );
 
         Ok(ToolOutput {
@@ -108,6 +116,7 @@ impact (blast radius), status (stats), enrich (add commits+tests+knowledge), con
             mode: Some(action),
             path: None,
             changed: false,
+            shell_outcome: None,
         })
     }
 }

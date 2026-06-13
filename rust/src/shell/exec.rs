@@ -217,6 +217,37 @@ fn exec_direct(args: &[String]) -> i32 {
     }
 }
 
+/// Decides whether an allowlist violation on the CLI path blocks (exit 126) or
+/// only warns.
+///
+/// Enforced when:
+/// - hook-child mode (`LEAN_CTX_HOOK_CHILD`): lean-ctx is the agent's
+///   command-interception channel and must not be weaker than the MCP path, or
+/// - stderr is not a TTY: a non-interactive caller is an agent or script, and
+///   agent-driven `lean-ctx -c` must enforce the same boundary as ctx_shell.
+///
+/// Warn-only when a human runs `lean-ctx -c` at an interactive terminal (they
+/// can run the command without lean-ctx anyway, so blocking adds friction, not
+/// a boundary) or when `LEAN_CTX_ALLOWLIST_WARN_ONLY=1` explicitly opts out.
+fn allowlist_must_enforce() -> bool {
+    let hook_child = std::env::var("LEAN_CTX_HOOK_CHILD").is_ok();
+    let warn_only = std::env::var("LEAN_CTX_ALLOWLIST_WARN_ONLY")
+        .is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
+    allowlist_must_enforce_inner(hook_child, warn_only, io::stderr().is_terminal())
+}
+
+/// Pure decision core of [`allowlist_must_enforce`] (unit-testable without
+/// process-global env/TTY state).
+fn allowlist_must_enforce_inner(hook_child: bool, warn_only: bool, stderr_is_tty: bool) -> bool {
+    if hook_child {
+        return true;
+    }
+    if warn_only {
+        return false;
+    }
+    !stderr_is_tty
+}
+
 /// True when this process's stdout is a **regular file** — i.e. the caller
 /// redirected output to a file (`cmd > out`, `cmd >> out`).
 ///
@@ -256,6 +287,15 @@ fn stdout_is_regular_file() -> bool {
 
 pub fn exec(command: &str) -> i32 {
     if let Err(msg) = crate::core::shell_allowlist::check_shell_allowlist(command) {
+        if allowlist_must_enforce() {
+            eprintln!("{msg}");
+            eprintln!(
+                "lean-ctx: command blocked by shell allowlist. \
+                 Allow it permanently: lean-ctx allow <cmd> — or set \
+                 LEAN_CTX_ALLOWLIST_WARN_ONLY=1 to downgrade to a warning."
+            );
+            return 126;
+        }
         tracing::warn!("[CLI] Command would be blocked in MCP mode: {msg}");
     }
 
@@ -435,6 +475,10 @@ fn exec_buffered(command: &str, shell: &str, shell_flag: &str, cfg: &config::Con
 
     let full_output = combine_output(&stdout, &stderr);
     let input_tokens = count_tokens(&full_output);
+
+    // Structured diagnostics (#499): failing cargo/tsc/eslint runs mark their
+    // files as context-priority; succeeding runs clear them.
+    crate::core::diagnostics_store::record_from_shell(command, &full_output, exit_code);
 
     let (compressed, output_tokens) =
         super::compress::compress_and_measure(command, &stdout, &stderr);
@@ -639,5 +683,32 @@ mod exec_tests {
         );
         assert_eq!(super::heavy_timeout("git status"), None);
         assert_eq!(super::heavy_timeout("ls -la"), None);
+    }
+
+    // P0-1 (#413): the CLI allowlist must enforce for agents, warn for humans.
+    #[test]
+    fn allowlist_enforces_in_hook_child_mode() {
+        // Hook-child wins over everything, even an interactive TTY.
+        assert!(super::allowlist_must_enforce_inner(true, false, true));
+        assert!(super::allowlist_must_enforce_inner(true, true, true));
+    }
+
+    #[test]
+    fn allowlist_enforces_for_non_interactive_callers() {
+        // Agent/script invocation: stderr is a pipe → enforce.
+        assert!(super::allowlist_must_enforce_inner(false, false, false));
+    }
+
+    #[test]
+    fn allowlist_warns_for_interactive_humans() {
+        // Human at a TTY → warn-only (they can bypass lean-ctx anyway).
+        assert!(!super::allowlist_must_enforce_inner(false, false, true));
+    }
+
+    #[test]
+    fn allowlist_warn_only_opt_out_downgrades_non_interactive() {
+        // Explicit LEAN_CTX_ALLOWLIST_WARN_ONLY=1 opt-out (but never in hook-child mode).
+        assert!(!super::allowlist_must_enforce_inner(false, true, false));
+        assert!(super::allowlist_must_enforce_inner(true, true, false));
     }
 }

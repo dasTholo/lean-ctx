@@ -180,7 +180,119 @@ pub fn handle(
             registry.set_status(from, AgentStatus::Finished, Some("handed off"));
             let _ = registry.save();
 
+            // Stigmergy (#540): mark the handed-off work as Done in the field
+            // so other agents see it arithmetically, without reading messages.
+            crate::core::scent_field::deposit(
+                from,
+                crate::core::scent_field::ScentKind::Done,
+                summary,
+                1.0,
+            );
+
             format!("Handoff complete: {from} → {target}\nSummary: {summary}")
+        }
+
+        // Stigmergic claim (#540): atomically claim a target (file, task,
+        // deploy unit) in the shared scent field. Fails fast when another
+        // agent's claim is still active — prevents duplicate work for ~0 tokens.
+        "claim" => {
+            let Some(target) = message else {
+                return "Error: message (the claim target, e.g. a file path or task label) is required for claim".to_string();
+            };
+            let agent = current_agent_id.map_or_else(
+                || crate::core::scent_field::scent_agent_id().to_string(),
+                str::to_string,
+            );
+            let normalized = crate::core::pathutil::normalize_tool_path(target);
+            match crate::core::scent_field::claim(&agent, &normalized) {
+                Ok(()) => format!("Claimed: {normalized} (by {agent}, decays in ~10m unless re-claimed)"),
+                Err(e) => format!("Claim REJECTED: {normalized} — {e}"),
+            }
+        }
+
+        // Release a stigmergic claim early (done or abandoned).
+        "release" => {
+            let Some(target) = message else {
+                return "Error: message (the claim target) is required for release".to_string();
+            };
+            let agent = current_agent_id.map_or_else(
+                || crate::core::scent_field::scent_agent_id().to_string(),
+                str::to_string,
+            );
+            let normalized = crate::core::pathutil::normalize_tool_path(target);
+            crate::core::scent_field::release(&agent, &normalized);
+            format!("Released: {normalized}")
+        }
+
+        // Sub-agent context contract (GL#450): deterministic briefing pack.
+        // `message` is the task; `priority` doubles as the token budget when
+        // numeric (default 2000). Same knowledge + task ⇒ byte-identical pack.
+        "brief" => {
+            let Some(task) = message else {
+                return "Error: message (the sub-agent task) is required for brief".to_string();
+            };
+            let budget = priority
+                .and_then(|p| p.parse::<usize>().ok())
+                .unwrap_or(2000);
+            let Some(knowledge) = crate::core::knowledge::ProjectKnowledge::load(project_root)
+            else {
+                return "No knowledge stored for this project yet — a briefing pack needs facts. Use ctx_knowledge(action=\"remember\") first.".to_string();
+            };
+            let pack =
+                crate::core::subagent_contract::build_briefing_pack(&knowledge, task, budget);
+            match crate::core::subagent_contract::serialize_pack(&pack) {
+                Ok(json) => json,
+                Err(e) => format!("Error: {e}"),
+            }
+        }
+
+        // Return synthesis (GL#450): distill a sub-agent's report into
+        // recallable parent knowledge. Expects contract-formatted lines
+        // ('category/key: value'); rejects are listed, never silently dropped.
+        "return" => {
+            let Some(report) = message else {
+                return "Error: message (the sub-agent report) is required for return".to_string();
+            };
+            let (facts, rejected) = crate::core::subagent_contract::parse_return_lines(report);
+            if facts.is_empty() {
+                return format!(
+                    "No contract-formatted lines found ({} rejected). Expected 'category/key: value' per line.",
+                    rejected.len()
+                );
+            }
+
+            let session_label = current_agent_id.unwrap_or("subagent");
+            let policy = match crate::tools::knowledge_shared::load_policy_or_error() {
+                Ok(p) => p,
+                Err(e) => return e,
+            };
+            let count = facts.len();
+            let res = crate::core::knowledge::ProjectKnowledge::mutate_locked(
+                project_root,
+                |knowledge| {
+                    for f in &facts {
+                        knowledge.remember(&f.category, &f.key, &f.value, session_label, 0.8, &policy);
+                    }
+                },
+            );
+            match res {
+                Ok(_) => {
+                    let mut out = format!(
+                        "Return synthesis: {count} fact(s) distilled into parent knowledge"
+                    );
+                    if !rejected.is_empty() {
+                        out.push_str(&format!(
+                            "\n{} line(s) rejected (not 'category/key: value'):",
+                            rejected.len()
+                        ));
+                        for r in rejected.iter().take(5) {
+                            out.push_str(&format!("\n  ✗ {r}"));
+                        }
+                    }
+                    out
+                }
+                Err(e) => format!("Error: knowledge store update failed: {e}"),
+            }
         }
 
         "sync" => {
@@ -230,6 +342,13 @@ pub fn handle(
             }
             out.push_str(&format!("  Pending messages: {pending_count}\n"));
             out.push_str(&format!("  Shared contexts: {shared_count}\n"));
+
+            // Stigmergy (#540): arithmetic field view — claims, stuck markers,
+            // hot files across all agents, no scratchpad reads needed.
+            let scents = crate::core::scent_field::sync_block();
+            if !scents.is_empty() {
+                out.push_str(&scents);
+            }
             out
         }
 

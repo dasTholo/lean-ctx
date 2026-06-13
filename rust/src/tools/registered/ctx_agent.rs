@@ -15,18 +15,18 @@ impl McpTool for CtxAgentTool {
     fn tool_def(&self) -> Tool {
         tool_def(
             "ctx_agent",
-            "Multi-agent coordination (shared message bus + persistent diaries). Actions: register (join with agent_type+role), \
-post (broadcast or direct message with category), read (poll messages), status (update state: active|idle|finished), \
-handoff (transfer task to another agent with summary), sync (overview of all agents + pending messages + shared contexts), \
-diary (log discovery/decision/blocker/progress/insight — persisted across sessions), \
-recall_diary (read agent diary), diaries (list all agent diaries), \
-list, info.",
+            "Multi-agent coordination: shared message bus, persistent diaries, stigmergic scent field. Actions: register (agent_type+role), \
+post (message+category), read (poll), status (active|idle|finished), handoff (transfer task+summary), \
+sync (agents + messages + scent: claims/stuck/hot), claim/release (atomic file/task claim, message=target), \
+brief (sub-agent briefing pack: message=task, priority=budget), \
+return (distill sub-agent report into knowledge: message='category/key: value' lines), \
+diary (log discovery/decision/blocker/progress/insight), recall_diary, diaries, list, info.",
             json!({
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["register", "list", "post", "read", "status", "info", "handoff", "sync", "diary", "recall_diary", "diaries", "share_knowledge", "receive_knowledge"],
+                        "enum": ["register", "list", "post", "read", "status", "info", "handoff", "sync", "claim", "release", "brief", "return", "diary", "recall_diary", "diaries", "share_knowledge", "receive_knowledge"],
                         "description": "Agent operation."
                     },
                     "agent_type": {
@@ -134,6 +134,7 @@ list, info.",
                 mode: Some(action),
                 path: None,
                 changed: false,
+                shell_outcome: None,
             });
         }
 
@@ -144,6 +145,7 @@ list, info.",
             mode: Some(action),
             path: None,
             changed: false,
+            shell_outcome: None,
         })
     }
 }

@@ -1,14 +1,34 @@
 use crate::tools::CrpMode;
 
 /// Claude Code truncates MCP server instructions at 2048 characters.
-/// Full instructions are installed as `$CLAUDE_CONFIG_DIR/rules/lean-ctx.md`
-/// (defaulting to `~/.claude/rules/lean-ctx.md`) instead.
+/// Full instructions live in the `<!-- lean-ctx -->` block in `~/.claude/CLAUDE.md`
+/// plus the on-demand skill (`~/.claude/skills/lean-ctx/SKILL.md`); the legacy
+/// always-loaded `~/.claude/rules/lean-ctx.md` was retired in 3.8 (GL #555).
 /// Session state is dynamically appended to the MCP instructions for continuity.
 ///
 /// Universal instruction cap for all MCP clients (in tokens, not bytes).
 /// Enforced via `count_tokens` so truncation is accurate regardless of
 /// character mix (ASCII, CJK, emoji).
-const INSTRUCTION_CAP_TOKENS: usize = 1200;
+///
+/// Budget split (#579): the static skeleton must stay <= 400 tokens
+/// (asserted in tests — details belong in LEAN-CTX.md on disk, not in every
+/// session); the remainder is headroom for dynamic session/knowledge blocks.
+const INSTRUCTION_CAP_TOKENS: usize = 800;
+
+/// Token budget for the static instruction skeleton (no session/knowledge
+/// state). CI-asserted so instruction creep cannot silently tax every session.
+/// Tdd mode pays extra for the CRP suffix + INSTRUCTION CODES decoder.
+#[cfg(test)]
+const STATIC_INSTRUCTION_BUDGET_TOKENS: usize = 400;
+#[cfg(test)]
+const STATIC_INSTRUCTION_BUDGET_TDD_TOKENS: usize = 500;
+/// Windows additionally carries the one-line `SHELL:` hint (POSIX vs
+/// PowerShell disambiguation, see `build_shell_hint`) inside the skeleton.
+/// Budgeted explicitly so the cap stays honest on every platform.
+#[cfg(all(test, windows))]
+const STATIC_INSTRUCTION_SHELL_HINT_TOKENS: usize = 25;
+#[cfg(all(test, not(windows)))]
+const STATIC_INSTRUCTION_SHELL_HINT_TOKENS: usize = 0;
 
 pub fn build_instructions(crp_mode: CrpMode) -> String {
     build_instructions_with_client(crp_mode, "")
@@ -52,6 +72,56 @@ pub fn build_instructions_with_client_for_compiler(
 fn is_claude_code_client(client_name: &str) -> bool {
     let lower = client_name.to_lowercase();
     lower.contains("claude") && !lower.contains("cursor")
+}
+
+/// LITM calibration manifest rotation (#539).
+///
+/// Settles the previous manifest — every entry the agent never re-recalled is
+/// a placement *hit* (misses were already recorded by the recall hook) — then
+/// stores the manifest for the injection built from `session` right now:
+/// task + decisions go to the begin block, findings + next steps to the end.
+fn rotate_wakeup_manifest(session: &crate::core::session::SessionState, profile_name: &str) {
+    use crate::core::litm_calibration::{record_outcome, Position};
+    use crate::core::session::ManifestEntry;
+
+    let mut updated = session.clone();
+
+    for entry in &updated.wakeup_manifest {
+        if !entry.missed {
+            if let Some(pos) = Position::parse(&entry.position) {
+                record_outcome(&entry.profile, pos, true);
+            }
+        }
+    }
+
+    let mut manifest: Vec<ManifestEntry> = Vec::new();
+    let mut push = |key: &str, position: &str| {
+        let key = key.trim();
+        if !key.is_empty() {
+            manifest.push(ManifestEntry {
+                key: key.chars().take(80).collect(),
+                position: position.to_string(),
+                profile: profile_name.to_string(),
+                missed: false,
+            });
+        }
+    };
+
+    if let Some(ref task) = updated.task {
+        push(&task.description, "begin");
+    }
+    for d in updated.decisions.iter().rev().take(5) {
+        push(&d.summary, "begin");
+    }
+    for f in updated.findings.iter().rev().take(8) {
+        push(&f.summary, "end");
+    }
+    for n in updated.next_steps.iter().take(3) {
+        push(n, "end");
+    }
+
+    updated.wakeup_manifest = manifest;
+    let _ = updated.save();
 }
 
 pub fn claude_config_dir_display() -> String {
@@ -177,7 +247,12 @@ fn build_full_instructions(crp_mode: CrpMode, client_name: &str) -> String {
 
     let (session_block, litm_end_block) = match loaded_session {
         Some(ref session) => {
-            let positioned = crate::core::litm::position_optimize(session);
+            // LITM calibration (#539): rotate the placement manifest — every
+            // entry the agent never re-recalled counts as a placement hit —
+            // then rebuild it for this injection and apply the learned share.
+            rotate_wakeup_manifest(session, profile.name);
+            let share = crate::core::litm_calibration::begin_share(profile.name);
+            let positioned = crate::core::litm::position_optimize_with_share(session, share);
             let begin = format!(
                 "\n\n--- ACTIVE SESSION (LITM P1: begin position, profile: {}) ---\n{}\n---\n",
                 profile.name, positioned.begin_block
@@ -247,7 +322,6 @@ fn build_full_instructions(crp_mode: CrpMode, client_name: &str) -> String {
 
     use crate::core::rules_canonical as rc;
     let tool_bullets = rc::tool_mapping_bullets(rc::Mode::Mcp);
-    let compat = rc::compatibility_block();
     let read_modes = rc::ctx_read_modes_block();
     let auto_block = rc::automation_block();
     let cep = rc::cep_block();
@@ -266,8 +340,6 @@ fn build_full_instructions(crp_mode: CrpMode, client_name: &str) -> String {
 CRITICAL: ALWAYS use lean-ctx MCP tools instead of native equivalents for token savings.\n\
 \n\
 {tool_bullets}\n\
-\n\
-{compat}\n\
 {shell_hint}\
 \n\
 {read_modes}\n\
@@ -282,12 +354,12 @@ CRITICAL: ALWAYS use lean-ctx MCP tools instead of native equivalents for token 
 {knowledge_block}\
 {gotcha_block}\
 \n\
---- ORIGIN ---\n\
 {origin}\n\
 \n\
 {litm_pref}\
 {litm_end_block}",
-        decoder_block = crate::core::protocol::instruction_decoder_block(),
+        decoder_block =
+            crate::core::protocol::instruction_decoder_block(matches!(crp_mode, CrpMode::Tdd)),
         origin = crate::core::integrity::origin_line(),
         litm_end_block = &litm_end_block
     );
@@ -306,25 +378,28 @@ CRITICAL: ALWAYS use lean-ctx MCP tools instead of native equivalents for token 
     // survive the token cap. The variable session/knowledge/gotcha blocks live
     // inside `base` and are the right thing to shed under pressure (H3). So we
     // protect the suffix and truncate only `base` to fit the budget.
-    let guidance_suffix = match crp_mode {
-        CrpMode::Off => format!("{terse_block}{intelligence_block}"),
-        CrpMode::Compact => format!(
-            "CRP MODE: compact\n\
-Omit filler. Abbreviate: fn,cfg,impl,deps,req,res,ctx,err,ret,arg,val,ty,mod.\n\
-Diff lines (+/-) only. TARGET: <=200 tok. Trust tool outputs.\n\n\
-{terse_block}{intelligence_block}"
-        ),
-        CrpMode::Tdd => format!(
-            "CRP MODE: tdd\n\
-Max density. Every token carries meaning. Fn refs only, diff lines (+/-) only.\n\
-Abbreviate: fn,cfg,impl,deps,req,res,ctx,err,ret,arg,val,ty,mod.\n\
-+F1:42 param(timeout:Duration) | -F1:10-15 | ~F1:42 old->new\n\
-BUDGET: <=150 tok. ZERO NARRATION. Trust tool outputs.\n\n\
-{terse_block}{intelligence_block}"
-        ),
+    let guidance_suffix = match crp_mode_suffix(&crp_mode) {
+        "" => format!("{terse_block}{intelligence_block}"),
+        crp => format!("{crp}\n\n{terse_block}{intelligence_block}"),
     };
 
     assemble_within_cap(&base, &guidance_suffix, INSTRUCTION_CAP_TOKENS)
+}
+
+/// CRP-mode contract appended to the instructions. One compact line per mode
+/// (#579): the abbreviation list and notation example double as the legend.
+fn crp_mode_suffix(crp_mode: &CrpMode) -> &'static str {
+    match crp_mode {
+        CrpMode::Off => "",
+        CrpMode::Compact => {
+            "CRP MODE: compact — omit filler; abbreviate fn,cfg,impl,deps,req,res; \
+             diff lines (+/-) only; <=200 tok; trust tool outputs."
+        }
+        CrpMode::Tdd => {
+            "CRP MODE: tdd — max density; Fn refs + diff lines only \
+             (+F1:42 | -F1:10-15 | ~F1:42 old->new); <=150 tok; zero narration."
+        }
+    }
 }
 
 /// Join `base` and a protected `suffix` so the result fits `cap_tokens`,
@@ -400,7 +475,6 @@ fn build_full_instructions_for_test(crp_mode: CrpMode, client_name: &str) -> Str
     let litm_end_block = String::new();
 
     let tool_bullets = rc::tool_mapping_bullets(rc::Mode::Mcp);
-    let compat = rc::compatibility_block();
     let read_modes = rc::ctx_read_modes_block();
     let auto_block = rc::automation_block();
     let cep = rc::cep_block();
@@ -411,8 +485,6 @@ fn build_full_instructions_for_test(crp_mode: CrpMode, client_name: &str) -> Str
 CRITICAL: ALWAYS use lean-ctx MCP tools instead of native equivalents for token savings.\n\
 \n\
 {tool_bullets}\n\
-\n\
-{compat}\n\
 {shell_hint}\
 \n\
 {read_modes}\n\
@@ -427,12 +499,12 @@ CRITICAL: ALWAYS use lean-ctx MCP tools instead of native equivalents for token 
 {knowledge_block}\
 {gotcha_block}\
 \n\
---- ORIGIN ---\n\
 {origin}\n\
 \n\
 {litm_pref}\
 {litm_end_block}",
-        decoder_block = crate::core::protocol::instruction_decoder_block(),
+        decoder_block =
+            crate::core::protocol::instruction_decoder_block(matches!(crp_mode, CrpMode::Tdd)),
         origin = crate::core::integrity::origin_line(),
         litm_end_block = &litm_end_block
     );
@@ -446,28 +518,9 @@ CRITICAL: ALWAYS use lean-ctx MCP tools instead of native equivalents for token 
     let intelligence_block = build_intelligence_block();
     let terse_block = build_terse_agent_block_for_client(&crp_mode, client_name);
 
-    match crp_mode {
-        CrpMode::Off => format!("{base}\n\n{terse_block}{intelligence_block}"),
-        CrpMode::Compact => {
-            format!(
-                "{base}\n\n\
-CRP MODE: compact\n\
-Omit filler. Abbreviate: fn,cfg,impl,deps,req,res,ctx,err,ret,arg,val,ty,mod.\n\
-Diff lines (+/-) only. TARGET: <=200 tok. Trust tool outputs.\n\n\
-{terse_block}{intelligence_block}"
-            )
-        }
-        CrpMode::Tdd => {
-            format!(
-                "{base}\n\n\
-CRP MODE: tdd\n\
-Max density. Every token carries meaning. Fn refs only, diff lines (+/-) only.\n\
-Abbreviate: fn,cfg,impl,deps,req,res,ctx,err,ret,arg,val,ty,mod.\n\
-+F1:42 param(timeout:Duration) | -F1:10-15 | ~F1:42 old->new\n\
-BUDGET: <=150 tok. ZERO NARRATION. Trust tool outputs.\n\n\
-{terse_block}{intelligence_block}"
-            )
-        }
+    match crp_mode_suffix(&crp_mode) {
+        "" => format!("{base}\n\n{terse_block}{intelligence_block}"),
+        crp => format!("{base}\n\n{crp}\n\n{terse_block}{intelligence_block}"),
     }
 }
 
@@ -484,7 +537,6 @@ fn build_full_instructions_for_compiler(
 
     use crate::core::rules_canonical as rc;
     let tool_bullets = rc::tool_mapping_bullets(rc::Mode::Mcp);
-    let compat = rc::compatibility_block();
     let read_modes = rc::ctx_read_modes_block();
     let auto_blk = rc::automation_block();
     let cep = rc::cep_block();
@@ -495,8 +547,6 @@ fn build_full_instructions_for_compiler(
 CRITICAL: ALWAYS use lean-ctx MCP tools instead of native equivalents for token savings.\n\
 \n\
 {tool_bullets}\n\
-\n\
-{compat}\n\
 {shell_hint}\
 \n\
 {read_modes}\n\
@@ -511,12 +561,12 @@ CRITICAL: ALWAYS use lean-ctx MCP tools instead of native equivalents for token 
 {knowledge_block}\
 {gotcha_block}\
 \n\
---- ORIGIN ---\n\
 {origin}\n\
 \n\
 {litm_pref}\
 {litm_end_block}",
-        decoder_block = crate::core::protocol::instruction_decoder_block(),
+        decoder_block =
+            crate::core::protocol::instruction_decoder_block(matches!(crp_mode, CrpMode::Tdd)),
         origin = crate::core::integrity::origin_line(),
         litm_end_block = &litm_end_block
     );
@@ -530,28 +580,9 @@ CRITICAL: ALWAYS use lean-ctx MCP tools instead of native equivalents for token 
     let _ = client_name; // keep signature aligned with other builders
     let intelligence_block = build_intelligence_block();
 
-    match crp_mode {
-        CrpMode::Off => format!("{base}\n\n{intelligence_block}"),
-        CrpMode::Compact => {
-            format!(
-                "{base}\n\n\
-CRP MODE: compact\n\
-Omit filler. Abbreviate: fn,cfg,impl,deps,req,res,ctx,err,ret,arg,val,ty,mod.\n\
-Diff lines (+/-) only. TARGET: <=200 tok. Trust tool outputs.\n\n\
-{intelligence_block}"
-            )
-        }
-        CrpMode::Tdd => {
-            format!(
-                "{base}\n\n\
-CRP MODE: tdd\n\
-Max density. Every token carries meaning. Fn refs only, diff lines (+/-) only.\n\
-Abbreviate: fn,cfg,impl,deps,req,res,ctx,err,ret,arg,val,ty,mod.\n\
-+F1:42 param(timeout:Duration) | -F1:10-15 | ~F1:42 old->new\n\
-BUDGET: <=150 tok. ZERO NARRATION. Trust tool outputs.\n\n\
-{intelligence_block}"
-            )
-        }
+    match crp_mode_suffix(&crp_mode) {
+        "" => format!("{base}\n\n{intelligence_block}"),
+        crp => format!("{base}\n\n{crp}\n\n{intelligence_block}"),
     }
 }
 
@@ -575,24 +606,19 @@ fn build_terse_agent_block_for_client(_crp_mode: &CrpMode, client_name: &str) ->
 }
 
 fn build_intelligence_block() -> String {
-    "\
-OUTPUT EFFICIENCY:\n\
-• Never echo tool output code. Never add narration comments. Show only changed code.\n\
-• [TASK:type] and SCOPE hints included. Architecture=thorough, generate=code."
-        .to_string()
+    "OUTPUT: never echo tool output, no narration comments, show only changed code.".to_string()
 }
 
 fn build_shell_hint() -> String {
     if !cfg!(windows) {
         return String::new();
     }
+    // Keep this hint terse: it rides inside the static skeleton, which is
+    // budget-capped (#579) — the cap applies on Windows too.
     let name = crate::shell::shell_name();
     let is_posix = matches!(name.as_str(), "bash" | "sh" | "zsh" | "fish");
     if is_posix {
-        format!(
-            "\nSHELL: {name} (POSIX). Use POSIX commands (cat, head, grep, find, ls). \
-             Do NOT use PowerShell cmdlets (Get-Content, Select-Object, Get-ChildItem).\n"
-        )
+        format!("\nSHELL: {name} (POSIX) — POSIX commands only, no PowerShell cmdlets.\n")
     } else if name.contains("powershell") || name.contains("pwsh") {
         format!("\nSHELL: {name}. Use PowerShell cmdlets.\n")
     } else {
@@ -651,5 +677,41 @@ mod tests {
         let base = "x\n".repeat(4000);
         let out = assemble_within_cap(&base, "", INSTRUCTION_CAP_TOKENS);
         assert!(count_tokens(&out) <= INSTRUCTION_CAP_TOKENS);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn shell_hint_stays_within_its_budget() {
+        // The skeleton budget grants the Windows shell hint exactly
+        // STATIC_INSTRUCTION_SHELL_HINT_TOKENS — keep the hint inside it.
+        let hint = build_shell_hint();
+        let tokens = count_tokens(&hint);
+        assert!(
+            tokens <= STATIC_INSTRUCTION_SHELL_HINT_TOKENS,
+            "shell hint = {tokens} tok, budget {STATIC_INSTRUCTION_SHELL_HINT_TOKENS}: {hint}"
+        );
+    }
+
+    #[test]
+    fn static_skeleton_stays_within_budget() {
+        // #579: the static instruction skeleton (no session/knowledge blocks)
+        // rides in EVERY session of EVERY install. Detail documentation
+        // belongs in LEAN-CTX.md on disk — this assert stops silent creep.
+        // Isolated data dir = default config, like a fresh install (the dev
+        // machine's compression_level/profile must not leak into the budget).
+        let _iso = crate::core::data_dir::isolated_data_dir();
+        for (mode, base_budget) in [
+            (CrpMode::Off, STATIC_INSTRUCTION_BUDGET_TOKENS),
+            (CrpMode::Compact, STATIC_INSTRUCTION_BUDGET_TOKENS),
+            (CrpMode::Tdd, STATIC_INSTRUCTION_BUDGET_TDD_TOKENS),
+        ] {
+            let budget = base_budget + STATIC_INSTRUCTION_SHELL_HINT_TOKENS;
+            let out = build_instructions_for_test(mode);
+            let tokens = count_tokens(&out);
+            assert!(
+                tokens <= budget,
+                "static instructions for {mode:?} = {tokens} tok, budget {budget}\n---\n{out}\n---"
+            );
+        }
     }
 }

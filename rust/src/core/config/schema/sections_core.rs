@@ -158,11 +158,13 @@ pub(super) fn build(sections: &mut BTreeMap<String, SectionSchema>) {
     root.insert(
         "rules_injection".into(),
         key_enum(
-            &["shared", "dedicated"],
+            &["shared", "dedicated", "off"],
             "shared",
-            "How rules load for CLAUDE.md/AGENTS.md/GEMINI.md agents: shared block, or \
+            "How rules load for CLAUDE.md/AGENTS.md/GEMINI.md agents: shared block, \
              dedicated (no shared-file edits; SessionStart hook / instructions[] / \
-             context.fileName). Override via LEAN_CTX_RULES_INJECTION",
+             context.fileName), or off (write no rules file — for hosts that supply \
+             their own steering or phase-isolated/non-caching harnesses). Override via \
+             LEAN_CTX_RULES_INJECTION",
         ),
     );
     root.insert(
@@ -261,6 +263,30 @@ pub(super) fn build(sections: &mut BTreeMap<String, SectionSchema>) {
         ),
     );
     root.insert(
+        "team_url".into(),
+        key(
+            "string?",
+            serde_json::json!(cfg.team_url),
+            "Team server base URL for the opt-in savings roll-up (push/pull)",
+        ),
+    );
+    root.insert(
+        "team_token".into(),
+        key(
+            "string?",
+            serde_json::json!(cfg.team_token),
+            "Bearer token for the team server (push needs a member token; pull/auto-push needs the configured team token)",
+        ),
+    );
+    root.insert(
+        "team_auto_push".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.team_auto_push),
+            "Opt-in: daemon periodically pushes your signed savings batch to team_url (off by default; requires team_url + team_token)",
+        ),
+    );
+    root.insert(
             "cache_policy".into(),
             key_with_env(
                 "enum(aggressive|safe|off)",
@@ -274,7 +300,7 @@ pub(super) fn build(sections: &mut BTreeMap<String, SectionSchema>) {
             key_with_env(
                 "bool",
                 serde_json::json!(false),
-                "Transparently intercept native Read/Grep/Shell calls via hooks and route them through lean-ctx",
+                "Opt-in (default off): transparently route native Read/Grep/Edit/Shell through lean-ctx — via hooks for hook-based agents, via the interception plugin for OpenCode",
                 "LEAN_CTX_SHADOW_MODE",
             ),
         );
@@ -634,16 +660,129 @@ pub(super) fn build(sections: &mut BTreeMap<String, SectionSchema>) {
             keys: search,
         });
 
+    let mut graph = BTreeMap::new();
+    graph.insert(
+        "traversal_edges".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.graph.traversal_edges),
+            "Learn co-access edges from real sessions (files surfaced together), surface them as decaying `co_access` graph edges, and boost recall by them. Set false for a purely static AST-only graph.",
+        ),
+    );
+    sections.insert(
+        "graph".into(),
+        SectionSchema {
+            description:
+                "Code-graph settings, including traversal (co-access) edges learned from sessions"
+                    .into(),
+            keys: graph,
+        },
+    );
+
+    let mut skillify = BTreeMap::new();
+    skillify.insert(
+        "enabled".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.skillify.enabled),
+            "Master switch for the skillify miner (codify recurring session patterns into .cursor/rules). Only acts when explicitly invoked.",
+        ),
+    );
+    skillify.insert(
+        "scope".into(),
+        key_enum(
+            &["project", "global"],
+            "project",
+            "Where generated rules are written: project (<repo>/.cursor/rules, git-committable) or global (~/.cursor/rules).",
+        ),
+    );
+    skillify.insert(
+        "min_confidence".into(),
+        key(
+            "f32",
+            serde_json::json!(cfg.skillify.min_confidence),
+            "Minimum confidence for a single curated knowledge fact to be codified without repetition (0.0..=1.0).",
+        ),
+    );
+    skillify.insert(
+        "min_recurrence".into(),
+        key(
+            "u32",
+            serde_json::json!(cfg.skillify.min_recurrence),
+            "Minimum reinforcements (confirmations / repeated mentions) before a sub-threshold-confidence pattern is codified.",
+        ),
+    );
+    sections.insert(
+        "skillify".into(),
+        SectionSchema {
+            description:
+                "Skillify miner: distill recurring session diary + knowledge patterns into rules"
+                    .into(),
+            keys: skillify,
+        },
+    );
+
+    let mut summaries = BTreeMap::new();
+    summaries.insert(
+        "enabled".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.summaries.enabled),
+            "Record periodic, semantically-recallable AI session summaries (what was done, files, decisions).",
+        ),
+    );
+    summaries.insert(
+        "every_n_turns".into(),
+        key(
+            "u32",
+            serde_json::json!(cfg.summaries.every_n_turns),
+            "Tool calls between automatic session summaries (gated by the auto-checkpoint cadence).",
+        ),
+    );
+    summaries.insert(
+        "max_kept".into(),
+        key(
+            "u32",
+            serde_json::json!(cfg.summaries.max_kept),
+            "Maximum session summaries kept per project (oldest pruned first).",
+        ),
+    );
+    sections.insert(
+        "summaries".into(),
+        SectionSchema {
+            description: "AI session summaries: periodic, semantically-recallable session digests"
+                .into(),
+            keys: summaries,
+        },
+    );
+
     let mut embedding = BTreeMap::new();
     embedding.insert(
             "model".into(),
             key_with_env(
                 "string",
                 serde_json::json!("minilm"),
-                "Local ONNX embedding model for ctx_semantic_search. One of: minilm (all-MiniLM-L6-v2, 384d, default), jina-code-v2 (768d, code-optimized), nomic (768d). Switching models re-indexes once on the next search.",
+                "Local ONNX embedding model for ctx_semantic_search. One of: minilm (all-MiniLM-L6-v2, 384d, default), jina-code-v2 (768d, code-optimized), nomic (768d) — or any HuggingFace repo with an ONNX export via hf:org/repo[@revision]. Switching models re-indexes once on the next search.",
                 "LEAN_CTX_EMBEDDING_MODEL",
             ),
         );
+    embedding.insert(
+        "dimensions".into(),
+        key(
+            "integer",
+            serde_json::json!(null),
+            "Declared embedding width for hf: custom models (fallback only — the real width is probed from the ONNX graph at load time). Built-in models ignore this key.",
+        ),
+    );
+    embedding.insert(
+        "auto_download".into(),
+        key_with_env(
+            "bool",
+            serde_json::json!(null),
+            "Download the embedding model in the background on first semantic need (default: allowed). Set false for air-gapped machines; semantic features then stay off until a model is provided manually.",
+            "LEAN_CTX_EMBEDDINGS_AUTO_DOWNLOAD",
+        ),
+    );
     sections.insert(
         "embedding".into(),
         SectionSchema {

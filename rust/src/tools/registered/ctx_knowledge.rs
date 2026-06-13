@@ -15,62 +15,26 @@ impl McpTool for CtxKnowledgeTool {
     fn tool_def(&self) -> Tool {
         tool_def(
             "ctx_knowledge",
-            "Persistent project knowledge across sessions (facts, patterns, history). Supports recall modes, embeddings, feedback, and typed relations.",
+            "Persistent project knowledge across sessions (facts, patterns, gotchas, typed relations).",
             json!({
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["policy", "remember", "recall", "pattern", "feedback", "relate", "unrelate", "relations", "relations_diagram", "consolidate", "status", "health", "remove", "export", "timeline", "rooms", "search", "wakeup", "embeddings_status", "embeddings_reset", "embeddings_reindex"],
-                        "description": "Knowledge operation to perform."
+                        "description": "remember|recall|search|pattern|gotcha|feedback|relate|unrelate|relations|relations_diagram|consolidate|status|health|lifecycle_report|remove|export|timeline|rooms|wakeup|policy|embeddings_status|embeddings_reset|embeddings_reindex"
                     },
-                    "trigger": {
-                        "type": "string",
-                        "description": "For gotcha action: what triggers the bug"
-                    },
-                    "resolution": {
-                        "type": "string",
-                        "description": "For gotcha action: how to fix/avoid it"
-                    },
-                    "severity": {
-                        "type": "string",
-                        "enum": ["critical", "warning", "info"],
-                        "description": "For gotcha action: severity level (default: warning)"
-                    },
-                    "category": {
-                        "type": "string",
-                        "description": "Fact category (architecture, api, testing, deployment, conventions, dependencies)"
-                    },
-                    "key": {
-                        "type": "string",
-                        "description": "Fact key/identifier"
-                    },
-                    "value": {
-                        "type": "string",
-                        "description": "Value for action (fact value, pattern text, feedback up/down, relation kind)."
-                    },
-                    "query": {
-                        "type": "string",
-                        "description": "Query/target for recall/relate/relations."
-                    },
-                    "mode": {
-                        "type": "string",
-                        "enum": ["auto", "exact", "semantic", "hybrid"],
-                        "description": "Recall mode (default: auto)."
-                    },
-                    "pattern_type": {
-                        "type": "string",
-                        "description": "Pattern type for pattern action"
-                    },
-                    "examples": {
-                        "type": "array",
-                        "items": { "type": "string" },
-                        "description": "Examples for pattern action"
-                    },
-                    "confidence": {
-                        "type": "number",
-                        "description": "Confidence score 0.0-1.0 for remember action (default: 0.8)"
-                    }
+                    "trigger": { "type": "string", "description": "gotcha: what triggers it" },
+                    "resolution": { "type": "string", "description": "gotcha: the fix" },
+                    "severity": { "type": "string", "description": "gotcha: critical|warning|info" },
+                    "category": { "type": "string", "description": "Fact category" },
+                    "key": { "type": "string" },
+                    "value": { "type": "string" },
+                    "query": { "type": "string", "description": "For recall/search/relate" },
+                    "mode": { "type": "string", "description": "Recall: auto|exact|semantic|hybrid" },
+                    "as_of": { "type": "string", "description": "Recall facts valid at this date (YYYY-MM-DD)" },
+                    "pattern_type": { "type": "string" },
+                    "examples": { "type": "array", "items": { "type": "string" } },
+                    "confidence": { "type": "number", "description": "0.0-1.0 (default 0.8)" }
                 },
                 "required": ["action"]
             }),
@@ -89,6 +53,7 @@ impl McpTool for CtxKnowledgeTool {
         let value = get_str(args, "value");
         let query = get_str(args, "query");
         let mode = get_str(args, "mode");
+        let as_of = get_str(args, "as_of");
         let pattern_type = get_str(args, "pattern_type");
         let examples = get_str_array(args, "examples");
         let confidence: Option<f32> = args
@@ -135,6 +100,7 @@ impl McpTool for CtxKnowledgeTool {
                     mode: Some(action),
                     path: None,
                     changed: false,
+                    shell_outcome: None,
                 });
             }
 
@@ -158,6 +124,7 @@ impl McpTool for CtxKnowledgeTool {
                 mode: Some(action),
                 path: None,
                 changed: false,
+                shell_outcome: None,
             });
         }
 
@@ -173,6 +140,7 @@ impl McpTool for CtxKnowledgeTool {
             examples,
             confidence,
             mode.as_deref(),
+            as_of.as_deref(),
         );
 
         Ok(ToolOutput {
@@ -182,6 +150,7 @@ impl McpTool for CtxKnowledgeTool {
             mode: Some(action),
             path: None,
             changed: false,
+            shell_outcome: None,
         })
     }
 }

@@ -158,12 +158,17 @@ pub fn cmd_register(args: &[String]) {
     }
 }
 
-pub fn cmd_sync() {
+pub fn cmd_sync(rest: &[String]) {
+    if rest.first().map(String::as_str) == Some("index") {
+        cmd_sync_index(&rest[1..]);
+        return;
+    }
     if !cloud_client::is_logged_in() {
         tracing::error!("Not logged in. Run: lean-ctx login <email>");
         std::process::exit(1);
     }
 
+    // Stats roll-up is account-level and stays free for everyone.
     println!("Syncing stats...");
     let store = core::stats::load();
     let entries = build_sync_entries(&store);
@@ -176,24 +181,157 @@ pub fn cmd_sync() {
         }
     }
 
+    // Everything below is the Pro "Personal Cloud" (cross-device sync of your own
+    // context). On a Free account the server returns 402; detect it once and show
+    // a friendly upgrade hint instead of one failure per surface.
+    if sync_personal_cloud(&store) == CloudSyncOutcome::Gated {
+        print_pro_upgrade_hint();
+        return;
+    }
+
+    if let Ok(plan) = cloud_client::fetch_plan() {
+        let _ = cloud_client::save_plan(&plan);
+    }
+
+    println!("Sync complete.");
+}
+
+/// `lean-ctx sync index <push|pull|status>` — the hosted Personal Index
+/// (GL #392): encrypted cross-device sync of the project's retrieval index.
+fn cmd_sync_index(args: &[String]) {
+    let sub = args.first().map_or("help", String::as_str);
+    let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+
+    match sub {
+        "push" => match cloud_client::push_index_bundle(&root) {
+            Ok((project_hash, bytes)) => {
+                println!(
+                    "\x1b[32m✓\x1b[0m Index pushed ({:.1} MB encrypted, project {})",
+                    bytes as f64 / 1_048_576.0,
+                    &project_hash[..12.min(project_hash.len())]
+                );
+                println!("  Pull on any device: lean-ctx sync index pull");
+            }
+            Err(e) => {
+                eprintln!("\x1b[31m✗\x1b[0m {e}");
+                std::process::exit(1);
+            }
+        },
+        "pull" => match cloud_client::pull_index_bundle(&root) {
+            Ok(manifest) => {
+                println!(
+                    "\x1b[32m✓\x1b[0m Index restored ({} files, built {} by v{})",
+                    manifest.files.len(),
+                    manifest.created_at,
+                    manifest.engine_version
+                );
+                println!("  Semantic search is ready — no local re-index needed.");
+            }
+            Err(e) => {
+                eprintln!("\x1b[31m✗\x1b[0m {e}");
+                std::process::exit(1);
+            }
+        },
+        "status" => match cloud_client::index_bundle_status() {
+            Ok(v) => {
+                let used_mb = v["used_bytes"].as_u64().unwrap_or(0) as f64 / 1_048_576.0;
+                let quota_mb = v["quota_mb"].as_u64().unwrap_or(0);
+                println!("Hosted Personal Index");
+                println!("  Usage: {used_mb:.1} MB / {quota_mb} MB");
+                if let Some(line) = render_quota_state(&v["storage"]) {
+                    println!("  {line}");
+                }
+                if let Some(buckets) = v["projects"].as_array() {
+                    if buckets.is_empty() {
+                        println!("  No project bundles yet. Push one: lean-ctx sync index push");
+                    }
+                    for b in buckets {
+                        println!(
+                            "  • {}  {:.1} MB  (updated {})",
+                            b["project_hash"].as_str().unwrap_or("?"),
+                            b["size_bytes"].as_u64().unwrap_or(0) as f64 / 1_048_576.0,
+                            b["updated_at"].as_str().unwrap_or("?")
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("\x1b[31m✗\x1b[0m {e}");
+                std::process::exit(1);
+            }
+        },
+        _ => {
+            println!("Usage: lean-ctx sync index <push|pull|status>");
+            println!("  push    Pack, encrypt and upload this project's retrieval index");
+            println!("  pull    Download and restore the hosted index on this device");
+            println!("  status  Show hosted buckets and quota usage");
+        }
+    }
+}
+
+/// One human line for the server's billing-plane-v2 `storage` block (GL #392):
+/// green/yellow/red by threshold state, with the headroom or overage spelled
+/// out. `None` when the server (older deploy) sent no block — print nothing
+/// rather than guessing.
+fn render_quota_state(storage: &serde_json::Value) -> Option<String> {
+    let state = storage["state"].as_str()?;
+    let percent = storage["percent"].as_f64();
+    let pct = percent.map_or(String::new(), |p| format!(" ({p:.0}% of quota)"));
+    Some(match state {
+        "ok" => format!("State: \x1b[32mok\x1b[0m{pct}"),
+        "warn" => format!("State: \x1b[33mwarn\x1b[0m{pct} — consider pruning old buckets"),
+        "critical" => {
+            format!("State: \x1b[31mcritical\x1b[0m{pct} — next push may exceed the quota")
+        }
+        "over" => {
+            let over_mb = storage["overage_bytes"].as_u64().unwrap_or(0) as f64 / 1_000_000.0;
+            format!(
+                "State: \x1b[31mover\x1b[0m{pct} — {over_mb:.1} MB over; pushes are blocked (nothing is billed). Free space: lean-ctx sync index status / delete"
+            )
+        }
+        // "none" (no entitlement) and future states: the usage line above
+        // already says everything actionable.
+        _ => return None,
+    })
+}
+
+/// Whether a `cloud_client` error string is the server's Pro gate (HTTP 402),
+/// mirroring the existing 403 string-match in `cloud_client::pull_cloud_models`.
+fn pro_gate_hit(err: &str) -> bool {
+    err.contains("402")
+}
+
+#[derive(PartialEq, Eq)]
+enum CloudSyncOutcome {
+    Done,
+    Gated,
+}
+
+/// Push the Pro-gated "Personal Cloud" surfaces. Returns [`CloudSyncOutcome::Gated`]
+/// at the first 402 (a Free account) so the caller shows a single upgrade hint
+/// rather than one error per surface. A self-hosted backend with the gate open
+/// (billing unset / `LEANCTX_CLOUD_SYNC_OPEN`) never returns 402, so all sync.
+fn sync_personal_cloud(store: &core::stats::StatsStore) -> CloudSyncOutcome {
     println!("Syncing commands...");
-    let command_entries = collect_command_entries(&store);
+    let command_entries = collect_command_entries(store);
     if command_entries.is_empty() {
         println!("  No command data to sync.");
     } else {
         match cloud_client::push_commands(&command_entries) {
             Ok(_) => println!("  Commands: synced"),
+            Err(e) if pro_gate_hit(&e) => return CloudSyncOutcome::Gated,
             Err(e) => tracing::error!("Commands sync failed: {e}"),
         }
     }
 
     println!("Syncing CEP scores...");
-    let cep_entries = collect_cep_entries(&store);
+    let cep_entries = collect_cep_entries(store);
     if cep_entries.is_empty() {
         println!("  No CEP sessions to sync.");
     } else {
         match cloud_client::push_cep(&cep_entries) {
             Ok(_) => println!("  CEP: synced"),
+            Err(e) if pro_gate_hit(&e) => return CloudSyncOutcome::Gated,
             Err(e) => tracing::error!("CEP sync failed: {e}"),
         }
     }
@@ -205,6 +343,7 @@ pub fn cmd_sync() {
     } else {
         match cloud_client::push_knowledge(&knowledge_entries) {
             Ok(_) => println!("  Knowledge: synced"),
+            Err(e) if pro_gate_hit(&e) => return CloudSyncOutcome::Gated,
             Err(e) => tracing::error!("Knowledge sync failed: {e}"),
         }
     }
@@ -216,6 +355,7 @@ pub fn cmd_sync() {
     } else {
         match cloud_client::push_gotchas(&gotcha_entries) {
             Ok(_) => println!("  Gotchas: synced"),
+            Err(e) if pro_gate_hit(&e) => return CloudSyncOutcome::Gated,
             Err(e) => tracing::error!("Gotchas sync failed: {e}"),
         }
     }
@@ -225,6 +365,7 @@ pub fn cmd_sync() {
     let buddy_data = serde_json::to_value(&buddy).unwrap_or_default();
     match cloud_client::push_buddy(&buddy_data) {
         Ok(_) => println!("  Buddy: synced"),
+        Err(e) if pro_gate_hit(&e) => return CloudSyncOutcome::Gated,
         Err(e) => tracing::error!("Buddy sync failed: {e}"),
     }
 
@@ -235,15 +376,19 @@ pub fn cmd_sync() {
     } else {
         match cloud_client::push_feedback(&feedback_entries) {
             Ok(_) => println!("  Feedback: synced"),
+            Err(e) if pro_gate_hit(&e) => return CloudSyncOutcome::Gated,
             Err(e) => tracing::error!("Feedback sync failed: {e}"),
         }
     }
 
-    if let Ok(plan) = cloud_client::fetch_plan() {
-        let _ = cloud_client::save_plan(&plan);
-    }
+    CloudSyncOutcome::Done
+}
 
-    println!("Sync complete.");
+/// Friendly, non-error hint shown when the server gates cloud sync behind Pro.
+/// Delegates to the central, entitlement-aware hint helper (#346) so the message
+/// reflects the user's actual plan and the cheapest unlocking tier.
+fn print_pro_upgrade_hint() {
+    super::upgrade_hint::hint_for("cloud_sync");
 }
 
 fn build_sync_entries(store: &core::stats::StatsStore) -> Vec<serde_json::Value> {
@@ -251,184 +396,23 @@ fn build_sync_entries(store: &core::stats::StatsStore) -> Vec<serde_json::Value>
 }
 
 fn collect_knowledge_entries() -> Vec<serde_json::Value> {
-    let Some(home) = dirs::home_dir() else {
-        return Vec::new();
-    };
-    let knowledge_dir = home.join(".lean-ctx").join("knowledge");
-    if !knowledge_dir.is_dir() {
-        return Vec::new();
-    }
-
-    let mut entries = Vec::new();
-
-    for project_entry in std::fs::read_dir(&knowledge_dir).into_iter().flatten() {
-        let Ok(project_entry) = project_entry else {
-            continue;
-        };
-        let project_path = project_entry.path();
-        if !project_path.is_dir() {
-            continue;
-        }
-
-        for file_entry in std::fs::read_dir(&project_path).into_iter().flatten() {
-            let Ok(file_entry) = file_entry else { continue };
-            let file_path = file_entry.path();
-            if file_path.extension().and_then(|e| e.to_str()) != Some("json") {
-                continue;
-            }
-            let Ok(data) = std::fs::read_to_string(&file_path) else {
-                continue;
-            };
-            let parsed: serde_json::Value = match serde_json::from_str(&data) {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-
-            if let Some(facts) = parsed["facts"].as_array() {
-                for fact in facts {
-                    let cat = fact["category"].as_str().unwrap_or("general");
-                    let key = fact["key"].as_str().unwrap_or("");
-                    let val = fact["value"]
-                        .as_str()
-                        .or_else(|| fact["description"].as_str())
-                        .unwrap_or("");
-                    if !key.is_empty() {
-                        entries.push(serde_json::json!({
-                            "category": cat,
-                            "key": key,
-                            "value": val,
-                        }));
-                    }
-                }
-            }
-
-            if let Some(gotchas) = parsed["gotchas"].as_array() {
-                for g in gotchas {
-                    let pattern = g["pattern"].as_str().unwrap_or("");
-                    let fix = g["fix"].as_str().unwrap_or("");
-                    if !pattern.is_empty() {
-                        entries.push(serde_json::json!({
-                            "category": "gotcha",
-                            "key": pattern,
-                            "value": fix,
-                        }));
-                    }
-                }
-            }
-        }
-    }
-
-    entries
+    crate::cloud_sync::collect_knowledge_entries()
 }
 
 fn collect_command_entries(store: &core::stats::StatsStore) -> Vec<serde_json::Value> {
-    store
-        .commands
-        .iter()
-        .map(|(name, stats)| {
-            let tokens_saved = stats.input_tokens.saturating_sub(stats.output_tokens);
-            serde_json::json!({
-                "command": name,
-                "source": if name.starts_with("ctx_") { "mcp" } else { "hook" },
-                "count": stats.count,
-                "input_tokens": stats.input_tokens,
-                "output_tokens": stats.output_tokens,
-                "tokens_saved": tokens_saved,
-            })
-        })
-        .collect()
-}
-
-fn complexity_to_float(s: &str) -> f64 {
-    match s.to_lowercase().as_str() {
-        "trivial" => 0.1,
-        "simple" => 0.3,
-        "moderate" => 0.5,
-        "complex" => 0.7,
-        "architectural" => 0.9,
-        other => other.parse::<f64>().unwrap_or(0.5),
-    }
+    crate::cloud_sync::collect_command_entries(store)
 }
 
 fn collect_cep_entries(store: &core::stats::StatsStore) -> Vec<serde_json::Value> {
-    store
-        .cep
-        .scores
-        .iter()
-        .map(|s| {
-            serde_json::json!({
-                "recorded_at": s.timestamp,
-                "score": s.score as f64 / 100.0,
-                "cache_hit_rate": s.cache_hit_rate as f64 / 100.0,
-                "mode_diversity": s.mode_diversity as f64 / 100.0,
-                "compression_rate": s.compression_rate as f64 / 100.0,
-                "tool_calls": s.tool_calls,
-                "tokens_saved": s.tokens_saved,
-                "complexity": complexity_to_float(&s.complexity),
-            })
-        })
-        .collect()
+    crate::cloud_sync::collect_cep_entries(store)
 }
 
 fn collect_gotcha_entries() -> Vec<serde_json::Value> {
-    let mut all_gotchas = core::gotcha_tracker::load_universal_gotchas();
-
-    if let Some(home) = dirs::home_dir() {
-        let knowledge_dir = home.join(".lean-ctx").join("knowledge");
-        if let Ok(entries) = std::fs::read_dir(&knowledge_dir) {
-            for entry in entries.flatten() {
-                let gotcha_path = entry.path().join("gotchas.json");
-                if gotcha_path.exists() {
-                    if let Ok(content) = std::fs::read_to_string(&gotcha_path) {
-                        if let Ok(store) =
-                            serde_json::from_str::<core::gotcha_tracker::GotchaStore>(&content)
-                        {
-                            for g in store.gotchas {
-                                if !all_gotchas
-                                    .iter()
-                                    .any(|existing| existing.trigger == g.trigger)
-                                {
-                                    all_gotchas.push(g);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    all_gotchas
-        .iter()
-        .map(|g| {
-            serde_json::json!({
-                "pattern": g.trigger,
-                "fix": g.resolution,
-                "severity": format!("{:?}", g.severity).to_lowercase(),
-                "category": format!("{:?}", g.category).to_lowercase(),
-                "occurrences": g.occurrences,
-                "prevented_count": g.prevented_count,
-                "confidence": g.confidence,
-            })
-        })
-        .collect()
+    crate::cloud_sync::collect_gotcha_entries()
 }
 
 fn collect_feedback_entries() -> Vec<serde_json::Value> {
-    let store = core::feedback::FeedbackStore::load();
-    store
-        .learned_thresholds
-        .iter()
-        .map(|(lang, thresholds)| {
-            serde_json::json!({
-                "language": lang,
-                "entropy": thresholds.entropy,
-                "jaccard": thresholds.jaccard,
-                "sample_count": thresholds.sample_count,
-                "avg_efficiency": thresholds.avg_efficiency,
-            })
-        })
-        .collect()
+    crate::cloud_sync::collect_feedback_entries()
 }
 
 pub fn cmd_contribute() {
@@ -553,20 +537,384 @@ pub fn cmd_cloud(args: &[String]) {
                 }
             }
         }
-        "status" => {
-            if cloud_client::is_logged_in() {
-                println!("Connected to LeanCTX Cloud.");
-            } else {
-                println!("Not connected to LeanCTX Cloud.");
-                println!("Get started: lean-ctx login <email>");
-            }
-        }
+        "status" => cmd_cloud_status(),
+        "pull" => cmd_cloud_pull(),
+        "autosync" => cmd_cloud_autosync(args.get(1).map(String::as_str)),
+        "autoindex" => cmd_cloud_autoindex(args.get(1).map(String::as_str)),
+        "upgrade" | "subscribe" => cloud_upgrade(&args[1..]),
         _ => {
             println!("Usage: lean-ctx cloud <command>");
             println!("  pull-models — Update adaptive compression models");
+            println!("  pull        — Restore your Personal Cloud knowledge onto this machine");
+            println!("  autosync    — on|off|status: daily background Personal Cloud push (Pro)");
+            println!("  autoindex   — on|off|status: daily background hosted-index push (Pro)");
             println!("  status      — Show cloud connection status");
+            println!(
+                "  upgrade     — Subscribe to Pro (Personal Cloud) or Team \
+                 [--plan pro|team|business] [--interval monthly|yearly]"
+            );
         }
     }
+}
+
+/// `lean-ctx cloud status` — your Personal Cloud, from the terminal. Shows the
+/// same privacy-preserving footprint as leanctx.com/account/cloud: per-bucket
+/// `lean-ctx cloud autosync <on|off|status>` — toggle the daily background
+/// Personal-Cloud push (GL #384). The flag lives in `[cloud] auto_sync`.
+fn cmd_cloud_autosync(arg: Option<&str>) {
+    let mut config = core::config::Config::load();
+    match arg {
+        Some("on") => {
+            config.cloud.auto_sync = true;
+            if let Err(e) = config.save() {
+                tracing::error!("Could not save config: {e}");
+                std::process::exit(1);
+            }
+            println!("Auto-sync enabled — your Personal Cloud (knowledge, commands, CEP, gotchas, buddy, feedback)");
+            println!(
+                "is pushed silently once per day at session end. Requires Pro and an active login."
+            );
+            if !cloud_client::is_logged_in() {
+                println!("Note: you are not logged in yet. Run: lean-ctx login <email>");
+            }
+        }
+        Some("off") => {
+            config.cloud.auto_sync = false;
+            if let Err(e) = config.save() {
+                tracing::error!("Could not save config: {e}");
+                std::process::exit(1);
+            }
+            println!("Auto-sync disabled. Manual sync stays available via: lean-ctx sync");
+        }
+        Some("status") | None => {
+            let state = if config.cloud.auto_sync { "on" } else { "off" };
+            println!("Auto-sync: {state}");
+            match config.cloud.last_auto_sync.as_deref() {
+                Some(date) => println!("Last auto-sync: {date}"),
+                None => println!("Last auto-sync: never"),
+            }
+            if !config.cloud.auto_sync {
+                println!("Enable with: lean-ctx cloud autosync on");
+            }
+        }
+        Some(other) => {
+            tracing::error!("Unknown autosync action: {other}. Use on|off|status.");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// `lean-ctx cloud autoindex <on|off|status>` — toggle the daily background
+/// hosted-index push (GL #392). Separate flag from `autosync` because index
+/// bundles are megabytes, not kilobytes. The flag lives in `[cloud] auto_index`.
+fn cmd_cloud_autoindex(arg: Option<&str>) {
+    let mut config = core::config::Config::load();
+    match arg {
+        Some("on") => {
+            config.cloud.auto_index = true;
+            if let Err(e) = config.save() {
+                tracing::error!("Could not save config: {e}");
+                std::process::exit(1);
+            }
+            println!(
+                "Auto-index enabled — this project's encrypted retrieval index is pushed \
+                 silently once per day when it changes. Requires Pro and an active login."
+            );
+            if !cloud_client::is_logged_in() {
+                println!("Note: you are not logged in yet. Run: lean-ctx login <email>");
+            }
+        }
+        Some("off") => {
+            config.cloud.auto_index = false;
+            if let Err(e) = config.save() {
+                tracing::error!("Could not save config: {e}");
+                std::process::exit(1);
+            }
+            println!(
+                "Auto-index disabled. Manual push stays available via: lean-ctx sync index push"
+            );
+        }
+        Some("status") | None => {
+            let state = if config.cloud.auto_index { "on" } else { "off" };
+            println!("Auto-index: {state}");
+            let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            let hash = core::index_namespace::namespace_hash(&root);
+            match config.cloud.last_index_push.get(&hash) {
+                Some(date) => println!("Last push (this project): {date}"),
+                None => println!("Last push (this project): never"),
+            }
+            if !config.cloud.auto_index {
+                println!("Enable with: lean-ctx cloud autoindex on");
+            }
+        }
+        Some(other) => {
+            tracing::error!("Unknown autoindex action: {other}. Use on|off|status.");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// counts + last sync, buddy, and the all-time usage totals. Free accounts see
+/// the connection state plus what upgrading unlocks.
+fn cmd_cloud_status() {
+    if !cloud_client::is_logged_in() {
+        println!("Not connected to LeanCTX Cloud.");
+        println!("Get started: lean-ctx login <email>");
+        return;
+    }
+    let email = cloud_client::account_email().unwrap_or_default();
+    println!("Connected to LeanCTX Cloud as {email}.");
+
+    let d = match cloud_client::fetch_account_cloud() {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::warn!("Could not fetch cloud status: {e}");
+            return;
+        }
+    };
+
+    let plan = d.get("plan").and_then(|v| v.as_str()).unwrap_or("free");
+    println!("Plan: {plan}");
+
+    if d.get("cloud_sync").and_then(serde_json::Value::as_bool) != Some(true) {
+        println!("Personal Cloud sync: locked on this plan.");
+        super::upgrade_hint::hint_for("cloud_sync");
+        return;
+    }
+
+    match d.get("last_synced_at").and_then(|v| v.as_str()) {
+        Some(ts) => println!("Last synced: {ts}"),
+        None => println!("Last synced: never — run `lean-ctx sync` on this machine."),
+    }
+
+    // Mirror the website's bucket order and labels.
+    const BUCKETS: [(&str, &str, &str); 6] = [
+        ("knowledge", "Knowledge & memory", "facts"),
+        ("commands", "Learned shell patterns", "patterns"),
+        ("cep", "CEP score history", "snapshots"),
+        ("gain", "GAIN score history", "snapshots"),
+        ("gotchas", "Gotchas", "fixes"),
+        ("feedback", "Feedback thresholds", "languages"),
+    ];
+    println!("\nSynced to your Personal Cloud:");
+    for (key, label, unit) in BUCKETS {
+        let count = d
+            .get("buckets")
+            .and_then(|b| b.get(key))
+            .and_then(|b| b.get("count"))
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0);
+        if count > 0 {
+            println!("  {label:<24} {count} {unit}");
+        } else {
+            println!("  {label:<24} —");
+        }
+    }
+
+    if let Some(buddy) = d
+        .get("buddy")
+        .filter(|b| b.get("present").and_then(serde_json::Value::as_bool) == Some(true))
+    {
+        let name = buddy
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Buddy");
+        let level = buddy
+            .get("level")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(1);
+        println!("  {:<24} {name} (level {level})", "Buddy");
+    }
+
+    if let Some(totals) = d.get("usage").and_then(|u| u.get("totals")) {
+        let tokens = totals
+            .get("tokens_saved")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0);
+        let sessions = totals
+            .get("sessions")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0);
+        if sessions > 0 {
+            println!("\nAll-time: {tokens} tokens saved across {sessions} synced sessions.");
+        }
+    }
+    println!("\nFull dashboard: https://leanctx.com/account/cloud/");
+}
+
+/// `lean-ctx cloud pull` — the read side of the Pro "Personal Cloud". `lean-ctx
+/// sync` pushes your knowledge to the account; this restores it onto the current
+/// machine, so your context follows you across devices. Facts are merged into the
+/// current project's local store with skip-existing semantics, so a local fact is
+/// never clobbered and re-running is idempotent. A Free account hits the 402 gate
+/// and gets the same upgrade hint as `sync`.
+fn cmd_cloud_pull() {
+    if !cloud_client::is_logged_in() {
+        eprintln!("Not logged in. Run: lean-ctx login <email>");
+        std::process::exit(1);
+    }
+
+    let project_root = std::env::current_dir()
+        .map_or_else(|_| ".".to_string(), |p| p.to_string_lossy().to_string());
+
+    println!("Pulling knowledge from LeanCTX Cloud...");
+    let entries = match cloud_client::pull_knowledge() {
+        Ok(e) => e,
+        Err(e) if pro_gate_hit(&e) => {
+            print_pro_upgrade_hint();
+            std::process::exit(1);
+        }
+        Err(e) => {
+            tracing::error!("Pull failed: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    if entries.is_empty() {
+        println!(
+            "No cloud knowledge to restore yet. Run `lean-ctx sync` on another machine first."
+        );
+        return;
+    }
+
+    let facts = match parse_pulled_knowledge(&entries) {
+        Ok(f) => f,
+        Err(e) => {
+            tracing::error!("Could not parse pulled knowledge: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let policy = match crate::tools::knowledge_shared::load_policy_or_error() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    };
+
+    let mut knowledge = core::knowledge::ProjectKnowledge::load_or_create(&project_root);
+    let result = knowledge.import_facts(
+        facts,
+        core::knowledge::ImportMerge::SkipExisting,
+        "cloud-pull",
+        &policy,
+    );
+
+    match knowledge.save() {
+        Ok(()) => {
+            println!(
+                "  Knowledge: {} restored, {} already present (into {project_root})",
+                result.added, result.skipped
+            );
+            println!("Pull complete.");
+        }
+        Err(e) => {
+            tracing::error!("Restored {} facts but save failed: {e}", result.added);
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Map the server's `{category, key, value, updated_by, updated_at}` rows onto the
+/// import schema (`value` + `source`/`timestamp` provenance) and reuse the
+/// battle-tested [`parse_import_data`] importer rather than re-deriving the
+/// `KnowledgeFact` shape here.
+fn parse_pulled_knowledge(
+    entries: &[serde_json::Value],
+) -> Result<Vec<core::knowledge::KnowledgeFact>, String> {
+    let str_field = |e: &serde_json::Value, k: &str| {
+        e.get(k)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
+    let simple: Vec<serde_json::Value> = entries
+        .iter()
+        .map(|e| {
+            serde_json::json!({
+                "category": str_field(e, "category"),
+                "key": str_field(e, "key"),
+                "value": str_field(e, "value"),
+                "source": e.get("updated_by").and_then(serde_json::Value::as_str),
+                "timestamp": e.get("updated_at").and_then(serde_json::Value::as_str),
+            })
+        })
+        .collect();
+    let data = serde_json::to_string(&simple).map_err(|e| e.to_string())?;
+    core::knowledge::parse_import_data(&data)
+}
+
+/// `lean-ctx cloud upgrade [--plan pro|team|business] [--interval monthly|yearly]`
+/// — start a hosted Stripe Checkout for the logged-in account and print the URL
+/// to open. Defaults to Pro monthly (the self-serve Personal Cloud tier).
+fn cloud_upgrade(args: &[String]) {
+    if !cloud_client::is_logged_in() {
+        eprintln!("Not logged in. Run: lean-ctx login <email>");
+        std::process::exit(1);
+    }
+    let (plan, interval) = match parse_upgrade_args(args) {
+        Ok(pi) => pi,
+        Err(e) => {
+            eprintln!("{e}");
+            eprintln!(
+                "Usage: lean-ctx cloud upgrade [--plan pro|team|business] [--interval monthly|yearly]"
+            );
+            std::process::exit(1);
+        }
+    };
+
+    println!("Starting {plan} checkout ({interval})...");
+    match cloud_client::start_checkout(&plan, &interval) {
+        Ok(url) => {
+            println!();
+            println!("Open this link to complete your subscription:");
+            println!("  {url}");
+        }
+        Err(e) => {
+            tracing::error!("Could not start checkout: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Parse the optional `--plan` / `--interval` flags for `cloud upgrade`. Defaults
+/// are Pro + monthly. Only `pro`/`team`/`business` and `monthly`/`yearly` are
+/// accepted; an unknown value is an error (so a typo never silently buys the
+/// wrong plan). Enterprise stays sales-assisted and is deliberately absent.
+fn parse_upgrade_args(args: &[String]) -> Result<(String, String), String> {
+    let mut plan = "pro".to_string();
+    let mut interval = "monthly".to_string();
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--plan" => {
+                i += 1;
+                let v = args
+                    .get(i)
+                    .ok_or("--plan needs a value (pro|team|business)")?;
+                if !matches!(v.as_str(), "pro" | "team" | "business") {
+                    return Err(format!("unknown plan '{v}' (use pro, team or business)"));
+                }
+                plan.clone_from(v);
+            }
+            "--interval" => {
+                i += 1;
+                let v = args
+                    .get(i)
+                    .ok_or("--interval needs a value (monthly|yearly)")?;
+                if !matches!(v.as_str(), "monthly" | "yearly") {
+                    return Err(format!("unknown interval '{v}' (use monthly or yearly)"));
+                }
+                interval.clone_from(v);
+            }
+            "--yearly" => interval = "yearly".to_string(),
+            "--monthly" => interval = "monthly".to_string(),
+            other => return Err(format!("unknown option '{other}'")),
+        }
+        i += 1;
+    }
+    Ok((plan, interval))
 }
 
 pub fn cmd_gotchas(args: &[String]) {
@@ -649,4 +997,94 @@ pub fn cmd_buddy(args: &[String]) {
 pub fn cmd_upgrade() {
     println!("'upgrade' has been renamed to 'update'. Running 'lean-ctx update' instead.\n");
     core::updater::run(&[]);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pro_gate_hit_detects_402_only() {
+        // The server's Pro gate surfaces as a 402 inside the error string.
+        assert!(pro_gate_hit(
+            "Push failed: http status 402 Payment Required"
+        ));
+        // Other failures must NOT be treated as the gate (they stay errors).
+        assert!(!pro_gate_hit("Push failed: http status 500"));
+        assert!(!pro_gate_hit("Push failed: connection refused"));
+        assert!(!pro_gate_hit("401 Unauthorized"));
+    }
+
+    fn s(args: &[&str]) -> Vec<String> {
+        args.iter().map(|a| (*a).to_string()).collect()
+    }
+
+    #[test]
+    fn upgrade_args_default_to_pro_monthly() {
+        assert_eq!(
+            parse_upgrade_args(&[]).unwrap(),
+            ("pro".to_string(), "monthly".to_string())
+        );
+    }
+
+    #[test]
+    fn upgrade_args_accept_team_and_yearly() {
+        assert_eq!(
+            parse_upgrade_args(&s(&["--plan", "team", "--interval", "yearly"])).unwrap(),
+            ("team".to_string(), "yearly".to_string())
+        );
+        // Shorthand cadence flags.
+        assert_eq!(
+            parse_upgrade_args(&s(&["--yearly"])).unwrap(),
+            ("pro".to_string(), "yearly".to_string())
+        );
+        // Business is self-serve too (GL #533).
+        assert_eq!(
+            parse_upgrade_args(&s(&["--plan", "business"])).unwrap(),
+            ("business".to_string(), "monthly".to_string())
+        );
+    }
+
+    #[test]
+    fn upgrade_args_reject_unknown_values() {
+        // A typo'd plan must error, never silently fall back to a purchase.
+        assert!(parse_upgrade_args(&s(&["--plan", "enterprise"])).is_err());
+        assert!(parse_upgrade_args(&s(&["--interval", "weekly"])).is_err());
+        assert!(parse_upgrade_args(&s(&["--plan"])).is_err());
+        assert!(parse_upgrade_args(&s(&["--bogus"])).is_err());
+    }
+
+    #[test]
+    fn parse_pulled_knowledge_maps_server_rows() {
+        // The GET /api/sync/knowledge contract: {category, key, value,
+        // updated_by, updated_at}. The pull path must map these onto facts and
+        // carry provenance (updated_by -> source_session).
+        let rows = vec![
+            serde_json::json!({
+                "category": "architecture",
+                "key": "db",
+                "value": "PostgreSQL 16 with pgvector",
+                "updated_by": "me@example.com",
+                "updated_at": "2026-01-02T03:04:05Z"
+            }),
+            serde_json::json!({
+                "category": "decision",
+                "key": "auth",
+                "value": "JWT RS256"
+            }),
+        ];
+        let facts = parse_pulled_knowledge(&rows).expect("rows must parse");
+        assert_eq!(facts.len(), 2);
+        assert_eq!(facts[0].category, "architecture");
+        assert_eq!(facts[0].key, "db");
+        assert_eq!(facts[0].value, "PostgreSQL 16 with pgvector");
+        assert_eq!(facts[0].source_session, "me@example.com");
+        // Rows without updated_by fall back to the importer's default source.
+        assert_eq!(facts[1].value, "JWT RS256");
+    }
+
+    #[test]
+    fn parse_pulled_knowledge_handles_empty() {
+        assert!(parse_pulled_knowledge(&[]).unwrap().is_empty());
+    }
 }

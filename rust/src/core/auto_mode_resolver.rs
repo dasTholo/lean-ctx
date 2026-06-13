@@ -1,6 +1,89 @@
+use std::collections::HashMap;
+use std::sync::Mutex;
+
 use crate::core::cache::SessionCache;
 use crate::core::context_ledger::PressureAction;
 use crate::core::mode_predictor::{FileSignature, ModePredictor};
+
+/// Per-process counters of which signal decided each auto-mode resolution.
+/// Surfaced by `ctx_metrics` so the learning loops are observable (#496).
+static SOURCE_COUNTS: Mutex<Option<HashMap<&'static str, u64>>> = Mutex::new(None);
+
+fn count_source(source: &'static str) {
+    if let Ok(mut guard) = SOURCE_COUNTS.lock() {
+        *guard
+            .get_or_insert_with(HashMap::new)
+            .entry(source)
+            .or_insert(0) += 1;
+    }
+}
+
+/// Snapshot of auto-mode decision sources, sorted by count descending.
+pub fn source_counts() -> Vec<(&'static str, u64)> {
+    let Ok(guard) = SOURCE_COUNTS.lock() else {
+        return Vec::new();
+    };
+    let mut items: Vec<(&'static str, u64)> = guard
+        .as_ref()
+        .map(|m| m.iter().map(|(k, v)| (*k, *v)).collect())
+        .unwrap_or_default();
+    items.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+    items
+}
+
+fn sources_path() -> Option<std::path::PathBuf> {
+    crate::core::data_dir::lean_ctx_data_dir()
+        .ok()
+        .map(|d| d.join("auto_mode_sources.json"))
+}
+
+/// Persist the in-process counters by *adding* them into the cumulative
+/// on-disk file, then reset the process counters. The counters live in the
+/// MCP/CLI process — the dashboard is a separate process and can only see
+/// them through this file (#505).
+pub fn flush_sources() {
+    let drained: Vec<(String, u64)> = {
+        let Ok(mut guard) = SOURCE_COUNTS.lock() else {
+            return;
+        };
+        match guard.take() {
+            Some(m) if !m.is_empty() => m.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
+            _ => return,
+        }
+    };
+    let Some(path) = sources_path() else {
+        return;
+    };
+    let mut on_disk: HashMap<String, u64> = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    for (k, v) in drained {
+        *on_disk.entry(k).or_insert(0) += v;
+    }
+    let Ok(json) = serde_json::to_string_pretty(&on_disk) else {
+        return;
+    };
+    let tmp = path.with_extension("json.tmp");
+    if std::fs::write(&tmp, json).is_ok() {
+        let _ = std::fs::rename(&tmp, &path);
+    }
+}
+
+/// Cumulative auto-mode decision sources from disk (all processes, all time),
+/// sorted by count descending. Used by the dashboard's Live Signals panel.
+pub fn persisted_source_counts() -> Vec<(String, u64)> {
+    let Some(path) = sources_path() else {
+        return Vec::new();
+    };
+    let map: HashMap<String, u64> = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    let mut items: Vec<(String, u64)> = map.into_iter().collect();
+    items.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+    items
+}
 
 pub struct AutoModeContext<'a> {
     pub path: &'a str,
@@ -17,6 +100,23 @@ pub struct ResolvedMode {
 /// Single entry point for auto-mode resolution.
 /// Merges Pipeline A (select_mode_with_task) and Pipeline B (resolve_auto_mode).
 pub fn resolve(ctx: &AutoModeContext) -> ResolvedMode {
+    // Quality loop (#494), signal 1: an edit on this file just failed after a
+    // compressed read — the agent needs the real body now, one-shot.
+    if crate::core::edit_quality::take_pending_escalation(ctx.path) {
+        return resolved("full", "edit_fail_escalation");
+    }
+
+    let r = resolve_inner(ctx);
+
+    // Quality loop (#494), signal 2: this mode keeps producing edit failures
+    // for this file type — compression here is a proven net loss, use full.
+    if r.mode != "full" && crate::core::edit_quality::is_risky_mode(ctx.path, &r.mode) {
+        return resolved("full", "edit_quality_penalty");
+    }
+    r
+}
+
+fn resolve_inner(ctx: &AutoModeContext) -> ResolvedMode {
     if crate::tools::ctx_read::is_instruction_file(ctx.path) {
         return resolved("full", "instruction_file");
     }
@@ -53,6 +153,19 @@ pub fn resolve(ctx: &AutoModeContext) -> ResolvedMode {
         }
     }
 
+    // Per-path long-term memory (#496): a file that historically bounced in
+    // the majority of its reads will bounce again — compression is a proven
+    // net loss for it, across process restarts.
+    if crate::core::path_mode_memory::should_force_full(ctx.path) {
+        return resolved("full", "path_bounce_memory");
+    }
+
+    // Active compiler error (#499): the agent reads this file to fix the
+    // build — compressed modes would hide the error region.
+    if crate::core::diagnostics_store::has_error(ctx.path) {
+        return resolved("full", "active_diagnostic");
+    }
+
     if let Some(mode) = intent_recommended_mode(ctx.task) {
         return resolved(&mode, "intent");
     }
@@ -69,6 +182,24 @@ pub fn resolve(ctx: &AutoModeContext) -> ResolvedMode {
     if predicted != "full" {
         if let Some(bandit_override) = bandit_explore(ctx.path, ctx.token_count) {
             predicted = bandit_override;
+        }
+    }
+
+    // Heatmap signal (#496): a frequently-read file where compression barely
+    // saves anything will likely trigger a follow-up read — step one mode more
+    // conservative. avg_compression_ratio is the historical fraction saved.
+    if predicted != "full" {
+        if let Some((access_count, avg_ratio)) = crate::core::heatmap::entry_stats(ctx.path) {
+            if access_count >= 5 && avg_ratio < 0.30 {
+                let conservative = match predicted.as_str() {
+                    "signatures" | "aggressive" | "entropy" => "map".to_string(),
+                    "map" if ctx.token_count <= 6000 => "full".to_string(),
+                    other => other.to_string(),
+                };
+                if conservative != predicted {
+                    return resolved(&conservative, "heatmap_conservative");
+                }
+            }
         }
     }
 
@@ -258,6 +389,7 @@ fn is_config_or_data(ext: &str, path: &str) -> bool {
 }
 
 fn resolved(mode: &str, source: &'static str) -> ResolvedMode {
+    count_source(source);
     ResolvedMode {
         mode: mode.to_string(),
         source,
@@ -316,6 +448,42 @@ mod tests {
     #[test]
     fn pressure_noaction_returns_none() {
         assert!(pressure_downgrade("full", &PressureAction::NoAction).is_none());
+    }
+
+    #[test]
+    fn flush_sources_merges_additively_into_disk_file() {
+        let _lock = crate::core::data_dir::test_env_lock();
+        let dir = std::env::temp_dir().join(format!("lctx-amr-flush-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        std::env::set_var("LEAN_CTX_DATA_DIR", dir.to_str().unwrap());
+        let _ = std::fs::remove_file(dir.join("auto_mode_sources.json"));
+
+        // Unique test-only keys: parallel resolve() tests count real sources
+        // into the same process-global map, so shared keys would be flaky.
+        count_source("test_flush_alpha");
+        count_source("test_flush_alpha");
+        count_source("test_flush_beta");
+        flush_sources();
+
+        count_source("test_flush_alpha");
+        flush_sources();
+
+        let persisted = persisted_source_counts();
+        let get = |k: &str| {
+            persisted
+                .iter()
+                .find(|(s, _)| s == k)
+                .map_or(0, |(_, n)| *n)
+        };
+        assert_eq!(
+            get("test_flush_alpha"),
+            3,
+            "two flushes must merge additively"
+        );
+        assert_eq!(get("test_flush_beta"), 1);
+
+        std::env::remove_var("LEAN_CTX_DATA_DIR");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

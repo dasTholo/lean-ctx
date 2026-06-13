@@ -29,6 +29,10 @@ pub fn run() {
         args.remove(1);
     }
 
+    if !is_server_mode(&args) {
+        restore_sigpipe_default();
+    }
+
     let enters_mcp = args.len() == 1 || args.get(1).is_some_and(|a| a == "mcp");
     if !enters_mcp {
         crate::core::logging::init_logging();
@@ -63,6 +67,8 @@ pub fn run() {
                 let code = shell::exec(&command);
                 core::stats::flush();
                 core::heatmap::flush();
+                core::path_mode_memory::flush();
+                core::auto_mode_resolver::flush_sources();
                 std::process::exit(code);
             }
             "-t" | "--track" => {
@@ -80,6 +86,8 @@ pub fn run() {
                 };
                 core::stats::flush();
                 core::heatmap::flush();
+                core::path_mode_memory::flush();
+                core::auto_mode_resolver::flush_sources();
                 std::process::exit(code);
             }
             "shell" | "--shell" => {
@@ -94,12 +102,26 @@ pub fn run() {
                 cmd_savings(&rest);
                 return;
             }
+            "learning" => {
+                cmd_learning(&rest);
+                return;
+            }
             "conformance" | "selftest" => {
                 cmd_conformance(&rest);
                 return;
             }
             "billing" => {
                 cmd_billing(&rest);
+                return;
+            }
+            "finops" => {
+                cmd_finops(&rest);
+                return;
+            }
+            "roi" => {
+                // Local ROI is individual + free. The team roll-up lives on its own
+                // surface (`savings team` / the web account), not under `roi`.
+                super::cmd_roi(&rest);
                 return;
             }
             "token-report" | "report-tokens" => {
@@ -111,6 +133,10 @@ pub fn run() {
             }
             "pack" => {
                 crate::cli::cmd_pack(&rest);
+                return;
+            }
+            "policy" => {
+                crate::cli::cmd_policy(&rest);
                 return;
             }
             "plugin" | "plugins" => {
@@ -145,7 +171,15 @@ pub fn run() {
                 return;
             }
             "audit" => {
-                println!("{}", crate::cli::audit_report::generate_report());
+                if rest.first().map(String::as_str) == Some("evidence") {
+                    crate::cli::audit_report::cmd_evidence(&rest[1..]);
+                } else {
+                    println!("{}", crate::cli::audit_report::generate_report());
+                }
+                return;
+            }
+            "agent" => {
+                crate::cli::cmd_agent(&rest);
                 return;
             }
             "instructions" => {
@@ -403,6 +437,14 @@ pub fn run() {
                 super::cmd_knowledge(&rest);
                 return;
             }
+            "skillify" => {
+                super::cmd_skillify(&rest);
+                return;
+            }
+            "summary" => {
+                super::cmd_summary(&rest);
+                return;
+            }
             "overview" => {
                 super::cmd_overview(&rest);
                 return;
@@ -470,6 +512,24 @@ pub fn run() {
             }
             "slow-log" => {
                 super::cmd_slow_log(&rest);
+                return;
+            }
+            // Editor focus ingress (#500): called by the VS Code extension on
+            // tab change; <10ms, no daemon required.
+            "editor-signal" => {
+                let file = rest
+                    .iter()
+                    .position(|a| a == "--file")
+                    .and_then(|i| rest.get(i + 1));
+                if let Some(path) = file {
+                    if let Err(e) = core::editor_signal::record_focus(path) {
+                        eprintln!("editor-signal: {e}");
+                        std::process::exit(1);
+                    }
+                } else {
+                    eprintln!("usage: lean-ctx editor-signal --file <path>");
+                    std::process::exit(2);
+                }
                 return;
             }
             "update" | "--self-update" => {
@@ -586,7 +646,7 @@ pub fn run() {
                 return;
             }
             "sync" => {
-                super::cloud::cmd_sync();
+                super::cloud::cmd_sync(&rest);
                 return;
             }
             "contribute" => {
@@ -652,6 +712,40 @@ pub fn run() {
     }
 }
 
+/// Long-lived server entry points keep Rust's default ignored SIGPIPE: they
+/// must survive peers closing sockets/pipes early. Bare `lean-ctx` counts as
+/// a server because MCP clients spawn the binary without a subcommand.
+fn is_server_mode(args: &[String]) -> bool {
+    args.len() == 1
+        || args.get(1).is_some_and(|a| {
+            matches!(
+                a.as_str(),
+                "mcp" | "daemon" | "proxy" | "serve" | "watch" | "dashboard"
+            )
+        })
+}
+
+/// Restore the default SIGPIPE disposition for short-lived CLI invocations.
+///
+/// Rust's runtime ignores SIGPIPE process-wide, so `lean-ctx doctor | head`
+/// made `println!` panic with BrokenPipe; the LineWriter flush in stdout's
+/// Drop then panicked again *during unwinding*, which aborts — the SIGABRT
+/// (exit 134) of upstream #378 / GL#436. Real CLIs (cat, grep, rg) terminate
+/// silently with exit 141 instead; SIG_DFL gives us exactly that. Children
+/// spawned via std::process::Command are unaffected either way (std resets
+/// their SIGPIPE disposition since Rust 1.65).
+#[cfg(unix)]
+fn restore_sigpipe_default() {
+    // SAFETY: signal(2) with SIG_DFL has no preconditions and is called once
+    // during single-threaded startup, before any I/O.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+}
+
+#[cfg(not(unix))]
+fn restore_sigpipe_default() {}
+
 fn passthrough(command: &str) -> ! {
     let (shell, flag) = shell::shell_and_flag();
     let mut cmd = std::process::Command::new(&shell);
@@ -671,6 +765,32 @@ pub(super) fn run_async<F: std::future::Future>(future: F) -> F::Output {
 mod tests {
     use super::*;
     use serial_test::serial;
+
+    fn args_of(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn server_modes_keep_ignored_sigpipe() {
+        for mode in ["mcp", "daemon", "proxy", "serve", "watch", "dashboard"] {
+            assert!(
+                is_server_mode(&args_of(&["lean-ctx", mode])),
+                "{mode} must count as server mode"
+            );
+        }
+        // Bare invocation = MCP server spawned by a client.
+        assert!(is_server_mode(&args_of(&["lean-ctx"])));
+    }
+
+    #[test]
+    fn cli_modes_restore_default_sigpipe() {
+        for mode in ["doctor", "-c", "status", "ls", "grep", "gain", "help"] {
+            assert!(
+                !is_server_mode(&args_of(&["lean-ctx", mode])),
+                "{mode} must count as CLI mode (SIGPIPE default)"
+            );
+        }
+    }
 
     #[test]
     fn quickstart_is_short_and_points_to_setup() {

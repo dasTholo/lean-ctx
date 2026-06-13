@@ -21,6 +21,32 @@ pub fn lean_ctx_data_dir() -> Result<PathBuf, String> {
         }
     }
 
+    // Test sandbox (GL #512): without this, any unit test that triggers a
+    // store write (stats, savings ledger, context ledger, heatmap, ...)
+    // silently pollutes the developer's real ~/.lean-ctx — bounce events from
+    // test fixtures showed up as "today 61%" on the user dashboard. Tests that
+    // set LEAN_CTX_DATA_DIR keep full control (handled above); everyone else
+    // lands in a per-process temp dir and physically cannot touch real data.
+    #[cfg(test)]
+    {
+        static TEST_SANDBOX: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+        let dir = TEST_SANDBOX.get_or_init(|| {
+            let d = std::env::temp_dir().join(format!("lean-ctx-testdata-{}", std::process::id()));
+            let _ = std::fs::create_dir_all(&d);
+            d
+        });
+        Ok(dir.clone())
+    }
+
+    #[cfg(not(test))]
+    {
+        resolve_home_data_dir()
+    }
+}
+
+/// Home-based resolution (legacy `~/.lean-ctx` vs XDG). Split out so the
+/// priority rules stay unit-testable despite the test sandbox above.
+fn resolve_home_data_dir() -> Result<PathBuf, String> {
     let home = dirs::home_dir().ok_or_else(|| "Cannot determine home directory".to_string())?;
 
     let legacy = home.join(".lean-ctx");
@@ -128,6 +154,43 @@ pub fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+/// RAII data-dir isolation for tests (GL #556): holds `test_env_lock` for
+/// the guard's lifetime, points `LEAN_CTX_DATA_DIR` at a fresh temp dir and
+/// restores the env on drop — even on panic, so a failing test cannot leak
+/// the override into others. Use this instead of hand-rolled
+/// `set_var`/`remove_var` pairs whenever a test needs an empty, private
+/// data dir (the shared per-process sandbox is NOT empty: parallel tests
+/// write stores like feedback, bandit and sessions into it).
+#[cfg(test)]
+pub struct IsolatedDataDir {
+    tmp: tempfile::TempDir,
+    _guard: std::sync::MutexGuard<'static, ()>,
+}
+
+#[cfg(test)]
+impl IsolatedDataDir {
+    pub fn path(&self) -> &std::path::Path {
+        self.tmp.path()
+    }
+}
+
+#[cfg(test)]
+impl Drop for IsolatedDataDir {
+    fn drop(&mut self) {
+        // Struct Drop runs before field drops, so the env is restored while
+        // the lock is still held.
+        std::env::remove_var("LEAN_CTX_DATA_DIR");
+    }
+}
+
+#[cfg(test)]
+pub fn isolated_data_dir() -> IsolatedDataDir {
+    let guard = test_env_lock();
+    let tmp = tempfile::tempdir().expect("tempdir for isolated data dir");
+    std::env::set_var("LEAN_CTX_DATA_DIR", tmp.path());
+    IsolatedDataDir { tmp, _guard: guard }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -207,7 +270,9 @@ mod tests {
         std::env::set_var("LEAN_CTX_DATA_DIR", "");
         std::env::set_var("XDG_CONFIG_HOME", xdg_base.to_str().unwrap());
 
-        let result = lean_ctx_data_dir().unwrap();
+        // Calls the home resolver directly: lean_ctx_data_dir() is sandboxed
+        // under cfg(test) (GL #512) and would short-circuit before XDG logic.
+        let result = resolve_home_data_dir().unwrap();
 
         std::env::remove_var("LEAN_CTX_DATA_DIR");
         std::env::remove_var("XDG_CONFIG_HOME");

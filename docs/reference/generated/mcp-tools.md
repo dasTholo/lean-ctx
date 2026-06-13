@@ -4,11 +4,11 @@
 
 Source of truth: `rust/src/server/registry.rs` and the tool definitions it registers.
 
-lean-ctx registers **72 MCP tools** (granular profile). Each entry below lists the tool name, what it does, and its parameters (`*` marks required).
+lean-ctx registers **76 MCP tools** (granular profile). Each entry below lists the tool name, what it does, and its parameters (`*` marks required).
 
 ## `ctx_agent`
 
-Multi-agent coordination (shared message bus + persistent diaries). Actions: register (join with agent_type+role), post (broadcast or direct message with category), read (poll messages), status (update state: active|idle|finished), handoff (transfer task to another agent with summary), sync (overview of all agents + pending messages + shared contexts), diary (log discovery/decision/blocker/progress/insight — persisted across sessions), recall_diary (read agent diary), diaries (list all agent diaries), list, info.
+Multi-agent coordination: shared message bus, persistent diaries, stigmergic scent field. Actions: register (agent_type+role), post (message+category), read (poll), status (active|idle|finished), handoff (transfer task+summary), sync (agents + messages + scent: claims/stuck/hot), claim/release (atomic file/task claim, message=target), brief (sub-agent briefing pack: message=task, priority=budget), return (distill sub-agent report into knowledge: message='category/key: value' lines), diary (log discovery/decision/blocker/progress/insight), recall_diary, diaries, list, info.
 
 Parameters: `action`*, `agent_type`, `category`, `message`, `role`, `status`, `to_agent`
 
@@ -44,15 +44,14 @@ Parameters: `action`*, `path`
 
 ## `ctx_call`
 
-Invoke any of the 50+ lean-ctx tools by name. Use for tools not in the core set.
-CATEGORIES:
-arch: ctx_architecture, ctx_impact, ctx_callgraph, ctx_refactor, ctx_symbol, ctx_routes, ctx_smells, ctx_index
-debug: ctx_benchmark, ctx_verify, ctx_analyze, ctx_profile, ctx_proof, ctx_review
+Invoke any non-core lean-ctx tool by name.
+arch: ctx_architecture, ctx_impact, ctx_callgraph, ctx_refactor, ctx_symbol, ctx_routes, ctx_smells
+debug: ctx_benchmark, ctx_verify, ctx_analyze, ctx_profile, ctx_review
 memory: ctx_semantic_search, ctx_artifacts
-batch: ctx_fill, ctx_execute, ctx_expand, ctx_pack, ctx_plan, ctx_control, ctx_compile
+batch: ctx_fill, ctx_execute, ctx_pack, ctx_plan, ctx_compile
 agent: ctx_agent, ctx_share, ctx_task, ctx_handoff, ctx_workflow
-util: ctx_compress, ctx_cache, ctx_retrieve, ctx_metrics, ctx_radar, ctx_dedup, ctx_cost, ctx_gain, ctx_heatmap, ctx_feedback, ctx_ledger, ctx_preload
-Example: ctx_call({"name":"ctx_architecture","arguments":{"action":"overview"}})
+util: ctx_compress, ctx_cache, ctx_metrics, ctx_dedup, ctx_cost, ctx_heatmap, ctx_preload
+Discover more: name=ctx_discover_tools, arguments={query}.
 
 Parameters: `arguments`, `name`*
 
@@ -139,7 +138,7 @@ Parameters: `query`
 
 ## `ctx_edit`
 
-Edit a file via search-and-replace. Works without native Read/Edit tools. Use this when the IDE's Edit tool requires Read but Read is unavailable.
+Edit a file via search-and-replace. Use when the IDE's Edit tool requires Read but Read is unavailable.
 
 Parameters: `create`, `new_string`*, `old_string`, `path`*, `replace_all`
 
@@ -151,7 +150,7 @@ Parameters: `action`, `code`, `intent`, `items`, `language`, `path`, `timeout`
 
 ## `ctx_expand`
 
-Retrieve firewalled/archived tool output (zero-loss). Large outputs are stored out-of-band and replaced inline by a digest+ref; use this to drill into the full content. Actions: retrieve (default), list, search_all.
+Retrieve archived/firewalled tool output (zero-loss). Use the ID from an [Archived:/Firewalled: ...] hint.
 
 Parameters: `action`, `end_line`, `head`, `id`, `json_keys`, `json_path`, `query`, `search`, `session_id`, `start_line`, `tail`
 
@@ -182,11 +181,18 @@ Use instead of ctx_url_read when you need a whole repo's files/structure.
 
 Parameters: `max_tokens`, `mode`, `path`, `query`, `ref`, `timeout_secs`, `url`*
 
+## `ctx_glob`
+
+Find files by glob pattern. Prefer over native Glob for consistency.
+Respects .gitignore; supports multi-root via `paths` array.
+
+Parameters: `ignore_gitignore`, `max_results`, `path`, `paths`, `pattern`*
+
 ## `ctx_graph`
 
-Unified code graph. Actions: build (index), related (connected files), symbol (def/usages), impact (blast radius), status (stats), enrich (add commits+tests+knowledge), context (task-based query), diagram (Mermaid deps/calls).
+Code graph: dependencies, symbol usages, impact/blast radius, Mermaid diagrams, git-diff impact.
 
-Parameters: `action`*, `depth`, `kind`, `path`, `project_root`
+Parameters: `action`*, `depth`, `format`, `kind`, `path`, `project_root`, `since`, `to`
 
 ## `ctx_handoff`
 
@@ -220,9 +226,9 @@ Parameters: `project_root`, `query`*
 
 ## `ctx_knowledge`
 
-Persistent project knowledge across sessions (facts, patterns, history). Supports recall modes, embeddings, feedback, and typed relations.
+Persistent project knowledge across sessions (facts, patterns, gotchas, typed relations).
 
-Parameters: `action`*, `category`, `confidence`, `examples`, `key`, `mode`, `pattern_type`, `query`, `resolution`, `severity`, `trigger`, `value`
+Parameters: `action`*, `as_of`, `category`, `confidence`, `examples`, `key`, `mode`, `pattern_type`, `query`, `resolution`, `severity`, `trigger`, `value`
 
 ## `ctx_ledger`
 
@@ -272,6 +278,12 @@ Context Package Manager. Actions: pr (PR context), create (build package from pr
 
 Parameters: `action`*, `apply`, `author`, `base`, `depth`, `description`, `diff`, `enable`, `file`, `format`, `layers`, `level`, `name`, `project_root`, `scope`, `tags`, `version`
 
+## `ctx_package`
+
+Save or resume portable context packages — self-contained JSON bundles with session state, summaries, and knowledge. Use to hand off context between agents, persist session snapshots for later, or onboard a new agent into a previous session's context. Actions: save (export current session), resume (import from a package file), list (show saved packages), info (inspect a package without importing).
+
+Parameters: `action`, `description`, `path`
+
 ## `ctx_plan`
 
 Context planning (CFT). Computes optimal context plan with Phi scoring, budget allocation, and policy-driven view selection.
@@ -304,7 +316,7 @@ Parameters: `action`*, `filename`, `format`, `max_evidence`, `max_ledger_files`,
 
 ## `ctx_provider`
 
-External context providers (GitHub, GitLab, Jira, Postgres, custom). action=discover|list: list registered providers. action=status: provider health + cache metrics. action=refresh: invalidate cache + re-fetch (provider= optional). action=configure: show config (resource=paths|template for details). action=query: provider+resource for data access. Legacy GitLab actions still supported.
+External context providers (GitHub, GitLab, Jira, Postgres, MCP, custom REST).
 
 Parameters: `action`*, `iid`, `labels`, `limit`, `mode`, `provider`, `resource`, `state`, `status`
 
@@ -317,7 +329,7 @@ Parameters: `format`
 ## `ctx_read`
 
 Read a file. Prefer over native Read/cat/head/tail (cached, compressed).
-Unchanged re-reads cost ~13 tokens. Auto-selects mode (full|map|signatures|diff|aggressive|entropy|task|reference|lines:N-M). fresh=true forces a disk re-read.
+Unchanged re-reads cost ~13 tokens. Auto-selects mode. fresh=true forces a disk re-read.
 
 Parameters: `fresh`, `mode`, `path`*, `start_line`
 
@@ -365,10 +377,9 @@ Parameters: `action`*, `agent`
 
 ## `ctx_search`
 
-Search code by regex. Prefer over native Grep/rg/find (compact output).
-Respects .gitignore; supports multi-root via `paths` array. Secret-like files skipped unless role allows.
+Regex code search. Prefer over native Grep/rg/find (compact, .gitignore-aware).
 
-Parameters: `ext`, `ignore_gitignore`, `max_results`, `path`, `paths`, `pattern`*
+Parameters: `ext`, `ignore_gitignore`, `include`, `max_results`, `path`, `paths`, `pattern`*
 
 ## `ctx_semantic_search`
 
@@ -378,7 +389,7 @@ Parameters: `action`, `file_path`, `languages`, `line`, `mode`, `path`, `path_gl
 
 ## `ctx_session`
 
-Cross-session memory (CCP). Actions: load (restore ~400 tok), save, status, task, finding, decision, reset, list, cleanup, snapshot, restore, resume, profile (context profiles), role (governance), budget (limits), slo (observability), diff (compare sessions), verify (output verification stats), episodes (episodic memory), procedures (procedural memory).
+Cross-session memory: record task/finding/decision, restore previous session state.
 
 Parameters: `action`*, `session_id`, `value`
 
@@ -391,9 +402,15 @@ Parameters: `action`*, `message`, `paths`, `to_agent`
 ## `ctx_shell`
 
 Run a shell command. Prefer over native Shell/Bash (compressed output).
-95+ output patterns; raw=true skips compression. cwd persists across calls via cd tracking. Output redaction on by default for non-admin roles (admin can disable).
+cwd persists across calls.
 
 Parameters: `command`*, `cwd`, `env`, `raw`
+
+## `ctx_skillify`
+
+Codify recurring patterns from this project's session diary + knowledge into versioned, git-committable .cursor/rules/skillify-*.mdc files. Actions: mine (distill & write/merge rules), list (show generated rules), status (config + counts), promote (copy a project rule to ~/.cursor/rules). Precision-biased; only acts when invoked; re-runs are idempotent.
+
+Parameters: `action`, `slug`
 
 ## `ctx_smart_read`
 
@@ -406,6 +423,12 @@ Parameters: `path`*
 Code smell detection. Actions: scan|summary|rules|file.
 
 Parameters: `action`, `format`, `path`, `root`, `rule`
+
+## `ctx_summary`
+
+Record and recall AI session summaries — compact, semantically-recallable digests of what was done (task, files, decisions, next steps). Actions: recall (find past summaries by query; semantic when embeddings are warm, else lexical), record (snapshot the current session now), list (recent summaries). Summaries are also captured automatically on the checkpoint cadence.
+
+Parameters: `action`, `query`, `top_k`
 
 ## `ctx_symbol`
 
@@ -430,7 +453,6 @@ Parameters: `action`, `arguments`, `query`, `tool`
 ## `ctx_tree`
 
 List a directory. Prefer over native ls/find (counts, compact tree).
-Supports multi-root via `paths` array. depth controls recursion (default 3).
 
 Parameters: `depth`, `path`, `paths`, `respect_gitignore`, `show_hidden`
 

@@ -30,13 +30,13 @@ lean-ctx init --agent cursor    # configure a single agent
 
 | Agent | Integration | Shell Hook | Rules File | Config Format | Setup Command |
 |-------|------------|------------|------------|---------------|---------------|
-| [Claude Code](claude-code.md) | Hybrid | ✅ | `~/.claude/rules/lean-ctx.md` | `~/.claude.json` | `lean-ctx init --agent claude` |
+| [Claude Code](claude-code.md) | Hybrid | ✅ | `~/.claude/CLAUDE.md` block + skill | `~/.claude.json` | `lean-ctx init --agent claude` |
 | [Cursor](cursor.md) | Hybrid | ✅ | `~/.cursor/rules/lean-ctx.mdc` | Cursor Settings UI | `lean-ctx init --agent cursor` |
 | [Aider](aider.md) | MCP-only | ❌ | Dedicated `.md` | `.aider.conf.yml` | `lean-ctx init --agent aider` |
 | [Windsurf](windsurf.md) | Hybrid | ✅ | `~/.codeium/windsurf/rules/lean-ctx.md` | MCP JSON | `lean-ctx init --agent windsurf` |
 | [Gemini CLI](gemini-cli.md) | Hybrid | ✅ | `~/.gemini/GEMINI.md` (shared) | `~/.gemini/settings.json` | `lean-ctx init --agent gemini` |
 | [OpenCode](opencode.md) | Hybrid | ✅ | `~/.config/opencode/AGENTS.md` (shared) | `opencode.json` | `lean-ctx init --agent opencode` |
-| [Codex CLI](codex-cli.md) | Hybrid | ✅ | `~/.claude/rules/lean-ctx.md` | `~/.codex/config.toml` | `lean-ctx init --agent codex` |
+| [Codex CLI](codex-cli.md) | Hybrid | ✅ | `~/.codex/instructions.md` (shared) | `~/.codex/config.toml` | `lean-ctx init --agent codex` |
 | [Pi Coding Agent](pi.md) | Hybrid | ✅ | `AGENTS.md` | Pi Package | `lean-ctx init --agent pi` |
 
 ## Integration Modes
@@ -49,7 +49,7 @@ Available for agents with shell access. Combines:
 
 ### MCP-Only Mode
 
-For agents without direct shell access. All 72 tools available via MCP protocol.
+For agents without direct shell access. All 76 tools available via MCP protocol.
 
 ## What lean-ctx Sets Up
 
@@ -62,7 +62,7 @@ Running `lean-ctx init --agent <name>` or `lean-ctx setup` configures:
 
 ## Common Tools Reference
 
-Every agent gets access to the same 72 MCP tools. The most important ones:
+Every agent gets access to the same 76 MCP tools. The most important ones:
 
 | Tool | Purpose | When to Use |
 |------|---------|-------------|
@@ -118,6 +118,9 @@ lean-ctx setup
 ## More Resources
 
 - [Monorepo Guide](monorepo.md)
+- [Custom Embedding Models](custom-embeddings.md)
+- [Context Policy Packs](policy-packs.md)
+- [Org Single Sign-On (OIDC) Setup](org-sso-setup.md)
 - [Getting Started](https://leanctx.com/docs/getting-started)
 - [Tools Reference](https://leanctx.com/docs/tools/)
 - [CLI Reference](https://leanctx.com/docs/cli-reference/)

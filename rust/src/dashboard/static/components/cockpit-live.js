@@ -241,9 +241,28 @@ function buildToolDetail(kind) {
   var parts = [];
   if (kind.mode) parts.push(kind.mode);
   if (kind.path) parts.push(String(kind.path));
-  if (kind.tokens_saved != null) parts.push('saved ' + String(kind.tokens_saved));
-  if (kind.tokens_original) parts.push('of ' + String(kind.tokens_original));
+  // Human-readable savings: "5.9k → 1.9k tok (−68%)" instead of "saved 4049 · of 5856".
+  var orig = kind.tokens_original || 0;
+  var saved = kind.tokens_saved != null ? kind.tokens_saved : null;
+  if (orig > 0 && saved != null) {
+    if (saved > 0) {
+      var sent = orig - saved;
+      var pct = Math.round((saved / orig) * 100);
+      parts.push(fmtTokShort(orig) + ' \u2192 ' + fmtTokShort(sent) + ' tok (\u2212' + pct + '%)');
+    } else {
+      parts.push(fmtTokShort(orig) + ' tok (not compressible)');
+    }
+  } else if (saved != null && saved > 0) {
+    parts.push('saved ' + fmtTokShort(saved) + ' tok');
+  }
   return parts.join(' · ');
+}
+
+function fmtTokShort(n) {
+  n = Number(n) || 0;
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+  return String(Math.round(n));
 }
 
 function buildCompressionDetail(kind) {
@@ -444,12 +463,25 @@ class CockpitLive extends HTMLElement {
     var events = results[0];
     var stats = results[1];
 
-    var newEvents = Array.isArray(events) ? events : [];
+    // A failed /api/events poll (daemon restart, expired token, timeout) must
+    // not masquerade as "No events recorded yet": keep the last known feed and
+    // surface the error instead.
+    var prevFeedError = this._feedError || null;
+    var newEvents;
+    if (Array.isArray(events)) {
+      newEvents = events;
+      this._feedError = null;
+    } else {
+      newEvents = this._data ? this._data.events : [];
+      this._feedError = events && events.__error ? String(events.__error) : 'fetch failed';
+    }
 
     var changed = forceRender || !this._data
+      || this._feedError !== prevFeedError
       || newEvents.length !== this._data.events.length
-      || (newEvents[0] && this._data.events[0]
-          && newEvents[0].id !== this._data.events[0].id);
+      || (newEvents.length && this._data.events.length
+          && newEvents[newEvents.length - 1].id
+             !== this._data.events[this._data.events.length - 1].id);
 
     this._data = {
       events: newEvents,
@@ -467,7 +499,7 @@ class CockpitLive extends HTMLElement {
   render() {
     var F = fmtLib();
     var S = shared();
-    var esc = F.esc || function (s) { var d = document.createElement('span'); d.textContent = s; return d.innerHTML; };
+    var esc = F.esc || function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; }); };
     var ff = F.ff || function (n) { return String(n); };
     var pc = F.pc || function (a, b) { return b > 0 ? Math.round((a / b) * 100) : 0; };
     var fmt = F.fmt || function (n) { return String(n); };
@@ -614,6 +646,7 @@ class CockpitLive extends HTMLElement {
       '<div class="card" style="margin-bottom:14px;padding:14px 20px">' +
       '<div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:10px;font-family:var(--mono);letter-spacing:.5px">' +
       '<span style="color:var(--accent);font-weight:600">MCP ' + esc(String(mcpPct)) + '%</span>' +
+      '<span style="color:var(--muted)">share of calls</span>' +
       '<span style="color:var(--muted);font-weight:600">HOOK ' + esc(String(hookPct)) + '%</span>' +
       '</div>' +
       '<div class="pressure-bar" style="height:8px;display:flex;overflow:hidden">' +
@@ -648,6 +681,22 @@ class CockpitLive extends HTMLElement {
     var filter = this._filter;
     var filterCat = FILTER_CATEGORIES[filter] || null;
 
+    var errorBanner = '';
+    if (this._feedError) {
+      errorBanner =
+        '<div class="card" style="margin-bottom:10px;border-left:2px solid var(--red)">' +
+        '<p class="hs" style="margin:0;color:var(--red)">Live feed unreachable: ' +
+        esc(this._feedError) +
+        '</p>' +
+        '<p class="hs" style="margin:4px 0 0;font-size:11px">' +
+        (events.length
+          ? 'Showing the last known events. '
+          : '') +
+        'If the dashboard was restarted, reopen it via <code>lean-ctx dashboard</code> ' +
+        'so this tab picks up the new auth token.</p>' +
+        '</div>';
+    }
+
     var sorted = events.slice().sort(function (a, b) {
       var ta = String(a.timestamp || '');
       var tb = String(b.timestamp || '');
@@ -666,14 +715,20 @@ class CockpitLive extends HTMLElement {
 
     if (count === 0) {
       return (
+        errorBanner +
         '<div class="card" style="margin-bottom:14px">' +
         '<h3>Event Feed' + tip('event_feed') + '</h3>' +
-        '<p class="hs">No events recorded yet. Events appear as lean-ctx intercepts tool calls.</p>' +
+        '<p class="hs">' +
+        (this._feedError
+          ? 'Events unavailable — the feed endpoint could not be reached.'
+          : 'No events recorded yet. Events appear as lean-ctx intercepts tool calls.') +
+        '</p>' +
         '</div>'
       );
     }
 
     return (
+      errorBanner +
       '<div style="margin-bottom:14px">' +
       '<h3 style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.18em;font-weight:600;margin-bottom:10px;display:flex;align-items:center;gap:8px">' +
       'Event Feed <span class="badge">' + esc(String(count)) + '</span></h3>' +
@@ -906,7 +961,7 @@ class CockpitLive extends HTMLElement {
         btn.disabled = true;
         btn.textContent = 'Loading\u2026';
 
-        var esc = (fmtLib().esc || function (s) { var d = document.createElement('span'); d.textContent = s; return d.innerHTML; });
+        var esc = (fmtLib().esc || function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; }); });
         var ff = (fmtLib().ff || function (n) { return String(n); });
 
         function renderComparison(origTok, origText, compTok, compText, modeKey, pct) {

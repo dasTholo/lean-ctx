@@ -9,16 +9,16 @@
 ╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝     ╚═════╝   ╚═╝   ╚═╝  ╚═╝
 </pre>
 
-**The Cognitive Context Layer for AI coding agents**
+### **Control what your AI can see.**
 
-Your AI coding agent wastes thousands of tokens rereading files, parsing noisy
-shell output, and losing context between sessions — and you have no control
-over any of it.
+**LeanCTX — Lean Context Intelligence for AI agents**
 
-**LeanCTX is the operating system for that context.** One local binary that
-governs every token between your code and the model: it **compresses** what the
-AI reads, **remembers** what matters across sessions, **routes** each read to the
-right fidelity, and **verifies** what comes back. Zero config required. Local-first.
+LeanCTX — short for **Lean Context** — is the context intelligence layer for
+AI agents. It runs as a single local binary between your agents and your code,
+shell and data: it **decides** what they read, **remembers** what they learn,
+**guards** what they touch — and **proves** what they save with a signed,
+verifiable savings ledger. The result: 60–90% fewer tokens — and that's the
+receipt, not the product. Zero config required. Local-first.
 
 | Problem | With LeanCTX |
 |---------|-------------|
@@ -52,9 +52,9 @@ right fidelity, and **verifies** what comes back. Zero config required. Local-fi
 
 ---
 
-> **LeanCTX** is the **Cognitive Context Layer** between your AI and your code: it perceives, compresses, remembers, routes, and governs every token that flows between them — all from one local Rust binary.
+> **Control what your AI can see.** LeanCTX — short for **Lean Context** — is the **context intelligence layer** for AI agents: one local Rust binary that decides what your agents read, remembers what they learn, guards what they touch — and proves what they save.
 
-> It governs every token between your code and the AI — so you make better decisions, not just cheaper ones. Works with **Cursor, Claude Code, Copilot, Windsurf, Codex, Gemini** and 24+ other agents — no config needed.
+> Token savings are the receipt. Intelligence is the product. Works with **Cursor, Claude Code, Copilot, Windsurf, Codex, Gemini** and 30+ other agents — no config needed.
 
 <p align="center"><strong>See it in action:</strong></p>
 
@@ -89,7 +89,7 @@ right fidelity, and **verifies** what comes back. Zero config required. Local-fi
 ## Why developers use LeanCTX
 
 - **Longer useful coding sessions** — less context waste = more room for actual code reasoning
-- **Lower API costs** — 60-99% compression on shell output, cached reads cost ~13 tokens
+- **Lower API costs** — 60–90% fewer tokens on reads and shell output, cached re-reads cost ~13 tokens
 - **No more "I already showed you this file"** — session memory persists across chats
 - **Works with your existing setup** — one `lean-ctx setup` command, no config changes needed
 - **Full visibility** — see exactly where your context window budget goes
@@ -111,8 +111,10 @@ covers the four dimensions that decide how well an AI agent actually performs:
 
 Your AI agent reads files and runs commands. LeanCTX compresses both automatically.
 
-- **File reads**: 10 modes (`full`, `map`, `signatures`, `diff`, `lines:N-M`) — cached re-reads cost ~13 tokens
-- **Shell output**: 56 pattern modules compress git, npm, cargo, docker, kubectl, terraform and more (270 passthrough rules)
+- **File reads**: 10 read modes (`full`, `map`, `signatures`, `diff`, `lines:N-M`, `density:X`, …) — cached re-reads cost ~13 tokens
+- **Target density** (`density:0.4`): SDE-style budget compression — keeps the highest-entropy lines until ~40% of the original tokens remain, deterministic
+- **JIT disclosure**: `signatures` carries line spans and points at `lines:N-M` for targeted expansion — outline first, bodies on demand
+- **Shell output**: 95+ shell-output patterns compress git, npm, cargo, docker, kubectl, terraform and more (270 passthrough rules)
 - **Tree-sitter AST**: structural understanding for 18 languages — not just text compression
 
 ### 2. Routing — the right fidelity per read
@@ -140,7 +142,7 @@ Performance is accuracy, not just speed. You stay in control of the window.
 - **Context Proof** (`ctx_proof`, `ctx_verify`): 4-layer verification engine with CI drift gates
 
 <details>
-<summary><strong>Full feature list (72 MCP tools)</strong></summary>
+<summary><strong>Full feature list (76 MCP tools)</strong></summary>
 
 - **Web & Research** (`ctx_url_read`): pull a public web page, PDF, or YouTube transcript into context as compressed, citation-backed text — `facts`/`quotes` return claims with a confidence score + source URL, relevance-ranked research-compression distils to a token budget, SSRF-guarded (http/https only)
 - **Graph-Powered Intelligence**: hybrid search (BM25 + embeddings + graph proximity via RRF), incremental git-diff updates
@@ -219,7 +221,7 @@ After onboarding, restart your shell and your editor/AI tool once so the MCP + h
 
 LeanCTX grows with you. Below are the journeys most people actually take — each
 links to a complete, function-by-function walkthrough in the
-**[Reference](docs/reference/README.md)** (every CLI command and all 69 MCP
+**[Reference](docs/reference/README.md)** (every CLI command and all 76 MCP
 tools are documented there).
 
 <table>
@@ -383,7 +385,7 @@ All analytics live in the CLI/dashboard — never burning agent tokens.
 ### 📚 The full reference
 *"I want to read everything."*
 
-Every command and all 72 MCP tools, organized as user journeys, plus
+Every command and all 76 MCP tools, organized as user journeys, plus
 appendices for the [CLI map](docs/reference/appendix-cli-map.md),
 [MCP tools](docs/reference/appendix-mcp-tools.md), and
 [paths & config](docs/reference/appendix-paths-and-config.md).
@@ -400,7 +402,7 @@ LeanCTX is a standard **MCP server**, so it works with any MCP-compatible client
 | Mode | How it works | Best for |
 |---|---|---|
 | **Hybrid** | MCP for cached reads (~13 tokens) + shell hooks for command compression | Agents with shell access (Cursor, Claude Code, Codex, ...) |
-| **MCP** | All 72 tools via MCP protocol, no shell hooks | Protocol-only agents (JetBrains, VS Code, Zed, ...) |
+| **MCP** | All 76 tools via MCP protocol, no shell hooks | Protocol-only agents (JetBrains, VS Code, Zed, ...) |
 
 ### Agent compatibility matrix
 
@@ -487,12 +489,13 @@ lean-ctx benchmark report .
 
 ## By the numbers
 
-- **1,800+ GitHub stars** in 4 months
-- **190+ forks** — active community contributions
-- **181 releases** — shipped daily since launch
+- **2,600+ GitHub stars** — and counting
+- **260+ forks** — active community contributions
+- **200+ releases** — shipped near-daily since launch
 - **30+ supported AI coding agents** — broadest MCP compatibility
-- **72 MCP tools** — from simple file reads to multi-agent orchestration
+- **76 MCP tools** — from simple file reads to multi-agent orchestration
 - Used in production by teams running Claude Code, Cursor, and Codex daily
+- **Live adoption metrics**: [leanctx.com/metrics](https://leanctx.com/metrics/) — installs, stars and savings, updated continuously
 
 ## Docs
 
@@ -500,7 +503,9 @@ lean-ctx benchmark report .
 - Getting started: https://leanctx.com/docs/getting-started
 - Tools reference: https://leanctx.com/docs/tools/
 - CLI reference: https://leanctx.com/docs/cli-reference/
+- What is LeanCTX: https://leanctx.com/what-is-leanctx/
 - Comparison (vs RTK, Context+, MemGPT): https://leanctx.com/compare/
+- Pricing & Cloud (local use is free forever): https://leanctx.com/pricing/
 - FAQ: [discord-faq.md](discord-faq.md)
 - Feature catalog (SSOT snapshot): [LEANCTX_FEATURE_CATALOG.md](LEANCTX_FEATURE_CATALOG.md)
 - Monorepo guide: [docs/guides/monorepo.md](docs/guides/monorepo.md)

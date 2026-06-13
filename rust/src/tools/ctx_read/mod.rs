@@ -10,7 +10,9 @@ use crate::core::signatures;
 use crate::core::symbol_map::{self, SymbolMap};
 use crate::core::tokens::count_tokens;
 use crate::tools::CrpMode;
-mod render;
+// `pub(crate)`: the conformance suite renders modes directly for its
+// accuracy invariants (GL#441).
+pub(crate) mod render;
 pub(crate) use render::*;
 #[cfg(test)]
 mod tests;
@@ -326,6 +328,26 @@ fn handle_with_options_resolved(
             result.output_tokens,
             original_tokens,
         );
+
+        // Quality signals (#538): compressed reads count as clean until a
+        // bounce proves otherwise (the bounce signal outweighs 6:1); large
+        // full reads of never-bouncing extensions are wasted compression
+        // opportunities and push the learned threshold up.
+        let compressed = !matches!(result.resolved_mode.as_str(), "full" | "diff" | "lines");
+        if compressed {
+            crate::core::threshold_learning::record_signal(
+                path,
+                crate::core::threshold_learning::QualitySignal::CleanCompressed,
+            );
+        } else if result.resolved_mode == "full"
+            && result.output_tokens > 2000
+            && bt.bounce_rate_for_extension(path).unwrap_or(0.0) < 0.05
+        {
+            crate::core::threshold_learning::record_signal(
+                path,
+                crate::core::threshold_learning::QualitySignal::WastedFull,
+            );
+        }
     }
 
     // Plugin seam: emit the realized compression stats. Same zero-cost guard.
@@ -336,6 +358,27 @@ fn handle_with_options_resolved(
             original_tokens,
             compressed_tokens: result.output_tokens,
         });
+    }
+
+    // Stigmergy (#540): deposit a Hot scent for this read in the background
+    // (the field file lock may briefly block; never stall the read path), and
+    // surface an active foreign claim as a one-line hint (~10 tokens) so
+    // parallel agents stop duplicating work.
+    {
+        let self_agent = crate::core::scent_field::scent_agent_id();
+        let scent_path = crate::core::pathutil::normalize_tool_path(path);
+        std::thread::spawn(move || {
+            crate::core::scent_field::deposit(
+                self_agent,
+                crate::core::scent_field::ScentKind::Hot,
+                &scent_path,
+                0.3,
+            );
+        });
+        if let Some(hint) = crate::core::scent_field::read_hint(path, self_agent) {
+            result.content.push('\n');
+            result.content.push_str(&hint);
+        }
     }
 
     result
@@ -353,10 +396,11 @@ fn handle_with_options_resolved(
 /// parallel reads of distinct files no longer serialize on a global write lock.
 pub fn try_stub_hit_readonly(cache: &SessionCache, path: &str) -> Option<ReadOutput> {
     let file_ref = cache.get_file_ref_readonly(path)?;
-    let (cached_mtime, read_count, line_count, content_opt) = {
+    let (cached_mtime, cached_hash, read_count, line_count, content_opt) = {
         let entry = cache.get(path)?;
         (
             entry.stored_mtime,
+            entry.hash.clone(),
             entry.read_count(),
             entry.line_count,
             entry.content(),
@@ -371,7 +415,7 @@ pub fn try_stub_hit_readonly(cache: &SessionCache, path: &str) -> Option<ReadOut
     let policy_allows_stub =
         crate::server::compaction_sync::effective_cache_policy() != "safe" && !force_full;
     if !policy_allows_stub
-        || crate::core::cache::is_cache_entry_stale(path, cached_mtime)
+        || crate::core::cache::is_cache_entry_stale_verified(path, cached_mtime, &cached_hash)
         || !cache.is_full_delivered(path)
     {
         return None;
@@ -448,7 +492,11 @@ fn handle_with_options_inner(
 
     if mode != "full" {
         if let Some(existing) = cache.get(path) {
-            let stale = crate::core::cache::is_cache_entry_stale(path, existing.stored_mtime);
+            let stale = crate::core::cache::is_cache_entry_stale_verified(
+                path,
+                existing.stored_mtime,
+                &existing.hash,
+            );
             if stale {
                 cache.invalidate(path);
             }

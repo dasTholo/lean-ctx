@@ -537,6 +537,14 @@ pub(super) fn build(sections: &mut BTreeMap<String, SectionSchema>) {
             "Enable contributing anonymized stats to lean-ctx cloud",
         ),
     );
+    cloud.insert(
+        "auto_sync".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.cloud.auto_sync),
+            "Push the Personal Cloud (knowledge, commands, CEP, gotchas, buddy, feedback) silently once per day at session end (Pro; toggle: `lean-ctx cloud autosync on|off`)",
+        ),
+    );
     sections.insert(
         "cloud".into(),
         SectionSchema {
@@ -576,6 +584,14 @@ pub(super) fn build(sections: &mut BTreeMap<String, SectionSchema>) {
             "u64",
             serde_json::json!(cfg.gain.auto_publish_interval_hours),
             "Minimum hours between automatic publishes (throttle; default 24)",
+        ),
+    );
+    gain.insert(
+        "last_auto_publish".into(),
+        key(
+            "string?",
+            serde_json::json!(null),
+            "Timestamp of the last automatic publish (written by lean-ctx for throttling — not meant to be edited)",
         ),
     );
     sections.insert(

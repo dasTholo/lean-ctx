@@ -2,7 +2,7 @@
 
 > Knappe Lookup-Tabellen für Agents: jede `ctx_refactor`-Action, ihr HTTP-Endpunkt,
 > Schlüssel-Parameter, Backing. Ausführliche Beschreibung (curl, Responses, Guards,
-> Architektur, E2E): **[Journey 18 — JetBrains-Plugin](18-jetbrains-plugin-de.md)**.
+> Architektur, E2E): **[Journey 19 — JetBrains-Plugin](19-jetbrains-plugin-de.md)**.
 >
 > Sprache: Deutsch; Tool-/Endpunkt-/Parameter-Namen und Error-Codes englisch.
 > Serena-Abgrenzung: eigenständiger Nachbau (nicht abgeleitet), lean-ctx-Lizenz —
@@ -70,5 +70,5 @@ Backing: **B** = JetBrains-IDE (Plugin via HTTP); **A** = rust-analyzer (headles
 
 ## Siehe auch
 
-- [Journey 18 — JetBrains-Plugin](18-jetbrains-plugin-de.md) — Vollreferenz
+- [Journey 19 — JetBrains-Plugin](19-jetbrains-plugin-de.md) — Vollreferenz
 - [MCP-Tool-Map](appendix-mcp-tools.md) · [Per-IDE-Quickstarts](appendix-ide-quickstarts.md)

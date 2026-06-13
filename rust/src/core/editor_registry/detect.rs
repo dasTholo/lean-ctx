@@ -184,13 +184,12 @@ pub fn build_targets(home: &Path) -> Vec<EditorTarget> {
             detect_path: home.join(".config/crush"),
             config_type: ConfigType::Crush,
         },
-        EditorTarget {
-            name: "Pi Coding Agent",
-            agent_key: "pi".to_string(),
-            config_path: home.join(".pi/agent/mcp.json"),
-            detect_path: home.join(".pi/agent"),
-            config_type: ConfigType::McpJson,
-        },
+        // NOTE: Pi Coding Agent is deliberately NOT an MCP-config target. Pi has
+        // no native MCP adapter — a `lean-ctx` entry in ~/.pi/agent/mcp.json is
+        // never served, and older pi-lean-ctx versions read it as "adapter
+        // configured" and disabled their embedded bridge (GitHub #361). Pi is
+        // integrated via the pi-lean-ctx npm package (embedded MCP bridge) and
+        // AGENTS.md; `init --agent pi` removes stale mcp.json entries.
         EditorTarget {
             name: "Amp",
             agent_key: "amp".to_string(),
@@ -252,7 +251,10 @@ pub fn build_targets(home: &Path) -> Vec<EditorTarget> {
             agent_key: "openclaw".to_string(),
             config_path: home.join(".openclaw/openclaw.json"),
             detect_path: home.join(".openclaw"),
-            config_type: ConfigType::McpJson,
+            // NOT McpJson: OpenClaw >= 2026.6.1 validates strictly and rejects
+            // a top-level `mcpServers` key ("Unrecognized key") — it requires
+            // the nested `mcp.servers` schema (GitHub #390).
+            config_type: ConfigType::OpenClaw,
         },
     ];
 
@@ -445,6 +447,22 @@ fn detect_extension_installed(home: &Path, extension_id: &str) -> bool {
         {
             return true;
         }
+        if home
+            .join(format!(
+                ".config/Code - Insiders/User/globalStorage/{extension_id}"
+            ))
+            .exists()
+        {
+            return true;
+        }
+        if home
+            .join(format!(
+                ".vscode-server/data/User/globalStorage/{extension_id}"
+            ))
+            .exists()
+        {
+            return true;
+        }
     }
     #[cfg(target_os = "windows")]
     {
@@ -488,9 +506,15 @@ pub fn detect_vscode_path() -> PathBuf {
     #[cfg(target_os = "linux")]
     {
         if let Some(home) = dirs::home_dir() {
-            let vscode = home.join(".config/Code/User/settings.json");
-            if vscode.exists() {
-                return vscode;
+            let paths = [
+                home.join(".config/Code/User/settings.json"),
+                home.join(".config/Code - Insiders/User/settings.json"),
+                home.join(".vscode-server/data/User/settings.json"),
+            ];
+            for vscode in paths {
+                if vscode.exists() {
+                    return vscode;
+                }
             }
         }
     }

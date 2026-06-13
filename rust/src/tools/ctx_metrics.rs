@@ -51,6 +51,9 @@ pub fn handle(cache: &SessionCache, tool_calls: &[ToolCallRecord], crp_mode: Crp
             cost_without - cost_saved,
             cost_saved
         ));
+        if let Some(line) = cache_adjusted_line(&quote.cost, total_saved, true) {
+            out.push(line);
+        }
     } else {
         out.push("lean-ctx session metrics".to_string());
         out.push("═".repeat(50));
@@ -77,6 +80,9 @@ pub fn handle(cache: &SessionCache, tool_calls: &[ToolCallRecord], crp_mode: Crp
         out.push(format!(
             "Cost estimate: ${cost_without:.4} without → ${cost_with:.4} with lean-ctx | ${cost_saved:.4} saved"
         ));
+        if let Some(line) = cache_adjusted_line(&quote.cost, total_saved, false) {
+            out.push(line);
+        }
     }
 
     if let Ok(bt) = crate::core::bounce_tracker::global().lock() {
@@ -105,6 +111,62 @@ pub fn handle(cache: &SessionCache, tool_calls: &[ToolCallRecord], crp_mode: Crp
             ));
         }
     }
+
+    // Online-learned threshold deltas (#538): show which extensions have
+    // shifted away from the static base table and by how much.
+    let learned = crate::core::threshold_learning::report();
+    if !learned.is_empty() {
+        out.push(String::new());
+        if crp_mode.is_tdd() {
+            out.push("§learned-thresholds".to_string());
+        } else {
+            out.push("Learned Thresholds (quality loop):".to_string());
+        }
+        out.extend(learned);
+    }
+
+    // LITM placement calibration (#539): observed begin/end hit rates and the
+    // calibrated begin-share per client profile.
+    let litm_cal = crate::core::litm_calibration::report();
+    if !litm_cal.is_empty() {
+        out.push(String::new());
+        if crp_mode.is_tdd() {
+            out.push("§litm-calibration".to_string());
+        } else {
+            out.push("LITM Placement Calibration:".to_string());
+        }
+        out.extend(litm_cal);
+    }
+
+    // Learning efficacy (#549): proof the learning loops work — bounce-rate
+    // trend, placement-hit movement, prevented duplicate work, playbook
+    // survival. Capturing here keeps the daily snapshot ring fresh without
+    // any timer.
+    crate::core::efficacy::capture();
+    let efficacy = crate::core::efficacy::report();
+    if !efficacy.is_empty() {
+        out.push(String::new());
+        if crp_mode.is_tdd() {
+            out.push("§learning-efficacy".to_string());
+        } else {
+            out.push("Learning Efficacy (is the adaptation working?):".to_string());
+        }
+        out.extend(efficacy);
+    }
+
+    // Embedding engine status (#551): semantic features are self-activating;
+    // surface where the engine currently stands so "why no semantics?" is
+    // never a mystery.
+    out.push(String::new());
+    out.push(format!(
+        "{} {}",
+        if crp_mode.is_tdd() {
+            "§embeddings"
+        } else {
+            "Embedding engine:"
+        },
+        crate::tools::ctx_knowledge::embeddings::engine_status_line()
+    ));
 
     if !tool_calls.is_empty() {
         out.push(String::new());
@@ -265,6 +327,16 @@ pub fn handle(cache: &SessionCache, tool_calls: &[ToolCallRecord], crp_mode: Crp
         "  Compression rate:  {:.0}%  (overall token reduction)",
         cep.compression_rate * 100.0
     ));
+    // Output-echo statistic (#501): how much of recent replies re-quoted
+    // content that was already delivered into context.
+    let echo_stats = crate::core::output_echo::load_stats();
+    if !echo_stats.reports.is_empty() {
+        out.push(format!(
+            "  Output echo:       {:.0}%  (replies re-quoting delivered content, last {})",
+            echo_stats.avg_ratio(50) * 100.0,
+            echo_stats.reports.len()
+        ));
+    }
     out.push(format!(
         "  CEP Score:         {:.0}/100",
         cep.overall_score * 100.0
@@ -273,7 +345,75 @@ pub fn handle(cache: &SessionCache, tool_calls: &[ToolCallRecord], crp_mode: Crp
     let complexity = crate::core::adaptive::classify_from_context(cache);
     out.push(format!("  Task complexity:   {complexity:?}"));
 
+    // Which signals decided auto-mode this session — makes the learning
+    // loops (bounce memory, heatmap, predictor, policy) observable (#496).
+    let sources = crate::core::auto_mode_resolver::source_counts();
+    if !sources.is_empty() {
+        let line = sources
+            .iter()
+            .take(6)
+            .map(|(s, n)| format!("{s}={n}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        out.push(format!("  Auto-mode sources: {line}"));
+    }
+
+    // Quality loop (#494): edit-failure rates per (ext × read-mode), risky
+    // pairs currently penalized to full, and served read escalations.
+    let eq = crate::core::edit_quality::metrics_snapshot();
+    let eq_pairs = eq["pairs"].as_array().cloned().unwrap_or_default();
+    let escalations = eq["escalations_served"].as_u64().unwrap_or(0);
+    if !eq_pairs.is_empty() || escalations > 0 {
+        out.push("\nEdit quality (compression-correlated):".to_string());
+        for p in eq_pairs.iter().take(5) {
+            let risky = if p["risky"].as_bool().unwrap_or(false) {
+                "  [risky -> full]"
+            } else {
+                ""
+            };
+            out.push(format!(
+                "  {}: {} fail / {} ok ({:.0}%){}",
+                p["pair"].as_str().unwrap_or("?"),
+                p["fails"].as_u64().unwrap_or(0),
+                p["successes"].as_u64().unwrap_or(0),
+                p["fail_rate"].as_f64().unwrap_or(0.0) * 100.0,
+                risky
+            ));
+        }
+        out.push(format!(
+            "  Read escalations served after edit-fails: {escalations} (pending: {})",
+            eq["pending_escalations"].as_u64().unwrap_or(0)
+        ));
+    }
+
     out.join("\n")
+}
+
+/// Honest cache-adjusted economics (GL #573): with provider prompt caching,
+/// context that *stays* in the prompt is re-billed at the cache-read rate on
+/// every later turn, so tokens lean-ctx removed save the full input price once
+/// and the cache-read price per repeat turn. Both figures come straight from
+/// the pricing table — no invented hit rate. Returns `None` when the model has
+/// no cache-read pricing or nothing was saved.
+fn cache_adjusted_line(
+    cost: &crate::core::gain::model_pricing::ModelCost,
+    total_saved: u64,
+    tdd: bool,
+) -> Option<String> {
+    if total_saved == 0 || cost.cache_read_per_m <= 0.0 || cost.input_per_m <= 0.0 {
+        return None;
+    }
+    let per_repeat_turn = total_saved as f64 / 1_000_000.0 * cost.cache_read_per_m;
+    let pct = cost.cache_read_per_m / cost.input_per_m * 100.0;
+    Some(if tdd {
+        format!(
+            "cache-adj: repeat turns -${per_repeat_turn:.4}/turn (cache-read {pct:.0}% of input)"
+        )
+    } else {
+        format!(
+            "Cache-adjusted: each repeat turn re-bills retained context at cache-read rate ({pct:.0}% of input) — saved tokens avoid ${per_repeat_turn:.4} per repeat turn"
+        )
+    })
 }
 
 struct CepCompliance {

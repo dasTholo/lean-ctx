@@ -185,7 +185,12 @@ fn hooks_installed_for(agent: &str, home: &std::path::Path) -> bool {
                 || file_contains_lean_ctx(&dir.join("hooks.json"))
         }
         "windsurf" => file_contains_lean_ctx(&home.join(".codeium/windsurf/hooks.json")),
-        "copilot" => file_contains_lean_ctx(&home.join(".github/hooks/hooks.json")),
+        "copilot" => {
+            // User-level Copilot hooks live under ~/.copilot/hooks (#381);
+            // ~/.github/hooks is the pre-#381 legacy location.
+            file_contains_lean_ctx(&home.join(".copilot/hooks/hooks.json"))
+                || file_contains_lean_ctx(&home.join(".github/hooks/hooks.json"))
+        }
         "qoder" => file_contains_lean_ctx(&home.join(".qoder/settings.json")),
         _ => false,
     }
@@ -419,20 +424,20 @@ pub fn install_project_rules_for_agents(agents: &[&str]) {
     }
 
     if wants("claude") {
-        let claude_rules_dir = cwd.join(".claude").join("rules");
-        let claude_rules_file = claude_rules_dir.join("lean-ctx.md");
-        if !claude_rules_file.exists()
-            || !std::fs::read_to_string(&claude_rules_file)
-                .unwrap_or_default()
-                .contains(crate::rules_inject::RULES_VERSION_STR)
-        {
-            let _ = std::fs::create_dir_all(&claude_rules_dir);
-            write_file(
-                &claude_rules_file,
-                crate::rules_inject::rules_dedicated_markdown(),
-            );
-            if !mcp_server_quiet_mode() {
-                eprintln!("Created .claude/rules/lean-ctx.md (Claude Code project rules).");
+        // GL #555: project rules files without `paths:` frontmatter load
+        // unconditionally every session and stacked on top of the global
+        // CLAUDE.md block (12k+ token memory footprints in the field). The
+        // AGENTS.md block + on-demand skill carry the same guidance, so the
+        // lean-ctx-owned copy is removed instead of refreshed.
+        let claude_rules_file = cwd.join(".claude").join("rules").join("lean-ctx.md");
+        if let Ok(existing) = std::fs::read_to_string(&claude_rules_file) {
+            if existing.contains("<!-- lean-ctx-rules-")
+                && std::fs::remove_file(&claude_rules_file).is_ok()
+                && !mcp_server_quiet_mode()
+            {
+                eprintln!(
+                    "Removed .claude/rules/lean-ctx.md (always-loaded duplicate; AGENTS.md block + skill replace it)."
+                );
             }
         }
 
@@ -484,11 +489,17 @@ fn ensure_project_agents_integration(cwd: &std::path::Path) {
         }
     }
 
+    // No `@` import: Claude Code expands `@file` references inline at session
+    // start, so pointing at LEAN-CTX.md re-loaded the full ruleset into every
+    // session on top of this block (GL #555). The block is self-contained;
+    // the full ruleset stays in LEAN-CTX.md for on-demand reading.
     let block = format!(
         "{AGENTS_BLOCK_START}\n\
 ## lean-ctx\n\n\
-Prefer lean-ctx MCP tools over native equivalents for token savings.\n\
-Full rules: @{PROJECT_LEAN_CTX_MD}\n\
+Prefer lean-ctx MCP tools over native equivalents for token savings:\n\
+`ctx_read` > Read/cat, `ctx_search` > Grep/rg, `ctx_shell` > bash, `ctx_tree` > ls/find.\n\
+Native Edit/Write/Glob stay as-is; use `ctx_edit` only when Edit needs an unavailable Read.\n\
+Full rules: {PROJECT_LEAN_CTX_MD} (open on demand — do not auto-load).\n\
 {AGENTS_BLOCK_END}\n"
     );
 
@@ -541,20 +552,17 @@ Full rules: @{PROJECT_LEAN_CTX_MD}\n\
     }
 }
 
+/// Compact pointer only (#578): Cursor already auto-loads the canonical full
+/// ruleset from `~/.cursor/rules/lean-ctx.mdc`, so a project `.cursorrules`
+/// that repeats it bills the same guidance twice in every session.
 const CURSORRULES_TEMPLATE: &str = "\
-# lean-ctx — Context Engineering Layer
+<!-- lean-ctx -->
+# lean-ctx
 
-CRITICAL: ALWAYS use lean-ctx tools instead of native equivalents. This is NOT optional.
-
-| MUST USE | NEVER USE | Why |
-|----------|-----------|-----|
-| `ctx_read(path, mode)` | `Read` / `cat` / `head` / `tail` | Cached, 10 read modes, re-reads ~13 tokens |
-| `ctx_search(pattern, path)` | `Grep` / `rg` | Compact, token-efficient results |
-| `lean-ctx -c \"<cmd>\"` (via Shell) | `ctx_shell` / raw `Shell` | CLI compression, no MCP overhead |
-
-File editing: use native Edit/StrReplace. Write, Delete, Glob → use normally.
-NEVER loop on Edit failures — switch to ctx_edit immediately.
-REMINDER: You MUST use lean-ctx tools. NEVER use native Read, Grep, or Shell directly.
+Prefer lean-ctx MCP tools: ctx_read > Read/cat, ctx_search > Grep/rg, ctx_shell > bash, ctx_tree > ls/find.
+Edit/Write/Glob stay native; ctx_edit only when Edit needs an unavailable Read.
+Full rules: ~/.cursor/rules/lean-ctx.mdc (auto-loaded) — do not duplicate here.
+<!-- /lean-ctx -->
 ";
 
 pub const KIRO_STEERING_TEMPLATE: &str = "\
@@ -705,6 +713,11 @@ pub fn install_agent_project_hooks(agent: &str, cwd: &std::path::Path) {
 }
 
 fn write_file(path: &std::path::Path, content: &str) {
+    // Skip identical rewrites: re-running setup/init must not churn mtimes or
+    // leave .bak files behind for content that did not change (GL #558).
+    if std::fs::read_to_string(path).is_ok_and(|existing| existing == content) {
+        return;
+    }
     if let Err(e) = crate::config_io::write_atomic_with_backup(path, content) {
         tracing::error!("Error writing {}: {e}", path.display());
     }
@@ -736,11 +749,15 @@ fn full_server_entry(binary: &str) -> serde_json::Value {
     let data_dir = crate::core::data_dir::lean_ctx_data_dir()
         .map(|d| d.to_string_lossy().to_string())
         .unwrap_or_default();
+    // No LEAN_CTX_FULL_TOOLS here: forcing the full toolset (69+ schemas,
+    // ~15k tokens of tool definitions resent every turn) made lean-ctx one of
+    // the biggest token consumers in users' sessions (GitHub #385). The server
+    // defaults to the core toolset + ctx_call/ctx_expand for on-demand access;
+    // power users opt in via `tool_profile = "power"` in config.toml.
     serde_json::json!({
         "command": binary,
         "env": {
-            "LEAN_CTX_DATA_DIR": data_dir,
-            "LEAN_CTX_FULL_TOOLS": "1"
+            "LEAN_CTX_DATA_DIR": data_dir
         }
     })
 }
@@ -878,19 +895,27 @@ mod tests {
         assert_eq!(to_bash_compatible_path("lean-ctx"), "lean-ctx");
     }
 
+    // MSYS2 drive mapping applies on Windows hosts only — on Linux/macOS
+    // /c/… is a literal directory and must pass through (GH #397).
+    #[cfg(windows)]
     #[test]
     fn normalize_msys2_path() {
         assert_eq!(
             normalize_tool_path("/c/Users/game/Downloads/project"),
             "C:/Users/game/Downloads/project"
         );
-    }
-
-    #[test]
-    fn normalize_msys2_drive_d() {
         assert_eq!(
             normalize_tool_path("/d/Projects/app/src"),
             "D:/Projects/app/src"
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn normalize_msys2_path_untouched_on_unix() {
+        assert_eq!(
+            crate::core::pathutil::normalize_tool_path_lexical("/c/Users/game/Downloads/project"),
+            "/c/Users/game/Downloads/project"
         );
     }
 
@@ -1130,16 +1155,14 @@ mod tests {
         assert_eq!(recommend_hook_mode("unknown-agent"), HookMode::Mcp);
     }
 
+    // Drive translation only applies on Windows hosts (GH #397).
+    #[cfg(windows)]
     #[test]
     fn from_bash_to_native_converts_msys_drive() {
         assert_eq!(
             from_bash_to_native_path("/c/Users/ABC/lean-ctx"),
             "C:/Users/ABC/lean-ctx"
         );
-    }
-
-    #[test]
-    fn from_bash_to_native_drive_d() {
         assert_eq!(
             from_bash_to_native_path("/d/Program Files/lean-ctx.exe"),
             "D:/Program Files/lean-ctx.exe"
@@ -1160,10 +1183,18 @@ mod tests {
     }
 
     #[test]
-    fn roundtrip_windows_path() {
+    fn windows_path_to_bash_form() {
         let native = r"C:\Users\ABC\AppData\Local\lean-ctx\lean-ctx.exe";
         let bash = to_bash_compatible_path(native);
         assert_eq!(bash, "/c/Users/ABC/AppData/Local/lean-ctx/lean-ctx.exe");
+    }
+
+    // The bash→native return leg only translates on Windows hosts (GH #397).
+    #[cfg(windows)]
+    #[test]
+    fn roundtrip_windows_path() {
+        let native = r"C:\Users\ABC\AppData\Local\lean-ctx\lean-ctx.exe";
+        let bash = to_bash_compatible_path(native);
         let back = from_bash_to_native_path(&bash);
         assert_eq!(back, "C:/Users/ABC/AppData/Local/lean-ctx/lean-ctx.exe");
     }

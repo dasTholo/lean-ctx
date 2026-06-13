@@ -77,6 +77,10 @@ pub(crate) fn process_mode(
     let line_count = content.lines().count();
 
     match mode {
+        "raw" => {
+            let sent = count_tokens(content);
+            (content.to_string(), sent)
+        }
         "auto" => {
             let chosen = resolve_auto_mode(file_path, original_tokens, task);
             process_mode(
@@ -118,6 +122,16 @@ pub(crate) fn process_mode(
                     .collect();
                 output.push_str(&format!("\n deps {}", imports_str.join(",")));
             }
+            // Self-describing outputs (GL #580): symbol notation always ships
+            // its own one-line legend so vanilla agents can read it.
+            if crp_mode.is_tdd() {
+                let refs: Vec<&signatures::Signature> = sigs.iter().collect();
+                let legend = signatures::tdd_legend(&refs);
+                if !legend.is_empty() {
+                    output.push('\n');
+                    output.push_str(&legend);
+                }
+            }
             for sig in &sigs {
                 output.push('\n');
                 if crp_mode.is_tdd() {
@@ -129,6 +143,17 @@ pub(crate) fn process_mode(
             if let Some(body) = task_relevant_body(content, file_path, ext, task) {
                 output.push('\n');
                 output.push_str(&body);
+            }
+            // JIT disclosure (GL#447): signatures carry L-spans, so point at the
+            // targeted range expansion before the full-read escalation.
+            if crate::core::profiles::active_profile()
+                .output_hints
+                .compressed_hint()
+                && !sigs.is_empty()
+            {
+                output.push_str(&format!(
+                    "\n  ↳ expand a symbol: ctx_read(\"{file_path}\", mode=\"lines:N-M\") using the spans above"
+                ));
             }
             let sent = count_tokens(&output);
             (
@@ -206,6 +231,13 @@ pub(crate) fn process_mode(
 
             if !key_sigs.is_empty() {
                 output.push_str("\n  API:");
+                // Self-describing outputs (GL #580): legend precedes symbols.
+                if crp_mode.is_tdd() {
+                    let legend = signatures::tdd_legend(&key_sigs);
+                    if !legend.is_empty() {
+                        output.push_str(&format!(" {legend}"));
+                    }
+                }
                 for sig in &key_sigs {
                     output.push_str("\n    ");
                     if crp_mode.is_tdd() {
@@ -249,7 +281,7 @@ pub(crate) fn process_mode(
             let header = build_header(file_ref, short, ext, content, line_count, true);
 
             let mut sym = SymbolMap::new();
-            let idents = symbol_map::extract_identifiers(&compressed, ext);
+            let idents = symbol_map::extract_identifiers(&compressed, &[ext]);
             for ident in &idents {
                 sym.register(ident);
             }
@@ -288,11 +320,23 @@ pub(crate) fn process_mode(
             )
         }
         "entropy" => {
-            // Task-conditioned IB: when there is an active session intent, use
-            // task keywords to rescue low-entropy lines that are still relevant.
-            let task_kws: Vec<String> = crate::core::session::SessionState::load_latest()
-                .and_then(|s| s.active_structured_intent)
-                .map(|i| i.keywords.clone())
+            // Query-conditioned IB (#542) — relevance source chain: explicit
+            // task param > active session intent > last semantic-search query.
+            let task_kws: Vec<String> = task
+                .filter(|t| !t.trim().is_empty())
+                .map(|t| crate::core::task_relevance::parse_task_hints(t).1)
+                .filter(|kws| !kws.is_empty())
+                .or_else(|| {
+                    let session = crate::core::session::SessionState::load_latest()?;
+                    if let Some(intent) = session.active_structured_intent {
+                        if !intent.keywords.is_empty() {
+                            return Some(intent.keywords);
+                        }
+                    }
+                    let q = session.last_semantic_query?;
+                    let kws = crate::core::task_relevance::parse_task_hints(&q).1;
+                    (!kws.is_empty()).then_some(kws)
+                })
                 .unwrap_or_default();
             let result = if task_kws.is_empty() {
                 entropy::entropy_compress_adaptive(content, file_path)
@@ -389,6 +433,36 @@ pub(crate) fn process_mode(
             let sent = count_tokens(&extracted);
             let savings = protocol::format_savings(original_tokens, sent);
             (format!("{header}\n{extracted}\n{savings}"), sent)
+        }
+        mode if mode.starts_with("density:") => {
+            // SDE target-density mode: compress to a token budget instead of
+            // maximum compression. `density:0.4` ≈ 40% of original tokens.
+            let target: f64 = mode[8..].parse().unwrap_or(0.5);
+            let result = entropy::entropy_compress_to_density(content, target);
+            let actual = if result.original_tokens > 0 {
+                result.compressed_tokens as f64 / result.original_tokens as f64
+            } else {
+                0.0
+            };
+            let techs = result.techniques.join(", ");
+            let header = if crate::core::protocol::meta_visible() && !file_ref.is_empty() {
+                format!(
+                    "{file_ref}={short} {line_count}L density target={:.2} actual={actual:.2} [{techs}]",
+                    target.clamp(0.05, 1.0)
+                )
+            } else {
+                format!(
+                    "{short} {line_count}L density target={:.2} actual={actual:.2} [{techs}]",
+                    target.clamp(0.05, 1.0)
+                )
+            };
+            let output = format!("{header}\n{}", result.output);
+            let sent = count_tokens(&output);
+            let savings = protocol::format_savings(original_tokens, sent);
+            (
+                append_compressed_hint(&format!("{output}\n{savings}"), file_path),
+                sent,
+            )
         }
         unknown => {
             let header = build_header(file_ref, short, ext, content, line_count, true);

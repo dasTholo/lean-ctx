@@ -5,6 +5,53 @@ use super::*;
 use tempfile::tempdir;
 
 #[test]
+fn marker_in_ancestry_found_at_repo_root() {
+    let tmp = tempdir().unwrap();
+    let stop = tmp.path().join("Documents");
+    let repo = stop.join("Projects").join("myrepo");
+    let sub = repo.join("rust").join("src");
+    std::fs::create_dir_all(&sub).unwrap();
+    std::fs::create_dir(repo.join(".git")).unwrap();
+
+    // repo/rust/src is a legit scan root: .git lives two levels up (GL#438).
+    assert!(has_marker_in_ancestry(&sub, &stop));
+    assert!(has_marker_in_ancestry(&repo, &stop));
+}
+
+#[test]
+fn marker_in_ancestry_stops_at_boundary() {
+    let tmp = tempdir().unwrap();
+    // Marker at the *stop* dir itself must NOT count: a marker-less
+    // ~/Documents tree stays refused even if ~/Documents has a stray .git.
+    let stop = tmp.path().join("Documents");
+    let sub = stop.join("no-project").join("deep");
+    std::fs::create_dir_all(&sub).unwrap();
+    std::fs::create_dir(stop.join(".git")).unwrap();
+
+    assert!(!has_marker_in_ancestry(&sub, &stop));
+}
+
+#[test]
+fn marker_in_ancestry_none_without_markers() {
+    let tmp = tempdir().unwrap();
+    let stop = tmp.path().join("Documents");
+    let sub = stop.join("a").join("b");
+    std::fs::create_dir_all(&sub).unwrap();
+
+    assert!(!has_marker_in_ancestry(&sub, &stop));
+}
+
+#[test]
+fn dir_marker_detects_each_project_type() {
+    for marker in ["Cargo.toml", "package.json", "go.mod", "pyproject.toml"] {
+        let tmp = tempdir().unwrap();
+        assert!(!dir_has_project_marker(tmp.path()), "{marker}: empty dir");
+        std::fs::write(tmp.path().join(marker), "x").unwrap();
+        assert!(dir_has_project_marker(tmp.path()), "{marker}: present");
+    }
+}
+
+#[test]
 fn test_short_hash_deterministic() {
     let h1 = short_hash("/Users/test/project");
     let h2 = short_hash("/Users/test/project");
@@ -329,6 +376,76 @@ fn stale_index_detected_by_age() {
 }
 
 #[test]
+fn content_aware_staleness_detects_edits_and_additions() {
+    let _env = crate::core::data_dir::test_env_lock();
+    let td = tempdir().expect("tempdir");
+    std::fs::write(
+        td.path().join("Cargo.toml"),
+        "[package]\nname = \"t\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(td.path().join("a.rs"), "fn a() {}\n").unwrap();
+    let root_s = normalize_project_root(&td.path().to_string_lossy());
+
+    // Build + persist the index, then it must look fresh.
+    let idx = scan(&root_s);
+    assert!(!idx.files.is_empty(), "scan should index a.rs");
+    assert!(
+        !index_looks_stale(&idx, &root_s),
+        "a just-built index must be fresh"
+    );
+
+    // mtime resolution can be coarse; ensure the next writes are strictly newer.
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+
+    // Edit detection.
+    std::fs::write(td.path().join("a.rs"), "fn a() { let _x = 1; }\n").unwrap();
+    assert!(
+        index_looks_stale(&idx, &root_s),
+        "an edited source file must mark the index stale"
+    );
+
+    // Addition detection.
+    std::fs::write(td.path().join("b.rs"), "fn b() {}\n").unwrap();
+    assert!(
+        index_looks_stale(&idx, &root_s),
+        "a new source file must mark the index stale"
+    );
+}
+
+#[test]
+fn touch_without_content_change_keeps_index_fresh() {
+    // #324: an mtime bump with identical bytes (touch / git checkout / no-op
+    // format) must NOT trigger a rescan — only a real content change does.
+    let _env = crate::core::data_dir::test_env_lock();
+    let td = tempdir().expect("tempdir");
+    std::fs::write(
+        td.path().join("Cargo.toml"),
+        "[package]\nname = \"t\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(td.path().join("a.rs"), "fn a() {}\n").unwrap();
+    let root_s = normalize_project_root(&td.path().to_string_lossy());
+
+    let idx = scan(&root_s);
+    assert!(!idx.files.is_empty(), "scan should index a.rs");
+    assert!(
+        !index_looks_stale(&idx, &root_s),
+        "a just-built index must be fresh"
+    );
+
+    // mtime resolution can be coarse; ensure the rewrite is strictly newer.
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+
+    // Rewrite identical bytes: mtime advances but the content hash is unchanged.
+    std::fs::write(td.path().join("a.rs"), "fn a() {}\n").unwrap();
+    assert!(
+        !index_looks_stale(&idx, &root_s),
+        "a content-identical rewrite must NOT mark the index stale"
+    );
+}
+
+#[test]
 fn safe_scan_root_rejects_home_downloads() {
     if let Some(home) = dirs::home_dir() {
         let downloads = home.join("Downloads");
@@ -381,6 +498,286 @@ fn safe_scan_root_accepts_multi_repo_parent() {
     assert!(
         is_safe_scan_root(&parent_str),
         "Multi-repo parent with >50 subdirs should be accepted"
+    );
+}
+
+#[test]
+fn csharp_graph_edges_end_to_end() {
+    // Full edge pipeline for a small C# project: `using` resolution (import
+    // edges) + namespace cohesion (namespace edges). Regression for the empty
+    // C# Call Graph / sparse graph report (NINA).
+    const USER_SERVICE: &str = "namespace App.Services;\n\
+using App.Data;\n\
+\n\
+public class UserService\n{\n    \
+private readonly OrderRepository _repo = new OrderRepository();\n    \
+public void Save() { _repo.Persist(); }\n}\n";
+    const ORDER_SERVICE: &str = "namespace App.Services;\n\
+\n\
+public class OrderService { public void Process() {} }\n";
+    const ORDER_REPO: &str = "namespace App.Data;\n\
+\n\
+public class OrderRepository { public void Persist() {} }\n";
+
+    let files = [
+        ("src/App/Services/UserService.cs", USER_SERVICE),
+        ("src/App/Services/OrderService.cs", ORDER_SERVICE),
+        ("src/App/Data/OrderRepository.cs", ORDER_REPO),
+    ];
+
+    let mut index = ProjectIndex::new("/proj-does-not-need-to-exist");
+    let mut cache: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for (path, content) in files {
+        index
+            .files
+            .insert(path.to_string(), fe(path, content, "cs"));
+        cache.insert(path.to_string(), content.to_string());
+    }
+
+    build_edges_cached(&mut index, &cache);
+
+    // `using App.Data` resolves to the representative file of that namespace.
+    assert!(
+        index.edges.iter().any(|e| e.kind == "import"
+            && e.from == "src/App/Services/UserService.cs"
+            && e.to == "src/App/Data/OrderRepository.cs"),
+        "expected a C# `using` import edge, got {:?}",
+        index.edges
+    );
+
+    // Two files in `App.Services` are linked by a namespace cohesion edge.
+    assert!(
+        index.edges.iter().any(|e| e.kind == "namespace"
+            && (e.from == "src/App/Services/OrderService.cs"
+                && e.to == "src/App/Services/UserService.cs"
+                || e.from == "src/App/Services/UserService.cs"
+                    && e.to == "src/App/Services/OrderService.cs")),
+        "expected a C# namespace cohesion edge, got {:?}",
+        index.edges
+    );
+}
+
+#[test]
+fn csharp_using_resolves_declared_namespace_not_matching_folder() {
+    // The real-world fix: namespaces that do NOT mirror the folder layout.
+    // `Foo.cs` lives in `src/` but declares `namespace Acme.Core`; `Bar.cs` lives
+    // in `lib/` but declares `namespace Acme.Data`. Folder-suffix matching alone
+    // cannot link them — only the *declared* namespace can.
+    const FOO: &str = "namespace Acme.Core;\n\
+using Acme.Data;\n\
+public class Foo { private readonly Bar _b = new Bar(); }\n";
+    const BAR: &str = "namespace Acme.Data;\n\
+public class Bar { }\n";
+
+    let files = [("src/Foo.cs", FOO), ("lib/Bar.cs", BAR)];
+    let mut index = ProjectIndex::new("/proj-x");
+    let mut cache: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for (path, content) in files {
+        index
+            .files
+            .insert(path.to_string(), fe(path, content, "cs"));
+        cache.insert(path.to_string(), content.to_string());
+    }
+
+    build_edges_cached(&mut index, &cache);
+
+    assert!(
+        index
+            .edges
+            .iter()
+            .any(|e| e.kind == "import" && e.from == "src/Foo.cs" && e.to == "lib/Bar.cs"),
+        "`using Acme.Data` must resolve via the declared namespace (folder != namespace), got {:?}",
+        index.edges
+    );
+}
+
+#[test]
+fn safe_scan_root_accepts_dotnet_project() {
+    // A `*.csproj` at the root must mark a valid scan root even with many
+    // subdirectories that would otherwise be rejected as a broad directory.
+    let tmp = tempdir().unwrap();
+    std::fs::write(tmp.path().join("MyApp.csproj"), "<Project></Project>\n").unwrap();
+    for i in 0..55 {
+        std::fs::create_dir(tmp.path().join(format!("dir{i}"))).unwrap();
+    }
+    let root = tmp.path().to_string_lossy().to_string();
+    assert!(
+        is_safe_scan_root(&root),
+        "a .csproj should mark a valid .NET scan root"
+    );
+}
+
+#[test]
+fn gdscript_scene_edges_end_to_end() {
+    // #315: `preload/load("res://…tscn")` yields import edges even though the
+    // `.tscn` isn't indexed yet, `extends "res://…gd"` resolves to the base
+    // script, and `graph related <scene>` finds the importing script.
+    const MAIN: &str = "extends Node\n\n\
+const Enemy = preload(\"res://scenes/Enemy.tscn\")\n\n\
+func _ready():\n\tvar level = load(\"res://scenes/Main.tscn\")\n";
+    const PLAYER: &str = "extends \"res://actors/Base.gd\"\n\nfunc _ready():\n\tpass\n";
+    const BASE: &str = "extends Node\n\nfunc _ready():\n\tpass\n";
+
+    let files = [
+        ("main.gd", MAIN),
+        ("actors/Player.gd", PLAYER),
+        ("actors/Base.gd", BASE),
+    ];
+
+    let mut index = ProjectIndex::new("/godot-proj");
+    let mut cache: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for (path, content) in files {
+        index
+            .files
+            .insert(path.to_string(), fe(path, content, "gd"));
+        cache.insert(path.to_string(), content.to_string());
+    }
+
+    build_edges_cached(&mut index, &cache);
+
+    // AC1: preload of an unindexed `.tscn` still produces an import edge.
+    assert!(
+        index
+            .edges
+            .iter()
+            .any(|e| e.kind == "import" && e.from == "main.gd" && e.to == "scenes/Enemy.tscn"),
+        "expected preload(.tscn) import edge, got {:?}",
+        index.edges
+    );
+
+    // `extends "res://actors/Base.gd"` resolves to the indexed base script.
+    assert!(
+        index.edges.iter().any(|e| e.kind == "import"
+            && e.from == "actors/Player.gd"
+            && e.to == "actors/Base.gd"),
+        "expected extends import edge, got {:?}",
+        index.edges
+    );
+
+    // AC2: `graph related scenes/Main.tscn` surfaces the importing script.
+    let related = index.get_related("scenes/Main.tscn", 2);
+    assert!(
+        related.contains(&"main.gd".to_string()),
+        "graph related <scene> should surface the importer, got {related:?}"
+    );
+}
+
+#[test]
+fn tscn_scene_indexed_with_script_edges() {
+    // #316: a real on-disk Godot project. The `.tscn` scene is indexed as a
+    // graph node, its `[ext_resource]` script becomes a Scene→Script import
+    // edge, and GDScript member symbols (`@export var`) surface in the graph.
+    // Acquire the env lock (scan reads LEAN_CTX_DATA_DIR) but do not mutate it,
+    // so we never race data-dir-sensitive tests.
+    let _env = crate::core::data_dir::test_env_lock();
+    let td = tempdir().expect("tempdir");
+    let root = td.path();
+
+    // `project.godot` is the sole project marker → also exercises detection.
+    std::fs::write(root.join("project.godot"), "config_version=5\n").unwrap();
+    std::fs::create_dir_all(root.join("actors")).unwrap();
+    std::fs::create_dir_all(root.join("scenes")).unwrap();
+    std::fs::write(
+        root.join("actors/Player.gd"),
+        "extends CharacterBody2D\n\n@export var speed: float = 200.0\n\nfunc _ready():\n\tpass\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("scenes/Main.tscn"),
+        "[gd_scene load_steps=2 format=3]\n\n\
+         [ext_resource type=\"Script\" path=\"res://actors/Player.gd\" id=\"1_p\"]\n\n\
+         [node name=\"Main\" type=\"Node2D\"]\n\
+         script = ExtResource(\"1_p\")\n",
+    )
+    .unwrap();
+
+    let root_s = normalize_project_root(&root.to_string_lossy());
+    let idx = scan(&root_s);
+
+    // AC1: the `.tscn` scene is indexed as a graph node.
+    assert!(
+        idx.files.contains_key("scenes/Main.tscn"),
+        "scene must be indexed; files: {:?}",
+        idx.files.keys().collect::<Vec<_>>()
+    );
+
+    // AC1/AC2: Scene→Script import edge from the scene to its attached script.
+    assert!(
+        idx.edges.iter().any(|e| e.kind == "import"
+            && e.from == "scenes/Main.tscn"
+            && e.to == "actors/Player.gd"),
+        "expected Scene→Script edge, got {:?}",
+        idx.edges
+    );
+
+    // AC2: GDScript `@export var` member symbol surfaces in the graph.
+    assert!(
+        idx.symbols.values().any(|s| s.name == "speed"),
+        "expected @export member symbol `speed` in the graph"
+    );
+}
+
+#[test]
+fn scan_skips_node_modules_without_git_dir() {
+    // #400: a monorepo without a top-level `.git` used to index node_modules
+    // wholesale, because the ignore crate only applies `.gitignore` files
+    // inside git repositories. The vendor-dir walk filter must skip them
+    // regardless of git state.
+    let _env = crate::core::data_dir::test_env_lock();
+    let td = tempdir().expect("tempdir");
+    let root = td.path();
+
+    std::fs::create_dir_all(root.join("api/node_modules/lodash")).unwrap();
+    std::fs::create_dir_all(root.join("api/src")).unwrap();
+    std::fs::write(root.join("api/package.json"), "{\"name\":\"api\"}").unwrap();
+    std::fs::write(
+        root.join("api/node_modules/lodash/index.js"),
+        "module.exports = 1;",
+    )
+    .unwrap();
+    std::fs::write(root.join("api/src/server.js"), "const x = 1;").unwrap();
+
+    let root_s = normalize_project_root(&root.to_string_lossy());
+    let idx = scan(&root_s);
+
+    assert!(
+        idx.files.keys().any(|p| p.contains("server.js")),
+        "real source must be indexed; files: {:?}",
+        idx.files.keys().collect::<Vec<_>>()
+    );
+    assert!(
+        !idx.files.keys().any(|p| p.contains("node_modules")),
+        "node_modules must never be indexed; files: {:?}",
+        idx.files.keys().collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn scan_respects_gitignore_without_git_dir() {
+    // #400 second half: `require_git(false)` makes `.gitignore` files
+    // effective even when no `.git` directory exists.
+    let _env = crate::core::data_dir::test_env_lock();
+    let td = tempdir().expect("tempdir");
+    let root = td.path();
+
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::create_dir_all(root.join("generated")).unwrap();
+    std::fs::write(root.join(".gitignore"), "generated/\n").unwrap();
+    std::fs::write(root.join("src/app.js"), "const y = 2;").unwrap();
+    std::fs::write(root.join("generated/bundle.js"), "var b = 3;").unwrap();
+
+    let root_s = normalize_project_root(&root.to_string_lossy());
+    let idx = scan(&root_s);
+
+    assert!(
+        idx.files.keys().any(|p| p.contains("app.js")),
+        "real source must be indexed; files: {:?}",
+        idx.files.keys().collect::<Vec<_>>()
+    );
+    assert!(
+        !idx.files.keys().any(|p| p.contains("bundle.js")),
+        "gitignored dir must be skipped without .git; files: {:?}",
+        idx.files.keys().collect::<Vec<_>>()
     );
 }
 

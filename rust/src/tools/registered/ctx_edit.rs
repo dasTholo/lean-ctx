@@ -17,15 +17,15 @@ impl McpTool for CtxEditTool {
     fn tool_def(&self) -> Tool {
         tool_def(
             "ctx_edit",
-            "Edit a file via search-and-replace. Works without native Read/Edit tools. Use this when the IDE's Edit tool requires Read but Read is unavailable.",
+            "Edit a file via search-and-replace. Use when the IDE's Edit tool requires Read but Read is unavailable.",
             json!({
                 "type": "object",
                 "properties": {
                     "path": { "type": "string", "description": "Absolute file path" },
-                    "old_string": { "type": "string", "description": "Exact text to find and replace (must be unique unless replace_all=true)" },
+                    "old_string": { "type": "string", "description": "Exact text to replace (unique unless replace_all)" },
                     "new_string": { "type": "string", "description": "Replacement text" },
-                    "replace_all": { "type": "boolean", "description": "Replace all occurrences (default: false)", "default": false },
-                    "create": { "type": "boolean", "description": "Create a new file with new_string as content (ignores old_string)", "default": false }
+                    "replace_all": { "type": "boolean", "default": false },
+                    "create": { "type": "boolean", "description": "Create new file from new_string", "default": false }
                 },
                 "required": ["path", "new_string"]
             }),
@@ -119,6 +119,10 @@ impl McpTool for CtxEditTool {
             // Heavy disk I/O — no global cache lock held here.
             let (output, effect) = crate::tools::ctx_edit::run_io(&edit_params, &last_mode);
 
+            // Quality loop (#494): feed success/old_string-miss back into
+            // per-(ext × mode) stats and the one-shot read escalation.
+            crate::tools::ctx_edit::record_outcome(&edit_params, &last_mode, &output, &effect);
+
             // Apply the deferred cache mutation under a brief exclusive lock.
             if !matches!(effect, crate::tools::ctx_edit::CacheEffect::None) {
                 match rt.block_on(tokio::time::timeout(
@@ -153,6 +157,7 @@ impl McpTool for CtxEditTool {
                 mode: None,
                 path: Some(path),
                 changed: false,
+                shell_outcome: None,
             })
         })
     }

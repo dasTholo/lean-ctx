@@ -2,7 +2,9 @@ use rmcp::model::Tool;
 use rmcp::ErrorData;
 use serde_json::{json, Map, Value};
 
-use crate::server::tool_trait::{get_bool, get_str, McpTool, ToolContext, ToolOutput};
+use crate::server::tool_trait::{
+    get_bool, get_str, McpTool, ShellOutcome, ToolContext, ToolOutput,
+};
 use crate::tool_defs::tool_def;
 
 pub struct CtxShellTool;
@@ -16,14 +18,14 @@ impl McpTool for CtxShellTool {
         tool_def(
             "ctx_shell",
             "Run a shell command. Prefer over native Shell/Bash (compressed output).\n\
-             95+ output patterns; raw=true skips compression. cwd persists across calls via cd tracking. Output redaction on by default for non-admin roles (admin can disable).",
+             cwd persists across calls.",
             json!({
                 "type": "object",
                 "properties": {
-                    "command": { "type": "string", "description": "Shell command to execute" },
-                    "raw": { "type": "boolean", "description": "Skip compression, return full uncompressed output. Redaction still applies by default for non-admin roles." },
-                    "cwd": { "type": "string", "description": "Working directory for the command. If omitted, uses last cd target or project root." },
-                    "env": { "type": "object", "description": "Additional environment variables to set for the command. Use to pass agent runtime vars (e.g. CODEX_THREAD_ID).", "additionalProperties": { "type": "string" } }
+                    "command": { "type": "string", "description": "Shell command" },
+                    "raw": { "type": "boolean", "description": "Skip compression" },
+                    "cwd": { "type": "string", "description": "Working directory (default: last cd or project root)" },
+                    "env": { "type": "object", "description": "Extra env vars", "additionalProperties": { "type": "string" } }
                 },
                 "required": ["command"]
             }),
@@ -39,11 +41,19 @@ impl McpTool for CtxShellTool {
             .ok_or_else(|| ErrorData::invalid_params("command is required", None))?;
 
         if let Some(rejection) = crate::tools::ctx_shell::validate_command(&command) {
-            return Ok(ToolOutput::simple(rejection));
+            // The command never ran — report as a tool error so MCP clients
+            // (guards, retry logic) can detect it programmatically (#389).
+            return Ok(ToolOutput {
+                shell_outcome: Some(ShellOutcome::Blocked),
+                ..ToolOutput::simple(rejection)
+            });
         }
 
         if let Err(msg) = crate::core::shell_allowlist::check_shell_allowlist(&command) {
-            return Ok(ToolOutput::simple(msg));
+            return Ok(ToolOutput {
+                shell_outcome: Some(ShellOutcome::Blocked),
+                ..ToolOutput::simple(msg)
+            });
         }
 
         warn_shell_secret_paths(&command);
@@ -80,11 +90,21 @@ impl McpTool for CtxShellTool {
                                 .collect()
                         })
                         .unwrap_or_default();
-                    let (raw_output, _exit_code) = crate::server::execute::execute_command_with_env(
+                    let (raw_output, exit_code) = crate::server::execute::execute_command_with_env(
                         &cmd_clone, &cwd_clone, &extra_env,
                     );
                     let output = redact_shell_output_secrets(&raw_output);
-                    return Ok(ToolOutput::simple(output));
+                    // Keep failure reporting consistent on this degraded path:
+                    // same [exit:N] footer and the same structured outcome (#389).
+                    let exit_suffix = if exit_code != 0 {
+                        format!("\n[exit:{exit_code}]")
+                    } else {
+                        String::new()
+                    };
+                    return Ok(ToolOutput {
+                        shell_outcome: Some(ShellOutcome::Exit(exit_code)),
+                        ..ToolOutput::simple(format!("{output}{exit_suffix}"))
+                    });
                 };
                 session.update_shell_cwd(&command);
                 let root_missing = session
@@ -126,6 +146,9 @@ impl McpTool for CtxShellTool {
             let (raw_output, exit_code) = crate::server::execute::execute_command_with_env(
                 &cmd_clone, &cwd_clone, &extra_env,
             );
+
+            // Structured diagnostics (#499) — same hook as the CLI path.
+            crate::core::diagnostics_store::record_from_shell(&cmd_clone, &raw_output, exit_code);
 
             let output = redact_shell_output_secrets(&raw_output);
 
@@ -214,6 +237,7 @@ impl McpTool for CtxShellTool {
                 mode,
                 path: None,
                 changed: false,
+                shell_outcome: Some(ShellOutcome::Exit(exit_code)),
             })
         })
     }

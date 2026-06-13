@@ -382,7 +382,19 @@ pub(super) fn remove_mcp_configs(home: &Path, dry_run: bool) -> bool {
         } else if is_toml {
             Some(remove_lean_ctx_from_toml(&content))
         } else {
-            remove_lean_ctx_from_json(&content)
+            let mut cleaned = remove_lean_ctx_from_json(&content);
+            // OpenClaw (GitHub #390): a leftover empty `mcpServers` object
+            // still fails the strict 2026.6.1 validator — drop it entirely.
+            if *name == "OpenClaw" {
+                if let Some(ref c) = cleaned {
+                    if let Some(stripped) =
+                        super::parsers::remove_empty_json_object_key(c, "mcpServers")
+                    {
+                        cleaned = Some(stripped);
+                    }
+                }
+            }
+            cleaned
         };
 
         if let Some(cleaned) = cleaned {
@@ -856,7 +868,11 @@ pub(super) fn remove_hook_files(home: &Path, dry_run: bool) -> bool {
         ),
         ("Windsurf", home.join(".codeium/windsurf/hooks.json")),
         ("Qoder", home.join(".qoder/settings.json")),
-        ("Copilot (global)", home.join(".github/hooks/hooks.json")),
+        ("Copilot (global)", home.join(".copilot/hooks/hooks.json")),
+        (
+            "Copilot (legacy global)",
+            home.join(".github/hooks/hooks.json"),
+        ),
         ("Gemini CLI", home.join(".gemini/settings.json")),
     ] {
         if !hj_path.exists() {
@@ -1020,14 +1036,15 @@ pub(super) fn remove_lean_ctx_from_hooks_json(content: &str) -> HookCleanupResul
         parsed.as_object_mut().map(|o| o.remove("permissions"));
     }
 
-    // Check if any meaningful content remains
+    // Check if any meaningful content remains. `version` / `$schema` are
+    // format boilerplate written by installers (e.g. Copilot hooks.json
+    // `{"hooks": {}, "version": 1}`) — an otherwise-empty file is still
+    // entirely lean-ctx-owned and safe to delete (GL #558).
     let has_remaining = parsed.as_object().is_some_and(|obj| {
-        obj.iter().any(|(key, val)| {
-            if key == "hooks" {
-                val.as_object().is_some_and(|h| !h.is_empty())
-            } else {
-                !val.is_null()
-            }
+        obj.iter().any(|(key, val)| match key.as_str() {
+            "hooks" => val.as_object().is_some_and(|h| !h.is_empty()),
+            "version" | "$schema" => false,
+            _ => !val.is_null(),
         })
     });
 

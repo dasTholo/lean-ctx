@@ -10,7 +10,13 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::process::Stdio;
 
-const GRAPH_SOURCE_EXTS: &[&str] = &["rs", "ts", "tsx", "js", "jsx", "py", "go", "java", "gd"];
+/// Extensions whose files become Property Graph source nodes. Must stay a subset
+/// of `language_capabilities::is_indexable_ext` and align with the deep-query
+/// extractors (`deep_queries::{type_defs, calls}`) so each language contributes
+/// real symbol/import/call structure rather than bare file nodes.
+const GRAPH_SOURCE_EXTS: &[&str] = &[
+    "rs", "ts", "tsx", "js", "jsx", "py", "go", "java", "gd", "cs",
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum OutputFormat {
@@ -423,6 +429,8 @@ fn walk_supported_sources(root_path: &Path) -> (Vec<String>, Vec<(String, String
     let walker = ignore::WalkBuilder::new(root_path)
         .hidden(true)
         .git_ignore(true)
+        .require_git(false)
+        .filter_entry(crate::core::walk_filter::keep_entry)
         .build();
 
     let mut file_paths: Vec<String> = Vec::new();
@@ -440,11 +448,14 @@ fn walk_supported_sources(root_path: &Path) -> (Vec<String>, Vec<(String, String
             continue;
         }
 
+        // Canonical `/` separators: graph node keys must be platform-stable
+        // so queries like `impact_analysis("Models/Engine.cs")` match the
+        // same node on Windows (output determinism, #498).
         let rel_path = path
             .strip_prefix(root_path)
             .unwrap_or(path)
             .to_string_lossy()
-            .to_string();
+            .replace('\\', "/");
 
         file_paths.push(rel_path.clone());
 
@@ -457,6 +468,122 @@ fn walk_supported_sources(root_path: &Path) -> (Vec<String>, Vec<(String, String
     file_paths.dedup();
     file_contents.sort_by(|a, b| a.0.cmp(&b.0));
     (file_paths, file_contents)
+}
+
+/// Per-file analysis borrowed from the walked contents: (path, content, ext, analysis).
+type AnalyzedFile<'a> = (
+    &'a str,
+    &'a str,
+    &'a str,
+    crate::core::deep_queries::DeepAnalysis,
+);
+
+/// Definition sites per symbol name: `name -> [(file, line_start, line_end)]`.
+type DefIndex = std::collections::HashMap<String, Vec<(String, usize, usize)>>;
+
+/// Analyze every walked source file once (parallel) and build the global
+/// symbol-definition index `type name -> [(file, line_start, line_end)]`.
+/// Shared by full build and incremental update on both builder paths.
+fn analyze_all(file_contents: &[(String, String, String)]) -> (Vec<AnalyzedFile<'_>>, DefIndex) {
+    use rayon::prelude::*;
+    let per_file: Vec<AnalyzedFile<'_>> = file_contents
+        .par_iter()
+        .map(|(p, c, e)| {
+            (
+                p.as_str(),
+                c.as_str(),
+                e.as_str(),
+                crate::core::deep_queries::analyze(c.as_str(), e.as_str()),
+            )
+        })
+        .collect();
+
+    let mut def_index = DefIndex::new();
+    for (p, _, _, analysis) in &per_file {
+        for t in &analysis.types {
+            def_index.entry(t.name.clone()).or_default().push((
+                (*p).to_string(),
+                t.line,
+                t.end_line,
+            ));
+        }
+    }
+
+    (per_file, def_index)
+}
+
+/// Definition sites of types this file *uses* (field/param/base/generic/cast),
+/// resolved against the project-wide definition index: `(defining_file,
+/// type_name, line_start, line_end)`. This is what connects C#/Java
+/// same-namespace consumers that have no import statement (GH #398).
+///
+/// A name defined in more than `MAX_DEF_SITES` files is considered too
+/// generic to attribute (e.g. `Config` in a monorepo) and is skipped —
+/// recall for the common case without flooding the graph with noise.
+fn type_ref_targets(
+    def_index: &DefIndex,
+    type_uses: &[crate::core::deep_queries::TypeUse],
+    rel_path: &str,
+) -> Vec<(String, String, usize, usize)> {
+    const MAX_DEF_SITES: usize = 3;
+
+    let mut targets: Vec<(String, String, usize, usize)> = Vec::new();
+    for type_use in type_uses {
+        let Some(sites) = def_index.get(&type_use.name) else {
+            continue;
+        };
+        // Defined in this very file -> self-reference, not a dependency.
+        let mut sites: Vec<&(String, usize, usize)> =
+            sites.iter().filter(|(f, _, _)| f != rel_path).collect();
+        sites.sort_unstable();
+        sites.dedup();
+        if sites.is_empty() || sites.len() > MAX_DEF_SITES {
+            continue;
+        }
+        targets.extend(
+            sites
+                .into_iter()
+                .map(|(f, ls, le)| (f.clone(), type_use.name.clone(), *ls, *le)),
+        );
+    }
+    targets.sort();
+    targets.dedup();
+    targets
+}
+
+/// Insert `TypeRef` edges for every resolved type usage:
+/// - file -> defining file (drives `impact_analysis` blast radius),
+/// - file -> defined type symbol (clears the symbol from `dead_code`,
+///   whose query already exempts `type_ref` targets).
+fn insert_type_ref_edges(
+    graph: &CodeGraph,
+    file_node_id: i64,
+    rel_path: &str,
+    type_uses: &[crate::core::deep_queries::TypeUse],
+    def_index: &DefIndex,
+) -> usize {
+    let mut added = 0usize;
+    for (target_file, type_name, line_start, line_end) in
+        type_ref_targets(def_index, type_uses, rel_path)
+    {
+        let Ok(target_id) = graph.upsert_node(&Node::file(&target_file)) else {
+            continue;
+        };
+        let _ = graph.upsert_edge(&Edge::new(file_node_id, target_id, EdgeKind::TypeRef));
+        added += 1;
+
+        let sym_node = Node::symbol(
+            &type_name,
+            &target_file,
+            crate::core::property_graph::NodeKind::Symbol,
+        )
+        .with_lines(line_start, line_end);
+        if let Ok(sym_id) = graph.upsert_node(&sym_node) {
+            let _ = graph.upsert_edge(&Edge::new(file_node_id, sym_id, EdgeKind::TypeRef));
+            added += 1;
+        }
+    }
+    added
 }
 
 fn normalize_git_path(line: &str) -> String {
@@ -522,7 +649,7 @@ fn enclosing_symbol_name_for_line(
 
 #[cfg(feature = "embeddings")]
 fn resolve_call_callee_site(
-    def_index: &std::collections::HashMap<String, Vec<(String, usize, usize)>>,
+    def_index: &DefIndex,
     callee: &str,
     caller_file: &str,
 ) -> Option<(String, usize, usize)> {
@@ -544,7 +671,7 @@ fn index_graph_file_embeddings(
     ext: &str,
     analysis: &crate::core::deep_queries::DeepAnalysis,
     resolver_ctx: &crate::core::import_resolver::ResolverContext,
-    def_index: &std::collections::HashMap<String, Vec<(String, usize, usize)>>,
+    def_index: &DefIndex,
 ) -> (usize, usize) {
     let mut total_nodes = 0usize;
     let mut total_edges = 0usize;
@@ -638,6 +765,17 @@ fn index_graph_file_embeddings(
         }
     }
 
+    // Type-usage edges close the same-namespace gap (C#/Java, GH #398):
+    // a file consuming a project type without importing it still depends on
+    // the defining file.
+    total_edges += insert_type_ref_edges(
+        graph,
+        file_node_id,
+        rel_path,
+        &analysis.type_uses,
+        def_index,
+    );
+
     (total_nodes, total_edges)
 }
 
@@ -647,15 +785,15 @@ fn index_graph_file_minimal(
     rel_path: &str,
     content: &str,
     ext: &str,
+    analysis: &crate::core::deep_queries::DeepAnalysis,
     resolver_ctx: &crate::core::import_resolver::ResolverContext,
+    def_index: &DefIndex,
 ) -> (usize, usize) {
     let Ok(file_node_id) = graph.upsert_node(&Node::file(rel_path)) else {
         return (0, 0);
     };
     let mut total_nodes = 1usize;
     let mut total_edges = 0usize;
-
-    let analysis = crate::core::deep_queries::analyze(content, ext);
 
     let resolved = crate::core::import_resolver::resolve_imports(
         &analysis.imports,
@@ -698,6 +836,16 @@ fn index_graph_file_minimal(
             }
         }
     }
+
+    // Same-namespace type consumption (C#/Java, GH #398) — see the
+    // embeddings-path counterpart in `index_graph_file_embeddings`.
+    total_edges += insert_type_ref_edges(
+        graph,
+        file_node_id,
+        rel_path,
+        &analysis.type_uses,
+        def_index,
+    );
 
     let exports: Vec<String> = analysis
         .types
@@ -756,64 +904,41 @@ fn handle_build(root: &str, fmt: OutputFormat) -> String {
 
     let (file_paths, file_contents) = walk_supported_sources(root_path);
 
-    let resolver_ctx =
-        crate::core::import_resolver::ResolverContext::new(root_path, file_paths.clone());
+    let cs_contents: std::collections::HashMap<String, String> = file_contents
+        .iter()
+        .filter(|(_, _, e)| e.eq_ignore_ascii_case("cs"))
+        .map(|(p, c, _)| (p.clone(), c.clone()))
+        .collect();
+    let resolver_ctx = crate::core::import_resolver::ResolverContext::new(
+        root_path,
+        file_paths.clone(),
+        &cs_contents,
+    );
 
     let mut total_nodes = 0usize;
     let mut total_edges = 0usize;
 
-    #[cfg(feature = "embeddings")]
-    let per_file: Vec<(
-        String,
-        String,
-        String,
-        crate::core::deep_queries::DeepAnalysis,
-    )> = {
-        use rayon::prelude::*;
-        file_contents
-            .par_iter()
-            .map(|(p, c, e)| {
-                (
-                    p.clone(),
-                    c.clone(),
-                    e.clone(),
-                    crate::core::deep_queries::analyze(c.as_str(), e.as_str()),
-                )
-            })
-            .collect()
-    };
+    let (per_file, def_index) = analyze_all(&file_contents);
 
     #[cfg(feature = "embeddings")]
-    let def_index: std::collections::HashMap<String, Vec<(String, usize, usize)>> = {
-        let mut m: std::collections::HashMap<String, Vec<(String, usize, usize)>> =
-            std::collections::HashMap::new();
-        for (p, _, _, analysis) in &per_file {
-            for t in &analysis.types {
-                m.entry(t.name.clone())
-                    .or_default()
-                    .push((p.clone(), t.line, t.end_line));
-            }
-        }
-        m
-    };
-
-    #[cfg(feature = "embeddings")]
-    for (rel_path, _content, ext, analysis) in per_file {
-        let (n, e) = index_graph_file_embeddings(
-            &graph,
-            &rel_path,
-            &ext,
-            &analysis,
-            &resolver_ctx,
-            &def_index,
-        );
+    for (rel_path, _content, ext, analysis) in &per_file {
+        let (n, e) =
+            index_graph_file_embeddings(&graph, rel_path, ext, analysis, &resolver_ctx, &def_index);
         total_nodes += n;
         total_edges += e;
     }
 
     #[cfg(not(feature = "embeddings"))]
-    for (rel_path, content, ext) in &file_contents {
-        let (n, e) = index_graph_file_minimal(&graph, rel_path, content, ext, &resolver_ctx);
+    for (rel_path, content, ext, analysis) in &per_file {
+        let (n, e) = index_graph_file_minimal(
+            &graph,
+            rel_path,
+            content,
+            ext,
+            analysis,
+            &resolver_ctx,
+            &def_index,
+        );
         total_nodes += n;
         total_edges += e;
     }
@@ -899,40 +1024,18 @@ fn handle_update(root: &str, fmt: OutputFormat) -> String {
 
     let changed_count = changed.len();
     let (file_paths, file_contents) = walk_supported_sources(root_path);
-    let resolver_ctx =
-        crate::core::import_resolver::ResolverContext::new(root_path, file_paths.clone());
-
-    #[cfg(feature = "embeddings")]
-    let per_file: Vec<(
-        String,
-        String,
-        String,
-        crate::core::deep_queries::DeepAnalysis,
-    )> = file_contents
+    let cs_contents: std::collections::HashMap<String, String> = file_contents
         .iter()
-        .map(|(p, c, e)| {
-            (
-                p.clone(),
-                c.clone(),
-                e.clone(),
-                crate::core::deep_queries::analyze(c.as_str(), e.as_str()),
-            )
-        })
+        .filter(|(_, _, e)| e.eq_ignore_ascii_case("cs"))
+        .map(|(p, c, _)| (p.clone(), c.clone()))
         .collect();
+    let resolver_ctx = crate::core::import_resolver::ResolverContext::new(
+        root_path,
+        file_paths.clone(),
+        &cs_contents,
+    );
 
-    #[cfg(feature = "embeddings")]
-    let def_index: std::collections::HashMap<String, Vec<(String, usize, usize)>> = {
-        let mut m: std::collections::HashMap<String, Vec<(String, usize, usize)>> =
-            std::collections::HashMap::new();
-        for (p, _, _, analysis) in &per_file {
-            for t in &analysis.types {
-                m.entry(t.name.clone())
-                    .or_default()
-                    .push((p.clone(), t.line, t.end_line));
-            }
-        }
-        m
-    };
+    let (per_file, def_index) = analyze_all(&file_contents);
 
     let mut total_nodes = 0usize;
     let mut total_edges = 0usize;
@@ -958,13 +1061,14 @@ fn handle_update(root: &str, fmt: OutputFormat) -> String {
             return format!("Failed to remove old nodes for {rel_path}: {e}");
         }
 
+        let Some((_, _content, ext_owned, analysis)) =
+            per_file.iter().find(|(p, _, _, _)| *p == rel_path)
+        else {
+            continue;
+        };
+
         #[cfg(feature = "embeddings")]
         {
-            let Some((_, _, ext_owned, analysis)) =
-                per_file.iter().find(|(p, _, _, _)| p == rel_path)
-            else {
-                continue;
-            };
             let (n, e) = index_graph_file_embeddings(
                 &graph,
                 rel_path,
@@ -979,12 +1083,15 @@ fn handle_update(root: &str, fmt: OutputFormat) -> String {
 
         #[cfg(not(feature = "embeddings"))]
         {
-            let Some((_, content, ext_owned)) = file_contents.iter().find(|t| t.0 == *rel_path)
-            else {
-                continue;
-            };
-            let (n, e) =
-                index_graph_file_minimal(&graph, rel_path, content, ext_owned, &resolver_ctx);
+            let (n, e) = index_graph_file_minimal(
+                &graph,
+                rel_path,
+                _content,
+                ext_owned,
+                analysis,
+                &resolver_ctx,
+                &def_index,
+            );
             total_nodes += n;
             total_edges += e;
         }
@@ -1244,6 +1351,53 @@ mod tests {
         assert!(result.contains("Unknown action"));
     }
 
+    /// GH #398: the TypeRef target resolution — unique definers connect,
+    /// self-references are skipped, over-generic names (>3 definers) are
+    /// dropped, and output is sorted + deduped (determinism, #498).
+    #[test]
+    fn type_ref_targets_resolution_rules() {
+        let mut def_index: std::collections::HashMap<String, Vec<(String, usize, usize)>> =
+            std::collections::HashMap::new();
+        def_index.insert("Engine".into(), vec![("Models/Engine.cs".into(), 1, 5)]);
+        def_index.insert("Motor".into(), vec![("Services/Motor.cs".into(), 1, 9)]);
+        def_index.insert(
+            "Config".into(),
+            vec![
+                ("a/Config.cs".into(), 1, 2),
+                ("b/Config.cs".into(), 1, 2),
+                ("c/Config.cs".into(), 1, 2),
+                ("d/Config.cs".into(), 1, 2),
+            ],
+        );
+
+        let uses = |names: &[&str]| -> Vec<crate::core::deep_queries::TypeUse> {
+            names
+                .iter()
+                .map(|n| crate::core::deep_queries::TypeUse {
+                    name: (*n).to_string(),
+                    line: 1,
+                })
+                .collect()
+        };
+
+        // Unique definer in another file -> edge target with symbol site.
+        assert_eq!(
+            type_ref_targets(&def_index, &uses(&["Engine"]), "Services/Motor.cs"),
+            vec![("Models/Engine.cs".to_string(), "Engine".to_string(), 1, 5)]
+        );
+        // Using one's own type -> no self edge.
+        assert!(type_ref_targets(&def_index, &uses(&["Motor"]), "Services/Motor.cs").is_empty());
+        // Defined in 4 files -> too generic, skipped.
+        assert!(type_ref_targets(&def_index, &uses(&["Config"]), "Services/Motor.cs").is_empty());
+        // Unknown / external types -> nothing.
+        assert!(type_ref_targets(&def_index, &uses(&["String"]), "x.cs").is_empty());
+        // Duplicate uses collapse into one sorted target list.
+        assert_eq!(
+            type_ref_targets(&def_index, &uses(&["Engine", "Engine"]), "x.cs"),
+            vec![("Models/Engine.cs".to_string(), "Engine".to_string(), 1, 5)]
+        );
+    }
+
     #[test]
     fn graph_target_key_normalizes_windows_styles() {
         let target = graph_target_key(r"C:/repo/src/main.rs", r"C:\repo");
@@ -1264,6 +1418,12 @@ mod tests {
     #[cfg(feature = "embeddings")]
     #[test]
     fn dead_code_builder_does_not_flag_instantiated_python_class() {
+        // The property-graph DB path is derived from `LEAN_CTX_DATA_DIR`
+        // (`graph_dir`), so a concurrent test that mutates that env var between
+        // our `build` and `open` would point them at different directories and
+        // yield an empty graph. Serialize on the shared lock that every other
+        // data-dir-mutating test already uses.
+        let _env = crate::core::data_dir::test_env_lock();
         let tmp = tempfile::tempdir().expect("tempdir");
         let root = tmp.path();
         std::fs::create_dir_all(root.join("models")).unwrap();
@@ -1305,6 +1465,104 @@ mod tests {
         assert!(
             dead.iter().any(|s| s == "UnusedOrphan"),
             "never-referenced class `UnusedOrphan` should still be flagged (non-vacuous); \
+             findings: {dead:?}"
+        );
+    }
+
+    /// End-to-end regression for GH #398: C# files in the same namespace use
+    /// each other's types **without any `using` directive**, and dependency
+    /// injection means the type is often never `new`-ed by its consumer. With
+    /// import- and call-edges only, the consumed class is a false-negative
+    /// leaf node. Type-usage edges (`TypeRef`) must connect consumer -> definer
+    /// so impact analysis reports the real blast radius.
+    #[cfg(feature = "embeddings")]
+    #[test]
+    fn csharp_same_namespace_type_use_is_not_a_leaf() {
+        let _env = crate::core::data_dir::test_env_lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("Models")).unwrap();
+        std::fs::create_dir_all(root.join("Services")).unwrap();
+
+        // The small class under change — no consumer imports it via `using`.
+        std::fs::write(
+            root.join("Models/Engine.cs"),
+            "namespace App.Core;\n\n\
+             public class Engine\n{\n    public int Power { get; set; }\n}\n",
+        )
+        .unwrap();
+        // DI-style consumer: field + constructor parameter, never `new Engine()`.
+        std::fs::write(
+            root.join("Services/Motor.cs"),
+            "namespace App.Core;\n\n\
+             public class Motor\n{\n    private readonly Engine _engine;\n\n\
+             \x20   public Motor(Engine engine)\n    {\n        _engine = engine;\n    }\n}\n",
+        )
+        .unwrap();
+        // Inheritance consumer in a nested namespace part, also without `using`.
+        std::fs::write(
+            root.join("Services/TurboEngine.cs"),
+            "namespace App.Core;\n\n\
+             public class TurboEngine : Engine\n{\n    public int Boost { get; set; }\n}\n",
+        )
+        .unwrap();
+        // Unrelated file: must NOT appear in the blast radius (non-vacuous).
+        std::fs::write(
+            root.join("Services/Logger.cs"),
+            "namespace App.Core;\n\n\
+             public class Logger\n{\n    public void Log(string msg) { }\n}\n",
+        )
+        .unwrap();
+
+        let root_str = root.to_string_lossy().to_string();
+        let out = handle("build", None, &root_str, None, Some("text"));
+        assert!(!out.contains("ERROR"), "graph build failed: {out}");
+
+        let graph =
+            crate::core::property_graph::CodeGraph::open(&root_str).expect("open property graph");
+        let impact = graph
+            .impact_analysis("Models/Engine.cs", 5)
+            .expect("impact analysis");
+
+        assert!(
+            impact
+                .affected_files
+                .contains(&"Services/Motor.cs".to_string()),
+            "DI consumer (field + ctor param, no using, no new) must be affected; got: {:?}",
+            impact.affected_files
+        );
+        assert!(
+            impact
+                .affected_files
+                .contains(&"Services/TurboEngine.cs".to_string()),
+            "subclass (base_list, no using) must be affected; got: {:?}",
+            impact.affected_files
+        );
+        assert!(
+            !impact
+                .affected_files
+                .contains(&"Services/Logger.cs".to_string()),
+            "unrelated file must NOT be affected; got: {:?}",
+            impact.affected_files
+        );
+
+        // Same root cause, second symptom: a class consumed only as a type
+        // (DI) was flagged `dead_code` because nothing ever *called* it. The
+        // symbol-level TypeRef edge must clear it; the genuinely unreferenced
+        // Logger keeps the rule honest.
+        let findings = crate::core::smells::scan_rule(
+            graph.connection(),
+            "dead_code",
+            &crate::core::smells::SmellConfig::default(),
+        );
+        let dead: Vec<String> = findings.iter().filter_map(|f| f.symbol.clone()).collect();
+        assert!(
+            !dead.iter().any(|s| s == "Engine"),
+            "type-consumed class `Engine` must not be dead_code; findings: {dead:?}"
+        );
+        assert!(
+            dead.iter().any(|s| s == "Logger"),
+            "never-referenced class `Logger` should still be flagged (non-vacuous); \
              findings: {dead:?}"
         );
     }

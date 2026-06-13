@@ -22,11 +22,19 @@ const COCKPIT_COMPONENT_MEMORY_JS: &str = include_str!("static/components/cockpi
 const COCKPIT_COMPONENT_SEARCH_JS: &str = include_str!("static/components/cockpit-search.js");
 const COCKPIT_COMPONENT_COMPRESSION_JS: &str =
     include_str!("static/components/cockpit-compression.js");
+const COCKPIT_COMPONENT_TOUR_JS: &str = include_str!("static/components/cockpit-tour.js");
 const COCKPIT_COMPONENT_GRAPH_JS: &str = include_str!("static/components/cockpit-graph.js");
+const COCKPIT_COMPONENT_ARCHITECTURE_JS: &str =
+    include_str!("static/components/cockpit-architecture.js");
+const COCKPIT_COMPONENT_EXPLORER_JS: &str = include_str!("static/components/cockpit-explorer.js");
 const COCKPIT_COMPONENT_HEALTH_JS: &str = include_str!("static/components/cockpit-health.js");
 const COCKPIT_COMPONENT_REMAINING_JS: &str = include_str!("static/components/cockpit-remaining.js");
 const COCKPIT_COMPONENT_COMMANDER_JS: &str = include_str!("static/components/cockpit-commander.js");
 const COCKPIT_COMPONENT_PALETTE_JS: &str = include_str!("static/components/cockpit-palette.js");
+const COCKPIT_COMPONENT_ROI_JS: &str = include_str!("static/components/cockpit-roi.js");
+const COCKPIT_COMPONENT_AREA_TABS_JS: &str = include_str!("static/components/cockpit-area-tabs.js");
+const COCKPIT_COMPONENT_PROTECTION_JS: &str =
+    include_str!("static/components/cockpit-protection.js");
 
 // Vendored third-party libraries — embedded so the dashboard works fully offline
 // (no external CDN). Served as text via the standard route pipeline.
@@ -96,11 +104,25 @@ pub async fn start(port: Option<u16>, host: Option<String>, base_path: Option<St
 
     // Always enable auth (even on loopback) to prevent cross-origin reads of /api/*
     // from a malicious website (CORS is not a reliable boundary for localhost services).
-    let t = generate_token();
-    save_token(&t);
+    let (t, token_from_env) = resolve_dashboard_token();
     let token = Some(Arc::new(t));
 
+    // Bind BEFORE persisting the token: two racing `lean-ctx dashboard` starts
+    // both used to write their fresh token, the bind loser exited — leaving a
+    // token on disk that the surviving server never accepted. Every later
+    // "already running" browser open (and any tool reading dashboard.token)
+    // then got 401s. Binding first makes the loser exit without touching the
+    // file, so dashboard.token always belongs to the live listener.
+    let listener = match TcpListener::bind(&addr).await {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("Failed to bind to {addr}: {e}");
+            std::process::exit(1);
+        }
+    };
+
     if let Some(t) = token.as_ref() {
+        save_token(t);
         let masked = if t.len() > 12 {
             format!(
                 "{}…{}",
@@ -110,25 +132,22 @@ pub async fn start(port: Option<u16>, host: Option<String>, base_path: Option<St
         } else {
             t.to_string()
         };
+        let src = if token_from_env {
+            " (from LEAN_CTX_HTTP_TOKEN)"
+        } else {
+            ""
+        };
         if is_local {
-            println!("  Auth: enabled (local)");
+            println!("  Auth: enabled (local){src}");
             println!("  Browser URL:  http://localhost:{port}{base_path}/?token={t}");
         } else {
             eprintln!(
                 "  \x1b[33m⚠\x1b[0m Binding to {host} — authentication enabled.\n  \
-                 Bearer token: \x1b[1;32m{masked}\x1b[0m\n  \
+                 Bearer token{src}: \x1b[1;32m{masked}\x1b[0m\n  \
                  Browser URL:  http://<your-ip>:{port}{base_path}/?token={t}"
             );
         }
     }
-
-    let listener = match TcpListener::bind(&addr).await {
-        Ok(l) => l,
-        Err(e) => {
-            eprintln!("Failed to bind to {addr}: {e}");
-            std::process::exit(1);
-        }
-    };
 
     let stats_path = crate::core::data_dir::lean_ctx_data_dir().map_or_else(
         |_| "~/.lean-ctx/stats.json".to_string(),
@@ -161,6 +180,12 @@ pub async fn start(port: Option<u16>, host: Option<String>, base_path: Option<St
         println!();
     }
 
+    if crate::core::datadog_push::spawn_if_enabled() {
+        println!(
+            "  Datadog push: enabled (agentless, every LEAN_CTX_DATADOG_INTERVAL_SECS or 60s)"
+        );
+    }
+
     loop {
         if let Ok((stream, _)) = listener.accept().await {
             let token_ref = token.clone();
@@ -168,6 +193,30 @@ pub async fn start(port: Option<u16>, host: Option<String>, base_path: Option<St
             tokio::spawn(handle_request(stream, token_ref, base_ref));
         }
     }
+}
+
+/// Name of the env var that pins the dashboard Bearer token (#377).
+const HTTP_TOKEN_ENV: &str = "LEAN_CTX_HTTP_TOKEN";
+/// Read-only token accepted **only** for `GET /metrics` (GL #401) so
+/// monitoring agents never hold the full dashboard credential.
+const SCRAPE_TOKEN_ENV: &str = "LEAN_CTX_SCRAPE_TOKEN";
+
+/// Resolve the dashboard Bearer token.
+///
+/// Honors `LEAN_CTX_HTTP_TOKEN` (#377): when set to a non-empty value it is used
+/// verbatim so reverse-proxy / container deployments keep a stable token across
+/// restarts and redeploys (nginx can inject a fixed `Authorization: Bearer …`).
+/// When unset or empty, a fresh random token is generated (no behavior change).
+///
+/// Returns the token and whether it originated from the env var.
+fn resolve_dashboard_token() -> (String, bool) {
+    if let Ok(raw) = std::env::var(HTTP_TOKEN_ENV) {
+        let trimmed = raw.trim();
+        if !trimmed.is_empty() {
+            return (trimmed.to_string(), true);
+        }
+    }
+    (generate_token(), false)
 }
 
 fn generate_token() -> String {
@@ -490,7 +539,20 @@ async fn handle_request(
     let requires_auth = is_api || path == "/metrics";
 
     if let Some(ref expected) = token {
-        let has_header_auth = check_auth(&header_text, expected);
+        let mut has_header_auth = check_auth(&header_text, expected);
+
+        // Read-only scrape token (GL #401): lets a Prometheus/Datadog agent
+        // scrape `/metrics` without holding the full dashboard token. Valid
+        // for the metrics endpoint only — every other API stays gated on the
+        // dashboard token.
+        if !has_header_auth && path == "/metrics" {
+            if let Ok(scrape) = std::env::var(SCRAPE_TOKEN_ENV) {
+                let scrape = scrape.trim();
+                if !scrape.is_empty() && check_auth(&header_text, scrape) {
+                    has_header_auth = true;
+                }
+            }
+        }
 
         if requires_auth && !has_header_auth {
             let body = r#"{"error":"unauthorized"}"#;
@@ -728,6 +790,27 @@ mod tests {
     }
 
     #[test]
+    fn api_billing_badge_returns_cosmetic_shape() {
+        let (status, ct, body) =
+            routes::route_response("/api/billing-badge", "", None, None, false, "GET", "");
+        assert_eq!(status, "200 OK");
+        assert_eq!(ct, "application/json");
+        let v: serde_json::Value = serde_json::from_str(&body).expect("valid JSON");
+        assert!(v.get("plan").and_then(|p| p.as_str()).is_some());
+        assert!(v
+            .get("supporter")
+            .and_then(serde_json::Value::as_bool)
+            .is_some());
+        assert!(
+            matches!(
+                v.get("source").and_then(|s| s.as_str()),
+                Some("live" | "cached" | "expired" | "none")
+            ),
+            "unexpected source: {body}"
+        );
+    }
+
+    #[test]
     fn api_episodes_returns_json() {
         let (_status, _ct, body) =
             routes::route_response("/api/episodes", "", None, None, false, "GET", "");
@@ -782,5 +865,48 @@ mod tests {
         if let Some(dir) = crate::core::graph_index::ProjectIndex::index_dir(&root_s) {
             let _ = std::fs::remove_dir_all(dir);
         }
+    }
+
+    #[test]
+    fn resolve_token_uses_env_var_verbatim() {
+        let _g = ENV_LOCK.lock().expect("env lock");
+        std::env::set_var(HTTP_TOKEN_ENV, "lctx_mystatic");
+        let (token, from_env) = resolve_dashboard_token();
+        std::env::remove_var(HTTP_TOKEN_ENV);
+        assert!(from_env, "token should be reported as env-sourced");
+        assert_eq!(token, "lctx_mystatic");
+    }
+
+    #[test]
+    fn resolve_token_trims_env_var() {
+        let _g = ENV_LOCK.lock().expect("env lock");
+        std::env::set_var(HTTP_TOKEN_ENV, "  lctx_padded  ");
+        let (token, from_env) = resolve_dashboard_token();
+        std::env::remove_var(HTTP_TOKEN_ENV);
+        assert!(from_env);
+        assert_eq!(token, "lctx_padded");
+    }
+
+    #[test]
+    fn resolve_token_falls_back_to_random_when_unset() {
+        let _g = ENV_LOCK.lock().expect("env lock");
+        std::env::remove_var(HTTP_TOKEN_ENV);
+        let (token, from_env) = resolve_dashboard_token();
+        assert!(!from_env, "unset env should yield a generated token");
+        assert!(
+            token.starts_with("lctx_"),
+            "generated token prefix, got {token}"
+        );
+        assert!(token.len() > 12, "generated token should be 32-byte hex");
+    }
+
+    #[test]
+    fn resolve_token_ignores_empty_env() {
+        let _g = ENV_LOCK.lock().expect("env lock");
+        std::env::set_var(HTTP_TOKEN_ENV, "   ");
+        let (token, from_env) = resolve_dashboard_token();
+        std::env::remove_var(HTTP_TOKEN_ENV);
+        assert!(!from_env, "whitespace-only env should fall back to random");
+        assert!(token.starts_with("lctx_"));
     }
 }
