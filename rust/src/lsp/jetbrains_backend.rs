@@ -441,6 +441,67 @@ impl JetBrainsHttpBackend {
             _ => code.to_string(),
         }
     }
+
+    /// Request body for `/inlinePreview` + `/inlineApply` (no force — spec §5.2).
+    fn inline_body(
+        rel_path: &str,
+        src_range: crate::lsp::backend::TextRange0Based,
+        keep_definition: bool,
+    ) -> Value {
+        serde_json::json!({
+            "path": rel_path,
+            "range": {
+                "start": { "line": src_range.start_line, "character": src_range.start_char },
+                "end":   { "line": src_range.end_line,   "character": src_range.end_char },
+            },
+            "keep_definition": keep_definition,
+        })
+    }
+
+    /// Request body for `/reformat`. scope.kind ∈ {file, region, symbol};
+    /// region/symbol carry a 0-based range, file omits it.
+    fn reformat_body(
+        rel_path: &str,
+        scope: &crate::lsp::backend::ReformatScope,
+        optimize_imports: bool,
+    ) -> Value {
+        use crate::lsp::backend::ReformatScope;
+        let scope_json = match scope {
+            ReformatScope::File => serde_json::json!({ "kind": "file" }),
+            ReformatScope::Region { range } => serde_json::json!({
+                "kind": "region",
+                "range": {
+                    "start": { "line": range.start_line, "character": range.start_char },
+                    "end":   { "line": range.end_line,   "character": range.end_char },
+                },
+            }),
+            ReformatScope::Symbol { range } => serde_json::json!({
+                "kind": "symbol",
+                "range": {
+                    "start": { "line": range.start_line, "character": range.start_char },
+                    "end":   { "line": range.end_line,   "character": range.end_char },
+                },
+            }),
+        };
+        serde_json::json!({
+            "path": rel_path,
+            "scope": scope_json,
+            "optimize_imports": optimize_imports,
+        })
+    }
+
+    /// Parse a `{applied, changed_paths}` reformat response.
+    fn parse_reformat_result(resp: &Value) -> crate::lsp::backend::ReformatResult {
+        let changed_paths = resp
+            .get("changed_paths")
+            .and_then(Value::as_array)
+            .map(|a| a.iter().filter_map(|p| p.as_str().map(String::from)).collect())
+            .unwrap_or_default();
+        crate::lsp::backend::ReformatResult {
+            applied: resp.get("applied").and_then(Value::as_bool).unwrap_or(false),
+            changed_paths,
+        }
+    }
 }
 
 impl LspBackend for JetBrainsHttpBackend {
@@ -635,6 +696,42 @@ impl LspBackend for JetBrainsHttpBackend {
             return Err(Self::error_from_envelope(err));
         }
         Ok(Self::parse_apply_result(&resp))
+    }
+
+    fn inline_preview(
+        &mut self,
+        req: &crate::lsp::backend::InlineQuery,
+    ) -> Result<crate::lsp::backend::RenamePlan, String> {
+        let body = Self::inline_body(&req.rel_path, req.src_range, req.keep_definition);
+        let resp = self.post("/inlinePreview", &body)?;
+        if let Some(err) = resp.get("error") {
+            return Err(Self::error_from_envelope(err));
+        }
+        Ok(Self::parse_rename_plan(&resp))
+    }
+
+    fn inline_apply(
+        &mut self,
+        req: &crate::lsp::backend::InlineApply,
+    ) -> Result<crate::lsp::backend::RenameResult, String> {
+        let body = Self::inline_body(&req.query.rel_path, req.query.src_range, req.query.keep_definition);
+        let resp = self.post("/inlineApply", &body)?;
+        if let Some(err) = resp.get("error") {
+            return Err(Self::error_from_envelope(err));
+        }
+        Ok(Self::parse_apply_result(&resp))
+    }
+
+    fn reformat(
+        &mut self,
+        req: &crate::lsp::backend::ReformatQuery,
+    ) -> Result<crate::lsp::backend::ReformatResult, String> {
+        let body = Self::reformat_body(&req.rel_path, &req.scope, req.optimize_imports);
+        let resp = self.post("/reformat", &body)?;
+        if let Some(err) = resp.get("error") {
+            return Err(Self::error_from_envelope(err));
+        }
+        Ok(Self::parse_reformat_result(&resp))
     }
 
     fn rename(
@@ -1092,5 +1189,43 @@ mod tests {
         assert_eq!(body["range"]["start"]["line"], 2);
         assert_eq!(body["force"], true);
         assert_eq!(body["propagate"], false);
+    }
+
+    #[test]
+    fn inline_body_carries_keep_definition() {
+        let r = crate::lsp::backend::TextRange0Based { start_line: 2, start_char: 4, end_line: 2, end_char: 7 };
+        let body = JetBrainsHttpBackend::inline_body("Calc.kt", r, true);
+        assert_eq!(body["path"], "Calc.kt");
+        assert_eq!(body["keep_definition"], true);
+        assert_eq!(body["range"]["start"]["line"], 2);
+    }
+
+    #[test]
+    fn reformat_body_encodes_scope_variants() {
+        use crate::lsp::backend::{ReformatScope, TextRange0Based};
+        let file = JetBrainsHttpBackend::reformat_body("M.kt", &ReformatScope::File, true);
+        assert_eq!(file["scope"]["kind"], "file");
+        assert_eq!(file["optimize_imports"], true);
+        let region = JetBrainsHttpBackend::reformat_body(
+            "M.kt",
+            &ReformatScope::Region { range: TextRange0Based { start_line: 9, start_char: 0, end_line: 19, end_char: 0 } },
+            false,
+        );
+        assert_eq!(region["scope"]["kind"], "region");
+        assert_eq!(region["scope"]["range"]["start"]["line"], 9);
+        let sym = JetBrainsHttpBackend::reformat_body(
+            "M.kt",
+            &ReformatScope::Symbol { range: TextRange0Based { start_line: 3, start_char: 0, end_line: 5, end_char: 1 } },
+            false,
+        );
+        assert_eq!(sym["scope"]["kind"], "symbol");
+    }
+
+    #[test]
+    fn parse_reformat_result_reads_changed_paths() {
+        let v = serde_json::json!({ "applied": true, "changed_paths": ["M.kt"] });
+        let r = JetBrainsHttpBackend::parse_reformat_result(&v);
+        assert!(r.applied);
+        assert_eq!(r.changed_paths, vec!["M.kt".to_string()]);
     }
 }
