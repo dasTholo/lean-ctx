@@ -178,6 +178,32 @@ data class SafeDeleteApplyRequest(
     val propagate: Boolean = false,
 )
 
+/** Request body for /inlinePreview + /inlineApply. NO force (spec §5.2). */
+data class InlinePreviewRequest(
+    val path: String,
+    val range: TextRangeDTO,
+    val keep_definition: Boolean = false,
+)
+
+data class InlineApplyRequest(
+    val path: String,
+    val range: TextRangeDTO,
+    val keep_definition: Boolean = false,
+)
+
+/** Reformat scope: kind="file" | "region" | "symbol"; range null for file. */
+data class ReformatScopeDTO(
+    val kind: String,
+    val range: TextRangeDTO? = null,
+)
+
+/** Request body for /reformat (Single-Phase, no plan_hash). */
+data class ReformatRequest(
+    val path: String,
+    val scope: ReformatScopeDTO,
+    val optimize_imports: Boolean = false,
+)
+
 object JsonCodec {
     private val gson: Gson = GsonBuilder().disableHtmlEscaping().create()
 
@@ -226,6 +252,18 @@ object JsonCodec {
 
     fun parseSafeDeleteApplyRequest(body: String): SafeDeleteApplyRequest =
         gson.fromJson(body, SafeDeleteApplyRequest::class.java)
+            ?: throw IllegalArgumentException("empty request body")
+
+    fun parseInlinePreviewRequest(body: String): InlinePreviewRequest =
+        gson.fromJson(body, InlinePreviewRequest::class.java)
+            ?: throw IllegalArgumentException("empty request body")
+
+    fun parseInlineApplyRequest(body: String): InlineApplyRequest =
+        gson.fromJson(body, InlineApplyRequest::class.java)
+            ?: throw IllegalArgumentException("empty request body")
+
+    fun parseReformatRequest(body: String): ReformatRequest =
+        gson.fromJson(body, ReformatRequest::class.java)
             ?: throw IllegalArgumentException("empty request body")
 
     fun toJson(value: Any): String = gson.toJson(value)

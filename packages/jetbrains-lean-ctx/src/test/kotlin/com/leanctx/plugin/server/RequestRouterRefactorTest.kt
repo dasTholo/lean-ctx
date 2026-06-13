@@ -250,5 +250,49 @@ class RequestRouterRefactorTest : BasePlatformTestCase() {
         assertTrue(text, text.contains("fun caller"))     // sibling member survives
         assertFalse(text, text.contains("fun target"))    // deleted member is gone
     }
+
+    // ---- Task 9: inline + reformat routes (wiring + error-mapping, no live IDE) ----
+    //
+    // These prove the three new POST routes are WIRED into route() (not 404), parse the
+    // body, and surface a fachlicher Negativfall (missing file → FILE_NOT_FOUND) as a
+    // 200 error envelope — exactly like the move/safe_delete siblings. The real
+    // processor wiring (inline) is exercised against the live IDE in Task 11.
+
+    fun testReformatRouteParsesAndReturns200() {
+        // Missing file → PsiLocator.psiFile throws FILE_NOT_FOUND (BackendException) → 200.
+        val body = """{"path":"Missing.kt","scope":{"kind":"file"},"optimize_imports":false}"""
+        val res = routeOffEdt("POST", "/reformat", body)
+        assertEquals(res.body, 200, res.status)
+        assertTrue(res.body, res.body.contains("FILE_NOT_FOUND") || res.body.contains("\"error\""))
+    }
+
+    fun testInlinePreviewRouteParsesAndReturns200() {
+        val body = """
+            {"path":"Missing.kt",
+             "range":{"start":{"line":0,"character":0},"end":{"line":0,"character":1}},
+             "keep_definition":false}
+        """.trimIndent()
+        val res = routeOffEdt("POST", "/inlinePreview", body)
+        assertEquals(res.body, 200, res.status)
+        assertTrue(res.body, res.body.contains("FILE_NOT_FOUND") || res.body.contains("\"error\""))
+    }
+
+    fun testInlineApplyRouteParsesAndReturns200() {
+        val body = """
+            {"path":"Missing.kt",
+             "range":{"start":{"line":0,"character":0},"end":{"line":0,"character":1}},
+             "keep_definition":false}
+        """.trimIndent()
+        val res = routeOffEdt("POST", "/inlineApply", body)
+        assertEquals(res.body, 200, res.status)
+        assertTrue(res.body, res.body.contains("FILE_NOT_FOUND") || res.body.contains("\"error\""))
+    }
+
+    fun testUnknownInlineRouteIs404() {
+        // Negative control: a typo path is NOT in the route table → 404. Proves the three
+        // new paths above are 200 because they are wired, not because everything returns 200.
+        val res = router().route("POST", "/inlineApplyy", "tok", "{}")
+        assertEquals(404, res.status)
+    }
 }
 

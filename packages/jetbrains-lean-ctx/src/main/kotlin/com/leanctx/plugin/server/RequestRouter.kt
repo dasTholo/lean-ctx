@@ -55,6 +55,9 @@ class RequestRouter(
             if (path == "/moveApply") return dispatchMoveApply(body)
             if (path == "/safeDeletePreview") return dispatchSafeDeletePreview(body)
             if (path == "/safeDeleteApply") return dispatchSafeDeleteApply(body)
+            if (path == "/inlinePreview") return dispatchInlinePreview(body)
+            if (path == "/inlineApply") return dispatchInlineApply(body)
+            if (path == "/reformat") return dispatchReformat(body)
             val handler: ((NavRequest) -> LocationsResponse)? = when (path) {
                 "/references" -> handlers::references
                 "/definition" -> handlers::definition
@@ -212,6 +215,39 @@ class RequestRouter(
         HttpResult(200, JsonCodec.error("INTERNAL", e.message ?: "bad request"))
     } catch (e: Exception) {
         log.warn("safeDeleteApply endpoint failed", e)
+        HttpResult(500, JsonCodec.error("INTERNAL", e.message ?: "internal error"))
+    }
+
+    private fun dispatchInlinePreview(body: String): HttpResult = try {
+        HttpResult(200, JsonCodec.toJson(refactorHandlers.inlinePreview(JsonCodec.parseInlinePreviewRequest(body))))
+    } catch (e: BackendException) {
+        HttpResult(200, JsonCodec.error(e.code, e.message ?: e.code))
+    } catch (e: IllegalArgumentException) {
+        HttpResult(200, JsonCodec.error("INTERNAL", e.message ?: "bad request"))
+    } catch (e: Exception) {
+        log.warn("inlinePreview endpoint failed", e)
+        HttpResult(500, JsonCodec.error("INTERNAL", e.message ?: "internal error"))
+    }
+
+    private fun dispatchInlineApply(body: String): HttpResult = try {
+        HttpResult(200, JsonCodec.toJson(refactorHandlers.inlineApply(JsonCodec.parseInlineApplyRequest(body))))
+    } catch (e: BackendException) {
+        HttpResult(200, JsonCodec.error(e.code, e.message ?: e.code))
+    } catch (e: IllegalArgumentException) {
+        HttpResult(200, JsonCodec.error("INTERNAL", e.message ?: "bad request"))
+    } catch (e: Exception) {
+        log.warn("inlineApply endpoint failed", e)
+        HttpResult(500, JsonCodec.error("INTERNAL", e.message ?: "internal error"))
+    }
+
+    private fun dispatchReformat(body: String): HttpResult = try {
+        HttpResult(200, JsonCodec.toJson(refactorHandlers.reformat(JsonCodec.parseReformatRequest(body))))
+    } catch (e: BackendException) {
+        HttpResult(200, JsonCodec.error(e.code, e.message ?: e.code))
+    } catch (e: IllegalArgumentException) {
+        HttpResult(200, JsonCodec.error("INTERNAL", e.message ?: "bad request"))
+    } catch (e: Exception) {
+        log.warn("reformat endpoint failed", e)
         HttpResult(500, JsonCodec.error("INTERNAL", e.message ?: "internal error"))
     }
 
