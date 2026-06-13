@@ -5,6 +5,7 @@ import com.intellij.openapi.wm.StatusBar
 import com.intellij.openapi.wm.StatusBarWidget
 import com.intellij.openapi.wm.StatusBarWidgetFactory
 import com.intellij.openapi.util.Disposer
+import com.leanctx.plugin.toolwindow.GAIN_TOOL_WINDOW_ID
 import java.util.Timer
 import java.util.TimerTask
 
@@ -58,7 +59,7 @@ class LeanCtxStatusBarWidget(private val project: Project) :
     override fun getClickConsumer(): com.intellij.util.Consumer<java.awt.event.MouseEvent> =
         com.intellij.util.Consumer {
             com.intellij.openapi.wm.ToolWindowManager.getInstance(project)
-                .getToolWindow("LeanCtxGain")?.activate(null)
+                .getToolWindow(GAIN_TOOL_WINDOW_ID)?.activate(null)
         }
 
     override fun dispose() {

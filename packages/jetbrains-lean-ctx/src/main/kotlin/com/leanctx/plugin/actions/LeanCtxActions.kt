@@ -3,6 +3,7 @@ package com.leanctx.plugin.actions
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.leanctx.plugin.BinaryResolver
+import com.leanctx.plugin.toolwindow.GAIN_TOOL_WINDOW_ID
 
 abstract class LeanCtxCommandAction(vararg args: String) : AnAction() {
     private val args: Array<out String> = args
@@ -20,7 +21,7 @@ class GainAction : AnAction() {
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         com.intellij.openapi.wm.ToolWindowManager.getInstance(project)
-            .getToolWindow("LeanCtxGain")?.activate(null)
+            .getToolWindow(GAIN_TOOL_WINDOW_ID)?.activate(null)
     }
 }
 
