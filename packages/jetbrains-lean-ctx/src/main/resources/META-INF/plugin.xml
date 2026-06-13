@@ -23,6 +23,10 @@
                 id="com.leanctx.statusBar"
                 order="after encodingWidget"/>
         <postStartupActivity implementation="com.leanctx.plugin.LeanCtxStartupActivity"/>
+        <toolWindow id="LeanCtxGain"
+                    anchor="bottom"
+                    secondary="true"
+                    factoryClass="com.leanctx.plugin.toolwindow.LeanCtxGainToolWindowFactory"/>
         <registryKey key="leanctx.editor.signal.enabled"
                      defaultValue="true"
                      description="Report the focused editor file path to lean-ctx for context ranking (#500). Path only, never content. Disable to opt out."/>
