@@ -16,7 +16,14 @@ abstract class LeanCtxCommandAction(vararg args: String) : AnAction() {
 
 class SetupAction : LeanCtxCommandAction("setup")
 class DoctorAction : LeanCtxCommandAction("doctor")
-class GainAction : LeanCtxCommandAction("gain")
+class GainAction : AnAction() {
+    override fun actionPerformed(e: AnActionEvent) {
+        val project = e.project ?: return
+        com.intellij.openapi.wm.ToolWindowManager.getInstance(project)
+            .getToolWindow("LeanCtxGain")?.activate(null)
+    }
+}
+
 class DashboardAction : AnAction() {
     override fun actionPerformed(e: AnActionEvent) {
         BinaryResolver.runCommand("dashboard")
