@@ -551,7 +551,7 @@ Change an v1).
 
 | Fremd-Tool                                               | lean-ctx-Ziel                       | Status       |
 |----------------------------------------------------------|-------------------------------------|--------------|
-| `jetbrains.reformat_file`                                | `ctx_refactor action=format`        | v1           |
+| `jetbrains.reformat_file`                                | `ctx_refactor action=reformat`      | v2d (nicht `action=format`) |
 | `jetbrains.get_file_problems` / `run_inspection_kts`     | `ctx_refactor action=inspections`   | v1           |
 | `serena.jet_brains_run_inspections` / `list_inspections` | `ctx_refactor action=inspections`   | v1           |
 | `serena.jet_brains_debug`                                | (kein Code-Intelligence-Äquivalent) | out of scope |
