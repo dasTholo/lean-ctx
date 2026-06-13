@@ -59,7 +59,7 @@ Jede Datei hat eine Default-Strategie. ⚠-Dateien werden bei der Ausführung
 |---|---|---|
 | `ctx_refactor.rs` ⚠ | Branch-Logik behalten **+** main's `shell_outcome: None` im `ToolOutput`-Konstruktor ergänzen | Branch = Feature-Kern (v2c Two-Phase-Stack: rename/move/safe_delete preview+apply, name_path-Edits, neue Schema-Felder); main nur additives Feld (#499). `ToolOutput` erhält via auto-gemergtem `tool_trait.rs` das neue Feld → jeder Konstruktor muss es setzen. |
 | `exec.rs` ⚠ | **Beide** Seiten vereinen | main: `allowlist_must_enforce`/`allowlist_must_enforce_inner` (#413, CLI-`-c`-Pfad erzwingt Allowlist für Agents statt nur zu warnen) + `diagnostics_store::record_from_shell` (#499). Branch: `cargo nextest` als heavy command + `heavy_timeout()`. Disjunkt → beide behalten; Test-Blöcke (`mod exec_tests`) und `exec()`-Einstieg sauber zusammenführen. |
-| `intensive_benchmarks.rs` ⚠ | Inspektion bei Ausführung | Test-Datei; vermutlich beidseitige Append-Konflikte. |
+| `intensive_benchmarks.rs` ⚠ | **main's `total < 12000`** in `bench_total_input_overhead` nehmen (Branch's `11600` verwerfen); übrige main-Hunks auto-merge | Beide ändern dieselbe assert-Zeile (Branch 11000→11600, main 11000→12000). main ist höher + dietisiert (#576) → Headroom. Übrige main-Änderungen (`instruction_decoder_block(false)`, #579-Cues, `essential_instructions`-Keywords) liegen disjunkt → von main. Siehe §3a. |
 | `Cargo.toml` | main komplett übernehmen, nur `version = "3.8.3-jb"` setzen | Branch hat **keine** eigenen dep-Adds; main bringt `base64`/`hkdf`/`chacha20poly1305`/`gethostname` + dev-dep `jsonschema` + example `locomo_bench`. |
 | `Cargo.lock` | main's Lock als Basis; wird beim ersten Gate-`cargo`-Lauf auf `3.8.3-jb` regeneriert | Lockfile ist Derivat. |
 
@@ -123,6 +123,44 @@ main beim Merge sauber gewinnt. `graph_index/mod.rs` ist unkritisch (Branch änd
 dort nur `get_forward_deps`, main's `scan_inner`-Umbau liegt im disjunkten
 Bereich). Definitiver Fang für diese Risikoklasse bleibt der `cargo nextest` +
 `clippy`-Gate (§4).
+
+### §3a — Token-Efficiency-Epic #571 (lean surface #575 + schema diet #576) ↔ Branch
+
+main's EPIC #571 (`351af7b9`, v3.8.3) senkt den Fixkosten-Overhead 13.7K→6.0K
+tok/Session. Zwei Teile berühren den Branch:
+
+**#575 — Lean default tool surface (Verhaltensänderung, kein Code-Konflikt).**
+Default ist jetzt die Lean-Core-Surface: `setup` pinnt **kein** `tool_profile`
+mehr, advertised werden nur die 13 `CORE_TOOL_NAMES` (`ctx_read`, `ctx_search`,
+`ctx_shell`, `shell`, `ctx_tree`, `ctx_edit`, `ctx_session`, `ctx_knowledge`,
+`ctx_overview`, `ctx_graph`, `ctx_call`, `ctx_provider`, `ctx_expand`); alles
+andere bleibt über den force-advertised `ctx_call` (INVOKER) erreichbar.
+`lean-ctx tools lean/reset` verwalten es. Die Maschinerie (`tool_visibility.rs`
+neu, `dynamic_tools.rs`, `tool_profiles.rs`, `profile_cmd.rs`) ist **rein main** —
+der Branch fasst nichts davon an → **kein Code-Konflikt**.
+- **`ctx_refactor` ist NICHT Core** → standardmäßig nicht in `tools/list`, nur via
+  `ctx_call`. Das Projekt pinnt `tool_profile = power` → `explicit_profile=true`
+  → `ProfileAuthoritative` → `ctx_refactor` (mit v2c-Actions) voll sichtbar.
+  Kein Problem für Projekt-/Subagent-Nutzung; **Doku-Punkt** nur für
+  Plugin-Endnutzer ohne gepinntes Profil (dort: `ctx_call` oder `tools reset`).
+
+**#576 — Schema diet ↔ `ctx_refactor`-Bloat (echter Anpassungsbedarf).**
+#576 trimmt Core-Tool-Descriptions/Schemas −36 % und faltet große Action-Enums in
+**pipe-delimited Descriptions**; ein Budget-Regression-Test sichert das ab.
+- Der **harte** Per-Tool-Budget-Test (`tool_visibility::core_tool_surface_stays_within_budget`,
+  300 tok/Tool, 2000 total) prüft **nur die Core-13** → `ctx_refactor` ist nicht
+  betroffen, sprengt ihn **nicht**.
+- Aber der Branch bläht `ctx_refactor` entgegen dem #576-Idiom auf (18-Action-
+  **JSON-enum-Array** + lange Description + 14 Properties). Das drückt gegen die
+  Full-Surface-Budgets `bench_total_input_overhead (<12000)` und
+  `bench_tool_descriptions (<3000)` in `intensive_benchmarks.rs`.
+- **Aktion (bedingt, nach dem Merge gemessen):** Gate-Lauf misst den realen
+  Full-Surface-Overhead. Bleibt er mit Headroom < 12000 → Schema-diet-Angleichung
+  ist **empfohlener Follow-up** (Stil + Headroom). Liegt er nahe/über 12000 →
+  **Pflicht**: `ctx_refactor`-Schema an #576 angleichen (Action-Enum in
+  pipe-delimited Description falten, Property-Descriptions kürzen). Das erledigt
+  zugleich den vom Branch-Autor selbst notierten Code-TODO *„v2c FOLLOW-UP:
+  analyze the real overhead drivers instead of raising this ceiling further"*.
 
 ### Additiv, kein Branch-Impact (nur zur Kenntnis, keine Aktion)
 
