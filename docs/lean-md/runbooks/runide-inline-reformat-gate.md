@@ -65,14 +65,30 @@ Für TOCTOU-Fälle zuerst das passende `inline_preview` ausführen, um den aktue
 | 13 | UNSUPPORTED_LANGUAGE | `{"action":"inline_preview","path":"notes.txt","line":1}` | `UNSUPPORTED_LANGUAGE`, kein Crash |
 | 14 | BACKEND_REQUIRED | IDE schließen, dann `inline_preview` und `reformat` | `BACKEND_REQUIRED` in beiden Fällen |
 
-### Task 7 `runInline` — Verdrahtung bei diesem Gate
+### Task 7 `runInline` — Live-Gate-Befund (2026-06-13)
 
-**Task 7 ist hier verdrahtet**: Der TDD-Befund (headless `UnitTestMode`) zeigt, dass
-`SymbolInliner` unter `runIde` gegen den echten `InlineMethodProcessor` /
-`InlineLocalVariableHandler` läuft. Der headless Plugin-Stub wirft `UNSUPPORTED_LANGUAGE`
-bis die echten Prozessoren am Gate (#1–#4) grün sind. Falls ein Kotlin-Inline-Prozessor
-`compileOnly` nicht auflösbar ist → `UNSUPPORTED_LANGUAGE` dokumentieren (Präzedenz:
-`SymbolMover` Member-Move-Pfad, v2c).
+**Ergebnis: `inline_apply` für Kotlin ist eine dokumentierte Headless-Grenze
+(`UNSUPPORTED_LANGUAGE`)** — Präzedenz `SymbolMover` Member-Move (v2c). Begründung:
+Kotlins Inline-Handler (`KotlinInlineValHandler` / `KotlinInlineNamedFunctionHandler`)
+sind Kotlin-Plugin-**Interna** ohne stabile `compileOnly`-SDK-Fläche **und** öffnen
+einen **modalen Dialog** — ein Modal auf dem HTTP-Handler-Thread deadlockt (runIde-Gate
+#8). Es gibt aktuell keinen dialogfreien Pfad.
+
+- **`inline_preview` + das Rust-Gate** (`plan_hash`/TOCTOU, force-loser Konflikt-Block)
+  sind voll funktionsfähig und am Gate grün (#1/#3/#5/#6).
+- **`inline_apply`** wird sauber abgelehnt (`UNSUPPORTED_LANGUAGE`), kein Teil-Edit,
+  kein Deadlock (#2/#4).
+- **Java-Pfad** (`InlineMethodProcessor`/`InlineLocalHandler`, dialog-unterdrückbar,
+  stabiles Platform-API) ist das Verdrahtungsziel, sobald ein Java-Fixture ergänzt wird
+  (Pseudocode-Kommentar in `SymbolInliner.runInline`).
+
+> **Begleitender Fix (am Gate gefunden):** `SymbolInliner.resolveTarget` traf bei
+> **eingerückten** Deklarationen das falsche Symbol — `findElementAt(line, char 0)`
+> landet auf der Einrückung, `getParentOfType(PsiNamedElement)` greift dann den
+> umschließenden Knoten (lokale Var → Funktion; Methode → Klasse). Fix: führende
+> `PsiWhiteSpace` via `PsiTreeUtil.nextLeaf` überspringen. Die v2c-Geschwister
+> (`SymbolMover`/`SymbolDeleter`) tragen dasselbe latente Muster, exponieren es aber
+> nicht (ihre Testsymbole stehen auf Spalte 0); dort bewusst **nicht** angefasst.
 
 ### Hinweis: OptimizeImportsProcessor — Package-Gotcha
 
@@ -82,6 +98,30 @@ falschen Package mit `ClassNotFoundException` zur Laufzeit fehl — auch wenn de
 compileOnly-kompatibel aussieht. Sicherste Prüfung: `javap -cp <plugin-jar>` auf
 `OptimizeImportsProcessor` verifizieren oder `grep -r OptimizeImports
 ~/.gradle/caches/modules-*/files-*/com.jetbrains.intellij*`.
+
+### Durchlauf 2026-06-13 — Ergebnis
+
+IC-2026.1.3-Sandbox, Fixture wie oben. Befund je Check:
+
+| # | Ergebnis | Notiz |
+|---|---|---|
+| 1 | ✅ | `usages: 2` (`tmp`), `plan_hash` gesetzt — nach `resolveTarget`-Fix korrekt |
+| 2 | ✅ | `UNSUPPORTED_LANGUAGE` (Kotlin-Headless-Grenze; Hash+Konflikt-Gate passiert, dann `runInline`) |
+| 3 | ✅ | `usages: 2` (`calc`, 2 Call-Sites) |
+| 4 | ✅ | `UNSUPPORTED_LANGUAGE` (mit `keep_definition=true`) |
+| 5 | ✅ | Preview trifft `loop` (`usages: 1`, Selbstaufruf); apply → `UNSUPPORTED_LANGUAGE` (subsumiert Rekursions-Refusal) |
+| 6 | ✅ | `CONFLICT: plan_hash mismatch` mit `expected`/`actual` — force-loser TOCTOU-Gate greift **vor** `runInline` |
+| 7 | ✅ | Messy.kt vollständig formatiert (Klammern/Einrückung/Spacing) |
+| 8 | ✅ | Region `applied` |
+| 9 | ✅ | Symbol via `name_path` `applied` (Index: 7 Dateien/12 Symbole) |
+| 10 | ✅ | `optimize_imports` entfernt `ArrayList`/`HashMap` — `OptimizeImportsProcessor`-Package-Gotcha **live bestätigt** |
+| 11 | ✅ | `INVALID_TARGET` (keine Adresse **und** beide Adressen) |
+| 12 | ⏭️ | Nicht live ausgelöst (Steady-State-Index); `INDEXING`-Gate über `inSmartReadAction` (Dumb-Mode) + Unit abgedeckt |
+| 13 | ✅ | `UNSUPPORTED_LANGUAGE: ... for TEXT` (notes.txt) |
+| 14 | ✅ | `BACKEND_REQUIRED` — vor IDE-Start reproduziert (kein Live-Port-File) |
+
+**Fazit:** reformat-Stack + Rust-Gate (TOCTOU/force-los/Adress-Dualität/Fehlerfälle)
+vollständig live verifiziert. `inline_apply` = dokumentierte Kotlin-Headless-Grenze.
 
 ## 4. Teardown
 

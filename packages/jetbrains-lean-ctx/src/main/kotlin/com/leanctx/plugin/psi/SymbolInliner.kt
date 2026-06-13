@@ -10,6 +10,7 @@ import com.intellij.openapi.fileTypes.PlainTextLanguage
 import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiNamedElement
+import com.intellij.psi.PsiWhiteSpace
 import com.intellij.psi.search.searches.ReferencesSearch
 import com.intellij.psi.util.PsiTreeUtil
 import com.leanctx.plugin.dto.ConflictDTO
@@ -92,8 +93,15 @@ class SymbolInliner(private val project: Project) {
             throw BackendException("UNSUPPORTED_LANGUAGE", "inline not supported for ${lang.id}")
         }
         val offset = locator.offsetOf(file, line, character)
-        val at = file.findElementAt(offset)
+        var at = file.findElementAt(offset)
             ?: throw BackendException("NO_SYMBOL", "no element at $line:$character")
+        // Line-addressed targets (char 0) land on the leading indentation; skip it so
+        // getParentOfType resolves the declaration ON the line, not its enclosing
+        // function/class. Indented members were never exercised by the col-0 move/delete
+        // cases (top-level symbols), so this seam first surfaced at the inline live-gate.
+        if (at is PsiWhiteSpace) {
+            at = PsiTreeUtil.nextLeaf(at) ?: at
+        }
         val named = PsiTreeUtil.getParentOfType(at, PsiNamedElement::class.java, false)
         if (named != null && named.name != null) return named
         throw BackendException("NO_SYMBOL", "no named declaration at target range")
@@ -109,22 +117,29 @@ class SymbolInliner(private val project: Project) {
      * time via JetBrains-MCP search_symbol. If a language's inline processor is not
      * resolvable compileOnly (cf. SymbolMover member-move stub), throw UNSUPPORTED_LANGUAGE.
      *
-     * STUB (Task 7): intentionally throws UNSUPPORTED_LANGUAGE — it compiles and never
-     * crashes. The real processor wiring is proven iteratively against the live IDE in
-     * Task 11 (Live-Gate); only the SDK-exact calls are deferred, the entry point is fixed.
+     * Live-Gate outcome (Task 11): inline-apply is a DOCUMENTED HEADLESS LIMITATION for
+     * languages whose inline processors are dialog-bound plugin internals. Kotlin's
+     * KotlinInlineValHandler / KotlinInlineNamedFunctionHandler have no dialog-free
+     * compileOnly SDK surface, and a modal dialog on the HTTP handler thread deadlocks
+     * (runIde gate #8). Preview + the Rust plan_hash/force-less gate are fully functional;
+     * apply is refused cleanly. SymbolMover member-move precedent (v2c). Java's
+     * InlineMethodProcessor / InlineLocalHandler (the commented shape below) is
+     * dialog-suppressable and is the wiring target if/when a Java fixture is added.
      */
     @Suppress("UNUSED_PARAMETER")
     private fun runInline(element: PsiElement, keepDefinition: Boolean) {
-        // Pseudocode shape — fill with the verified IC-2026.1.3 calls (TDD against runIde gate):
+        // Future Java wiring (dialog-free, stable platform API):
         //   when (element) {
-        //     is PsiMethod (or Kotlin function) -> InlineMethodProcessor(project, method, null,
-        //         /*editor*/ null, /*inlineThisOnly*/ false, /*searchInComments*/ false,
+        //     is PsiMethod -> InlineMethodProcessor(project, method, null, /*editor*/ null,
+        //         /*inlineThisOnly*/ false, /*searchInComments*/ false,
         //         /*searchForTextOccurrences*/ false, /*deleteTheDeclaration*/ !keepDefinition).run()
-        //     is local variable -> InlineLocalHandler.invoke(project, /*editor*/ null, local, null)
-        //         then, if (!keepDefinition) the handler removes the decl; else keep.
-        //     else -> throw BackendException("UNSUPPORTED_LANGUAGE", "inline not wired for ${element.language.id}")
+        //     is PsiLocalVariable -> InlineLocalHandler.invoke(project, /*editor*/ null, local, null)
         //   }
-        throw BackendException("UNSUPPORTED_LANGUAGE", "inline not yet wired for ${element.language.id}")
+        throw BackendException(
+            "UNSUPPORTED_LANGUAGE",
+            "inline-apply for ${element.language.id} is a documented headless limitation " +
+                "(dialog-bound IDE inline processors; preview + gating work, apply refused)",
+        )
     }
 
     private fun contextSnippet(el: PsiElement): String? {
