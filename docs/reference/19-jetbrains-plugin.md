@@ -25,20 +25,20 @@ lean-ctx becomes the sole interface for symbols, navigation, and refactoring.
 
 ### 0.1 Delineation Serena ↔ lean-ctx Plugin
 
-| Aspect          | Serena                       | lean-ctx JetBrains plugin                                                |
-| --------------- | ---------------------------- | ------------------------------------------------------------------------ |
-| Hosting         | external Oraios component    | in the lean-ctx repo (`packages/jetbrains-lean-ctx`)                     |
-| Interface       | several separate MCP tools   | bundled under `ctx_refactor` (token compression)                         |
-| Backend model   | running IDE only             | Backing B (IDE) **+** Backing A (rust-analyzer) **+** Headless           |
-| Headless / CI   | no                           | yes — tree-sitter fallback for `symbols_overview` + edits                |
-| Conflict guard  | none                         | BLAKE3 `expected_hash` (edits) / `plan_hash` (refactoring), Rust-central |
-| Security        | —                            | PathJail (project-root validation) + token auth per project              |
-| License         | proprietary (Oraios)         | lean-ctx project license                                                 |
+| Aspect         | Serena                     | lean-ctx JetBrains plugin                                                |
+|----------------|----------------------------|--------------------------------------------------------------------------|
+| Hosting        | external Oraios component  | in the lean-ctx repo (`packages/jetbrains-lean-ctx`)                     |
+| Interface      | several separate MCP tools | bundled under `ctx_refactor` (token compression)                         |
+| Backend model  | running IDE only           | Backing B (IDE) **+** Backing A (rust-analyzer) **+** Headless           |
+| Headless / CI  | no                         | yes — tree-sitter fallback for `symbols_overview` + edits                |
+| Conflict guard | none                       | BLAKE3 `expected_hash` (edits) / `plan_hash` (refactoring), Rust-central |
+| Security       | —                          | PathJail (project-root validation) + token auth per project              |
+| License        | proprietary (Oraios)       | lean-ctx project license                                                 |
 
 ### 0.2 Mapping: Serena concept → `ctx_refactor` action → HTTP endpoint
 
 | Serena concept             | `ctx_refactor` action            | HTTP endpoint                                       |
-| -------------------------- | -------------------------------- | --------------------------------------------------- |
+|----------------------------|----------------------------------|-----------------------------------------------------|
 | `find_referencing_symbols` | `references`                     | `POST /references`                                  |
 | `find_declaration`         | `declaration`                    | `POST /declaration`                                 |
 | (goto definition)          | `definition`                     | `POST /definition`                                  |
@@ -84,12 +84,12 @@ lean-ctx becomes the sole interface for symbols, navigation, and refactoring.
 `select_backend` (`rust/src/lsp/router.rs`) decides per call which path applies.
 The `LspBackend` trait tiers the methods:
 
-| Class                                       | Methods                                                                                                                      | Default without IDE                        |
-| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| **Mandatory** (both backings)              | `open_file`, `references`, `definition`, `implementations`                                                                   | served by Backing A                        |
-| **Default-degrading** (Backing B preferred) | `declaration`, `type_hierarchy`, `inspections`, `list_inspections`                                                           | `Err` — "requires the JetBrains backend"   |
-| **Headless-default** (lossless)            | `symbols_overview` (tree-sitter), `replace_symbol_body`, `insert_before_symbol`, `insert_after_symbol` (`local_range_write`) | works without IDE                          |
-| **`BACKEND_REQUIRED`**                      | refactoring engine (`rename`, `move`, `safe_delete`, `inline`)                                                               | `Err` — no headless usage search possible  |
+| Class                                       | Methods                                                                                                                      | Default without IDE                       |
+|---------------------------------------------|------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------|
+| **Mandatory** (both backings)               | `open_file`, `references`, `definition`, `implementations`                                                                   | served by Backing A                       |
+| **Default-degrading** (Backing B preferred) | `declaration`, `type_hierarchy`, `inspections`, `list_inspections`                                                           | `Err` — "requires the JetBrains backend"  |
+| **Headless-default** (lossless)             | `symbols_overview` (tree-sitter), `replace_symbol_body`, `insert_before_symbol`, `insert_after_symbol` (`local_range_write`) | works without IDE                         |
+| **`BACKEND_REQUIRED`**                      | refactoring engine (`rename`, `move`, `safe_delete`, `inline`)                                                               | `Err` — no headless usage search possible |
 
 ### 1.2 Port discovery & staleness
 
@@ -154,7 +154,7 @@ Conventions for all endpoints:
   navigation/edit endpoints are **0-based** (LSP convention); the `line` fields in
   `type_hierarchy`, `symbols_overview`, and `inspections` responses are **1-based**.
 - Domain negative cases arrive as an envelope `{"error":{"code","message"}}` with
-  HTTP 200 (see §5).
+  HTTP 200 (see §7).
 
 ### 2.1 Navigation (read-only)
 
@@ -276,7 +276,7 @@ ctx_refactor action=insert_after_symbol name_path=Main/run \
   text="fun helper() = 42"
 ```
 
-**HTTP (curl) — wire body carries `path`/`range`/`text` (no hash, see §4.1):**
+**HTTP (curl) — wire body carries `path`/`range`/`text` (no hash, see §5.1):**
 
 ```bash
 curl -s -X POST http://127.0.0.1:$PORT/replaceSymbolBody \
@@ -413,9 +413,90 @@ performs the multi-file replacement. Same engine as `rename`.
 
 ---
 
-## 4. Behavioral Guarantees & Guards
+## 4. Gain Tool Window
 
-### 4.1 BLAKE3 conflict guard (Rust-central)
+A dockable bottom tool window (`LeanCtxGain`) that renders the rich
+`lean-ctx gain` report inside the IDE — a hero Gain Score, four sub-scores, a
+task-category table and a top-files heatmap, plus a footer with the model name
+and refresh age. It is a read-only consumer; the existing status-bar widget keeps
+its cheap local `StatsReader` and merely acts as one of the triggers.
+
+### 4.1 Data flow
+
+`GainService.load()` spawns `lean-ctx gain --json` as a **subprocess** (via the
+shared `BinaryResolver.runCommand`, off the EDT) with a **10-second timeout** —
+shorter than the status bar's 30 s so a hung binary surfaces an error quickly.
+The captured stdout is parsed by `GainCodec.parse` (Gson, `disableHtmlEscaping`),
+which maps the snake_case JSON payload onto typed DTOs via `@SerializedName`. The
+service classifies the outcome into a typed `GainLoadResult`, which the panel maps
+1:1 onto one of four UI states:
+
+| `GainLoadResult` | Trigger                                       | Panel state                                   |
+|------------------|-----------------------------------------------|-----------------------------------------------|
+| `Ok(data)`       | exit 0, parsed, has data                      | data view (hero, sub-scores, tables, footer)  |
+| `Empty`          | exit 0 but `tokens_saved == 0` and 0 commands | "no data captured yet"                        |
+| `BinaryNotFound` | stderr contains `binary not found`            | hint to run `lean-ctx setup` / check PATH     |
+| `Failed(reason)` | exit ≠ 0, timeout (exit `-1`), or parse error | error message + stderr excerpt + retry button |
+
+Choosing a subprocess over the existing HTTP backend is deliberate: that backend
+is **plugin-as-server** (Rust queries the IDE for PSI), which is the wrong
+direction here — the tool window is the consumer and Rust is the producer. The
+subprocess keeps the `GainScore` logic as the single source of truth in Rust;
+Kotlin only renders.
+
+### 4.2 Schema contract (DTO keys)
+
+Because `gain --json` is effectively the tool window's API, its top-level keys are
+pinned against the Kotlin DTOs (`dto/GainData.kt`) by a Rust drift test
+(`e82ddbec`) — a schema change breaks the test instead of silently breaking the
+plugin. Only the rendered subset is parsed; extra payload keys (`model`,
+`energy_wh`, `co2_grams`, `roi`, …) are ignored by Gson.
+
+| JSON key                  | DTO                          | Notes                                                                        |
+|---------------------------|------------------------------|------------------------------------------------------------------------------|
+| `summary`                 | `GainSummaryDTO`             | hero + sub-scores root                                                       |
+| `summary.model.model_key` | `ModelDTO.modelKey`          | footer model name                                                            |
+| `summary.tokens_saved`    | `GainSummaryDTO.tokensSaved` | hero                                                                         |
+| `summary.gain_rate_pct`   | `GainSummaryDTO.gainRatePct` | hero                                                                         |
+| `summary.avoided_usd`     | `GainSummaryDTO.avoidedUsd`  | hero                                                                         |
+| `summary.score`           | `ScoreDTO`                   | `total`, `compression`, `cost_efficiency`, `quality`, `consistency`, `trend` |
+| `tasks[]`                 | `TaskRow`                    | `category`, `commands`, `tokens_saved`, `tool_calls`, `tool_spend_usd`       |
+| `heatmap[]`               | `FileRow`                    | `path`, `access_count`, `tokens_saved`, `compression_pct`                    |
+
+The `tasks` and `heatmap` arrays default to empty when absent (Gson bypasses the
+Kotlin constructor defaults, so `GainCodec.parse` normalizes them post-parse).
+
+### 4.3 Visibility-gated polling
+
+`GainPollController` is **visibility-gated** via
+`ToolWindowManagerListener.stateChanged` + `toolWindow.isVisible`: it loads
+**immediately** when the window becomes visible (no initial delay), then polls on
+a 30 s timer only while the window stays visible. Hiding, detaching or switching
+tabs stops the timer at once — no subprocess is spawned while the window is not
+shown. A manual refresh button in the toolbar forces an immediate reload, and the
+timer is bound to a `Disposable` on the tool-window content for cleanup on close.
+
+### 4.4 Triggers
+
+Two entry points open the window, both referencing the `GAIN_TOOL_WINDOW_ID`
+constant (`"LeanCtxGain"`) rather than a string literal:
+
+- **Status-bar click** — `LeanCtxStatusBarWidget` activates the tool window via
+  its click consumer.
+- **Tools menu → "Gain Report"** — the existing `GainAction` was repurposed to
+  activate the tool window instead of showing a text popup.
+
+### 4.5 Output hygiene
+
+Command output is stripped of ANSI escape sequences before display
+(`util/AnsiText.stripAnsi`, fix `b933e510`) so colored CLI output never leaks raw
+escape codes into the Swing panel or the command-result popups.
+
+---
+
+## 5. Behavioral Guarantees & Guards
+
+### 5.1 BLAKE3 conflict guard (Rust-central)
 
 The `expected_hash` (edits) or `plan_hash` (refactoring) is a **BLAKE3 hex**
 (`crate::core::hasher::hash_hex`) and is checked **exclusively in Rust** — the
@@ -431,7 +512,7 @@ carries only `path`/`range`/`text`).
 
 This prevents blindly overwriting externally modified locations.
 
-### 4.2 Smart mode, language, PathJail
+### 5.2 Smart mode, language, PathJail
 
 - **Smart mode:** If the IDE is in dumb mode (index being built),
   PSI operations return `INDEXING` instead of a partial result (no automatic waiting).
@@ -443,10 +524,10 @@ This prevents blindly overwriting externally modified locations.
   execution — both the name_path/position resolution and every
   `usage`/`changed_path` returned by the plugin.
 
-### 4.3 Idempotency & atomicity
+### 5.3 Idempotency & atomicity
 
 | Operation                                    | Transaction                                    | Idempotent                    |
-| -------------------------------------------- | ---------------------------------------------- | ----------------------------- |
+|----------------------------------------------|------------------------------------------------|-------------------------------|
 | Navigation, structure, inspections           | smart-mode read action                         | yes (index-stable)            |
 | Symbol-body edits                            | `WriteCommandAction` (IDE) / atomic (headless) | protected via `expected_hash` |
 | Refactoring (rename/move/safe_delete/inline) | multi-file `WriteCommandAction`                | protected via `plan_hash`     |
@@ -455,7 +536,7 @@ This prevents blindly overwriting externally modified locations.
 Headless writes are atomic (temp file `.<name>.lean-ctx.tmp.<pid>` + `rename`,
 `local_range_write` in `rust/src/lsp/edit_apply.rs`).
 
-### 4.4 Cache coherence
+### 5.4 Cache coherence
 
 After every write, lean-ctx evicts the file from the cache; the next `ctx_read`
 re-validates via mtime (~13 tokens). The `editedText` of the `EditResponse` allows an
@@ -463,7 +544,7 @@ immediate rewarm; for multi-file refactoring each `changed_path` is mtime-checke
 
 ---
 
-## 5. Authentication & Security
+## 6. Authentication & Security
 
 - **Token per project:** On start the plugin generates a random token
   (`SecureRandom`, hex), stored in the port file. It is checked on every HTTP request
@@ -478,7 +559,7 @@ See also [Journey 13 — Security & Governance](13-security-and-governance.md).
 
 ---
 
-## 6. Error Catalog
+## 7. Error Catalog
 
 **HTTP status:** `200` = success **or** domain negative case (envelope); `401`
 = token missing/wrong; `404` = no route for `METHOD /path`; `500` = a real,
@@ -487,26 +568,26 @@ as `200` + `INTERNAL`.)
 
 **Envelope:** `{"error":{"code":"<CODE>","message":"<text>"}}`
 
-| Code                    | Trigger                                                         | Source                       | Remedy                                                    |
-| ----------------------- | -------------------------------------------------------------- | ---------------------------- | --------------------------------------------------------- |
-| `UNAUTHORIZED`          | token missing/wrong (401)                                      | plugin (`RequestRouter`)     | send a valid `X-LeanCtx-Token`                            |
-| `NOT_FOUND`             | unknown route (404)                                            | plugin                       | check the endpoint path                                   |
-| `FILE_NOT_FOUND`        | file not readable                                              | Rust (`edit_apply`) / plugin | verify the path with `ctx_tree`                           |
-| `POSITION_OUT_OF_RANGE` | line/column past EOF / `end < start`                            | Rust / plugin                | re-resolve the range (`ctx_read`)                         |
-| `CONFLICT`              | `expected_hash`/`plan_hash` mismatch; or conflicts ∧ `!force`  | Rust                         | read fresh, refresh the hash; if needed `force`           |
-| `AMBIGUOUS_SYMBOL`      | `name_path` matches >1 symbol                                  | Rust (`ctx_refactor`)        | qualify (`Class/method`) — note the candidate list        |
-| `NO_SYMBOL`             | `name_path` / target range matches 0 symbols                   | Rust / plugin (refactor)     | correct the name/path                                     |
-| `NO_SYMBOL_AT_POSITION` | no resolvable element/reference at the given `line:character`   | plugin (nav/structure PSI)   | re-resolve the position (`ctx_read`)                      |
-| `INVALID_TARGET`        | unknown move/reformat scope kind, or move destination missing/not a directory | plugin (`SymbolMover`/`SymbolReformatter`) | fix the `target`/`scope` kind or destination path |
-| `INDEXING`             | IDE in dumb mode                                               | plugin (`PsiLocator`)        | wait until indexing is finished, retry                    |
-| `UNSUPPORTED`           | refactoring engine refused the operation (e.g. recursive/non-inlinable symbol) | plugin (`SymbolInliner`)     | pick a different symbol/operation                         |
-| `UNSUPPORTED_LANGUAGE`  | no LSP config / no PSI processor                               | Rust / plugin                | language is not (yet) supported                           |
-| `BACKEND_REQUIRED`      | refactoring without a running IDE                              | Rust (trait default)         | start the IDE with an open project                        |
-| `INTERNAL`              | other error / parse                                            | both                         | check `message`; report a bug if needed                   |
+| Code                    | Trigger                                                                        | Source                                     | Remedy                                             |
+|-------------------------|--------------------------------------------------------------------------------|--------------------------------------------|----------------------------------------------------|
+| `UNAUTHORIZED`          | token missing/wrong (401)                                                      | plugin (`RequestRouter`)                   | send a valid `X-LeanCtx-Token`                     |
+| `NOT_FOUND`             | unknown route (404)                                                            | plugin                                     | check the endpoint path                            |
+| `FILE_NOT_FOUND`        | file not readable                                                              | Rust (`edit_apply`) / plugin               | verify the path with `ctx_tree`                    |
+| `POSITION_OUT_OF_RANGE` | line/column past EOF / `end < start`                                           | Rust / plugin                              | re-resolve the range (`ctx_read`)                  |
+| `CONFLICT`              | `expected_hash`/`plan_hash` mismatch; or conflicts ∧ `!force`                  | Rust                                       | read fresh, refresh the hash; if needed `force`    |
+| `AMBIGUOUS_SYMBOL`      | `name_path` matches >1 symbol                                                  | Rust (`ctx_refactor`)                      | qualify (`Class/method`) — note the candidate list |
+| `NO_SYMBOL`             | `name_path` / target range matches 0 symbols                                   | Rust / plugin (refactor)                   | correct the name/path                              |
+| `NO_SYMBOL_AT_POSITION` | no resolvable element/reference at the given `line:character`                  | plugin (nav/structure PSI)                 | re-resolve the position (`ctx_read`)               |
+| `INVALID_TARGET`        | unknown move/reformat scope kind, or move destination missing/not a directory  | plugin (`SymbolMover`/`SymbolReformatter`) | fix the `target`/`scope` kind or destination path  |
+| `INDEXING`              | IDE in dumb mode                                                               | plugin (`PsiLocator`)                      | wait until indexing is finished, retry             |
+| `UNSUPPORTED`           | refactoring engine refused the operation (e.g. recursive/non-inlinable symbol) | plugin (`SymbolInliner`)                   | pick a different symbol/operation                  |
+| `UNSUPPORTED_LANGUAGE`  | no LSP config / no PSI processor                                               | Rust / plugin                              | language is not (yet) supported                    |
+| `BACKEND_REQUIRED`      | refactoring without a running IDE                                              | Rust (trait default)                       | start the IDE with an open project                 |
+| `INTERNAL`              | other error / parse                                                            | both                                       | check `message`; report a bug if needed            |
 
 ---
 
-## 7. End-to-End Examples
+## 8. End-to-End Examples
 
 **Example 1 — Replace a function body conflict-safely.**
 
@@ -539,7 +620,7 @@ ctx_refactor action=reformat path=src/Main.kt    # apply code style afterward
 
 ---
 
-## 8. Cross-references & Sources
+## 9. Cross-references & Sources
 
 - [Concise agent reference](appendix-jetbrains-plugin-de.md) — tables for quick lookup
 - [Per-IDE quickstarts](appendix-ide-quickstarts.md) — setup for JetBrains IDEs
