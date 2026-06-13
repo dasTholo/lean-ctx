@@ -154,7 +154,7 @@ Conventions for all endpoints:
   navigation/edit endpoints are **0-based** (LSP convention); the `line` fields in
   `type_hierarchy`, `symbols_overview`, and `inspections` responses are **1-based**.
 - Domain negative cases arrive as an envelope `{"error":{"code","message"}}` with
-  HTTP 200 (see §8).
+  HTTP 200 (see §9).
 
 ### 2.1 Navigation (read-only)
 
@@ -276,7 +276,7 @@ ctx_refactor action=insert_after_symbol name_path=Main/run \
   text="fun helper() = 42"
 ```
 
-**HTTP (curl) — wire body carries `path`/`range`/`text` (no hash, see §6.1):**
+**HTTP (curl) — wire body carries `path`/`range`/`text` (no hash, see §7.1):**
 
 ```bash
 curl -s -X POST http://127.0.0.1:$PORT/replaceSymbolBody \
@@ -558,9 +558,91 @@ power-user opt-out with minimal surface is sufficient.
 
 ---
 
-## 6. Behavioral Guarantees & Guards
+## 6. IDE UI Integration
 
-### 6.1 BLAKE3 conflict guard (Rust-central)
+Beyond the headless HTTP surface (§2–§3), the plugin ships three user-facing IDE
+touchpoints: a status-bar widget, a `lean-ctx` Tools menu, and explicit K2
+(Kotlin-2 compiler mode) support. All three are registered in
+`META-INF/plugin.xml`.
+
+### 6.1 Status-bar widget
+
+The widget shows real-time token savings and is registered as a
+`statusBarWidgetFactory` with `id="com.leanctx.statusBar"` and
+`order="after encodingWidget"` — so it sits immediately right of the encoding
+indicator in the IDE status bar.
+
+- **Factory** (`LeanCtxStatusBarFactory`): `isAvailable`/`canBeEnabledOn` both
+  return `true`; `createWidget` produces a `LeanCtxStatusBarWidget`, disposed via
+  `Disposer.dispose`.
+- **Widget** (`LeanCtxStatusBarWidget`, a `StatusBarWidget.TextPresentation`):
+  on `install` it renders once and then arms a daemon `Timer` that re-reads the
+  stats **every 30 s** and calls `statusBar.updateWidget(ID())`.
+- **Text:** `⚡ <N> saved` (e.g. `⚡ 12.4K saved`) when savings are positive,
+  otherwise the idle label `⚡ lean-ctx`. The tooltip reads
+  `lean-ctx: <N> tokens saved · <M> commands`, or `lean-ctx: No stats yet` when
+  no stats file exists.
+- **Click → Gain Tool Window:** the click consumer calls
+  `ToolWindowManager.getInstance(project).getToolWindow(GAIN_TOOL_WINDOW_ID).activate(null)`
+  — the same `GAIN_TOOL_WINDOW_ID` constant documented in §4, so a click on the
+  widget opens the Gain Tool Window.
+
+**Stats source** (`StatsReader` + `LeanCtxStats`): `StatsReader.read()` reads
+`~/.lean-ctx/stats.json` and regex-extracts the long fields
+`total_input_tokens`, `total_output_tokens`, `total_commands` (missing file or
+parse error → `null`, never throws). `tokensSaved` mirrors the Rust source of
+truth `input.saturating_sub(output)`:
+`(totalInputTokens − totalOutputTokens).coerceAtLeast(0)`. `formattedSavings()`
+renders `M`/`K`/raw with a `Locale.US` decimal point. The same reader feeds the
+Gain panel (§4).
+
+### 6.2 Tools menu (`lean-ctx`)
+
+`plugin.xml` registers an action group `LeanCtx.Menu` (`text="lean-ctx"`,
+`popup="true"`) added to the IDE `ToolsMenu` (anchor `last`). It contains four
+actions:
+
+| Action       | ID                | Runs                                                  |
+| ------------ | ----------------- | ----------------------------------------------------- |
+| Setup        | `LeanCtx.Setup`   | `lean-ctx setup` — output in a Messages popup         |
+| Doctor       | `LeanCtx.Doctor`  | `lean-ctx doctor` — output in a Messages popup        |
+| Gain Report  | `LeanCtx.Gain`    | opens the Gain Tool Window (`GAIN_TOOL_WINDOW_ID`)    |
+| Dashboard    | `LeanCtx.Dashboard` | `lean-ctx dashboard` — fire-and-forget              |
+
+- **Base class:** `SetupAction` and `DoctorAction` extend the abstract
+  `LeanCtxCommandAction(vararg args)` (in `actions/LeanCtxActions.kt`). Its
+  `actionPerformed` runs `BinaryResolver.runCommand(*args)`, takes the captured
+  `stdout` (falling back to `stderr` when blank), pipes it through `stripAnsi`,
+  and shows the result in a `Messages.showInfoMessage` popup titled `lean-ctx`.
+  So `SetupAction = LeanCtxCommandAction("setup")` and
+  `DoctorAction = LeanCtxCommandAction("doctor")` differ only by their argument.
+- **`GainAction`** extends `AnAction` directly and only activates the Gain Tool
+  Window via `GAIN_TOOL_WINDOW_ID` — it spawns no binary.
+- **`DashboardAction`** extends `AnAction` directly and calls
+  `BinaryResolver.runCommand("dashboard")` fire-and-forget (no popup; the CLI
+  opens its own dashboard).
+
+**ANSI strip** (`util/AnsiText.kt`, `stripAnsi`): the `lean-ctx` CLI emits ANSI
+CSI escape sequences (colour/SGR) that a Swing `Messages` dialog cannot render.
+`stripAnsi` removes them with the regex `\[[0-9;?]*[ -/]*[@-~]` before the
+captured output is shown, so the Setup/Doctor popups display clean text rather
+than raw escape codes.
+
+### 6.3 K2 mode
+
+The plugin declares K2 support via
+`<supportsKotlinPluginMode supportsK2="true"/>` (under the
+`org.jetbrains.kotlin` extension namespace). K2 is the Kotlin-2 compiler/analysis
+mode of the Kotlin IDE plugin; this declaration tells the IDE the plugin is
+compatible with the K2 frontend, so it remains enabled when the user runs the
+IDE in K2 mode. The plugin's PSI/navigation/refactoring operations (§2–§3) work
+under both the legacy and the K2 Kotlin plugin modes.
+
+---
+
+## 7. Behavioral Guarantees & Guards
+
+### 7.1 BLAKE3 conflict guard (Rust-central)
 
 The `expected_hash` (edits) or `plan_hash` (refactoring) is a **BLAKE3 hex**
 (`crate::core::hasher::hash_hex`) and is checked **exclusively in Rust** — the
@@ -576,7 +658,7 @@ carries only `path`/`range`/`text`).
 
 This prevents blindly overwriting externally modified locations.
 
-### 6.2 Smart mode, language, PathJail
+### 7.2 Smart mode, language, PathJail
 
 - **Smart mode:** If the IDE is in dumb mode (index being built),
   PSI operations return `INDEXING` instead of a partial result (no automatic waiting).
@@ -588,7 +670,7 @@ This prevents blindly overwriting externally modified locations.
   execution — both the name_path/position resolution and every
   `usage`/`changed_path` returned by the plugin.
 
-### 6.3 Idempotency & atomicity
+### 7.3 Idempotency & atomicity
 
 | Operation                                    | Transaction                                    | Idempotent                    |
 |----------------------------------------------|------------------------------------------------|-------------------------------|
@@ -600,7 +682,7 @@ This prevents blindly overwriting externally modified locations.
 Headless writes are atomic (temp file `.<name>.lean-ctx.tmp.<pid>` + `rename`,
 `local_range_write` in `rust/src/lsp/edit_apply.rs`).
 
-### 6.4 Cache coherence
+### 7.4 Cache coherence
 
 After every write, lean-ctx evicts the file from the cache; the next `ctx_read`
 re-validates via mtime (~13 tokens). The `editedText` of the `EditResponse` allows an
@@ -608,7 +690,7 @@ immediate rewarm; for multi-file refactoring each `changed_path` is mtime-checke
 
 ---
 
-## 7. Authentication & Security
+## 8. Authentication & Security
 
 - **Token per project:** On start the plugin generates a random token
   (`SecureRandom`, hex), stored in the port file. It is checked on every HTTP request
@@ -623,7 +705,7 @@ See also [Journey 13 — Security & Governance](13-security-and-governance.md).
 
 ---
 
-## 8. Error Catalog
+## 9. Error Catalog
 
 **HTTP status:** `200` = success **or** domain negative case (envelope); `401`
 = token missing/wrong; `404` = no route for `METHOD /path`; `500` = a real,
@@ -651,7 +733,7 @@ as `200` + `INTERNAL`.)
 
 ---
 
-## 9. End-to-End Examples
+## 10. End-to-End Examples
 
 **Example 1 — Replace a function body conflict-safely.**
 
@@ -684,7 +766,7 @@ ctx_refactor action=reformat path=src/Main.kt    # apply code style afterward
 
 ---
 
-## 10. Cross-references & Sources
+## 11. Cross-references & Sources
 
 - [Concise agent reference](appendix-jetbrains-plugin-de.md) — tables for quick lookup
 - [Per-IDE quickstarts](appendix-ide-quickstarts.md) — setup for JetBrains IDEs
