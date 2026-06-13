@@ -48,7 +48,16 @@ Statusleiste idle).
 ## 3. Gate-Checks
 
 Jeder Check (sofern nicht anders notiert):
-`lean-ctx call ctx_refactor --project-root "$FIX" --json '<args>'`.
+`lean-ctx call ctx_refactor --project-root "$FIX" --json '{"action":"<op>", …}'`.
+
+> **Args-Schema (verbindlich, in der 2026-06-13-Sandbox verifiziert):** Das Feld
+> **`action`** (NICHT `op`) wählt die Operation
+> (`references`/`definition`/`declaration`/`implementations`/`type_hierarchy`/
+> `rename_preview`/`rename_apply`/`reformat`/`inspections`/…; Default ist
+> `references`). Positionsfelder: **`line` ist 1-basiert**, **`column`** (NICHT
+> `character`), 0-basiert. `symbols_overview` (#8) läuft über
+> `lean-ctx call ctx_outline --json '{"path":"…"}'`, die Call-Hierarchie (#10) über
+> `lean-ctx call ctx_callgraph --json '{"symbol":"…"}'`.
 
 | #  | Fall                                       | Soll-Ergebnis                                                                                              |
 |----|--------------------------------------------|-----------------------------------------------------------------------------------------------------------|
@@ -65,16 +74,26 @@ Jeder Check (sofern nicht anders notiert):
 | 10 | `ctx_callgraph` callers/callees (Rust-Fn)  | Call-Hierarchie für `total_area` geliefert (lean-ctx-Pfad)                                                 |
 | 11 | Editor-Signal                              | Fokuswechsel auf Rust-Datei → `editor-signal` emittiert (Pfad-only)                                        |
 
-### Durchlauf <DATUM> — Ergebnis
+### Durchlauf 2026-06-13 — Ergebnis
 
-RustRover-<VERSION>-Sandbox, Fixture wie oben. Befund je Check (✅/⏭️):
+RustRover-2026.1-Sandbox (IU-2026.1.3), Fixture wie oben. Befund je Check (✅/⏭️):
+**12/12 ✅** — Plugin lädt in RustRover ohne `java-capable`-Fehler, alle Rust-Features
+live bestätigt, `type_hierarchy` degradiert wortgenau.
 
 | #  | Ergebnis | Notiz |
 |----|----------|-------|
-| 0  |          |       |
-| 1  |          |       |
-| …  |          |       |
-| 11 |          |       |
+| 0  | ✅ | `leanctx-jvm.xml` per K2-Gate nicht geladen; kein `java-capable`/`NoClassDefFoundError`; Core lädt sprach-neutral |
+| 1  | ✅ | Status-Bar `⚡ lean-ctx`, Gain-Tool-Window, `Tools → lean-ctx`-Menü vorhanden |
+| 2  | ✅ | `references` auf `area` → Call-Site `s.area()` (`main.rs:4:26`) |
+| 3  | ✅ | `definition`/`declaration` auf `total_area`-Call → Definition `main.rs:3` |
+| 4  | ✅ | `implementations` auf `trait Shape` → `Circle` (`shapes.rs:7`) + `Square` (`shapes.rs:14`) |
+| 5  | ✅ | `rename_preview` `Shape→Figure`: 4 usages / 2 files + `plan_hash` (Two-Phase) |
+| 6  | ✅ | `reformat src/messy.rs` → sauber formatiert (CodeStyleManager, Rust) |
+| 7  | ✅ | `inspections mode=run` → sauber leer, kein Crash |
+| 8  | ✅ | `symbols_overview` via `ctx_outline` (tree-sitter): Shape/Circle/Square/area, kein IDE-PSI |
+| 9  | ✅ | `type_hierarchy` → `UNSUPPORTED_LANGUAGE: type_hierarchy requires a JVM-capable IDE` (wortgenau, kein Crash) |
+| 10 | ✅ | `ctx_callgraph` `total_area` → 2 callers (`main` L10, L11) |
+| 11 | ✅ | Fokuswechsel → `👁 Editor focus: messy.rs` im Dashboard (path-only) |
 
 ## 4. Teardown
 

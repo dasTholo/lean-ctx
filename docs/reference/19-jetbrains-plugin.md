@@ -244,6 +244,12 @@ For Rust/Python the IDE-PSI variant of `type_hierarchy` and Kotlin `symbols_over
 is not registered; the Rust backend serves the equivalent via `ctx_outline`
 (tree-sitter), `implementations` (rust-analyzer / Backing A) and `ctx_callgraph`.
 
+> **Live-verified (2026-06-13, RustRover-2026.1 / IU-2026.1.3 sandbox).** All 12 cross-IDE
+> gate checks passed: the Core loads with no `java-capable` error (`leanctx-jvm.xml` skipped
+> via the K2 gate), every Rust feature in the matrix works, and `type_hierarchy` degrades
+> with the exact `UNSUPPORTED_LANGUAGE: type_hierarchy requires a JVM-capable IDE` envelope.
+> Runbook + result table: `docs/lean-md/runbooks/runrustrover-cross-ide-gate.md`.
+
 ### 2.3 Quality — Inspections
 
 **Action:** `inspections` (`mode=run|list`)
