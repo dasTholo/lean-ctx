@@ -23,6 +23,9 @@
                 id="com.leanctx.statusBar"
                 order="after encodingWidget"/>
         <postStartupActivity implementation="com.leanctx.plugin.LeanCtxStartupActivity"/>
+        <registryKey key="leanctx.editor.signal.enabled"
+                     defaultValue="true"
+                     description="Report the focused editor file path to lean-ctx for context ranking (#500). Path only, never content. Disable to opt out."/>
     </extensions>
 
     <extensions defaultExtensionNs="org.jetbrains.kotlin">
