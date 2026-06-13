@@ -162,6 +162,38 @@ der Branch fasst nichts davon an → **kein Code-Konflikt**.
   zugleich den vom Branch-Autor selbst notierten Code-TODO *„v2c FOLLOW-UP:
   analyze the real overhead drivers instead of raising this ceiling further"*.
 
+### §3b — Invariante: Funktionserhalt unter Schema-diet + Lean-Surface (HARTE PLAN-ANFORDERUNG)
+
+Schema-diet + Lean-Default dürfen **nie** dazu führen, dass Agent oder MCP-Server
+die Übersicht verlieren, was `ctx_refactor` (oder ein anderes Tool) kann. Konkret:
+
+- **Schema-diet = Format-Umstellung, kein Informationsverlust.** Die Action-Liste
+  wandert vom `"enum": [...]`-Array in die `"description"` als **pipe-delimited
+  Text** — Vorbild `registered/ctx_graph.rs` (main):
+  `"action": { "type": "string", "description": "build|related|symbol|…" }`.
+  **Keine** Action und **kein** Param wird gestrichen; alle 18 v2c-Actions
+  (`rename|rename_preview|rename_apply|move_preview|move_apply|safe_delete_preview|
+  safe_delete_apply|references|definition|implementations|declaration|
+  type_hierarchy|symbols_overview|inspections|replace_symbol_body|
+  insert_before_symbol|insert_after_symbol`) bleiben in der Description.
+- **Verfügbarkeit ≠ Sichtbarkeit.** `ctx_refactor` bleibt in der Registry
+  registriert. Im Lean-Default (nicht Core) ist es zwar nicht in `tools/list`,
+  aber über den force-advertised `ctx_call` (INVOKER) und `discover_tools` /
+  `ctx_tools find` voll erreichbar. Unter `tool_profile = power` (Projekt) ohnehin
+  voll advertised.
+- **Vier Übersichts-Quellen, die der Plan grün halten muss:**
+  1. Tool-Description (gefaltete Action-Liste) — sichtbar via `tools/list`
+     (power) bzw. `ctx_call`-Schema.
+  2. `ctx_call` + `discover_tools`/`ctx_tools find` — Discovery für nicht-Core.
+  3. `docs/reference/appendix-mcp-tools.md` + `generated/mcp-tools.md` — die
+     authoritative Tool-Referenz für Agents/Subagents (Projekt-Regel). **Muss die
+     v2c-Actions vollständig führen → `gen_docs` neu + Drift-Test grün (Gate §4).**
+  4. #579 on-demand `LEAN-CTX.md` — „auf Abruf"-Detaildoc.
+- **Plan-Anforderung:** Jede Schema-Änderung an `ctx_refactor` folgt dem
+  ctx_graph-Idiom; der Drift-Test (Registry ↔ generierte Doku) ist Pflicht-Gate;
+  ein Smoke-Check bestätigt, dass `discover_tools("refactor")` /
+  `ctx_call name=ctx_refactor` die volle Action-Liste liefert.
+
 ### Additiv, kein Branch-Impact (nur zur Kenntnis, keine Aktion)
 
 Context OS 12.x (Personas, Extension-Registry, WASM-Runtime, Python/TS/Rust
@@ -213,6 +245,13 @@ fehl. Expliziter Gate-Punkt.
   Drift-/Conformance-Tests.
 - main's branch-relevante Verbesserungen (#413, #499) vollständig übernommen.
 - JetBrains-Plugin-Funktionalität (v2c Two-Phase-Stack) unverändert erhalten.
+- **Schema-diet + Lean-Surface (#576/#575) eingehalten — ohne Funktionsverlust
+  (§3b):** `ctx_refactor` folgt dem ctx_graph-Idiom (Action-Enum als
+  pipe-delimited Description, keine Action/Param gestrichen); `bench_total_input_overhead`
+  < 12000 grün; `discover_tools("refactor")` + `ctx_call name=ctx_refactor`
+  liefern die volle Action-Liste; `appendix-mcp-tools.md` + `generated/mcp-tools.md`
+  führen alle v2c-Actions (Drift-Test grün). Agent + MCP-Server behalten die volle
+  Refactoring-Übersicht.
 - Build-Befehl für den manuellen Release-Build des Nutzers dokumentiert geliefert.
 
 ## 6. Nicht-Ziele
