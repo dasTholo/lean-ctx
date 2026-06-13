@@ -15,7 +15,15 @@
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
-    <depends>org.jetbrains.kotlin</depends>
+    <depends optional="true" config-file="leanctx-jvm.xml">org.jetbrains.kotlin</depends>
+
+    <extensionPoints>
+        <!-- Project-level SPI for JVM-PSI structure ops; implementation registered only
+          in leanctx-jvm.xml. Qualified name: com.leanctx.plugin.structureProvider. -->
+        <extensionPoint name="structureProvider"
+                        interface="com.leanctx.plugin.spi.StructureProvider"
+                        area="IDEA_PROJECT"/>
+    </extensionPoints>
 
     <extensions defaultExtensionNs="com.intellij">
         <statusBarWidgetFactory
@@ -30,10 +38,6 @@
         <registryKey key="leanctx.editor.signal.enabled"
                      defaultValue="true"
                      description="Report the focused editor file path to lean-ctx for context ranking (#500). Path only, never content. Disable to opt out."/>
-    </extensions>
-
-    <extensions defaultExtensionNs="org.jetbrains.kotlin">
-        <supportsKotlinPluginMode supportsK2="true"/>
     </extensions>
 
     <actions>

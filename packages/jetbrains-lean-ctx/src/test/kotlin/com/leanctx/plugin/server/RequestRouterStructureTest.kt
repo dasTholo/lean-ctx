@@ -4,10 +4,24 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.WriteAction
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import com.leanctx.plugin.endpoint.StructureHandlers
+import com.leanctx.plugin.spi.StructureProvider
 import java.nio.file.Files
 import java.nio.file.Paths
 
 class RequestRouterStructureTest : BasePlatformTestCase() {
+
+    // In production the StructureProvider implementation is contributed by the optional
+    // leanctx-jvm.xml descriptor (loaded only when org.jetbrains.kotlin is present). The
+    // IntelliJ light-test fixture (BasePlatformTestCase) does not merge optional
+    // <depends config-file="..."> descriptors, so the project-level EP would be empty here.
+    // Register the same StructureHandlers impl into the same EP for the test lifetime to
+    // exercise the real RequestRouter -> StructureProvider.forProject(project) wiring.
+    override fun setUp() {
+        super.setUp()
+        StructureProvider.EP.getPoint(project)
+            .registerExtension(StructureHandlers(project), testRootDisposable)
+    }
 
     private fun router() = RequestRouter("tok", "IC-2026.1", project.name, project)
 
