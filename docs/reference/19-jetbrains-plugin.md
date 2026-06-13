@@ -154,7 +154,7 @@ Conventions for all endpoints:
   navigation/edit endpoints are **0-based** (LSP convention); the `line` fields in
   `type_hierarchy`, `symbols_overview`, and `inspections` responses are **1-based**.
 - Domain negative cases arrive as an envelope `{"error":{"code","message"}}` with
-  HTTP 200 (see §7).
+  HTTP 200 (see §8).
 
 ### 2.1 Navigation (read-only)
 
@@ -276,7 +276,7 @@ ctx_refactor action=insert_after_symbol name_path=Main/run \
   text="fun helper() = 42"
 ```
 
-**HTTP (curl) — wire body carries `path`/`range`/`text` (no hash, see §5.1):**
+**HTTP (curl) — wire body carries `path`/`range`/`text` (no hash, see §6.1):**
 
 ```bash
 curl -s -X POST http://127.0.0.1:$PORT/replaceSymbolBody \
@@ -494,9 +494,73 @@ escape codes into the Swing panel or the command-result popups.
 
 ---
 
-## 5. Behavioral Guarantees & Guards
+## 5. Editor-Focus Reporter
 
-### 5.1 BLAKE3 conflict guard (Rust-central)
+The plugin reports the path of the focused editor file to lean-ctx so the
+context engine can rank it up. This is the **JetBrains producer side of #500
+(editor focus)** — 1:1 parity with the VS Code producer
+(`vscode-extension/src/editor-signal.ts`). Until this was added, JetBrains users
+got none of the #500 ranking boost; the reporter
+(`EditorFocusReporter`, wired in `LeanCtxStartupActivity`) closes that gap.
+
+**Privacy — path only, never content.** The signal carries nothing but the
+absolute file path. The file's contents are never read, hashed, or transmitted.
+Only real, local files **inside the current project** are reported (no
+scratch/decompiled/library buffers, no directories).
+
+### 5.1 Mechanism (producer side)
+
+The reporter mirrors the focused-file path into lean-ctx's existing #500 ingress;
+it does **not** introduce a new signal format or daemon:
+
+- **Trigger:** a focused-file change (`FileEditorManagerListener.selectionChanged`)
+  and the initially open file at project start both call
+  `EditorFocusReporter.onFileFocused(file)`.
+- **Filter:** the file must be `isInLocalFileSystem`, not a directory, and sit
+  under `project.basePath` (segment-boundary check, so `/foo/bar2` is not treated
+  as under `/foo/bar`). Anything else is dropped.
+- **Dedup + debounce:** the same path back-to-back is skipped (`lastSent`); a 2 s
+  pooled-thread `Alarm` (`DEBOUNCE_MS = 2_000`, identical to VS Code) collapses
+  rapid tab hops to a single emission.
+- **Emit:** fire-and-forget on a pooled thread (never the EDT) — it shells out to
+  the resolved binary as `lean-ctx editor-signal --file <absPath>` (via
+  `BinaryResolver`). The Rust side (`core::editor_signal::record_focus`) is the
+  **single source of truth** for the on-disk format
+  (`~/.lean-ctx/editor_signal.json`, `recent_files` ring, path normalization,
+  freshness) — the plugin only passes the path, so there is no Kotlin drift of
+  the signal format. The consumer (`apply_boost` in `ctx_preload`) then lifts
+  matching ranking candidates.
+
+A missing or too-old binary (no `editor-signal` subcommand) and any spawn/IO error
+are swallowed silently — a lost signal is harmless, the next focus change resends.
+The debounce `Alarm` is bound to a project-scoped `Disposable`, so it is cancelled
+on project close (no leak, no spawn after close).
+
+> **Known limit (inherited from #500, not a JetBrains regression):**
+> `editor_signal.json` is a single **global** file, so multiple IDE/editor windows
+> are last-write-wins. This is identical to VS Code's behavior; per-window
+> correctness would be an editor-agnostic #500 core change and is out of scope.
+
+### 5.2 Opt-out (registry key)
+
+The reporter is **on by default**. It can be disabled via the built-in IntelliJ
+registry key `leanctx.editor.signal.enabled` (default **`true`**), evaluated
+producer-side on every focus event:
+
+| Registry key                    | Default | Effect when `false`                                    |
+|---------------------------------|---------|--------------------------------------------------------|
+| `leanctx.editor.signal.enabled` | `true`  | no signal is emitted on focus change (no binary spawn) |
+
+Toggling the key takes effect on the next focus change — no IDE restart needed. A
+registry key (rather than a visible settings page) was chosen deliberately: the
+signal is a path-only ranking hint and the plugin has no other config layer, so a
+power-user opt-out with minimal surface is sufficient.
+
+---
+
+## 6. Behavioral Guarantees & Guards
+
+### 6.1 BLAKE3 conflict guard (Rust-central)
 
 The `expected_hash` (edits) or `plan_hash` (refactoring) is a **BLAKE3 hex**
 (`crate::core::hasher::hash_hex`) and is checked **exclusively in Rust** — the
@@ -512,7 +576,7 @@ carries only `path`/`range`/`text`).
 
 This prevents blindly overwriting externally modified locations.
 
-### 5.2 Smart mode, language, PathJail
+### 6.2 Smart mode, language, PathJail
 
 - **Smart mode:** If the IDE is in dumb mode (index being built),
   PSI operations return `INDEXING` instead of a partial result (no automatic waiting).
@@ -524,7 +588,7 @@ This prevents blindly overwriting externally modified locations.
   execution — both the name_path/position resolution and every
   `usage`/`changed_path` returned by the plugin.
 
-### 5.3 Idempotency & atomicity
+### 6.3 Idempotency & atomicity
 
 | Operation                                    | Transaction                                    | Idempotent                    |
 |----------------------------------------------|------------------------------------------------|-------------------------------|
@@ -536,7 +600,7 @@ This prevents blindly overwriting externally modified locations.
 Headless writes are atomic (temp file `.<name>.lean-ctx.tmp.<pid>` + `rename`,
 `local_range_write` in `rust/src/lsp/edit_apply.rs`).
 
-### 5.4 Cache coherence
+### 6.4 Cache coherence
 
 After every write, lean-ctx evicts the file from the cache; the next `ctx_read`
 re-validates via mtime (~13 tokens). The `editedText` of the `EditResponse` allows an
@@ -544,7 +608,7 @@ immediate rewarm; for multi-file refactoring each `changed_path` is mtime-checke
 
 ---
 
-## 6. Authentication & Security
+## 7. Authentication & Security
 
 - **Token per project:** On start the plugin generates a random token
   (`SecureRandom`, hex), stored in the port file. It is checked on every HTTP request
@@ -559,7 +623,7 @@ See also [Journey 13 — Security & Governance](13-security-and-governance.md).
 
 ---
 
-## 7. Error Catalog
+## 8. Error Catalog
 
 **HTTP status:** `200` = success **or** domain negative case (envelope); `401`
 = token missing/wrong; `404` = no route for `METHOD /path`; `500` = a real,
@@ -587,7 +651,7 @@ as `200` + `INTERNAL`.)
 
 ---
 
-## 8. End-to-End Examples
+## 9. End-to-End Examples
 
 **Example 1 — Replace a function body conflict-safely.**
 
@@ -620,7 +684,7 @@ ctx_refactor action=reformat path=src/Main.kt    # apply code style afterward
 
 ---
 
-## 9. Cross-references & Sources
+## 10. Cross-references & Sources
 
 - [Concise agent reference](appendix-jetbrains-plugin-de.md) — tables for quick lookup
 - [Per-IDE quickstarts](appendix-ide-quickstarts.md) — setup for JetBrains IDEs
