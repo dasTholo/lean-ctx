@@ -69,7 +69,7 @@ class SymbolMoverTest : BasePlatformTestCase() {
     }
 
     fun testResolvesIndentedMemberNotEnclosingClass() {
-        writeAndIndex("Sample.kt", fixture)   // use writeAndIndex, NOT writeFile
+        writeAndIndex("Sample.kt", fixture)
         // preview() uses only range.start to resolveSource; target is required but unused.
         val req = MovePreviewRequest(
             path = "Sample.kt",

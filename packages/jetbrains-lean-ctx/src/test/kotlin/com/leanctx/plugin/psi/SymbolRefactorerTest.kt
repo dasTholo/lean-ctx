@@ -68,7 +68,7 @@ class SymbolRefactorerTest : BasePlatformTestCase() {
     }
 
     fun testResolvesIndentedMemberNotEnclosingClass() {
-        writeAndIndex("Sample.kt", fixture)   // use writeAndIndex, NOT writeFile
+        writeAndIndex("Sample.kt", fixture)
         val req = RenamePreviewRequest(
             path = "Sample.kt",
             range = TextRangeDTO(PositionDTO(3, 0), PositionDTO(3, 0)),
