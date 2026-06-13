@@ -47,6 +47,34 @@ Arbeitet auf `feat-jetbrains-plugin`, committet dort.
   Die bestehende Doku deckt diese Endpunkte bereits ab — beim Übersetzen
   **verlustfrei** erhalten und gegen den aktuellen Code verifizieren; nichts
   weglassen.
+- **Bestands-Code-Verifikation (verbindlich — gilt für das GANZE Dokument).**
+  Übersetzen allein genügt nicht: **jede** überprüfbare Behauptung in §0–8
+  wird gegen den aktuellen Code geprüft und bei Abweichung korrigiert. Die
+  bestehende Doku ist potenziell veraltet (Beleg: der `v2a`-Temp-Suffix in
+  Z. 467 entspricht nicht mehr dem Code). Verifikationsachsen + Code-Anker:
+  - **Endpunkt-Routen / Action→Endpoint-Mapping** (§0, §2, §3) →
+    `…/plugin/server/RequestRouter.kt` + `…/plugin/endpoint/*.kt` + das
+    `ctx_refactor`-Action-Schema (`rust/src/tools/registered/`).
+  - **Wire-DTOs: Feldnamen, Typen, 0-/1-basierte Koordinaten** (§2) →
+    `…/plugin/dto/Wire.kt`.
+  - **Backend-Klassen-Tabelle (Mandatory / Default-degrading / Headless /
+    BACKEND_REQUIRED) + Methodennamen + Dateipfade** (§1.1) →
+    `rust/src/lsp/backend.rs` (`LspBackend`-Trait), `rust/src/lsp/router.rs`
+    (`select_backend`).
+  - **Port-Datei-Felder + 3-Stufen-Discovery + Pfade** (§1.2) →
+    `rust/src/lsp/port_discovery.rs`, `…/plugin/server/PortFile*.kt`,
+    `LeanCtxPaths.kt`.
+  - **Guards** (§4: BLAKE3-Conflict, Smart-Mode, PathJail, Idempotenz,
+    Cache-Kohärenz) → zugehörige Rust-/Kotlin-Implementierung.
+  - **Fehler-Katalog: Error-Codes + Messages** (§5/§6) → `BackendException.kt`
+    + Rust-Error-Envelope-Quelle.
+  - **E2E-Beispiele** (§7): curl-Pfade, Header, Bodies, Responses gegen die
+    realen Routen/DTOs plausibilisieren.
+  - **Querverweise/Quellen** (§8): referenzierte Dateipfade existieren
+    (`git ls-files`).
+  Methodik: pro Sektion die zitierten Routen/Felder/Pfade/Codes via
+  `ctx_search`/`ctx_read` am Anker gegenprüfen; Treffer = bestätigt, Miss =
+  korrigieren. Befunde + Korrekturen in der Gap-Liste protokollieren.
 - **HARTE REGEL — keine internen Versions-Codenamen in der publizierten Doku.**
   Die Bezeichnungen `v1`, `v2a`, `v2b`, `v2c`, `v2d` (und interne
   „Phase-N"-Meilensteine) dürfen NICHT im Text auftauchen — nur funktionale

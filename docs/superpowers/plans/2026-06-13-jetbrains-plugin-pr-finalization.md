@@ -95,6 +95,59 @@ git commit -m "docs(jetbrains): translate reference journey 19 to English (secti
 
 ---
 
+### Task A2b: Bestands-Code-Verifikation (ganzes Dokument gegen Code)
+
+> Verbindlich. Übersetzen ≠ verifizieren. Jede überprüfbare Behauptung in §0–8 wird gegen den Code geprüft und bei Abweichung in `19-jetbrains-plugin.md` korrigiert. Befunde in `_inventory-jetbrains.md` protokollieren.
+
+**Files:**
+- Modify: `docs/reference/19-jetbrains-plugin.md` (Korrekturen)
+- Modify: `docs/superpowers/plans/_inventory-jetbrains.md` (Befund-Protokoll)
+- Lesen (Anker): `packages/jetbrains-lean-ctx/src/main/kotlin/com/leanctx/plugin/server/RequestRouter.kt`, `…/endpoint/*.kt`, `…/dto/Wire.kt`; `rust/src/lsp/router.rs`, `rust/src/lsp/backend.rs`, `rust/src/lsp/port_discovery.rs`; `…/plugin/server/BackendException.kt`, `…/plugin/server/PortFileReader.kt`, `LeanCtxPaths.kt`
+
+- [ ] **Step 1: Endpunkt-Routen + Action→Endpoint-Mapping (§0, §2, §3)**
+
+```
+ctx_search pattern="\"/[a-zA-Z]+\"|path ==|when *\\(" path="packages/jetbrains-lean-ctx/src/main/kotlin/com/leanctx/plugin/server/RequestRouter.kt"
+```
+Jede in §0/§2/§3 genannte Route (`/references`, `/definition`, `/implementations`, `/declaration`, `/renamePreview`, `/renameApply`, `/reformat`, `/movePreview`, `/moveApply`, `/safeDeletePreview`, `/safeDeleteApply`, `/inlinePreview`, `/inlineApply`, `/health`, Symbol-Body-Routen) muss im Router existieren. Fehlende/zusätzliche Routen → Doku korrigieren.
+
+- [ ] **Step 2: Wire-DTOs + Koordinaten-Konventionen (§2)**
+
+`ctx_read mode="signatures" …/dto/Wire.kt`. Feldnamen + 0-/1-basierte Konventionen aus §2 (Zeile ~164–167) gegen die DTOs abgleichen. Abweichende Feldnamen/Typen → korrigieren.
+
+- [ ] **Step 3: Backend-Klassen-Tabelle (§1.1)**
+
+`ctx_read mode="signatures" rust/src/lsp/backend.rs` (LspBackend-Trait) + `ctx_search pattern="select_backend|BACKEND_REQUIRED|Mandatory|degrad" path="rust/src/lsp/router.rs"`. Die Tabelle (Zeile ~103–106) muss die echten Trait-Methoden + Klassifizierung widerspiegeln. Methoden, die hinzukamen/wegfielen → Tabelle anpassen.
+
+- [ ] **Step 4: Port-Discovery + Dateipfade (§1.2)**
+
+`ctx_read mode="signatures" rust/src/lsp/port_discovery.rs` + `…/plugin/server/PortFileReader.kt` + `LeanCtxPaths.kt`. Port-Datei-Felder (`port`/`token`/`pid`/`projectRoot`/`ideVersion`/`startedAt`) + 3-Stufen-Discovery (§115–122) gegen Code prüfen. Genannte Dateipfade in §1.1/§1.2 via `git ls-files` bestätigen.
+
+- [ ] **Step 5: Guards (§4)**
+
+Für jeden Guard (BLAKE3-Conflict, Smart-Mode/INDEXING, PathJail, Idempotenz/Atomarität, Cache-Kohärenz) den implementierenden Code via `ctx_search` lokalisieren und die Behauptung plausibilisieren. Speziell §467: temp-Write-Muster gegen `rust/src/cloud_client.rs:64` / `local_range_write` (→ generisch, kein `v2a`).
+
+- [ ] **Step 6: Fehler-Katalog (§5/§6)**
+
+`ctx_read …/plugin/server/BackendException.kt` + `ctx_search pattern="code.*=|ErrorCode|INDEXING|NO_SYMBOL|UNSUPPORTED_LANGUAGE|INVALID_TARGET|BACKEND_REQUIRED" path="packages/jetbrains-lean-ctx/src/main/kotlin"`. Jeder in §6 gelistete Error-Code muss im Code existieren; im Code existierende Codes, die fehlen → ergänzen.
+
+- [ ] **Step 7: E2E-Beispiele (§7) + Querverweise (§8)**
+
+Curl-Beispiele: Route/Header/Body-Felder gegen Step 1+2 plausibilisieren. §8-Quellen: alle referenzierten Dateipfade via `git ls-files` prüfen; tote Pfade korrigieren.
+
+- [ ] **Step 8: Befund-Protokoll + Verifikation**
+
+In `_inventory-jetbrains.md` je Achse `OK | korrigiert: <was>` festhalten. Verifikation: keine Achse offen; alle Korrekturen in `19-jetbrains-plugin.md` eingearbeitet.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add docs/reference/19-jetbrains-plugin.md docs/superpowers/plans/_inventory-jetbrains.md
+git commit -m "docs(jetbrains): verify journey 19 claims against current code, fix drift"
+```
+
+---
+
 ### Task A3: Neue Sektion „Gain Tool Window"
 
 **Files:**
