@@ -5,6 +5,8 @@ import com.intellij.openapi.application.WriteAction
 import com.intellij.openapi.module.ModuleManager
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VfsUtil
+import com.intellij.testFramework.IndexingTestUtil
+import com.intellij.testFramework.LightProjectDescriptor
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.PsiTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
@@ -17,6 +19,15 @@ import java.nio.file.Paths
 import java.util.concurrent.TimeUnit
 
 class SymbolMoverTest : BasePlatformTestCase() {
+
+    // Class-private light project (fresh descriptor instance, not the shared default) so the
+    // PsiTestUtil.addSourceRoot mutation in writeAndIndex — and the asynchronous dumb-mode
+    // reindex it triggers — cannot leak into later-running classes (e.g. RequestRouter*Test),
+    // which would otherwise fail fast with INDEXING in PsiLocator. The isolated project is
+    // disposed at teardown, so its dumb/index state never reaches another class's project.
+    private val isolatedDescriptor = LightProjectDescriptor()
+
+    override fun getProjectDescriptor(): LightProjectDescriptor = isolatedDescriptor
 
     private val fixture = """
         package p
@@ -39,7 +50,10 @@ class SymbolMoverTest : BasePlatformTestCase() {
     }
 
     // Write the file to disk (so LocalFileSystem.findFileByPath succeeds in PsiLocator) and
-    // register its parent dir as a source root (so ReferencesSearch scope includes it).
+    // register its parent dir as a source root (so ReferencesSearch scope includes it). The
+    // module belongs to this class's isolated project, so the root mutation is not cleaned up
+    // (the project is disposed at teardown). We still settle indexing so the resolve below runs
+    // in smart mode.
     private fun writeAndIndex(rel: String, content: String) {
         val p = Paths.get(project.basePath!!, rel)
         Files.createDirectories(p.parent)
@@ -51,6 +65,7 @@ class SymbolMoverTest : BasePlatformTestCase() {
             val module = ModuleManager.getInstance(project).modules.first()
             PsiTestUtil.addSourceRoot(module, vFile.parent)
         }
+        IndexingTestUtil.waitUntilIndexesAreReady(project)
     }
 
     fun testResolvesIndentedMemberNotEnclosingClass() {

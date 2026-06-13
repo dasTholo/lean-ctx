@@ -5,6 +5,8 @@ import com.intellij.openapi.application.WriteAction
 import com.intellij.openapi.module.ModuleManager
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VfsUtil
+import com.intellij.testFramework.IndexingTestUtil
+import com.intellij.testFramework.LightProjectDescriptor
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.PsiTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
@@ -16,6 +18,16 @@ import java.nio.file.Paths
 import java.util.concurrent.TimeUnit
 
 class SymbolDeleterTest : BasePlatformTestCase() {
+
+    // Use a class-private light project (a fresh descriptor instance, not the shared default).
+    // writeAndIndex mutates the module via PsiTestUtil.addSourceRoot, which fires a RootsChanged
+    // event → asynchronous dumb-mode reindex. On the shared default-descriptor project that dumb
+    // state races into later-running classes (e.g. RequestRouter*Test), which then fail fast with
+    // INDEXING in PsiLocator. An isolated descriptor gives this class its own project that is
+    // disposed at teardown, so its dumb/index state can never reach another class's project.
+    private val isolatedDescriptor = LightProjectDescriptor()
+
+    override fun getProjectDescriptor(): LightProjectDescriptor = isolatedDescriptor
 
     private val fixture = """
         package p
@@ -38,7 +50,10 @@ class SymbolDeleterTest : BasePlatformTestCase() {
     }
 
     // Write the file to disk (so LocalFileSystem.findFileByPath succeeds in PsiLocator) and
-    // register its parent dir as a source root (so ReferencesSearch scope includes it).
+    // register its parent dir as a source root (so ReferencesSearch scope includes it). The
+    // module belongs to this class's isolated project, so the root mutation is not cleaned up
+    // (the project is disposed at teardown). We still settle indexing so the resolve below runs
+    // in smart mode.
     private fun writeAndIndex(rel: String, content: String) {
         val p = Paths.get(project.basePath!!, rel)
         Files.createDirectories(p.parent)
@@ -50,6 +65,7 @@ class SymbolDeleterTest : BasePlatformTestCase() {
             val module = ModuleManager.getInstance(project).modules.first()
             PsiTestUtil.addSourceRoot(module, vFile.parent)
         }
+        IndexingTestUtil.waitUntilIndexesAreReady(project)
     }
 
     fun testResolvesIndentedMemberNotEnclosingClass() {
