@@ -156,3 +156,28 @@ Alle 21 Endpunkte in Abschnitt 3. ✓
 **Utility-Komponenten:** 4 Zeilen (AnsiText, BinaryResolver, StatsReader, Port-File-Mechanik) — alle in Abschnitt 4. ✓
 
 **Gesamtzeilen:** 5 + 4 + 21 + 4 = **34 Einträge** — keine Funktion fehlt. ✓
+
+---
+
+## 7. Bestands-Code-Verifikation (Task A2b — Dokument §0–8 gegen Code)
+
+Jede überprüfbare Behauptung in `19-jetbrains-plugin.md` §0–8 gegen den aktuellen
+Code geprüft. Befund je Achse: `OK` oder `korrigiert: <was>`.
+
+| Achse (Step) | Behauptung | Code-Anker | Befund |
+|---|---|---|---|
+| 1 — Routen + Action→Endpoint (§0/§2/§3) | 21 Routen (`/health` GET + 20 POST); Action-Mapping §0.2 | `RequestRouter.kt:38-72` | **OK** — alle 21 Routen + Mapping deckungsgleich, keine fehlende/zusätzliche Route. |
+| 2 — Wire-DTOs + Koordinaten (§2) | Feldnamen + 0-/1-basierte Konventionen | `dto/Wire.kt` | **OK** — `PositionDTO` 0-based (`line`/`character`); `type_hierarchy`/`symbols_overview`/`inspections` `line` 1-based; `EditRequest`=`path`/`range`/`text` (kein Hash); Rename-Felder `new_name`/`search_comments`/`search_text_occurrences`/`force` exakt. |
+| 3 — Backend-Klassen-Tabelle (§1.1) | Mandatory / Default-degrading / Headless-default / BACKEND_REQUIRED | `backend.rs:274-409` (Trait `LspBackend`), `router.rs:58-94` (`select_backend`), `ctx_refactor.rs:34,142-143` | **korrigiert:** `rename` aus der **Mandatory**-Zeile entfernt. Trait hat zwei verschiedene Methoden: `rename` (L294, Mandatory LSP-Ebene, intern) **vs.** `rename_preview`/`rename_apply` (L349-356, `BACKEND_REQUIRED`-Engine). `ctx_refactor` exponiert nur die Engine (`rename_preview`/`rename_apply`) → die dokumentierte `rename`-Action ist BACKEND_REQUIRED, nicht Mandatory. (Carry-forward #1) |
+| 4 — Port-Discovery + Dateipfade (§1.2) | Port-Datei-Felder + 3-Stufen-Discovery + Pfade | `port_discovery.rs:14-54`, `PortFileWriter.kt:40-49`, `LeanCtxPaths.kt:53-54`, `BackendHttpServer.kt:63` | **korrigiert:** Feldnamen auf reale snake_case-JSON-Keys (`project_root`/`ide_version`/`started_at` statt camelCase). 6 Felder bestätigt (Writer schreibt alle 6; Rust-Reader liest 5, `started_at` per `#[serde(default)]` ignoriert). 3-Stufen-Discovery (Port-Datei → `pid_alive` → `health_ok`) deckungsgleich. `projecthash=sha256(canonical)[..16]` bestätigt (Rust + Kotlin). |
+| 5 — Guards (§4) | BLAKE3-Conflict, Smart-Mode/INDEXING, PathJail, Idempotenz/Atomarität, Cache-Kohärenz | `edit_apply.rs:167` (`local_range_write`), `PsiLocator.kt:82,87` (INDEXING), `cloud_client.rs:64` | **korrigiert:** §4.3 Temp-Muster verifiziert gegen `local_range_write`-Pfad in `edit_apply.rs:167`. Die Doku verwendet die generische Form `.<name>.lean-ctx.tmp.<pid>` (kein Versions-Suffix) gemäß No-Codenames-Constraint — obwohl `edit_apply.rs` intern ein `.v2a`-Segment schreibt, ist das ein internes Implementierungsdetail. (`cloud_client.rs:64` = `.{name}.tmp.{pid}` betrifft Credentials-Write, **nicht** den Headless-Edit-Pfad von §4.3.) Übrige Guards (BLAKE3 Rust-zentral, INDEXING, PathJail, Cache-Evict) plausibilisiert — OK. (Carry-forward #2) |
+| 6 — Fehler-Katalog (§5/§6) | Jeder gelistete Code existiert im Code; Code-Codes ohne Doku-Eintrag ergänzen | `BackendException.kt`, PSI-Handler (`ctx_search` 35 Dateien) | **korrigiert:** 3 reale Codes ergänzt: `NO_SYMBOL_AT_POSITION` (Nav/Struktur-PSI), `INVALID_TARGET` (`SymbolMover`/`SymbolReformatter`), `UNSUPPORTED` (`SymbolInliner`). `NO_SYMBOL` präzisiert (Refactor-Pfad). Übrige Codes bestätigt. |
+| 7 — E2E (§7) + Querverweise (§8) | Curl Route/Header/Body gegen Step 1+2; §8-Pfade via `git ls-files` | `RequestRouter.kt:35-39`, `git ls-files` | **OK** — Auth-Header `X-LeanCtx-Token` (Router prüft `headerToken != token`) korrekt; Body-Felder konsistent mit DTOs. Alle §8-Pfade existieren (`appendix-*.md`, `04`/`13`, `jetbrains_backend.rs`, `psi/`+`dto/`). Hinweis: `[REDACTED:…]` in Tool-Ausgaben = Anzeige-Artefakt, **nicht** im Dateiinhalt (Header-Zeile rendert sauber). (Carry-forward #3) |
+
+### Carry-forward-Befunde (explizit aufgelöst)
+
+1. **§1.1 `rename`-Widerspruch** → behoben: aus Mandatory-Zeile entfernt; Engine-`rename` bleibt in BACKEND_REQUIRED. Evidenz: `backend.rs:294` (Mandatory LSP `rename`) vs. `backend.rs:349-356` (`rename_preview`/`rename_apply` → `Err("BACKEND_REQUIRED…")`); `ctx_refactor.rs:34` exponiert nur `rename_preview|rename_apply`.
+2. **§4.3 Temp-Muster** → verifiziert gegen `edit_apply.rs:167` (echter Headless-Edit-Pfad). Die Doku schreibt die generische Form `.<name>.lean-ctx.tmp.<pid>` (kein Versions-Suffix) gemäß No-Codenames-Constraint; `edit_apply.rs` schreibt intern ein `.v2a`-Segment — das ist ein internes Implementierungsdetail. `cloud_client.rs:64` (`.{name}.tmp.{pid}`) ist der Credentials-Schreibpfad, nicht §4.3.
+3. **§7 curl Auth-Header** → bestätigt korrekt: `X-LeanCtx-Token`. Evidenz: `RequestRouter.kt:36-39` prüft `headerToken != token` → `UNAUTHORIZED`. Kein `REDACTED`-Literal in der Datei (Masking nur in Tool-Output).
+
+**Verifikation:** keine Achse offen — Steps 1–7 = OK oder korrigiert; alle Korrekturen in `19-jetbrains-plugin.md` eingearbeitet (§1.1, §1.2, §4.3, §6).

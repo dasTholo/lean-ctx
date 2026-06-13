@@ -1,15 +1,5 @@
 # Journey 19 — JetBrains Plugin
 
-> You want code intelligence (navigation, structure, inspections, symbolic
-> edits, refactoring) directly from a running JetBrains IDE — token-compressed
-> under `ctx_refactor`, with a headless fallback for CI. This journey explains every
-> function in detail: what it does, how the agent invokes it, the raw
-> HTTP endpoint, and the behavior under the hood.
-
-> Language: English. Code, parameters, endpoint/tool names, and error codes stay
-> English. Concise table reference for agents:
-> [appendix-jetbrains-plugin-de.md](appendix-jetbrains-plugin-de.md).
-
 Authoritative sources:
 
 - Plugin: `packages/jetbrains-lean-ctx/src/main/kotlin/com/leanctx/plugin/{server,endpoint,psi,dto}/…`
@@ -96,17 +86,19 @@ The `LspBackend` trait tiers the methods:
 
 | Class                                       | Methods                                                                                                                      | Default without IDE                        |
 | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| **Mandatory** (both backings)              | `open_file`, `references`, `definition`, `implementations`, `rename`                                                         | served by Backing A                        |
+| **Mandatory** (both backings)              | `open_file`, `references`, `definition`, `implementations`                                                                   | served by Backing A                        |
 | **Default-degrading** (Backing B preferred) | `declaration`, `type_hierarchy`, `inspections`, `list_inspections`                                                           | `Err` — "requires the JetBrains backend"   |
 | **Headless-default** (lossless)            | `symbols_overview` (tree-sitter), `replace_symbol_body`, `insert_before_symbol`, `insert_after_symbol` (`local_range_write`) | works without IDE                          |
 | **`BACKEND_REQUIRED`**                      | refactoring engine (`rename`, `move`, `safe_delete`, `inline`)                                                               | `Err` — no headless usage search possible  |
 
 ### 1.2 Port discovery & staleness
 
-On project start the plugin writes a **port file** (atomic, idempotent) with
-`port`, `token`, `pid`, `projectRoot`, `ideVersion`, `startedAt`
-(`BackendHttpServer.kt` → `LeanCtxPaths.portFile(dataDir, projectRoot)`). On
-`projectClosing` (Disposable) it is deleted.
+On project start the plugin writes a **port file** (atomic, idempotent) with the
+JSON keys `port`, `token`, `pid`, `project_root`, `ide_version`, `started_at`
+(snake_case on the wire; `PortFileWriter.kt`, `BackendHttpServer.kt` →
+`LeanCtxPaths.portFile(dataDir, projectRoot)`). On `projectClosing` (Disposable)
+it is deleted. The Rust reader (`PortFile`, `port_discovery.rs`) consumes
+`port`/`token`/`pid`/`project_root`/`ide_version`.
 
 Rust checks reachability in **three stages** (`rust/src/lsp/port_discovery.rs`):
 
@@ -460,7 +452,8 @@ This prevents blindly overwriting externally modified locations.
 | Refactoring (rename/move/safe_delete/inline) | multi-file `WriteCommandAction`                | protected via `plan_hash`     |
 | Reformat                                     | `WriteCommandAction` (single file)             | yes (formatting-stable)       |
 
-Headless writes are atomic (temp file `.<name>.lean-ctx.tmp.<pid>` + `rename`).
+Headless writes are atomic (temp file `.<name>.lean-ctx.tmp.<pid>` + `rename`,
+`local_range_write` in `rust/src/lsp/edit_apply.rs`).
 
 ### 4.4 Cache coherence
 
@@ -502,8 +495,11 @@ as `200` + `INTERNAL`.)
 | `POSITION_OUT_OF_RANGE` | line/column past EOF / `end < start`                            | Rust / plugin                | re-resolve the range (`ctx_read`)                         |
 | `CONFLICT`              | `expected_hash`/`plan_hash` mismatch; or conflicts ∧ `!force`  | Rust                         | read fresh, refresh the hash; if needed `force`           |
 | `AMBIGUOUS_SYMBOL`      | `name_path` matches >1 symbol                                  | Rust (`ctx_refactor`)        | qualify (`Class/method`) — note the candidate list        |
-| `NO_SYMBOL`             | `name_path` matches 0 symbols                                  | Rust / plugin                | correct the name/path                                     |
+| `NO_SYMBOL`             | `name_path` / target range matches 0 symbols                   | Rust / plugin (refactor)     | correct the name/path                                     |
+| `NO_SYMBOL_AT_POSITION` | no resolvable element/reference at the given `line:character`   | plugin (nav/structure PSI)   | re-resolve the position (`ctx_read`)                      |
+| `INVALID_TARGET`        | unknown move/reformat scope kind, or move destination missing/not a directory | plugin (`SymbolMover`/`SymbolReformatter`) | fix the `target`/`scope` kind or destination path |
 | `INDEXING`             | IDE in dumb mode                                               | plugin (`PsiLocator`)        | wait until indexing is finished, retry                    |
+| `UNSUPPORTED`           | refactoring engine refused the operation (e.g. recursive/non-inlinable symbol) | plugin (`SymbolInliner`)     | pick a different symbol/operation                         |
 | `UNSUPPORTED_LANGUAGE`  | no LSP config / no PSI processor                               | Rust / plugin                | language is not (yet) supported                           |
 | `BACKEND_REQUIRED`      | refactoring without a running IDE                              | Rust (trait default)         | start the IDE with an open project                        |
 | `INTERNAL`              | other error / parse                                            | both                         | check `message`; report a bug if needed                   |
