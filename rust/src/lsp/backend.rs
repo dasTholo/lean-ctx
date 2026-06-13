@@ -412,25 +412,47 @@ mod tests {
         let mq = MoveQuery {
             abs_path: "/proj/Widget.kt".into(),
             rel_path: "Widget.kt".into(),
-            src_range: TextRange0Based { start_line: 2, start_char: 0, end_line: 2, end_char: 12 },
+            src_range: TextRange0Based {
+                start_line: 2,
+                start_char: 0,
+                end_line: 2,
+                end_char: 12,
+            },
             target: mt.clone(),
         };
-        let ma = MoveApply { query: mq.clone(), force: true };
+        let ma = MoveApply {
+            query: mq.clone(),
+            force: true,
+        };
         assert_eq!(ma.query.target, mt);
 
         let parent = MoveTarget::Parent {
             abs_path: "/proj/Other.kt".into(),
             rel_path: "Other.kt".into(),
-            range: TextRange0Based { start_line: 0, start_char: 0, end_line: 5, end_char: 1 },
+            range: TextRange0Based {
+                start_line: 0,
+                start_char: 0,
+                end_line: 5,
+                end_char: 1,
+            },
         };
         assert_ne!(parent, mt);
 
         let sq = SafeDeleteQuery {
             abs_path: "/proj/Widget.kt".into(),
             rel_path: "Widget.kt".into(),
-            src_range: TextRange0Based { start_line: 2, start_char: 0, end_line: 2, end_char: 12 },
+            src_range: TextRange0Based {
+                start_line: 2,
+                start_char: 0,
+                end_line: 2,
+                end_char: 12,
+            },
         };
-        let sa = SafeDeleteApply { query: sq.clone(), force: true, propagate: false };
+        let sa = SafeDeleteApply {
+            query: sq.clone(),
+            force: true,
+            propagate: false,
+        };
         assert_eq!(sa.query, sq);
         assert!(sa.force);
         assert!(!sa.propagate);
@@ -474,25 +496,88 @@ mod tests {
         // v2c Err defaults (no lossless headless move/delete — spec §4 inherited §3).
         struct Bare;
         impl LspBackend for Bare {
-            fn open_file(&mut self, _u: &lsp_types::Uri, _l: &str, _t: &str) -> Result<(), String> { Ok(()) }
-            fn references(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position, _s: &str) -> Result<Vec<lsp_types::Location>, String> { Ok(vec![]) }
-            fn definition(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position) -> Result<lsp_types::GotoDefinitionResponse, String> { Ok(lsp_types::GotoDefinitionResponse::Array(vec![])) }
-            fn implementations(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position, _s: &str) -> Result<Vec<lsp_types::Location>, String> { Ok(vec![]) }
-            fn rename(&mut self, _u: &lsp_types::Uri, _p: lsp_types::Position, _n: &str) -> Result<Option<lsp_types::WorkspaceEdit>, String> { Ok(None) }
+            fn open_file(&mut self, _u: &lsp_types::Uri, _l: &str, _t: &str) -> Result<(), String> {
+                Ok(())
+            }
+            fn references(
+                &mut self,
+                _u: &lsp_types::Uri,
+                _p: lsp_types::Position,
+                _s: &str,
+            ) -> Result<Vec<lsp_types::Location>, String> {
+                Ok(vec![])
+            }
+            fn definition(
+                &mut self,
+                _u: &lsp_types::Uri,
+                _p: lsp_types::Position,
+            ) -> Result<lsp_types::GotoDefinitionResponse, String> {
+                Ok(lsp_types::GotoDefinitionResponse::Array(vec![]))
+            }
+            fn implementations(
+                &mut self,
+                _u: &lsp_types::Uri,
+                _p: lsp_types::Position,
+                _s: &str,
+            ) -> Result<Vec<lsp_types::Location>, String> {
+                Ok(vec![])
+            }
+            fn rename(
+                &mut self,
+                _u: &lsp_types::Uri,
+                _p: lsp_types::Position,
+                _n: &str,
+            ) -> Result<Option<lsp_types::WorkspaceEdit>, String> {
+                Ok(None)
+            }
         }
         let mut b = Bare;
         let mq = MoveQuery {
-            abs_path: "/p/a.kt".into(), rel_path: "a.kt".into(),
-            src_range: TextRange0Based { start_line: 0, start_char: 0, end_line: 0, end_char: 1 },
-            target: MoveTarget::Path { abs_path: "/p/x".into(), rel_path: "x".into() },
+            abs_path: "/p/a.kt".into(),
+            rel_path: "a.kt".into(),
+            src_range: TextRange0Based {
+                start_line: 0,
+                start_char: 0,
+                end_line: 0,
+                end_char: 1,
+            },
+            target: MoveTarget::Path {
+                abs_path: "/p/x".into(),
+                rel_path: "x".into(),
+            },
         };
-        assert!(b.move_preview(&mq).unwrap_err().starts_with("BACKEND_REQUIRED"));
-        assert!(b.move_apply(&MoveApply { query: mq, force: false }).unwrap_err().starts_with("BACKEND_REQUIRED"));
+        assert!(b
+            .move_preview(&mq)
+            .unwrap_err()
+            .starts_with("BACKEND_REQUIRED"));
+        assert!(b
+            .move_apply(&MoveApply {
+                query: mq,
+                force: false
+            })
+            .unwrap_err()
+            .starts_with("BACKEND_REQUIRED"));
         let sq = SafeDeleteQuery {
-            abs_path: "/p/a.kt".into(), rel_path: "a.kt".into(),
-            src_range: TextRange0Based { start_line: 0, start_char: 0, end_line: 0, end_char: 1 },
+            abs_path: "/p/a.kt".into(),
+            rel_path: "a.kt".into(),
+            src_range: TextRange0Based {
+                start_line: 0,
+                start_char: 0,
+                end_line: 0,
+                end_char: 1,
+            },
         };
-        assert!(b.safe_delete_preview(&sq).unwrap_err().starts_with("BACKEND_REQUIRED"));
-        assert!(b.safe_delete_apply(&SafeDeleteApply { query: sq, force: false, propagate: false }).unwrap_err().starts_with("BACKEND_REQUIRED"));
+        assert!(b
+            .safe_delete_preview(&sq)
+            .unwrap_err()
+            .starts_with("BACKEND_REQUIRED"));
+        assert!(b
+            .safe_delete_apply(&SafeDeleteApply {
+                query: sq,
+                force: false,
+                propagate: false
+            })
+            .unwrap_err()
+            .starts_with("BACKEND_REQUIRED"));
     }
 }

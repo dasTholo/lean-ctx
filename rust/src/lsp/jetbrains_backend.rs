@@ -365,7 +365,11 @@ impl JetBrainsHttpBackend {
                 "kind": "path",
                 "path": tp,
             }),
-            MoveTarget::Parent { rel_path: pp, range, .. } => serde_json::json!({
+            MoveTarget::Parent {
+                rel_path: pp,
+                range,
+                ..
+            } => serde_json::json!({
                 "kind": "parent",
                 "path": pp,
                 "range": {
@@ -416,7 +420,10 @@ impl JetBrainsHttpBackend {
             })
             .unwrap_or_default();
         crate::lsp::backend::RenameResult {
-            applied: resp.get("applied").and_then(Value::as_bool).unwrap_or(false),
+            applied: resp
+                .get("applied")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             changed_paths,
         }
     }
@@ -617,7 +624,12 @@ impl LspBackend for JetBrainsHttpBackend {
         &mut self,
         req: &crate::lsp::backend::SafeDeleteApply,
     ) -> Result<crate::lsp::backend::RenameResult, String> {
-        let body = Self::safe_delete_body(&req.query.rel_path, req.query.src_range, req.force, req.propagate);
+        let body = Self::safe_delete_body(
+            &req.query.rel_path,
+            req.query.src_range,
+            req.force,
+            req.propagate,
+        );
         let resp = self.post("/safeDeleteApply", &body)?;
         if let Some(err) = resp.get("error") {
             return Err(Self::error_from_envelope(err));
@@ -1025,19 +1037,40 @@ mod tests {
     #[test]
     fn move_body_path_and_parent_variants() {
         use crate::lsp::backend::{MoveTarget, TextRange0Based};
-        let r = TextRange0Based { start_line: 2, start_char: 0, end_line: 2, end_char: 12 };
+        let r = TextRange0Based {
+            start_line: 2,
+            start_char: 0,
+            end_line: 2,
+            end_char: 12,
+        };
 
         let path_body = JetBrainsHttpBackend::move_body(
-            "Widget.kt", r, &MoveTarget::Path { abs_path: "/p/app/moved".into(), rel_path: "app/moved".into() },
+            "Widget.kt",
+            r,
+            &MoveTarget::Path {
+                abs_path: "/p/app/moved".into(),
+                rel_path: "app/moved".into(),
+            },
         );
         assert_eq!(path_body["path"], "Widget.kt");
         assert_eq!(path_body["target"]["kind"], "path");
         assert_eq!(path_body["target"]["path"], "app/moved");
         assert!(path_body["target"].get("range").is_none());
 
-        let pr = TextRange0Based { start_line: 0, start_char: 0, end_line: 5, end_char: 1 };
+        let pr = TextRange0Based {
+            start_line: 0,
+            start_char: 0,
+            end_line: 5,
+            end_char: 1,
+        };
         let parent_body = JetBrainsHttpBackend::move_body(
-            "Widget.kt", r, &MoveTarget::Parent { abs_path: "/p/Other.kt".into(), rel_path: "Other.kt".into(), range: pr },
+            "Widget.kt",
+            r,
+            &MoveTarget::Parent {
+                abs_path: "/p/Other.kt".into(),
+                rel_path: "Other.kt".into(),
+                range: pr,
+            },
         );
         assert_eq!(parent_body["target"]["kind"], "parent");
         assert_eq!(parent_body["target"]["path"], "Other.kt");
@@ -1048,7 +1081,12 @@ mod tests {
     #[test]
     fn safe_delete_body_carries_flags() {
         use crate::lsp::backend::TextRange0Based;
-        let r = TextRange0Based { start_line: 2, start_char: 0, end_line: 2, end_char: 12 };
+        let r = TextRange0Based {
+            start_line: 2,
+            start_char: 0,
+            end_line: 2,
+            end_char: 12,
+        };
         let body = JetBrainsHttpBackend::safe_delete_body("Widget.kt", r, true, false);
         assert_eq!(body["path"], "Widget.kt");
         assert_eq!(body["range"]["start"]["line"], 2);

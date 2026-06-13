@@ -5,9 +5,14 @@
       "mcp__serena__*",
       "mcp__jetbrains__*",
       "mcp__markdownai__*",
-      "WebFetch(domain:leanctx.com)"
+      "WebFetch(domain:leanctx.com)",
+      "WebFetch(domain:plugins.jetbrains.com)"
     ]
   },
+  "enabledMcpjsonServers": [
+    "jetbrains",
+    "markdownai"
+  ],
   "hooks": {
     "PostToolUse": [
       {
@@ -73,9 +78,5 @@
         ]
       }
     ]
-  },
-  "enabledMcpjsonServers": [
-    "jetbrains",
-    "markdownai"
-  ]
+  }
 }

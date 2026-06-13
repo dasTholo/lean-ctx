@@ -32,13 +32,13 @@ getrennt, 30 s Timeout, setzt `NO_COLOR=1` + `LEAN_CTX_ACTIVE=0`. Das Ergebnis
 Die gewählten Sektionen lassen sich **nicht** vollständig aus `stats.json`
 ableiten:
 
-| Sektion | Quelle |
-|---|---|
-| Hero `tokens_saved` / `gain_rate_pct` | `stats.json` (ableitbar) |
-| Task-Spalte `tokens_saved` | `stats.commands` (in `stats.json`) |
-| **Score + 4 Sub-Scores + Trend** | `GainScore::compute(stats, costs, pricing)` — Rust-Logik (`core/gain/mod.rs:91`) |
-| Task-Spalten `tool_calls` / `tool_spend_usd` | `cost_attribution.json` (`mod.rs:142-153`) |
-| **Heatmap-Tabelle** | separate Datei `heatmap.json` (`mod.rs:160-173`) |
+| Sektion                                      | Quelle                                                                           |
+|----------------------------------------------|----------------------------------------------------------------------------------|
+| Hero `tokens_saved` / `gain_rate_pct`        | `stats.json` (ableitbar)                                                         |
+| Task-Spalte `tokens_saved`                   | `stats.commands` (in `stats.json`)                                               |
+| **Score + 4 Sub-Scores + Trend**             | `GainScore::compute(stats, costs, pricing)` — Rust-Logik (`core/gain/mod.rs:91`) |
+| Task-Spalten `tool_calls` / `tool_spend_usd` | `cost_attribution.json` (`mod.rs:142-153`)                                       |
+| **Heatmap-Tabelle**                          | separate Datei `heatmap.json` (`mod.rs:160-173`)                                 |
 
 Ein Datei-Read-Ansatz erforderte ≥3 Dateien plus in Kotlin nachgebaute
 `GainScore`/`TaskClassifier`/`ModelPricing`-Logik → **Drift-Risiko** gegen die
@@ -103,20 +103,20 @@ Robust für jede Andock-Seite (auch schmal rechts oder als Float-Window):
 2. **Sub-Scores:** 4 `JProgressBar` — `compression`, `cost_efficiency`,
    `quality`, `consistency`.
 3. **Tabellen (`JBTable`):**
-   - Tasks: Kategorie, commands, tokens_saved, tool_calls, tool_spend_usd.
-   - Heatmap: path, access_count, tokens_saved, compression_pct.
+    - Tasks: Kategorie, commands, tokens_saved, tool_calls, tool_spend_usd.
+    - Heatmap: path, access_count, tokens_saved, compression_pct.
 
 **Nicht enthalten:** Impact-Kennzahlen (Energy/CO2/ROI/tool_spend_usd-Gesamt) —
 werden auch **nicht** ins DTO geparst (gson ignoriert sie).
 
 ## 4. Komponenten (Kotlin, Package `com.leanctx.plugin`)
 
-| Komponente | Verantwortung |
-|---|---|
-| `GainData.kt` | gson-DTOs: `Summary { tokensSaved, gainRatePct, avoidedUsd, score }`, `Score { total, compression, costEfficiency, quality, consistency, trend }`, `TaskRow`, `FileRow`. Nur gerenderte Felder; `@SerializedName` mappt snake_case → camelCase. |
-| `GainService.kt` | `fun load(): Result<GainData>` — ruft `BinaryResolver.runCommand("gain","--json")`, parst via gson. **Läuft nie auf dem EDT.** Liefert typisierte Fehlerzustände. |
-| `LeanCtxGainToolWindowFactory` | `ToolWindowFactory`; baut `GainPanel` als Content, registriert Disposable. |
-| `GainPanel` | `SimpleToolWindowPanel`; rendert die 3 Sektionen + Toolbar (Refresh) + Footer; hält den Poll-Timer; kapselt die Zustands-Panels. |
+| Komponente                     | Verantwortung                                                                                                                                                                                                                                   |
+|--------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `GainData.kt`                  | gson-DTOs: `Summary { tokensSaved, gainRatePct, avoidedUsd, score }`, `Score { total, compression, costEfficiency, quality, consistency, trend }`, `TaskRow`, `FileRow`. Nur gerenderte Felder; `@SerializedName` mappt snake_case → camelCase. |
+| `GainService.kt`               | `fun load(): Result<GainData>` — ruft `BinaryResolver.runCommand("gain","--json")`, parst via gson. **Läuft nie auf dem EDT.** Liefert typisierte Fehlerzustände.                                                                               |
+| `LeanCtxGainToolWindowFactory` | `ToolWindowFactory`; baut `GainPanel` als Content, registriert Disposable.                                                                                                                                                                      |
+| `GainPanel`                    | `SimpleToolWindowPanel`; rendert die 3 Sektionen + Toolbar (Refresh) + Footer; hält den Poll-Timer; kapselt die Zustands-Panels.                                                                                                                |
 
 ## 5. Polling — sichtbarkeits-gekoppelt
 
@@ -150,12 +150,12 @@ unverändert.
   `invokeLater` auf dem EDT. Ein blockierender Aufruf auf dem EDT würde die IDE
   einfrieren.
 - Vier Nicht-Daten-Zustände im Panel (kein Crash):
-  1. **Laden** — Spinner + „Lade Gain-Daten…".
-  2. **Binary nicht gefunden** (`BinaryNotFound`) — Hinweis auf `lean-ctx setup`
-     / PATH.
-  3. **Befehl fehlgeschlagen / Timeout** (`CommandFailed` / `Timeout` /
-     `ParseError`) — Fehlermeldung + stderr-Auszug, Button „Erneut".
-  4. **Leer** (`Empty`, 0 commands) — „Noch keine Daten erfasst".
+    1. **Laden** — Spinner + „Lade Gain-Daten…".
+    2. **Binary nicht gefunden** (`BinaryNotFound`) — Hinweis auf `lean-ctx setup`
+       / PATH.
+    3. **Befehl fehlgeschlagen / Timeout** (`CommandFailed` / `Timeout` /
+       `ParseError`) — Fehlermeldung + stderr-Auszug, Button „Erneut".
+    4. **Leer** (`Empty`, 0 commands) — „Noch keine Daten erfasst".
 
 ## 8. Tests
 
@@ -178,17 +178,30 @@ unverändert.
     "gain_rate_pct": 68.57,
     "avoided_usd": 19.02,
     "score": {
-      "total": 68, "compression": 69, "cost_efficiency": 3,
-      "quality": 76, "consistency": 29, "trend": "Rising"
+      "total": 68,
+      "compression": 69,
+      "cost_efficiency": 3,
+      "quality": 76,
+      "consistency": 29,
+      "trend": "Rising"
     }
   },
   "tasks": [
-    { "category": "Exploration", "commands": 2281, "tokens_saved": 6337663,
-      "tool_calls": 4352, "tool_spend_usd": 43.92 }
+    {
+      "category": "Exploration",
+      "commands": 2281,
+      "tokens_saved": 6337663,
+      "tool_calls": 4352,
+      "tool_spend_usd": 43.92
+    }
   ],
   "heatmap": [
-    { "path": "…/backend.rs", "access_count": 3, "tokens_saved": 518625,
-      "compression_pct": 99.84 }
+    {
+      "path": "…/backend.rs",
+      "access_count": 3,
+      "tokens_saved": 518625,
+      "compression_pct": 99.84
+    }
   ]
 }
 ```
@@ -204,4 +217,5 @@ Payload, werden aber bewusst **nicht** geparst/gerendert.
   `LeanCtxStatusBarFactory.kt` (`getClickConsumer`).
 - **Unverändert:** `StatsReader.kt`, HTTP-Backend (`jetbrains_backend.rs` &
   `server/`-Klassen).
+
 ```

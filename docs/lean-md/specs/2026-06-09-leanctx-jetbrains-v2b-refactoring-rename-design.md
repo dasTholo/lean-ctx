@@ -81,11 +81,11 @@ Naheliegender Einwand: lean-ctx hat bereits `ctx_callgraph`/`ctx_graph`/`ctx_imp
 zu verlangen? Weil „semantisch" drei verschiedene Dinge meint und ein resolve-genaues Rename nur
 das dritte verträgt:
 
-| Ebene                    | lean-ctx-Mittel                                            | Misst                                  | Rename-tauglich?               |
-| ------------------------ | ---------------------------------------------------------- | -------------------------------------- | ------------------------------ |
-| **1. Lexikalisch**       | `ctx_search` (regex), BM25, `call_graph` (Namens-Match, `call_graph.rs:416-420`, case-**insensitiv**) | Text-/Namens-**Treffer**               | ✗ false positives + negatives  |
-| **2. NLP-semantisch**    | `ctx_semantic_search` (Embeddings minilm/jina/nomic, Cosine, Reranking) | Bedeutungs-**Nähe** (Konzept-Ähnlichkeit, probabilistisch) | ✗ bewusst unscharf — schlechter als 1 |
-| **3. Compiler-semantisch** | **nur** Backing B (IDE-PSI `RenameProcessor`) / A (rust-analyzer) | Binding-**Identität** (resolve)        | ✓ — **das** braucht rename     |
+| Ebene                      | lean-ctx-Mittel                                                                                       | Misst                                                      | Rename-tauglich?                      |
+|----------------------------|-------------------------------------------------------------------------------------------------------|------------------------------------------------------------|---------------------------------------|
+| **1. Lexikalisch**         | `ctx_search` (regex), BM25, `call_graph` (Namens-Match, `call_graph.rs:416-420`, case-**insensitiv**) | Text-/Namens-**Treffer**                                   | ✗ false positives + negatives         |
+| **2. NLP-semantisch**      | `ctx_semantic_search` (Embeddings minilm/jina/nomic, Cosine, Reranking)                               | Bedeutungs-**Nähe** (Konzept-Ähnlichkeit, probabilistisch) | ✗ bewusst unscharf — schlechter als 1 |
+| **3. Compiler-semantisch** | **nur** Backing B (IDE-PSI `RenameProcessor`) / A (rust-analyzer)                                     | Binding-**Identität** (resolve)                            | ✓ — **das** braucht rename            |
 
 - **Ebene 1** (Graph/Callgraph) ist ein reiner Namens-Match (`e.callee_name.to_lowercase() == sym`)
   ohne Scope-/Typ-Auflösung → Homonyme/Overloads/Shadowing/Import-Alias/Override-Hierarchien sind
@@ -393,10 +393,12 @@ Direkte Verallgemeinerung von v2a-§9 auf mehrere Dateien:
 ## 11. v2c-Forward-Pointer (eigener Folge-Spec, NICHT hier)
 
 Nach v2b-Abschluss folgt **v2c** auf **derselben Engine**: `move`, `safe_delete`, `inline`
-(Serena-Äquivalente `jet_brains_move`/`safe_delete`/`inline_symbol`). Sie nutzen dieselbe
+(Serena-Äquivalente `jet_brains_move`/`safe_delete`/`inline_symbol`/`jetbrains__reformat_file`). Sie nutzen dieselbe
 v2b-Infrastruktur — Two-Phase (`*_preview`/`*_apply`), `plan_hash`-Guard, Rust-zentrales
 Konflikt-Gate, Multi-File-Cache-Kohärenz, `BACKEND_REQUIRED`-Headless-Verhalten — und sind
 deshalb inkrementell. Eigenheiten je Op (in v2c zu spezifizieren):
+
+- In v2c muss auch abgeglichen werden welche jetbrains mcp funktionen ggf in plugin noch abgebildet werden müssten
 
 - **`move`**: braucht ein **Ziel** (Ziel-Package/-Datei) als Zusatzparameter; Ziel-Auflösung
     + Ziel-Jail.
@@ -404,6 +406,7 @@ deshalb inkrementell. Eigenheiten je Op (in v2c zu spezifizieren):
   verbleibenden Referenzen, sofern nicht `force`).
 - **`inline`**: Usage-**Substitution** (Body an die Aufrufstellen), nicht nur Umbenennung —
   die semantisch komplexeste Op.
+- **`reformat`**: ähnlich dem mcp__jetbrains__reformat_file. Beachte das das genauer ausgearbeitet werden muss
 
 Die v2b-Gates **erben sich** über die Engine: Smart-Mode-Pflicht/`INDEXING`, Sprach-Fallback
 `UNSUPPORTED_LANGUAGE`, mehrstufiges `select_backend`/`BACKEND_REQUIRED` (§3.1, §6) gelten für
@@ -425,6 +428,7 @@ sind durch `ctx_knowledge` abgedeckt.
 
 - Fortführung auf `feat-jetbrains-plugin` (Muster v1-§12.3): **ein Commit pro Phase** nach
   erfülltem Phasen-Gate, kein Squash während der Entwicklung. Direkt auf dem Branch, **kein
+- 
   worktree** (Projekt-Rule).
 - Finaler Merge nach `main` via Squash-Merge-PR (am Schluss).
 - **Schema-Drift-Gate:** `ctx_refactor`-Schema-Änderung → `docs/reference/generated/mcp-tools.md`
