@@ -30,6 +30,39 @@ Arbeitspakete:
 
 Arbeitet auf `feat-jetbrains-plugin`, committet dort.
 
+### A.0 Inhaltsregeln (gelten für A.1–A.3)
+
+- **Vollständige funktionale Abdeckung.** Alle Funktionen, die über die
+  Entwicklungsstufen v1 bis v2d entstanden sind, müssen in der Referenz
+  erläutert sein — als Funktionen, nicht als Versionen:
+  - **v1:** PSI-Backend, Navigation (`references`/`definition`/
+    `implementations`/`declaration`), Struktur (`symbols_overview`/
+    File-Structure), Qualität (`type_hierarchy`/`inspections`/
+    `list_inspections`).
+  - **v2a:** Symbol-Body-Edits (`replace_symbol_body`,
+    `insert_before_symbol`, `insert_after_symbol`).
+  - **v2b:** Rename (Two-Phase preview/apply).
+  - **v2c:** Move + Safe Delete.
+  - **v2d:** Inline + Reformat.
+  Die bestehende Doku deckt diese Endpunkte bereits ab — beim Übersetzen
+  **verlustfrei** erhalten und gegen den aktuellen Code verifizieren; nichts
+  weglassen.
+- **HARTE REGEL — keine internen Versions-Codenamen in der publizierten Doku.**
+  Die Bezeichnungen `v1`, `v2a`, `v2b`, `v2c`, `v2d` (und interne
+  „Phase-N"-Meilensteine) dürfen NICHT im Text auftauchen — nur funktionale
+  Beschreibungen.
+  - **Ausnahme:** „Phase 1 / Phase 2" als Beschreibung des **Two-Phase-
+    Protokolls** (preview→apply) ist legitim und bleibt (kein Versions-Marker).
+  - **Zu bereinigen:** `19-jetbrains-plugin-de.md:467` — temp-Dateiname
+    `.<name>.lean-ctx.v2a.tmp.<pid>`. Zuerst gegen den Code verifizieren
+    (`SymbolEditor.kt` / `local_range_write`): schreibt der Code wirklich
+    `v2a` in den Suffix? Falls ja → Code-Fakt, aber generisch umschreiben
+    (z. B. `.<name>.lean-ctx.tmp.<pid>` als Muster mit Hinweis auf
+    versionierten Suffix) ODER exakt belassen mit klarer Kennzeichnung als
+    Implementierungsdetail. Entscheidung im Plan datengetrieben.
+  - **Scan-Pflicht:** Nach dem Schreiben `ctx_search` auf `\bv2[a-d]\b` /
+    `\bv1\b` über beide Zieldateien → 0 unerwünschte Treffer.
+
 ### A.1 `19-jetbrains-plugin-de.md` → `19-jetbrains-plugin.md`
 
 - **Übersetzung:** Bestehende Sektionen 0–8 (559 Zeilen) vollständig ins
@@ -47,10 +80,23 @@ Arbeitet auf `feat-jetbrains-plugin`, committet dort.
   - **+ Neue Sektion: editor-focus reporter.** Quelle:
     `docs/lean-md/specs/2026-06-13-leanctx-jetbrains-editor-focus-design.md`
     (#500 producer parity).
-  - **Verifikation Bestand:** Refactoring-Sektionen (Rename/Reformat/Move/
-    Safe-Delete/Inline) gegen aktuellen Code/Endpoints prüfen und ggf.
-    korrigieren (v2c resolveTarget-Indentation-Fix, v2d inline/reformat,
-    headless-conflict direct-PSI safe_delete).
+  - **+ Neue Sektion: IDE-UI-Integration.** Aus `plugin.xml` ergeben sich
+    weitere undokumentierte, registrierte Funktionen, die erläutert werden
+    müssen:
+    - **Status-Bar-Widget** (`LeanCtxStatusBarFactory` + `StatsReader`) —
+      Echtzeit-Token-Savings, Click-to-open-ToolWindow.
+    - **Tools-Menü-Actions** (`actions/` — Setup, Doctor, Gain Report,
+      Dashboard), inkl. ANSI-Escape-Strip vor Messages-Popup (`util/AnsiText`).
+    - **K2-Mode-Support** (`supportsKotlinPluginMode supportsK2="true"`).
+  - **Verifikation Bestand (Gap-Analyse-Prinzip):** Vor dem Schreiben ein
+    vollständiges Funktions-Inventar erstellen — `plugin.xml` (Extensions +
+    Actions) + Endpoint-Handler (`endpoint/*.kt`) gegen die bestehende Doku
+    (§0–8) abgleichen. Jede registrierte Funktion ohne Doku-Abdeckung wird
+    ergänzt; die genannten Listen sind der bekannte Startpunkt, NICHT
+    abschließend. Refactoring-Sektionen (Rename/Reformat/Move/Safe-Delete/
+    Inline) gegen aktuellen Code/Endpoints prüfen und ggf. korrigieren (v2c
+    resolveTarget-Indentation-Fix, v2d inline/reformat, headless-conflict
+    direct-PSI safe_delete).
 - **Querverweise:** interne Links auf `appendix-jetbrains-plugin.md`
   aktualisieren (Zeilen ~11, ~552).
 
