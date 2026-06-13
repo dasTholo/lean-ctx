@@ -412,12 +412,27 @@ Cache-Evict; `reformat` Adress-Dispatch + Single-File-Evict) **und** Plugin (Inl
 `CodeStyleManager`, Multi-File- bzw. Single-File-Transaktion, ein Undo) — gegen ein
 Kotlin-Gradle-Fixture.
 
-**Liefergegenstand (in v2d zu erstellen):** `docs/lean-md/runbooks/runide-inline-reformat-gate.md`
-mit identischer Struktur (Voraussetzungen → Fixture-Setup → `./gradlew runIde --args="$FIX"` →
-Gate-Checks via `lean-ctx call ctx_refactor --project-root "$FIX" --json '<args>'` → Teardown).
-Das Fixture stellt bereit: eine inline-bare lokale Variable, eine inline-bare Methode mit
-Aufrufstellen, eine rekursive Methode (für `UNSUPPORTED`), eine schlecht formatierte Datei/Region
-und eine Datei mit ungenutzten Imports.
+**Liefergegenstände (in v2d zu erstellen) — zwei Dateien, abgeleitet vom v2c-Muster:**
+
+1. **`scripts/runide-inline-reformat-gate-setup.sh`** — idempotenter Fixture-Generator,
+   **abgeleitet** von `scripts/runide-move-safedelete-gate-setup.sh` (gleiches Idiom:
+   `set -euo pipefail`, `rm -rf "$DEST"` + `cat > … <<'EOF'`-heredocs, identische
+   Gradle-Boilerplate `kotlin("jvm") 2.1.0` + `mavenCentral`). Materialisiert nach
+   `tmp/runide-inline-reformat-gate/` (`tmp/` ist gitignored → ephemer, das **Script** ist die
+   eingecheckte Quelle). **Eigenes** Script/Fixture statt Wiederverwendung des v2c-Fixtures:
+   die Gate-Familien bleiben entkoppelt (v2c = Move/SafeDelete-Symbole, v2d = Inline/Reformat-
+   Symbole; gemeinsame Nutzung würde beide Gates verkoppeln). Fixture-Inhalt:
+    - **inline-bare lokale Variable** (z.B. `Calc.kt`: `val tmp = a + b; return tmp + tmp`).
+    - **inline-bare Methode** mit ≥2 Aufrufstellen (Body-Substitution + Parameter-Binding prüfbar).
+    - **rekursive Methode** (für den `UNSUPPORTED`-Fall, #5).
+    - schlecht **formatierte Datei + Region** (`Messy.kt`, für reformat Datei/Region/Symbol).
+    - Datei mit **ungenutzten Imports** (`Imports.kt`, für `optimize_imports`).
+    - `notes.txt` (Plain-Text, für `UNSUPPORTED_LANGUAGE` — aus v2c übernommen).
+2. **`docs/lean-md/runbooks/runide-inline-reformat-gate.md`** — Runbook mit identischer Struktur
+   zum v2c-Gate (Voraussetzungen → **`bash scripts/runide-inline-reformat-gate-setup.sh`** →
+   `./gradlew runIde --args="$FIX"` → Gate-Checks via
+   `lean-ctx call ctx_refactor --project-root "$FIX" --json '<args>'` → Teardown). Das Runbook
+   **ruft das Setup-Script auf** (kein inline-dupliziertes Fixture), exakt wie das v2c-Runbook.
 
 **Voraussetzung — frisches Binary (Daemon-Stopp ist Pflicht):** Die neuen Actions
 (`inline_*`/`reformat`) existieren erst nach Neubau. Ein **laufender** lean-ctx-Daemon hält den
