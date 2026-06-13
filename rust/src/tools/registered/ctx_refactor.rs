@@ -15,27 +15,24 @@ impl McpTool for CtxRefactorTool {
     fn tool_def(&self) -> Tool {
         tool_def(
             "ctx_refactor",
-            "LSP-powered refactoring. Actions: rename, references, definition, implementations, \
-             declaration, type_hierarchy, symbols_overview, inspections. Requires a running \
-             language server (rust-analyzer, typescript-language-server, pylsp, gopls) or the \
-             JetBrains backend (declaration, type_hierarchy, symbols_overview, inspections are \
-             JetBrains-only). Symbol-body edits (replace_symbol_body, insert_before_symbol, \
-             insert_after_symbol) are name_path-addressed and work IDE-first with a lossless \
-             headless fallback. The Two-Phase rename ops (rename_preview, rename_apply) are \
-             name_path-addressed, require a running JetBrains IDE (BACKEND_REQUIRED otherwise), \
-             use a stateless plan_hash guard, and block on refactoring conflicts unless force=true.",
+            "LSP/IDE refactoring. action=one pipe-delimited value below. \
+             Reads (references/definition/implementations/declaration/type_hierarchy/\
+             symbols_overview/inspections) need a language server or the JetBrains \
+             backend. Symbol edits (replace/insert_before/insert_after_symbol) are \
+             name_path-addressed, IDE-first with a lossless headless fallback. Two-Phase \
+             ops (rename/move/safe_delete/inline _preview+_apply) need a JetBrains IDE \
+             (else BACKEND_REQUIRED) with a stateless plan_hash TOCTOU guard. \
+             rename/move/safe_delete block conflicts unless force=true; inline cannot be \
+             forced (→ UNSUPPORTED). reformat is Single-Phase, by name_path | path | path+line.",
             json!({
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["rename", "references", "definition", "implementations",
-                                 "declaration", "type_hierarchy", "symbols_overview", "inspections",
-                                 "replace_symbol_body", "insert_before_symbol", "insert_after_symbol",
-                                 "rename_preview", "rename_apply",
-                                 "move_preview", "move_apply",
-                                 "safe_delete_preview", "safe_delete_apply"],
-                        "description": "Refactoring action"
+                        "description": "rename|references|definition|implementations|declaration|type_hierarchy|\
+                            symbols_overview|inspections|replace_symbol_body|insert_before_symbol|\
+                            insert_after_symbol|rename_preview|rename_apply|move_preview|move_apply|\
+                            safe_delete_preview|safe_delete_apply|inline_preview|inline_apply|reformat"
                     },
                     "path": { "type": "string", "description": "File path" },
                     "line": { "type": "integer", "description": "1-indexed line number" },
@@ -67,7 +64,9 @@ impl McpTool for CtxRefactorTool {
                     "search_text_occurrences": { "type": "boolean", "description": "rename: also rename non-code text occurrences (default false)." },
                     "target_path": { "type": "string", "description": "move only: destination directory/file (project-relative). Set EXACTLY ONE of target_path/target_parent. Out-of-jail or both/neither set → INVALID_TARGET." },
                     "target_parent": { "type": "string", "description": "move only: destination parent symbol (name_path, e.g. 'OtherClass') for a member move. Set EXACTLY ONE of target_path/target_parent." },
-                    "propagate": { "type": "boolean", "description": "safe_delete_apply only: also delete dependencies that become unreferenced (Serena 'propagate', default false)." }
+                    "propagate": { "type": "boolean", "description": "safe_delete_apply only: also delete dependencies that become unreferenced (Serena 'propagate', default false)." },
+                    "keep_definition": { "type": "boolean", "description": "inline only: inline at all call sites but keep the declaration (default false)." },
+                    "optimize_imports": { "type": "boolean", "description": "reformat only: also remove unused imports (default false)." }
                 },
                 "required": ["action"]
             }),
@@ -106,6 +105,8 @@ impl McpTool for CtxRefactorTool {
                     | "rename_apply"
                     | "move_apply"
                     | "safe_delete_apply"
+                    | "inline_apply"
+                    | "reformat"
             ),
             shell_outcome: None,
         })
@@ -151,6 +152,11 @@ mod schema_tests {
             "target_path",
             "target_parent",
             "propagate",
+            "inline_preview",
+            "inline_apply",
+            "reformat",
+            "keep_definition",
+            "optimize_imports",
         ] {
             assert!(schema.contains(needle), "schema missing {needle}: {schema}");
         }
