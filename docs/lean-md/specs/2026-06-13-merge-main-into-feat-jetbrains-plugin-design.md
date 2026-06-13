@@ -177,22 +177,39 @@ die Übersicht verlieren, was `ctx_refactor` (oder ein anderes Tool) kann. Konkr
   type_hierarchy|symbols_overview|inspections|replace_symbol_body|
   insert_before_symbol|insert_after_symbol`) bleiben in der Description.
 - **Verfügbarkeit ≠ Sichtbarkeit.** `ctx_refactor` bleibt in der Registry
-  registriert. Im Lean-Default (nicht Core) ist es zwar nicht in `tools/list`,
-  aber über den force-advertised `ctx_call` (INVOKER) und `discover_tools` /
-  `ctx_tools find` voll erreichbar. Unter `tool_profile = power` (Projekt) ohnehin
-  voll advertised.
-- **Vier Übersichts-Quellen, die der Plan grün halten muss:**
-  1. Tool-Description (gefaltete Action-Liste) — sichtbar via `tools/list`
-     (power) bzw. `ctx_call`-Schema.
-  2. `ctx_call` + `discover_tools`/`ctx_tools find` — Discovery für nicht-Core.
-  3. `docs/reference/appendix-mcp-tools.md` + `generated/mcp-tools.md` — die
-     authoritative Tool-Referenz für Agents/Subagents (Projekt-Regel). **Muss die
-     v2c-Actions vollständig führen → `gen_docs` neu + Drift-Test grün (Gate §4).**
-  4. #579 on-demand `LEAN-CTX.md` — „auf Abruf"-Detaildoc.
-- **Plan-Anforderung:** Jede Schema-Änderung an `ctx_refactor` folgt dem
-  ctx_graph-Idiom; der Drift-Test (Registry ↔ generierte Doku) ist Pflicht-Gate;
-  ein Smoke-Check bestätigt, dass `discover_tools("refactor")` /
-  `ctx_call name=ctx_refactor` die volle Action-Liste liefert.
+  registriert (`build_registry()` → `registry.rs:139`). Im Lean-Default (nicht
+  Core) ist es zwar nicht in `tools/list`, aber über den force-advertised
+  `ctx_call` (INVOKER) und `discover_tools` / `ctx_tools find` voll erreichbar.
+  Unter `tool_profile = power` (Projekt) ohnehin voll advertised.
+
+**Kanonische Quelle MUSS neuinstallations-sicher sein (im Binary, nicht im Repo).**
+Die Übersichts-Quellen zerfallen in zwei Klassen — entscheidend, weil eine reine
+Binary-Installation (`cargo install` / binstall / Release-Binary) **nur das
+Binary** mitbringt, **keine Repo-Dateien**:
+
+| # | Quelle | Ort | Bei Neuinstallation |
+|---|---|---|---|
+| 1 | Tool-Description (pipe-delimited Actions) | **Binary** (`tool_def`, `&'static str`) | ✅ immer da |
+| 2 | `discover_tools` / `ctx_call` | **Binary** (liest `build_registry().tool_defs()`) | ✅ immer da |
+| 3 | `appendix-mcp-tools.md` + `generated/mcp-tools.md` | **Repo-Dateien** | ❌ fehlen |
+| 4 | `LEAN-CTX.md` (#579) | von `init`/`setup` generiert | ✅ da, trägt Regeln/Modi, **nicht** die Action-Liste |
+
+Daraus folgt: Die **einkompilierte `tool_def()`-Description** (Quellen 1+2) ist die
+einzig neuinstallations-sichere Übersicht — genau deshalb ist das ctx_graph-Idiom
+(Actions in die Description falten) die robuste Lösung und **nicht** das Risiko:
+die Info wird ins Binary verlagert, nicht in eine Repo-Doc ausgelagert. Die
+Repo-Docs (#3) sind nur ein **Entwickler-/CI-Spiegel** (Drift-Test) und dürfen
+**nie** die einzige Action-Quelle sein.
+
+- **Plan-Anforderung (verschärft):**
+  1. Die **vollständige** v2c-Action-Liste steht in der einkompilierten
+     `ctx_refactor`-`tool_def()`-Description (ctx_graph-Idiom) — nie nur in
+     Repo-Docs.
+  2. `appendix-mcp-tools.md` + `generated/mcp-tools.md` bleiben über `gen_docs` +
+     Drift-Test (Gate §4) synchron — als Spiegel, nicht als Quelle.
+  3. Smoke-Check bestätigt, dass `discover_tools("refactor")` /
+     `ctx_call name=ctx_refactor` (beide aus dem Binary) die volle Action-Liste
+     liefern — der Test, der den Neuinstallations-Fall abdeckt.
 
 ### Additiv, kein Branch-Impact (nur zur Kenntnis, keine Aktion)
 
