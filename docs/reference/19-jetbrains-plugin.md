@@ -768,7 +768,7 @@ ctx_refactor action=reformat path=src/Main.kt    # apply code style afterward
 
 ## 11. Cross-references & Sources
 
-- [Concise agent reference](appendix-jetbrains-plugin-de.md) — tables for quick lookup
+- [Concise agent reference](appendix-jetbrains-plugin.md) — tables for quick lookup
 - [Per-IDE quickstarts](appendix-ide-quickstarts.md) — setup for JetBrains IDEs
 - [MCP tool map](appendix-mcp-tools.md) — all MCP tools incl. `ctx_refactor`, `ctx_symbol`
 - [Journey 4 — Code Intelligence](04-code-intelligence.md)

@@ -32,7 +32,7 @@ Each journey document answers three questions for every feature:
 | 13 | [Security & Governance](13-security-and-governance.md)           | putting lean-ctx in front of real code               | PathJail, `shell_allowlist`, `secret_detection`, sandbox, `harden`, role policies                         |
 | 14 | [Performance Tuning](14-performance-tuning.md)                   | huge repo / constrained machine                      | `memory_profile`, `bm25_max_cache_mb`, `graph_index_max_files`, `LEAN_CTX_MAX_*`, `slow-log`              |
 | 18 | [Adaptive Learning](18-adaptive-learning.md)                     | understanding how lean-ctx tunes itself              | learned thresholds, LITM calibration, scent field, playbook, `learning export/import`, efficacy           |
-| 19 | [JetBrains-Plugin (DE)](19-jetbrains-plugin-de.md)               | using code intelligence from a running JetBrains IDE | `ctx_refactor`: navigation, structure, inspections, symbol-edits, rename/reformat/move/safe_delete/inline |
+| 19 | [JetBrains-Plugin](19-jetbrains-plugin.md)                      | using code intelligence from a running JetBrains IDE | `ctx_refactor`: navigation, structure, inspections, symbol-edits, rename/reformat/move/safe_delete/inline |
 
 ## Cross-cutting references
 
@@ -43,7 +43,7 @@ Each journey document answers three questions for every feature:
 | [MCP tool map](appendix-mcp-tools.md)                    | Every MCP tool, params, and which profile exposes it                                                                                                     |
 | [Paths, env vars & config](appendix-paths-and-config.md) | Data dir layout, every `LEAN_CTX_*` var, every config key                                                                                                |
 | [Glossary](appendix-glossary.md)                         | MCP, CCP, hooks, modes, profiles, proxy — in one place                                                                                                   |
-| [JetBrains-Plugin (DE)](appendix-jetbrains-plugin-de.md) | Compact agent lookup for the JetBrains plugin — every `ctx_refactor` action, endpoint, guard, error. Full guide: [Journey 18](18-jetbrains-plugin-de.md) |
+| [JetBrains-Plugin](appendix-jetbrains-plugin.md)        | Compact agent lookup for the JetBrains plugin — every `ctx_refactor` action, endpoint, guard, error. Full guide: [Journey 19](19-jetbrains-plugin.md)   |
 
 > **Generated, always-current appendices** (rendered directly from the code, so
 > they can never drift): [MCP tools](generated/mcp-tools.md) (every registered
