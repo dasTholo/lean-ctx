@@ -225,6 +225,25 @@ curl -s -X POST http://127.0.0.1:$PORT/symbols_overview \
 **lossless headless default** via the tree-sitter symbol index
 (`overview_from_index`, the same source as `ctx_symbol`/`ctx_outline`).
 
+**IDE-neutral loading & degradation.** The Core `plugin.xml` depends only on
+`com.intellij.modules.platform`, so it loads in every IntelliJ IDE (RustRover, PyCharm,
+GoLand, WebStorm, IDEA, …). The two JVM-PSI-bound structure ops live in an optional
+module (`leanctx-jvm.xml`, loaded only when the Kotlin plugin is present) and are wired
+through the `com.leanctx.plugin.structureProvider` extension point. In non-JVM IDEs the
+EP is empty and the Core degrades cleanly:
+
+| Feature              | RustRover (Rust)                          | PyCharm (Python)      | IDEA / Android Studio (JVM)        |
+|----------------------|-------------------------------------------|-----------------------|------------------------------------|
+| Navigation           | ✅ Plugin-PSI (Rust) / Backing-A fallback | ✅ Plugin-PSI         | ✅ Plugin-PSI                      |
+| `symbols_overview`   | ✅ lean-ctx tree-sitter (`ctx_outline`)   | ✅ tree-sitter        | ✅ IDE-PSI (Kotlin) + tree-sitter  |
+| `type_hierarchy`     | → `implementations` / `ctx_callgraph`     | → `implementations`   | ✅ IDE-PSI (Java + Kotlin)         |
+| Edits / Refactor / `reformat` / `inspections` | ✅ Plugin (platform)     | ✅                    | ✅                                 |
+| UI (Gain, Status-bar, Doctor, Editor-signal)  | ✅                       | ✅                    | ✅                                 |
+
+For Rust/Python the IDE-PSI variant of `type_hierarchy` and Kotlin `symbols_overview`
+is not registered; the Rust backend serves the equivalent via `ctx_outline`
+(tree-sitter), `implementations` (rust-analyzer / Backing A) and `ctx_callgraph`.
+
 ### 2.3 Quality — Inspections
 
 **Action:** `inspections` (`mode=run|list`)
@@ -638,6 +657,12 @@ compatible with the K2 frontend, so it remains enabled when the user runs the
 IDE in K2 mode. The plugin's PSI/navigation/refactoring operations (§2–§3) work
 under both the legacy and the K2 Kotlin plugin modes.
 
+The `<supportsKotlinPluginMode supportsK2="true"/>` declaration lives in the optional
+`leanctx-jvm.xml` module (not in the Core `plugin.xml`), because it references the
+`org.jetbrains.kotlin` namespace. It is loaded only in JVM-capable IDEs where the Kotlin
+plugin is present; non-JVM IDEs (RustRover, PyCharm) never parse this block, which is
+what keeps the Core free of any hard `java-capable` / Kotlin dependency.
+
 ---
 
 ## 7. Behavioral Guarantees & Guards
@@ -727,7 +752,7 @@ as `200` + `INTERNAL`.)
 | `INVALID_TARGET`        | unknown move/reformat scope kind, or move destination missing/not a directory  | plugin (`SymbolMover`/`SymbolReformatter`) | fix the `target`/`scope` kind or destination path  |
 | `INDEXING`              | IDE in dumb mode                                                               | plugin (`PsiLocator`)                      | wait until indexing is finished, retry             |
 | `UNSUPPORTED`           | refactoring engine refused the operation (e.g. recursive/non-inlinable symbol) | plugin (`SymbolInliner`)                   | pick a different symbol/operation                  |
-| `UNSUPPORTED_LANGUAGE`  | no LSP config / no PSI processor                                               | Rust / plugin                              | language is not (yet) supported                    |
+| `UNSUPPORTED_LANGUAGE`  | no LSP config / no PSI processor; or `type_hierarchy`/IDE-PSI `symbols_overview` in a non-JVM IDE (empty `structureProvider` EP) | Rust / plugin                              | language is not (yet) supported; for structure ops use `ctx_outline`/`implementations`/`ctx_callgraph` |
 | `BACKEND_REQUIRED`      | refactoring without a running IDE                                              | Rust (trait default)                       | start the IDE with an open project                 |
 | `INTERNAL`              | other error / parse                                                            | both                                       | check `message`; report a bug if needed            |
 
