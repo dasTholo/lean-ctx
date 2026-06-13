@@ -1,3 +1,4 @@
+import org.jetbrains.intellij.platform.gradle.IntelliJPlatformType
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
@@ -8,7 +9,7 @@ plugins {
 }
 
 group = "com.leanctx"
-version = "3.7.5"
+version = "3.8.3"
 
 repositories {
     mavenCentral()
@@ -47,5 +48,18 @@ kotlin {
     jvmToolchain(21)
     compilerOptions {
         jvmTarget = JvmTarget.JVM_21
+    }
+}
+
+intellijPlatformTesting {
+    runIde {
+        register("runRustRover") {
+            type = IntelliJPlatformType.RustRover
+            version = "2026.1"
+        }
+        register("runPyCharm") {
+            type = IntelliJPlatformType.PyCharmCommunity
+            version = "2026.1"
+        }
     }
 }
