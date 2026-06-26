@@ -36,6 +36,14 @@ pub fn handle(args: &Value, project_root: &str, abs_path: &str) -> String {
         return handle_reformat_refactor(args, project_root);
     }
 
+    // `symbols_overview` degrades losslessly to the tree-sitter symbol index and
+    // never needs the LSP `open_file` round-trip (its uri is only a path carrier).
+    // Resolve it BEFORE `open_file` so a headless run with no reachable backend
+    // still gets the tree-sitter fallthrough instead of an `ERROR: open_file …`.
+    if action == "symbols_overview" {
+        return handle_symbols_overview(abs_path, project_root);
+    }
+
     let line = args.get("line").and_then(Value::as_u64).unwrap_or(1) as u32;
     let column = args.get("column").and_then(Value::as_u64).unwrap_or(0) as u32;
     let scope = args
@@ -65,7 +73,6 @@ pub fn handle(args: &Value, project_root: &str, abs_path: &str) -> String {
         "implementations" => handle_implementations(abs_path, project_root, &uri, position, scope),
         "declaration" => handle_declaration(abs_path, project_root, &uri, position),
         "type_hierarchy" => handle_type_hierarchy(args, abs_path, project_root, &uri, position),
-        "symbols_overview" => handle_symbols_overview(abs_path, project_root, &uri),
         "inspections" => handle_inspections(args, abs_path, project_root, &uri),
         _ => format!(
             "ERROR: Unknown action '{action}'. Available: rename, references, definition, \
@@ -1264,30 +1271,33 @@ fn resolve_reformat_scope(
     }
 }
 
-/// Single-Phase reformat: resolve address → scope, jail, require live IDE, run the
-/// IDE reformat, then Single-File evict (spec §5.3). No plan_hash, no preview.
-fn render_reformat(
-    backend: &mut dyn crate::lsp::backend::LspBackend,
+/// Run the JetBrains IDE reformat for `scope` (full Region/Symbol support). The
+/// mutation only; the caller handles change detection + output.
+fn run_jetbrains_reformat(
+    args: &Value,
     project_root: &str,
-    query: &crate::lsp::backend::ReformatQuery,
-) -> String {
-    let res = match backend.reformat(query) {
-        Ok(r) => r,
-        Err(e) => return format!("ERROR: {e}"),
+    abs_path: &str,
+    rel_path: &str,
+    scope: crate::lsp::backend::ReformatScope,
+) -> Result<(), String> {
+    let mut backend = live_jetbrains_backend(project_root)?;
+    let optimize_imports = args
+        .get("optimize_imports")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let query = crate::lsp::backend::ReformatQuery {
+        abs_path: abs_path.to_string(),
+        rel_path: rel_path.to_string(),
+        scope,
+        optimize_imports,
     };
-    for cp in &res.changed_paths {
-        match crate::core::path_resolve::resolve_tool_path(Some(project_root), None, cp) {
-            Ok(abs) => crate::core::cli_cache::invalidate(&abs),
-            Err(e) => return format!("ERROR: INVALID_TARGET: changed path blocked by jail: {e}"),
-        }
-    }
-    format!(
-        "reformat: '{}' applied\n  changed files: {}\n",
-        query.rel_path,
-        res.changed_paths.len(),
-    )
+    backend.reformat(&query).map(|_| ())
 }
 
+/// Single-Phase reformat: resolve address → scope, pick the formatter by
+/// extension (built-in defaults), run it, then report an honest
+/// `changed`/`unchanged` via before/after BLAKE3 (and invalidate the cache
+/// only on a real change). `.rs` → rustfmt by default; everything else → the IDE.
 fn handle_reformat_refactor(args: &Value, project_root: &str) -> String {
     let (abs_path, rel_path, scope) = match resolve_reformat_scope(args, project_root) {
         Ok(t) => t,
@@ -1297,21 +1307,38 @@ fn handle_reformat_refactor(args: &Value, project_root: &str) -> String {
     if let Some(e) = deny_if_read_only(&abs_path) {
         return e;
     }
-    let mut backend = match live_jetbrains_backend(project_root) {
-        Ok(b) => b,
-        Err(e) => return format!("ERROR: {e}"),
+
+    let before = crate::lsp::format::blake3_of(&abs_path).ok();
+
+    let formatter = crate::lsp::format::resolve_formatter(&abs_path);
+
+    let (label, run_result): (String, Result<(), String>) = match &formatter {
+        crate::lsp::format::Formatter::Command(template) => (
+            crate::lsp::format::command_label(template).to_string(),
+            crate::lsp::format::run_command_formatter(template, &abs_path, project_root),
+        ),
+        crate::lsp::format::Formatter::Jetbrains => (
+            "jetbrains".to_string(),
+            run_jetbrains_reformat(args, project_root, &abs_path, &rel_path, scope),
+        ),
     };
-    let optimize_imports = args
-        .get("optimize_imports")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let query = crate::lsp::backend::ReformatQuery {
-        abs_path,
+
+    if let Err(e) = run_result {
+        return format!("ERROR: {e}");
+    }
+
+    let after = crate::lsp::format::blake3_of(&abs_path).ok();
+    let changed = before != after;
+    if changed {
+        crate::core::cli_cache::invalidate(&abs_path);
+    }
+
+    format!(
+        "reformat: '{}' via {} — {}\n",
         rel_path,
-        scope,
-        optimize_imports,
-    };
-    render_reformat(backend.as_mut(), project_root, &query)
+        label,
+        if changed { "changed" } else { "unchanged" },
+    )
 }
 
 fn parse_direction(args: &Value) -> HierarchyDirection {
@@ -1345,18 +1372,32 @@ fn handle_type_hierarchy(
     }
 }
 
-fn handle_symbols_overview(file_path: &str, project_root: &str, uri: &lsp_types::Uri) -> String {
+fn handle_symbols_overview(file_path: &str, project_root: &str) -> String {
+    // The uri is only a path carrier here; build it locally instead of going
+    // through `open_file` (which a headless run with no reachable backend cannot
+    // complete). Backing B (live IDE) still serves PSI via `with_backend`; if no
+    // backend can be selected (no IDE + no rust-analyzer) we fall through to the
+    // tree-sitter symbol index — the same lossless source the Backing-A default
+    // `symbols_overview` uses — so headless never leaks `ERROR: open_file …`.
+    let uri = match crate::lsp::client::file_path_to_uri(file_path) {
+        Ok(u) => u,
+        Err(e) => return format!("ERROR: {e}"),
+    };
     let result = crate::lsp::router::with_backend(file_path, project_root, |backend, _| {
-        let items = backend.symbols_overview(uri)?;
+        let items = backend.symbols_overview(&uri)?;
         Ok((items, backend.last_truncation()))
     });
-    match result {
-        Ok((items, meta)) => {
-            let mut out = format_symbols_overview(&items);
-            out.push_str(&truncation_note(items.len(), meta));
-            out
-        }
-        Err(e) => format!("ERROR: {e}"),
+    if let Ok((items, meta)) = result {
+        let mut out = format_symbols_overview(&items);
+        out.push_str(&truncation_note(items.len(), meta));
+        out
+    } else {
+        // No backend could be selected (headless, no IDE, no rust-analyzer):
+        // degrade to the tree-sitter symbol index directly.
+        let items = crate::lsp::edit_apply::overview_from_index(file_path);
+        let mut out = format_symbols_overview(&items);
+        out.push_str(&truncation_note(items.len(), None));
+        out
     }
 }
 

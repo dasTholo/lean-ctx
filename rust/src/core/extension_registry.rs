@@ -42,12 +42,23 @@ pub trait ReadMode: Send + Sync {
     fn render(&self, source: &str, path: &str) -> String;
 }
 
+/// A named text→text transform for a custom `@render type=<name>` (WASM-backed render transform).
+/// `hint` is a generic i32 the host fills with the audience (ai = 0, human = 1);
+/// a transform that does not need it ignores the value.
+pub trait RenderTransform: Send + Sync {
+    /// Stable registry name (the `@render type=<name>` token).
+    fn name(&self) -> &str;
+    /// Render `input` into the directive's output, honoring `hint` if relevant.
+    fn render(&self, input: &str, hint: i32) -> String;
+}
+
 /// Registry of pluggable read-modes, compressors, and chunkers.
 #[derive(Default)]
 pub struct ExtensionRegistry {
     read_modes: BTreeMap<String, Arc<dyn ReadMode>>,
     compressors: BTreeMap<String, Arc<dyn Compressor>>,
     chunkers: BTreeMap<String, Arc<dyn Chunker>>,
+    render_transforms: BTreeMap<String, Arc<dyn RenderTransform>>,
 }
 
 impl ExtensionRegistry {
@@ -133,6 +144,24 @@ impl ExtensionRegistry {
     #[must_use]
     pub fn chunker_names(&self) -> Vec<String> {
         self.chunkers.keys().cloned().collect()
+    }
+
+    /// Register (or replace) a render transform by its name.
+    pub fn register_render_transform(&mut self, handler: Arc<dyn RenderTransform>) {
+        self.render_transforms
+            .insert(handler.name().to_string(), handler);
+    }
+
+    /// Look up a render transform by name.
+    #[must_use]
+    pub fn render_transform(&self, name: &str) -> Option<Arc<dyn RenderTransform>> {
+        self.render_transforms.get(name).cloned()
+    }
+
+    /// Registered render-transform names (sorted).
+    #[must_use]
+    pub fn render_transform_names(&self) -> Vec<String> {
+        self.render_transforms.keys().cloned().collect()
     }
 }
 
@@ -323,5 +352,27 @@ mod tests {
     fn global_registry_seeds_builtins() {
         let reg = global().read().unwrap();
         assert!(reg.compressor("identity").is_some());
+    }
+
+    struct UpperRender;
+    impl RenderTransform for UpperRender {
+        fn name(&self) -> &str {
+            "upper"
+        }
+        fn render(&self, input: &str, hint: i32) -> String {
+            // hint is forwarded verbatim; an extension that ignores audience
+            // still receives it. Echo it so the test proves pass-through.
+            format!("{}|hint={hint}", input.to_uppercase())
+        }
+    }
+
+    #[test]
+    fn render_transform_registers_and_resolves_with_hint() {
+        let mut reg = ExtensionRegistry::new();
+        reg.register_render_transform(Arc::new(UpperRender));
+        assert!(reg.render_transform_names().contains(&"upper".to_string()));
+        let t = reg.render_transform("upper").expect("registered");
+        assert_eq!(t.render("hi", 1), "HI|hint=1");
+        assert!(reg.render_transform("nope").is_none());
     }
 }
