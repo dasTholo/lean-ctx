@@ -47,7 +47,7 @@ as the rest of the addon system.
 
 ```toml
 [install]
-manager = "uv"                     # one of: pip | uv | cargo | npm | brew
+manager = "uv"                     # one of: pip | uv | cargo | npm | brew | dotnet
 package = "headroom-ai[mcp]"       # the package spec the manager understands
 version = "0.27.0"                 # MANDATORY exact pin (no ranges, no "latest")
 bin     = "headroom"               # binary the [mcp] command expects (PATH idempotency)
@@ -55,7 +55,7 @@ bin     = "headroom"               # binary the [mcp] command expects (PATH idem
 ```
 
 Rules (enforced by `AddonInstall::validate()`, called from `manifest.validate()`):
-- `manager` ∈ a fixed allowlist (`uv`/`pip`/`cargo`/`npm`/`brew`). Each manager
+- `manager` ∈ a fixed allowlist (`uv`/`pip`/`cargo`/`npm`/`brew`/`dotnet`). Each manager
   maps to a **fixed argv template** the engine owns — the manifest never supplies
   raw shell.
 - `version` is required and must be an exact pin (empty / `latest` / `*` are
@@ -79,6 +79,7 @@ Rules (enforced by `AddonInstall::validate()`, called from `manifest.validate()`
 | `cargo`   | `cargo install {base} --version {version}`       | `cargo uninstall {base}`         |
 | `npm`     | `npm install -g {package}@{version}`             | `npm rm -g {base}`               |
 | `brew`    | `brew install {package}` (formula carries the pin, e.g. `node@22`) | `brew uninstall {base}` |
+| `dotnet`  | `dotnet tool install --global {package} --version {version}`       | `dotnet tool uninstall --global {base}` |
 
 `{base}` is `{package}` with extras and any inline version stripped
 (`headroom-ai[mcp]` → `headroom-ai`), keeping an npm scope intact
@@ -110,6 +111,12 @@ flowchart TD
 - **Idempotency**: check presence *first* (`verify` argv, else `bin` on `PATH`);
   if already satisfied, skip the manager entirely and just wire. Re-running `add`
   is safe and reports `Already installed — skipped`.
+- **Pre-flight**: when an install *is* needed, verify the manager itself exists
+  (`LEANCTX_BOOTSTRAP_<MGR>` override path, else the bare name on `PATH`) before
+  spawning it. A missing manager fails with an install hint
+  (`install uv → https://docs.astral.sh/uv/…`) instead of a raw spawn error, and
+  the `add` disclosure shows a `requires: <manager> on PATH — ✓/✗` line up front
+  so the gap is visible *before* consent.
 - **Receipt**: `<data_dir>/addons/installed.json` carries an `install` record
   (manager, package, version, bin) — content-only, no timestamps, so it stays
   determinism-friendly (#498). `remove` reads it to uninstall.
@@ -179,6 +186,7 @@ ships a clean server — no further engine work.
   environments; otherwise the manager is resolved from `PATH`.
 - Open: per-manager cache/location detection for richer "already present" checks
   (today: `verify` argv, else `bin` on `PATH`).
-- Open: a `doctor` check that the managers referenced by installed addons exist.
+- Partly shipped: `add` now pre-flights the manager's existence (with an install
+  hint); a full `doctor` sweep over *already-installed* addons is still open.
 - Open: Windows support for the manager templates (the executable probe already
   falls back to "is a file" off-unix; argv templates assume POSIX managers).

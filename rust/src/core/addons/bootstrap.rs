@@ -33,6 +33,9 @@ pub enum Manager {
     /// Homebrew — `brew install <formula>` (version pinned via the formula name,
     /// e.g. `node@22`; the `version` field documents the expected version).
     Brew,
+    /// .NET SDK — `dotnet tool install --global <pkg> --version <ver>` (.NET
+    /// global tools published to NuGet, e.g. `CodeCompress.Server`).
+    Dotnet,
 }
 
 impl Manager {
@@ -45,6 +48,7 @@ impl Manager {
             "cargo" => Some(Self::Cargo),
             "npm" => Some(Self::Npm),
             "brew" | "homebrew" => Some(Self::Brew),
+            "dotnet" => Some(Self::Dotnet),
             _ => None,
         }
     }
@@ -58,6 +62,7 @@ impl Manager {
             Self::Cargo => "cargo",
             Self::Npm => "npm",
             Self::Brew => "brew",
+            Self::Dotnet => "dotnet",
         }
     }
 
@@ -70,6 +75,34 @@ impl Manager {
             .ok()
             .filter(|v| !v.trim().is_empty())
             .unwrap_or_else(|| self.as_str().to_string())
+    }
+
+    /// A short, actionable hint for installing this manager when it is absent —
+    /// surfaced by the `addon add` pre-flight so a missing manager fails with a
+    /// "here's how to get it" message rather than a raw spawn error.
+    #[must_use]
+    pub fn install_hint(self) -> &'static str {
+        match self {
+            Self::Uv => "install uv → https://docs.astral.sh/uv/getting-started/installation/",
+            Self::Pip => "install Python & pip → https://pip.pypa.io/en/stable/installation/",
+            Self::Cargo => "install Rust (cargo) → https://rustup.rs",
+            Self::Npm => "install Node.js (ships npm) → https://nodejs.org/",
+            Self::Brew => "install Homebrew → https://brew.sh",
+            Self::Dotnet => "install the .NET SDK → https://dotnet.microsoft.com/download",
+        }
+    }
+
+    /// Whether the manager's executable can actually be launched: its
+    /// `LEANCTX_BOOTSTRAP_<MANAGER>` override path is executable, or its bare
+    /// name resolves on `PATH`. Lets `addon add` pre-flight a missing manager.
+    #[must_use]
+    pub fn is_available(self) -> bool {
+        let prog = self.program();
+        if prog.contains('/') || prog.contains('\\') {
+            is_executable(std::path::Path::new(&prog))
+        } else {
+            binary_on_path(&prog)
+        }
     }
 
     /// argv to install `package` pinned to `version`. Engine-owned; `package`
@@ -91,6 +124,14 @@ impl Manager {
             // Homebrew cannot install an arbitrary historical version; the
             // formula name carries the pin (`node@22`), so we install it verbatim.
             Self::Brew => vec!["install".into(), pkg.into()],
+            Self::Dotnet => vec![
+                "tool".into(),
+                "install".into(),
+                "--global".into(),
+                package_base(pkg).into(),
+                "--version".into(),
+                ver.into(),
+            ],
         }
     }
 
@@ -103,6 +144,12 @@ impl Manager {
             Self::Pip => vec!["uninstall".into(), "-y".into(), base.into()],
             Self::Npm => vec!["rm".into(), "-g".into(), base.into()],
             Self::Cargo | Self::Brew => vec!["uninstall".into(), base.into()],
+            Self::Dotnet => vec![
+                "tool".into(),
+                "uninstall".into(),
+                "--global".into(),
+                base.into(),
+            ],
         }
     }
 }
@@ -114,7 +161,7 @@ impl Manager {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AddonInstall {
-    /// Package manager: `uv` | `pip` | `cargo` | `npm` | `brew`.
+    /// Package manager: `uv` | `pip` | `cargo` | `npm` | `brew` | `dotnet`.
     pub manager: String,
     /// Package/formula to install (may carry extras, e.g. `headroom-ai[all]`).
     pub package: String,
@@ -169,7 +216,7 @@ impl AddonInstall {
         }
         if self.manager().is_none() {
             return Err(format!(
-                "[install] manager `{}` is not supported — use one of: uv, pip, cargo, npm, brew",
+                "[install] manager `{}` is not supported — use one of: uv, pip, cargo, npm, brew, dotnet",
                 self.manager.trim()
             ));
         }
@@ -292,6 +339,20 @@ pub fn ensure_installed(install: &AddonInstall) -> Result<BootstrapOutcome, Stri
             receipt,
             warning: None,
         });
+    }
+
+    // Pre-flight: the package is absent, so the manager must run — verify it
+    // exists first and fail with an install hint instead of a raw spawn error.
+    if !manager.is_available() {
+        return Err(format!(
+            "the `{mgr}` package manager is not installed (or not on PATH), so `{pkg}` cannot be \
+             installed.\n  → {hint}\n  Or install `{bin}` yourself, then re-run — `addon add` \
+             detects it and skips the bootstrap.",
+            mgr = manager.as_str(),
+            pkg = install.package.trim(),
+            hint = manager.install_hint(),
+            bin = install.bin(),
+        ));
     }
 
     run(
@@ -484,6 +545,17 @@ mod tests {
             declared("brew", "node@22", "22.0.0").install_argv(),
             ["install", "node@22"]
         );
+        assert_eq!(
+            declared("dotnet", "CodeCompress.Server", "0.15.0").install_argv(),
+            [
+                "tool",
+                "install",
+                "--global",
+                "CodeCompress.Server",
+                "--version",
+                "0.15.0"
+            ]
+        );
     }
 
     #[test]
@@ -499,6 +571,10 @@ mod tests {
         assert_eq!(
             declared("pip", "cognee==0.1.0", "0.1.0").uninstall_argv(),
             ["uninstall", "-y", "cognee"]
+        );
+        assert_eq!(
+            declared("dotnet", "CodeCompress.Server", "0.15.0").uninstall_argv(),
+            ["tool", "uninstall", "--global", "CodeCompress.Server"]
         );
     }
 
@@ -604,5 +680,44 @@ mod tests {
         // SAFETY: guarded by ENV_LOCK; clears the override set above.
         unsafe { std::env::remove_var("LEANCTX_BOOTSTRAP_UV") };
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn install_hint_is_present_for_every_manager() {
+        for m in [
+            Manager::Uv,
+            Manager::Pip,
+            Manager::Cargo,
+            Manager::Npm,
+            Manager::Brew,
+            Manager::Dotnet,
+        ] {
+            assert!(!m.install_hint().is_empty(), "{m:?} needs an install hint");
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn ensure_installed_preflights_a_missing_manager() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let tmp = std::env::temp_dir().join(format!("leanctx-boot-miss-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let missing = tmp.join("uv-not-here");
+
+        let mut install = declared("uv", "demo-pkg", "1.0.0");
+        install.verify = vec!["false".into()]; // never satisfied → must install
+
+        // SAFETY: guarded by ENV_LOCK; points the manager at a non-existent path
+        // so the pre-flight must reject *before* any spawn is attempted.
+        unsafe { std::env::set_var("LEANCTX_BOOTSTRAP_UV", &missing) };
+        let err = ensure_installed(&install).expect_err("missing manager rejected");
+
+        // SAFETY: guarded by ENV_LOCK; clears the override set above.
+        unsafe { std::env::remove_var("LEANCTX_BOOTSTRAP_UV") };
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        assert!(err.contains("uv"), "names the manager: {err}");
+        assert!(err.contains("not installed"), "explains why: {err}");
+        assert!(err.contains("astral.sh"), "gives an install hint: {err}");
     }
 }
