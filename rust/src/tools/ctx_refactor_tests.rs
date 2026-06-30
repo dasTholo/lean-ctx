@@ -1597,3 +1597,27 @@ fn reformat_without_ide_is_backend_required() {
         "got: {out}"
     );
 }
+
+#[test]
+fn reformat_rust_via_rustfmt_reports_changed() {
+    if std::process::Command::new("rustfmt")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
+        eprintln!("SKIP: rustfmt not in PATH");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let f = dir.path().join("a.rs");
+    std::fs::write(&f, "fn   x( ){let y=1;}\n").unwrap();
+    let root = dir.path().to_str().unwrap();
+    let args = serde_json::json!({ "action": "reformat", "path": "a.rs" });
+    let out = super::handle_reformat_refactor(&args, root);
+    assert!(out.contains("via rustfmt"), "got: {out}");
+    assert!(out.contains("changed"), "got: {out}");
+
+    // Second run: already conformant → unchanged.
+    let out2 = super::handle_reformat_refactor(&args, root);
+    assert!(out2.contains("unchanged"), "got: {out2}");
+}
