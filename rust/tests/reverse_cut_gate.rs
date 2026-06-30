@@ -11,7 +11,7 @@ fn repo_root() -> PathBuf {
     let rust_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     rust_dir
         .parent()
-        .map(|p| p.to_path_buf())
+        .map(std::path::Path::to_path_buf)
         .unwrap_or(rust_dir)
 }
 

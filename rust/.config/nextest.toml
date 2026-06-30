@@ -1,7 +1,6 @@
 experimental = ["setup-scripts"]
 
 [profile.default]
-test-threads = -4
 # Some integration tests share global state (fixed /tmp paths, shared server
 # state) and are flaky under high parallelism — they pass in isolation. Retry
 # them up to twice so a transient race doesn't fail the whole run. This masks,

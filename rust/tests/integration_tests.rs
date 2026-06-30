@@ -298,12 +298,21 @@ fn redirect_fidelity_command() -> &'static str {
 /// `LEAN_CTX_DISABLED` (and CI may set `LEAN_CTX_ACTIVE`) — each forces raw
 /// passthrough, which would make these tests assert nothing (the redirect test
 /// would pass vacuously). Stripping them pins the exact forced-compress path.
+///
+/// `LEAN_CTX_WRAPPED` matters most: when the test runner itself is launched
+/// inside a `lean-ctx -c` wrapper (the agent shell, or `cargo nextest` invoked
+/// through ctx_shell), lean-ctx stamps `LEAN_CTX_WRAPPED` on every child. The
+/// inherited marker makes `should_pass_through()` true, so the child bypasses
+/// compression entirely (`exec` is never reached) and the pipe test sees raw
+/// bytes. Removing it guarantees this child owns compression regardless of how
+/// the suite was started.
 fn forced_compress_bin() -> Command {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_lean-ctx"));
     cmd.current_dir(env!("CARGO_MANIFEST_DIR"))
         .env_remove("LEAN_CTX_RAW")
         .env_remove("LEAN_CTX_DISABLED")
         .env_remove("LEAN_CTX_ACTIVE")
+        .env_remove("LEAN_CTX_WRAPPED")
         .env("LEAN_CTX_COMPRESS", "1")
         .env("__LEAN_CTX_SKIP_EVENTS", "1")
         // Allowlist enforcement (non-TTY stderr ⇒ block) is out of scope here;

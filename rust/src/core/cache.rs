@@ -1183,6 +1183,14 @@ mod tests {
     fn hebbian_eviction_bonus_is_wired() {
         // #3: files read together build a Hebbian association via store()'s
         // recording, and that association must feed the eviction bonus.
+        //
+        // Warm up tiktoken first: the very first count_tokens() in the process
+        // pays a one-time ~700ms BPE-init. store() records co-access BEFORE
+        // count_tokens, so without this warmup that init would land between the
+        // two stores, blowing past the 500ms co-access burst window and
+        // splitting the (a,b) pair apart. A real agent run has tiktoken long
+        // warm by the time co-access matters; the warmup pins that condition.
+        let _ = count_tokens("warm");
         let mut cache = SessionCache::new();
         cache.store("/a.rs", "fn a() {}");
         cache.store("/b.rs", "fn b() {}");
