@@ -893,23 +893,6 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
-    fn lmd_md_read_returns_raw_directives_verbatim() {
-        // Post lmd-reverse-cut: a `.lmd.md` read is a plain raw read — the source
-        // directives (`@phase`/`@include`) come back verbatim, never rendered and
-        // never tagged `mode:"lmd"`. No addon delegation path exists anymore.
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("doc.lmd.md");
-        let src = "@phase \"task-1\"\n@include shared\nbody line\n";
-        std::fs::write(&path, src).unwrap();
-
-        let text = std::fs::read_to_string(&path).unwrap();
-        assert!(
-            text.contains("@phase") && text.contains("@include"),
-            "raw .lmd.md read must preserve directives verbatim, got: {text}"
-        );
-    }
-
-    #[test]
     fn raw_alias_forces_raw_mode_over_explicit_mode() {
         // #513: raw=true is the verbatim escape hatch and must win over any
         // mode arg an agent also happened to pass.
