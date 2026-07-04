@@ -25,63 +25,6 @@ fn per_file_lock(path: &str) -> Arc<Mutex<()>> {
     crate::core::path_locks::per_file_lock(path)
 }
 
-/// Auto-render delegation for `.lmd.md` (lean-md) documents.
-///
-/// `.lmd.md` is the lean-md source format. The render transform itself no longer
-/// lives in lean-ctx (removed with the lmd reverse-cut); rendering is owned by
-/// the external **lean-md addon**, which exposes a `ctx_md_render` tool over its
-/// own MCP and is reached through the gateway proxy. This hook is the ONLY
-/// remaining lmd-aware code in lean-ctx and is intentionally thin: detect the
-/// extension, locate the addon's render tool in the gateway catalog, delegate,
-/// and return the rendered text.
-///
-/// Returns `Some(rendered)` only when ALL of the following hold:
-///   * `path` ends in `.lmd.md`,
-///   * the gateway is enabled (`enabled_effective`),
-///   * a downstream tool named `ctx_md_render` exists in the catalog, and
-///   * the proxy call succeeds.
-///
-/// Otherwise returns `None`, so the caller falls back to the normal raw/
-/// compressed read — never an error, never a half-rendered document.
-///
-/// Handle convention: the catalog is searched for the first entry whose tool
-/// name equals `ctx_md_render`; its `server::tool` handle is used as-is. The
-/// lean-md addon's gateway server name is deliberately NOT hard-coded — whichever
-/// downstream server exposes `ctx_md_render` wins.
-fn try_lmd_addon_render(
-    path: &str,
-    cfg: &crate::core::config::Config,
-    project_root: &str,
-) -> Option<String> {
-    if !path.ends_with(".lmd.md") {
-        return None;
-    }
-    if !cfg.gateway.enabled_effective() {
-        return None;
-    }
-    // `try_current` (not `current`): degrade to the raw-read fallback instead of
-    // panicking when invoked outside a Tokio runtime (e.g. unit tests). Inside
-    // the dispatch layer (which wraps handlers in `block_in_place`) blocking on
-    // the current runtime here is safe — same pattern as `ctx_tools`. Both the
-    // async catalog fetch and the proxy call are driven through this handle.
-    let rt = tokio::runtime::Handle::try_current().ok()?;
-    let catalog = rt.block_on(crate::core::gateway::catalog::get(&cfg.gateway));
-    let handle = catalog
-        .entries
-        .iter()
-        .find(|e| e.tool == "ctx_md_render")
-        .map(|e| e.namespaced.clone())?;
-    let mut arguments = serde_json::Map::new();
-    arguments.insert("path".into(), serde_json::Value::String(path.to_string()));
-    rt.block_on(crate::core::gateway::proxy(
-        &cfg.gateway,
-        &handle,
-        arguments,
-        project_root,
-    ))
-    .ok()
-}
-
 pub struct CtxReadTool;
 
 impl McpTool for CtxReadTool {
@@ -157,24 +100,6 @@ impl CtxReadTool {
         ctx: &ToolContext,
         path: &str,
     ) -> Result<ToolOutput, ErrorData> {
-        // lmd auto-render delegation (the ONLY remaining lmd-aware code in
-        // lean-ctx). A `.lmd.md` read is delegated to the external lean-md addon
-        // via the gateway when reachable; otherwise we fall through to the normal
-        // read below so the raw source is returned (never an error, never
-        // half-rendered). Runs before the session/cache lock machinery.
-        let cfg = crate::core::config::Config::load();
-        if let Some(rendered) = try_lmd_addon_render(path, &cfg, &ctx.project_root) {
-            return Ok(ToolOutput {
-                text: rendered,
-                original_tokens: 0,
-                saved_tokens: 0,
-                mode: Some("lmd".to_string()),
-                path: Some(path.to_string()),
-                changed: false,
-                shell_outcome: None,
-            });
-        }
-
         let session_lock = ctx
             .session
             .as_ref()
@@ -968,18 +893,20 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
-    fn lmd_md_without_addon_returns_raw_text() {
-        // No lean-md addon / gateway disabled (default Config) → no delegation,
-        // caller must fall back to the raw read. The helper returns None.
-        crate::test_env::remove_var("LEAN_CTX_GATEWAY");
-        let mut cfg = crate::core::config::Config::default();
-        cfg.gateway.enabled = false;
+    fn lmd_md_read_returns_raw_directives_verbatim() {
+        // Post lmd-reverse-cut: a `.lmd.md` read is a plain raw read — the source
+        // directives (`@phase`/`@include`) come back verbatim, never rendered and
+        // never tagged `mode:"lmd"`. No addon delegation path exists anymore.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("doc.lmd.md");
+        let src = "@phase \"task-1\"\n@include shared\nbody line\n";
+        std::fs::write(&path, src).unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
         assert!(
-            try_lmd_addon_render("/tmp/doc.lmd.md", &cfg, "").is_none(),
-            "without an addon, .lmd.md must not delegate (raw fallback)"
+            text.contains("@phase") && text.contains("@include"),
+            "raw .lmd.md read must preserve directives verbatim, got: {text}"
         );
-        // A non-.lmd.md path is never delegated either.
-        assert!(try_lmd_addon_render("/tmp/doc.md", &cfg, "").is_none());
     }
 
     #[test]
