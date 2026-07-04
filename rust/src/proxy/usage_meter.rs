@@ -174,6 +174,58 @@ pub fn resume_from_disk() {
 /// Records one turn's measured usage against its model bucket (and its
 /// output-savings cohort, when tagged) and persists.
 pub fn record(u: &super::usage::RealUsage) {
+    // Gateway store subscription (enterprise#17): forward the full record to
+    // the installed sink (no-op locally). Never blocks the request path.
+    super::usage_sink::push(u);
+
+    // Budget windows (enterprise#25): book this turn's measured cost against
+    // the person/day and project/month accumulators the policy gate checks.
+    // Local turns book the shadow rate — the same valuation the usage store
+    // applies — so local-only budgets stay meaningful.
+    if let Some(wire) = u.wire.as_deref()
+        && (wire.person.is_some() || wire.project.is_some())
+    {
+        let pricing = crate::core::gain::model_pricing::ModelPricing::load();
+        let baseline = crate::core::config::Config::load().proxy.baseline.clone();
+        #[allow(clippy::cast_precision_loss)]
+        let cost_usd = if wire.is_local {
+            let billable =
+                u.input_tokens + u.output_tokens + u.cache_read_tokens + u.cache_write_tokens;
+            baseline.effective_local_shadow_rate() / 1_000_000.0 * billable as f64
+        } else {
+            pricing.quote(Some(&u.model)).cost.estimate_usd(
+                u.input_tokens,
+                u.output_tokens,
+                u.cache_write_tokens,
+                u.cache_read_tokens,
+            )
+        };
+        super::policy_gate::record_spend(wire.person.as_deref(), wire.project.as_deref(), cost_usd);
+    }
+
+    // Mechanism attribution into the local savings ledger (enterprise#19).
+    // Routing: the gateway served a cheaper model than requested — value the
+    // rate delta on the measured input tokens. Caching: provider prompt-cache
+    // reads billed below the input rate. Both best-effort, never blocking.
+    if let Some(wire) = u.wire.as_deref()
+        && let Some(routed_from) = wire.routed_from.as_deref()
+    {
+        crate::core::savings_ledger::record_routing_event(routed_from, &u.model, u.input_tokens);
+    }
+    if u.cache_read_tokens > 0 {
+        let cost = crate::core::gain::model_pricing::ModelPricing::load()
+            .quote(Some(&u.model))
+            .cost;
+        #[allow(clippy::cast_precision_loss)]
+        let discount_usd =
+            (cost.input_per_m - cost.cache_read_per_m) / 1_000_000.0 * u.cache_read_tokens as f64;
+        crate::core::savings_ledger::record_caching_event(
+            &u.model,
+            u.cache_read_tokens,
+            discount_usd,
+        );
+    }
+
     let key = normalize_key(&u.model);
     {
         let mut map = store()
@@ -352,9 +404,7 @@ mod tests {
             input_tokens: input,
             output_tokens: output,
             cache_read_tokens: cache_read,
-            cache_write_tokens: 0,
-            reasoning_tokens: 0,
-            cohort: None,
+            ..Default::default()
         }
     }
 

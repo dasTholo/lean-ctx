@@ -3,6 +3,8 @@
 
 #[allow(clippy::wildcard_imports)]
 use super::*;
+use chrono::Utc;
+
 use crate::core::knowledge::{AdmissionResult, sort_fact_for_output};
 use crate::core::plugins::{PluginManager, executor::HookPoint};
 
@@ -17,11 +19,18 @@ pub(crate) fn handle_remember(
     let Some(cat) = category else {
         return "Error: category is required for remember".to_string();
     };
-    let Some(k) = key else {
-        return "Error: key is required for remember".to_string();
-    };
     let Some(v) = value else {
         return "Error: value is required for remember".to_string();
+    };
+    // `key` is optional: agents (and our own injected instructions) commonly
+    // call remember with just category+content. Derive a deterministic slug
+    // from the value so the call succeeds instead of erroring (#658).
+    let derived_key;
+    let k = if let Some(k) = key {
+        k
+    } else {
+        derived_key = derive_key_from_value(v);
+        derived_key.as_str()
     };
     let conf = confidence.unwrap_or(0.8);
     let (v, _secret_matches) = crate::core::secret_detection::scan_and_redact_from_config(v);
@@ -153,7 +162,13 @@ pub(crate) fn handle_remember(
             } => (category.clone(), key.clone(), value.clone()),
             _ => (cat.to_string(), k.to_string(), v.to_string()),
         };
-        if let Some(engine) = embedding_engine() {
+        // Non-blocking engine access: `remember` must never stall on a model
+        // download/load (fresh install, offline sandbox — the blocking variant
+        // hit the 120s tool watchdog before the first fact was ever embedded).
+        // When the engine is not loaded yet this kicks off the one-time
+        // background activation and skips the side-car for THIS call only;
+        // compaction / embeddings_reindex backfill the vector later.
+        if let Some(engine) = embedding_engine_nonblocking() {
             // Serialize the embedding index's read-modify-write under the same
             // per-project lock as the fact write above, and compact against the
             // freshly committed on-disk knowledge instead of this call's
@@ -161,8 +176,7 @@ pub(crate) fn handle_remember(
             // stale snapshot, so parallel `remember` calls clobbered each
             // other's vectors and pruned just-stored embeddings — semantic
             // recall then returned far fewer hits than facts stored (issue #412,
-            // a #326 follow-up). The model is fetched outside the lock so its
-            // load never serializes other writers.
+            // a #326 follow-up).
             let (warn, semantic) = ProjectKnowledge::with_project_lock(project_root, || {
                 let mut idx = crate::core::knowledge_embedding::KnowledgeEmbeddingIndex::load(
                     &knowledge.project_hash,
@@ -200,6 +214,18 @@ pub(crate) fn handle_remember(
                     Ok(()) => {
                         let fresh = ProjectKnowledge::load(project_root);
                         let kref = fresh.as_ref().unwrap_or(&knowledge);
+                        // Self-healing coverage: facts written while the engine
+                        // was still warming up (non-blocking remember) or via
+                        // the consolidation/ETL writers have no vector yet —
+                        // embed a bounded batch of them now that the engine is
+                        // warm, so semantic recall converges without a manual
+                        // embeddings_reindex.
+                        crate::core::knowledge_embedding::backfill_missing(
+                            &mut idx,
+                            engine,
+                            kref,
+                            crate::core::knowledge_embedding::BACKFILL_PER_REMEMBER,
+                        );
                         crate::core::knowledge_embedding::compact_against_knowledge(
                             &mut idx, kref, &policy,
                         );
@@ -247,6 +273,35 @@ pub(crate) fn handle_remember(
     }
 
     result
+}
+
+/// Deterministic key slug from a fact's value: the first four words,
+/// lowercased, non-alphanumerics collapsed to single dashes, capped at 48
+/// bytes. A pure function of the content (no timestamps/counters, #498) so
+/// repeated remembers of the same value merge into the same key.
+pub(crate) fn derive_key_from_value(value: &str) -> String {
+    let words: Vec<&str> = value.split_whitespace().take(4).collect();
+    let joined = words.join(" ").to_lowercase();
+    let mut slug = String::with_capacity(joined.len());
+    let mut last_dash = true; // suppress a leading dash
+    for c in joined.chars() {
+        if c.is_alphanumeric() {
+            slug.push(c);
+            last_dash = false;
+        } else if !last_dash {
+            slug.push('-');
+            last_dash = true;
+        }
+        if slug.len() >= 48 {
+            break;
+        }
+    }
+    let slug = slug.trim_end_matches('-');
+    if slug.is_empty() {
+        "note".to_string()
+    } else {
+        slug.to_string()
+    }
 }
 
 pub(crate) fn handle_recall(
@@ -399,7 +454,29 @@ pub(crate) fn handle_recall(
         return out;
     }
 
-    "Error: provide query or category for recall".to_string()
+    // Bare recall (no query, no category): show the most recent current facts
+    // instead of erroring — "what do we know?" is the natural first call (#658).
+    let limit = policy.knowledge.recall_facts_limit;
+    let mut current: Vec<&crate::core::knowledge::KnowledgeFact> =
+        knowledge.facts.iter().filter(|f| f.is_current()).collect();
+    if current.is_empty() {
+        return "No knowledge stored for this project yet.".to_string();
+    }
+    current.sort_by(|a, b| sort_fact_for_output(a, b));
+    let total = current.len();
+    current.truncate(limit);
+    let mut out = format!("Recent facts (showing {}/{total}):\n", current.len());
+    for f in &current {
+        out.push_str(&format!(
+            "  [{}/{}]: {} (confidence: {:.0}%)\n",
+            f.category,
+            f.key,
+            f.value,
+            f.confidence * 100.0
+        ));
+    }
+    out.push_str("→ narrow with query=… or category=…");
+    out
 }
 
 /// Parse an `as_of` timestamp: RFC 3339 (`2026-06-01T12:00:00Z`) or a bare
@@ -669,6 +746,43 @@ fn score_placement_misses(query: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn derive_key_is_deterministic_slug() {
+        let v = "fresh-demo uses greet() as the single formatting entry point";
+        let k1 = derive_key_from_value(v);
+        let k2 = derive_key_from_value(v);
+        assert_eq!(k1, k2, "must be a pure function of the value");
+        assert_eq!(k1, "fresh-demo-uses-greet-as");
+        assert!(k1.len() <= 48);
+    }
+
+    #[test]
+    fn derive_key_handles_degenerate_values() {
+        assert_eq!(derive_key_from_value("---"), "note");
+        assert_eq!(derive_key_from_value(""), "note");
+        assert_eq!(
+            derive_key_from_value("Fix: обновление конфига"),
+            "fix-обновление-конфига"
+        );
+    }
+
+    #[test]
+    fn remember_without_key_derives_one() {
+        let out = handle_remember(
+            "/tmp/test-remember-derived-key",
+            Some("decision"),
+            None,
+            Some("uses BTreeSet for deterministic iteration"),
+            "s1",
+            None,
+        );
+        assert!(
+            out.contains("uses-btreeset-for-deterministic"),
+            "derived key expected in: {out}"
+        );
+        assert!(!out.starts_with("Error"), "must not error: {out}");
+    }
 
     #[test]
     fn parse_as_of_accepts_rfc3339() {

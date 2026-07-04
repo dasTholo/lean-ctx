@@ -10,6 +10,15 @@ pub struct ProxyConfig {
     pub openai_upstream: Option<String>,
     pub chatgpt_upstream: Option<String>,
     pub gemini_upstream: Option<String>,
+    /// Universal provider registry (`[[proxy.providers]]`): additional upstream
+    /// providers beyond the four built-ins, declared as data — id + wire shape +
+    /// base URL — so a new OpenAI/Anthropic/Gemini-compatible endpoint (Azure AI
+    /// Foundry, OpenRouter, Groq, vLLM/Ollama, a corporate gateway…) is a pure
+    /// config entry, never a code change. Reachable under
+    /// `/providers/{id}/...` on the proxy and addressable by the router.
+    /// The legacy `*_upstream` fields above stay authoritative for the four
+    /// built-in provider routes (backwards compatible).
+    pub providers: Vec<ProviderEntry>,
     /// History-pruning strategy for proxied chat requests.
     /// "cache-aware" (default) | "rolling" | "off". See [`HistoryMode`].
     pub history_mode: Option<String>,
@@ -170,6 +179,198 @@ pub struct ProxyConfig {
     /// `lean-ctx proxy codex-chatgpt on|off`; resolved via
     /// [`ProxyConfig::codex_chatgpt_proxy_enabled`].
     pub codex_chatgpt_proxy: Option<bool>,
+    /// Active request routing (`[proxy.routing]`, enterprise#13): model aliases
+    /// and intent-tier downgrades applied in the forward path. Off by default —
+    /// an empty/absent table is a strict passthrough. See [`RoutingRules`].
+    pub routing: RoutingRules,
+    /// Counterfactual-baseline parameters (`[proxy.baseline]`, enterprise#15/#18)
+    /// for the avoided-cost evidence chain. See [`BaselineConfig`].
+    pub baseline: BaselineConfig,
+}
+
+/// `[proxy.baseline]` — the contract-frozen counterfactual parameters that make
+/// the success fee provable (enterprise#15, Doc 04 §6 / Doc 08 §2).
+///
+/// - `reference_model`: the model the customer *would have used* without
+///   lean-ctx. Frozen per deployment/contract (calibration: enterprise#41);
+///   every usage event stores `reference_cost_usd` = the request's
+///   **uncompressed** input tokens priced at this model's input rate — the
+///   counterfactual cost the avoided-cost ledger settles against.
+/// - `local_shadow_rate_per_mtok`: USD per 1M tokens booked as the actual cost
+///   of locally served (loopback) inference. Local compute is never free —
+///   hardware and power are real — so the shadow rate keeps local-model savings
+///   honest instead of infinite. Default: `0.25` USD/MTok, a conservative
+///   self-hosting cost estimate; calibrate per deployment.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct BaselineConfig {
+    /// Counterfactual reference model (`None` = baseline evidence off).
+    pub reference_model: Option<String>,
+    /// USD per 1M tokens for local/loopback inference (default 0.25, never 0).
+    pub local_shadow_rate_per_mtok: Option<f64>,
+}
+
+/// Default local shadow rate (USD per 1M tokens) when `[proxy.baseline]` sets
+/// none: a conservative self-hosted inference cost so `is_local` usage is
+/// never booked at $0 (Doc 04 §6 "local-free ≠ cost-free").
+pub const DEFAULT_LOCAL_SHADOW_RATE_PER_MTOK: f64 = 0.25;
+
+impl BaselineConfig {
+    /// Effective shadow rate: configured value (clamped positive) or default.
+    #[must_use]
+    pub fn effective_local_shadow_rate(&self) -> f64 {
+        match self.local_shadow_rate_per_mtok {
+            Some(r) if r > 0.0 => r,
+            _ => DEFAULT_LOCAL_SHADOW_RATE_PER_MTOK,
+        }
+    }
+}
+
+/// `[proxy.routing]` — the active router's rule set (enterprise#13).
+///
+/// Two mechanisms, both **within-shape** in M1 (the target must speak the same
+/// wire dialect as the request; N×M shape translation is M2):
+///
+/// - **Aliases**: exact requested-model → target. Lets an org expose stable
+///   names (`acme/fast`) or transparently swap one concrete model for another.
+/// - **Tiers**: intent-based downgrade. The request's last user message is
+///   classified (`intent_router`); the resulting tier (`fast|standard|premium`)
+///   picks a target from this table. An absent tier key (or `""`) keeps the
+///   requested model — premium work is never silently downgraded unless the
+///   operator says so.
+///
+/// A target is `"model"` (swap the model, keep the upstream) or
+/// `"provider:model"` where `provider` is a `[[proxy.providers]]` registry id
+/// or a built-in (`anthropic|openai|gemini`) — then the request is also
+/// re-targeted to that provider's upstream.
+///
+/// **Fail-open by construction:** any lookup/classification/validation miss
+/// routes nothing and forwards the request unchanged.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RoutingRules {
+    /// Master switch; `false`/absent = passthrough (no body rewrite at all).
+    pub enabled: Option<bool>,
+    /// Exact model-name aliases: requested model → `"provider:model"` | `"model"`.
+    /// BTreeMap for deterministic iteration/serialization (#498).
+    pub aliases: std::collections::BTreeMap<String, String>,
+    /// Intent-tier targets: `fast|standard|premium` → `"provider:model"` |
+    /// `"model"` | `""` (= keep requested model).
+    pub tiers: std::collections::BTreeMap<String, String>,
+}
+
+impl RoutingRules {
+    /// True when the router should run at all.
+    #[must_use]
+    pub fn is_active(&self) -> bool {
+        self.enabled.unwrap_or(false) && !(self.aliases.is_empty() && self.tiers.is_empty())
+    }
+}
+
+/// A parsed routing target: optional provider id + model name.
+/// `"foundry:gpt-4o-mini"` → provider `foundry`, model `gpt-4o-mini`;
+/// `"claude-haiku-4-5"` → model only (upstream unchanged).
+#[must_use]
+pub fn parse_route_target(target: &str) -> Option<(Option<&str>, &str)> {
+    let t = target.trim();
+    if t.is_empty() {
+        return None;
+    }
+    match t.split_once(':') {
+        Some((provider, model)) => {
+            let (provider, model) = (provider.trim(), model.trim());
+            if provider.is_empty() || model.is_empty() {
+                None
+            } else {
+                Some((Some(provider), model))
+            }
+        }
+        None => Some((None, t)),
+    }
+}
+
+/// The API dialect an upstream endpoint speaks — deliberately separate from the
+/// provider's *identity*. lean-ctx understands three wire shapes; any number of
+/// configured providers (Foundry, OpenRouter, Groq, a local vLLM…) map onto
+/// them. New shape = code; new provider = config (universal-provider-framework).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WireShape {
+    /// Anthropic Messages API (`/v1/messages`).
+    Anthropic,
+    /// OpenAI Chat Completions / Responses API (also spoken by Azure AI
+    /// Foundry, OpenRouter, Groq, vLLM, Ollama, LM Studio…).
+    OpenAi,
+    /// Google Gemini `generateContent` API.
+    Gemini,
+}
+
+impl WireShape {
+    /// Stable lowercase name (serde representation) for logs and `/status`.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WireShape::Anthropic => "anthropic",
+            WireShape::OpenAi => "openai",
+            WireShape::Gemini => "gemini",
+        }
+    }
+}
+
+/// One `[[proxy.providers]]` registry entry (see [`ProxyConfig::providers`]).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderEntry {
+    /// Registry id, used in the `/providers/{id}/...` route and in routing
+    /// rules. Lowercase alphanumeric plus `-`/`_`; must not shadow a built-in
+    /// provider name (`anthropic`, `openai`, `chatgpt`, `gemini`).
+    pub id: String,
+    /// Which API dialect the endpoint speaks (`anthropic|openai|gemini`).
+    pub shape: WireShape,
+    /// Endpoint base URL. HTTPS for any non-loopback host; a declared registry
+    /// entry is itself the custom-host opt-in (no separate allowlist flag).
+    pub base_url: String,
+    /// Name of the environment variable holding the upstream API key the
+    /// gateway injects (replacing the caller's credential headers). `None` =
+    /// forward the caller's own credentials verbatim (default, loopback mode).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key_env: Option<String>,
+    /// Set `false` to keep the entry in config but take it out of service.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// Marks this endpoint as local inference (Ollama/vLLM/…): usage is booked
+    /// at the transparent `local_shadow_rate` instead of provider list prices
+    /// (enterprise#15/#18). Unset = derived from the URL (loopback hosts are
+    /// local). Set it explicitly when the endpoint is local but not loopback —
+    /// the containerized gateway reaching the host's Ollama
+    /// (`host.docker.internal`) or an in-cluster server (`ollama.svc.cluster.local`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local: Option<bool>,
+}
+
+/// A validated, ready-to-serve registry provider (runtime view of
+/// [`ProviderEntry`], published inside [`Upstreams`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedProvider {
+    pub id: String,
+    pub shape: WireShape,
+    pub base_url: String,
+    pub api_key_env: Option<String>,
+    /// Billed as local inference (shadow rate). Explicit `local` flag when the
+    /// entry declares one, otherwise loopback-URL derivation.
+    pub local: bool,
+}
+
+/// Built-in provider route names a registry entry must not shadow.
+const BUILTIN_PROVIDER_IDS: &[&str] = &["anthropic", "openai", "chatgpt", "gemini"];
+
+/// True when `id` is usable as a registry id: non-empty, lowercase alnum plus
+/// `-`/`_` (it becomes a URL path segment), and not a built-in provider name.
+fn is_valid_provider_id(id: &str) -> bool {
+    !id.is_empty()
+        && !BUILTIN_PROVIDER_IDS.contains(&id)
+        && id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
 }
 
 /// Per-role prose-compression intensity for the proxy's frozen request region.
@@ -620,7 +821,61 @@ impl ProxyConfig {
             openai: self.resolve_upstream(ProxyProvider::OpenAi),
             chatgpt: self.resolve_upstream(ProxyProvider::ChatGpt),
             gemini: self.resolve_upstream(ProxyProvider::Gemini),
+            providers: self.resolve_providers(),
         }
+    }
+
+    /// Validate + resolve the `[[proxy.providers]]` registry. Invalid entries
+    /// are logged and skipped (one typo must never take the proxy down or
+    /// disable the remaining registry); duplicates keep the first occurrence.
+    /// A declared registry entry is itself the deliberate custom-host opt-in,
+    /// so any HTTPS host is accepted; plaintext HTTP still requires loopback or
+    /// the explicit insecure-HTTP opt-in (same rule as the built-ins).
+    #[must_use]
+    pub fn resolve_providers(&self) -> Vec<ResolvedProvider> {
+        let mut seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+        let mut out = Vec::new();
+        for entry in &self.providers {
+            if !entry.enabled.unwrap_or(true) {
+                continue;
+            }
+            let id = entry.id.trim();
+            if !is_valid_provider_id(id) {
+                tracing::warn!(
+                    "[proxy.providers] invalid id '{id}' (lowercase alnum/-/_ only, \
+                     must not shadow a built-in provider) — entry skipped"
+                );
+                continue;
+            }
+            if !seen.insert(id) {
+                tracing::warn!("[proxy.providers] duplicate id '{id}' — keeping first entry");
+                continue;
+            }
+            match validate_upstream_url(&entry.base_url, self.allows_insecure_http_upstream(), true)
+            {
+                Ok(base_url) => {
+                    // Explicit `local` flag wins; otherwise loopback URLs are
+                    // local (host.docker.internal etc. need the explicit flag).
+                    let local = entry.local.unwrap_or_else(|| is_local_proxy_url(&base_url));
+                    out.push(ResolvedProvider {
+                        id: id.to_string(),
+                        shape: entry.shape,
+                        base_url,
+                        api_key_env: entry
+                            .api_key_env
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|v| !v.is_empty())
+                            .map(str::to_string),
+                        local,
+                    });
+                }
+                Err(e) => {
+                    tracing::warn!("[proxy.providers] '{id}' has invalid base_url — skipped: {e}");
+                }
+            }
+        }
+        out
     }
 
     /// Resolve all upstreams from config.toml only (ignoring `LEAN_CTX_*` env) —
@@ -636,6 +891,7 @@ impl ProxyConfig {
             openai: pick(ProxyProvider::OpenAi),
             chatgpt: pick(ProxyProvider::ChatGpt),
             gemini: pick(ProxyProvider::Gemini),
+            providers: self.resolve_providers(),
         }
     }
 
@@ -655,11 +911,15 @@ impl ProxyConfig {
             openai: keep(ProxyProvider::OpenAi, &last.openai),
             chatgpt: keep(ProxyProvider::ChatGpt, &last.chatgpt),
             gemini: keep(ProxyProvider::Gemini, &last.gemini),
+            // Registry re-resolution is deterministic from config; an entry
+            // that turned invalid is dropped with a warning (see
+            // `resolve_providers`), the rest keep serving.
+            providers: self.resolve_providers(),
         }
     }
 }
 
-/// The three resolved provider upstreams a running proxy forwards to. Published
+/// The resolved provider upstreams a running proxy forwards to. Published
 /// to request handlers via a `tokio::sync::watch` channel so a config change is
 /// picked up live, without a proxy restart (#449).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -668,6 +928,18 @@ pub struct Upstreams {
     pub openai: String,
     pub chatgpt: String,
     pub gemini: String,
+    /// Registry providers from `[[proxy.providers]]` (universal framework),
+    /// validated and live-reloadable exactly like the built-ins.
+    pub providers: Vec<ResolvedProvider>,
+}
+
+impl Upstreams {
+    /// Look up a registry provider by id (`/providers/{id}/...` route, router
+    /// upstream overrides). Built-ins are not addressed here.
+    #[must_use]
+    pub fn provider_by_id(&self, id: &str) -> Option<&ResolvedProvider> {
+        self.providers.iter().find(|p| p.id == id)
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -836,721 +1108,5 @@ pub fn is_local_proxy_url(value: &str) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn loopback_http_is_always_allowed() {
-        assert_eq!(
-            validate_upstream_url("http://127.0.0.1:4444", false, false).unwrap(),
-            "http://127.0.0.1:4444"
-        );
-        assert_eq!(
-            validate_upstream_url("http://localhost:2455/", false, false).unwrap(),
-            "http://localhost:2455"
-        );
-    }
-
-    #[test]
-    fn https_allowlisted_host_is_allowed() {
-        assert_eq!(
-            validate_upstream_url("https://api.openai.com", false, false).unwrap(),
-            "https://api.openai.com"
-        );
-    }
-
-    #[test]
-    fn non_loopback_http_is_rejected_without_optin() {
-        let err =
-            validate_upstream_url("http://host.docker.internal:2455", false, false).unwrap_err();
-        // The hint must point at the flag that actually lifts the scheme check
-        // (#440). The old message pointed at LEAN_CTX_ALLOW_CUSTOM_UPSTREAM,
-        // which never bypassed the HTTPS requirement.
-        assert!(
-            err.contains("LEAN_CTX_ALLOW_INSECURE_HTTP_UPSTREAM"),
-            "hint must name the working opt-in, got: {err}"
-        );
-    }
-
-    #[test]
-    fn non_loopback_http_is_allowed_with_optin() {
-        assert_eq!(
-            validate_upstream_url("http://host.docker.internal:2455", true, false).unwrap(),
-            "http://host.docker.internal:2455"
-        );
-    }
-
-    #[test]
-    fn unknown_scheme_is_rejected() {
-        assert!(validate_upstream_url("ftp://example.com", true, true).is_err());
-    }
-
-    #[test]
-    fn https_custom_host_is_rejected_without_optin() {
-        // #590: a custom HTTPS host (e.g. a corporate gateway) is blocked unless
-        // the operator opts in. The hint must name BOTH the env var and the
-        // config flag — only the config flag reaches the managed proxy.
-        let err =
-            validate_upstream_url("https://gw.corp.example/anthropic", false, false).unwrap_err();
-        assert!(
-            err.contains("LEAN_CTX_ALLOW_CUSTOM_UPSTREAM") && err.contains("allow_custom_upstream"),
-            "hint must name both opt-ins, got: {err}"
-        );
-    }
-
-    #[test]
-    fn https_custom_host_is_allowed_with_optin() {
-        // The opt-in (env or `[proxy] allow_custom_upstream`) lifts the allowlist.
-        assert_eq!(
-            validate_upstream_url("https://gw.corp.example/anthropic", false, true).unwrap(),
-            "https://gw.corp.example/anthropic"
-        );
-    }
-
-    #[test]
-    fn config_flag_enables_custom_upstream_optin() {
-        // #590: mirrors `config_flag_enables_insecure_http_optin`. `Some(true)`
-        // resolves to true regardless of the environment, so no env mutation.
-        let cfg = ProxyConfig {
-            allow_custom_upstream: Some(true),
-            ..Default::default()
-        };
-        assert!(cfg.allows_custom_upstream());
-    }
-
-    #[test]
-    fn has_custom_host_upstream_detects_only_custom_https() {
-        // A custom HTTPS host counts; an allowlisted host, a loopback URL, and an
-        // unset upstream do not (the http case is the insecure-http opt-in's job).
-        assert!(
-            ProxyConfig {
-                anthropic_upstream: Some("https://gw.corp.example/anthropic".into()),
-                ..Default::default()
-            }
-            .has_custom_host_upstream()
-        );
-        assert!(
-            !ProxyConfig {
-                openai_upstream: Some("https://api.openai.com".into()),
-                anthropic_upstream: Some("http://127.0.0.1:4444".into()),
-                ..Default::default()
-            }
-            .has_custom_host_upstream()
-        );
-        assert!(!ProxyConfig::default().has_custom_host_upstream());
-    }
-
-    #[test]
-    fn cold_prefix_repack_is_opt_in_and_config_enables() {
-        // #480: off by default (a wrong cold guess re-bills reads as writes ~12x),
-        // enabled via config. Isolate from a developer shell that may export the
-        // env override.
-        let _lock = crate::core::data_dir::test_env_lock();
-        crate::test_env::remove_var("LEAN_CTX_PROXY_COLD_PREFIX_REPACK");
-        assert!(
-            !ProxyConfig::default().repacks_cold_prefix(),
-            "cold-prefix repack must be opt-in (off by default)"
-        );
-        let cfg = ProxyConfig {
-            cold_prefix_repack: Some(true),
-            ..Default::default()
-        };
-        assert!(cfg.repacks_cold_prefix());
-    }
-
-    #[test]
-    fn ccr_inband_is_opt_in_and_config_enables() {
-        // #493: off by default (the splice mutates provider-visible content for
-        // the expand turn), enabled via config. Isolate from a developer shell
-        // that may export the env override.
-        let _lock = crate::core::data_dir::test_env_lock();
-        crate::test_env::remove_var("LEAN_CTX_PROXY_CCR_INBAND");
-        assert!(
-            !ProxyConfig::default().ccr_inband_enabled(),
-            "in-band CCR must be opt-in (off by default)"
-        );
-        let cfg = ProxyConfig {
-            ccr_inband: Some(true),
-            ..Default::default()
-        };
-        assert!(cfg.ccr_inband_enabled());
-    }
-
-    #[test]
-    fn cache_breakpoint_is_opt_in_and_config_enables() {
-        // #939: off by default (it reshapes the provider-visible system field),
-        // enabled via config. Isolate from a developer shell that may export the
-        // env override.
-        let _lock = crate::core::data_dir::test_env_lock();
-        crate::test_env::remove_var("LEAN_CTX_PROXY_CACHE_BREAKPOINT");
-        assert!(
-            !ProxyConfig::default().cache_breakpoint_enabled(),
-            "cache-breakpoint injection must be opt-in (off by default)"
-        );
-        let cfg = ProxyConfig {
-            cache_breakpoint: Some(true),
-            ..Default::default()
-        };
-        assert!(cfg.cache_breakpoint_enabled());
-    }
-
-    #[test]
-    fn cache_aligner_defaults_on_and_config_disables() {
-        // #986 premium defaults: the volatile-field scan is measurement-only and
-        // strictly cache-safe, so it ships on by default; `false` opts out.
-        // Isolate from a developer shell that may export the env override.
-        let _lock = crate::core::data_dir::test_env_lock();
-        crate::test_env::remove_var("LEAN_CTX_PROXY_CACHE_ALIGNER");
-        assert!(
-            ProxyConfig::default().cache_aligner_enabled(),
-            "cache-aligner telemetry must be on by default (measurement-only, safe)"
-        );
-        let cfg = ProxyConfig {
-            cache_aligner: Some(false),
-            ..Default::default()
-        };
-        assert!(!cfg.cache_aligner_enabled(), "explicit false opts out");
-    }
-
-    #[test]
-    fn cache_aligner_legacy_opt_in_still_enables() {
-        // An explicit `true` (a pre-#986 config) keeps working unchanged. Isolate
-        // from a developer shell that may export the env override.
-        let _lock = crate::core::data_dir::test_env_lock();
-        crate::test_env::remove_var("LEAN_CTX_PROXY_CACHE_ALIGNER");
-        let cfg = ProxyConfig {
-            cache_aligner: Some(true),
-            ..Default::default()
-        };
-        assert!(cfg.cache_aligner_enabled());
-    }
-
-    #[test]
-    fn cache_align_relocate_is_opt_in_and_config_enables() {
-        // #974: off by default (it reshapes the provider-visible system field by
-        // relocating volatile values to the tail). Isolate from a developer shell
-        // that may export the env override.
-        let _lock = crate::core::data_dir::test_env_lock();
-        crate::test_env::remove_var("LEAN_CTX_PROXY_CACHE_ALIGN_RELOCATE");
-        assert!(
-            !ProxyConfig::default().cache_align_relocate_enabled(),
-            "active cache-aligner relocate must be opt-in (off by default)"
-        );
-        let cfg = ProxyConfig {
-            cache_align_relocate: Some(true),
-            ..Default::default()
-        };
-        assert!(cfg.cache_align_relocate_enabled());
-    }
-
-    #[test]
-    fn cache_policy_defaults_on_and_can_be_disabled() {
-        // #986 premium defaults: telemetry + a more-conservative repack gate are
-        // both strictly safe, so cache-economics ships on by default and is
-        // opt-out via config `false` or `LEAN_CTX_PROXY_CACHE_POLICY=off`. Isolate
-        // from a developer shell that may export the env override.
-        let _lock = crate::core::data_dir::test_env_lock();
-        crate::test_env::remove_var("LEAN_CTX_PROXY_CACHE_POLICY");
-        assert!(
-            ProxyConfig::default().cache_policy_enabled(),
-            "cache-economics must be on by default (measurement + safe gate)"
-        );
-        let cfg = ProxyConfig {
-            cache_policy: Some(false),
-            ..Default::default()
-        };
-        assert!(!cfg.cache_policy_enabled(), "explicit false opts out");
-
-        // An explicit env `off` wins even over a config `true`.
-        crate::test_env::set_var("LEAN_CTX_PROXY_CACHE_POLICY", "off");
-        let on = ProxyConfig {
-            cache_policy: Some(true),
-            ..Default::default()
-        };
-        assert!(!on.cache_policy_enabled(), "env off overrides config true");
-        crate::test_env::remove_var("LEAN_CTX_PROXY_CACHE_POLICY");
-    }
-
-    #[test]
-    fn effort_defaults_off_and_config_sets_it() {
-        // #834: cache-safe effort control is opt-in. Isolate from a developer
-        // shell that may export the env override.
-        let _lock = crate::core::data_dir::test_env_lock();
-        crate::test_env::remove_var("LEAN_CTX_PROXY_EFFORT");
-        assert_eq!(
-            ProxyConfig::default().resolved_effort(),
-            None,
-            "effort control must be opt-in (off by default)"
-        );
-        let cfg = ProxyConfig {
-            effort: Some("low".into()),
-            ..Default::default()
-        };
-        assert_eq!(
-            cfg.resolved_effort(),
-            Some(crate::core::config::Effort::Low)
-        );
-        // An unknown configured value resolves to off — never a silent default.
-        let typo = ProxyConfig {
-            effort: Some("lowish".into()),
-            ..Default::default()
-        };
-        assert_eq!(typo.resolved_effort(), None);
-    }
-
-    #[test]
-    fn effort_env_overrides_and_off_disables() {
-        use crate::core::config::Effort;
-        let _lock = crate::core::data_dir::test_env_lock();
-        let cfg = ProxyConfig {
-            effort: Some("high".into()),
-            ..Default::default()
-        };
-        // A valid env level wins over config.
-        crate::test_env::set_var("LEAN_CTX_PROXY_EFFORT", "minimal");
-        assert_eq!(cfg.resolved_effort(), Some(Effort::Minimal));
-        // `off` explicitly disables even a configured level.
-        crate::test_env::set_var("LEAN_CTX_PROXY_EFFORT", "off");
-        assert_eq!(cfg.resolved_effort(), None);
-        // A blank/garbage env value is ignored → falls back to config.
-        crate::test_env::set_var("LEAN_CTX_PROXY_EFFORT", "   ");
-        assert_eq!(cfg.resolved_effort(), Some(Effort::High));
-        crate::test_env::remove_var("LEAN_CTX_PROXY_EFFORT");
-    }
-
-    #[test]
-    fn prose_ranker_defaults_to_auto_and_config_sets_it() {
-        // #895: premium extractive path is the default; `truncate`/`off` selects
-        // the legacy squeeze; a typo can never silently disable the premium path.
-        let _lock = crate::core::data_dir::test_env_lock();
-        crate::test_env::remove_var("LEAN_CTX_PROXY_PROSE_RANKER");
-        assert_eq!(
-            ProxyConfig::default().resolved_prose_ranker(),
-            ProseRanker::Auto
-        );
-        let truncate = ProxyConfig {
-            prose_ranker: Some("truncate".into()),
-            ..Default::default()
-        };
-        assert_eq!(truncate.resolved_prose_ranker(), ProseRanker::Truncate);
-        let off = ProxyConfig {
-            prose_ranker: Some("off".into()),
-            ..Default::default()
-        };
-        assert_eq!(off.resolved_prose_ranker(), ProseRanker::Truncate);
-        let extractive = ProxyConfig {
-            prose_ranker: Some("extractive".into()),
-            ..Default::default()
-        };
-        assert_eq!(extractive.resolved_prose_ranker(), ProseRanker::Extractive);
-        let typo = ProxyConfig {
-            prose_ranker: Some("extractiveish".into()),
-            ..Default::default()
-        };
-        assert_eq!(
-            typo.resolved_prose_ranker(),
-            ProseRanker::Auto,
-            "unknown value must resolve to Auto, never silently off"
-        );
-    }
-
-    #[test]
-    fn output_holdout_defaults_off_and_clamps() {
-        let _lock = crate::core::data_dir::test_env_lock();
-        crate::test_env::remove_var("LEAN_CTX_PROXY_OUTPUT_HOLDOUT");
-        assert_eq!(ProxyConfig::default().output_holdout_fraction(), 0.0);
-        let cfg = ProxyConfig {
-            output_holdout: Some(0.2),
-            ..Default::default()
-        };
-        assert!((cfg.output_holdout_fraction() - 0.2).abs() < f64::EPSILON);
-        let over = ProxyConfig {
-            output_holdout: Some(5.0),
-            ..Default::default()
-        };
-        assert_eq!(over.output_holdout_fraction(), 1.0, "clamped into [0,1]");
-    }
-
-    #[test]
-    fn verbosity_steer_defaults_off_and_env_overrides() {
-        let _lock = crate::core::data_dir::test_env_lock();
-        crate::test_env::remove_var("LEAN_CTX_PROXY_VERBOSITY_STEER");
-        assert!(!ProxyConfig::default().verbosity_steer_enabled());
-        let cfg = ProxyConfig {
-            verbosity_steer: Some(true),
-            ..Default::default()
-        };
-        assert!(cfg.verbosity_steer_enabled());
-        crate::test_env::set_var("LEAN_CTX_PROXY_VERBOSITY_STEER", "on");
-        assert!(ProxyConfig::default().verbosity_steer_enabled());
-        crate::test_env::remove_var("LEAN_CTX_PROXY_VERBOSITY_STEER");
-    }
-
-    #[test]
-    fn codex_chatgpt_proxy_flag_reads_config_and_env() {
-        // Isolate from a developer shell that may export the env override.
-        let _lock = crate::core::data_dir::test_env_lock();
-        crate::test_env::remove_var("LEAN_CTX_CODEX_CHATGPT_PROXY");
-        assert!(
-            !ProxyConfig::default().codex_chatgpt_proxy_enabled(),
-            "Codex ChatGPT proxy opt-in defaults off"
-        );
-        let cfg = ProxyConfig {
-            codex_chatgpt_proxy: Some(true),
-            ..Default::default()
-        };
-        assert!(cfg.codex_chatgpt_proxy_enabled());
-        // An explicit env value wins even over an unset/false config.
-        crate::test_env::set_var("LEAN_CTX_CODEX_CHATGPT_PROXY", "1");
-        assert!(ProxyConfig::default().codex_chatgpt_proxy_enabled());
-        crate::test_env::remove_var("LEAN_CTX_CODEX_CHATGPT_PROXY");
-    }
-
-    #[test]
-    fn prose_ranker_env_overrides_config() {
-        let _lock = crate::core::data_dir::test_env_lock();
-        let cfg = ProxyConfig {
-            prose_ranker: Some("auto".into()),
-            ..Default::default()
-        };
-        crate::test_env::set_var("LEAN_CTX_PROXY_PROSE_RANKER", "truncate");
-        assert_eq!(cfg.resolved_prose_ranker(), ProseRanker::Truncate);
-        crate::test_env::remove_var("LEAN_CTX_PROXY_PROSE_RANKER");
-    }
-
-    #[test]
-    fn config_flag_enables_insecure_http_optin() {
-        // `Some(true)` resolves to `true` regardless of the environment, so this
-        // assertion is robust without mutating process-global env vars.
-        let cfg = ProxyConfig {
-            allow_insecure_http_upstream: Some(true),
-            ..Default::default()
-        };
-        assert!(cfg.allows_insecure_http_upstream());
-    }
-
-    /// `resolve_all_disk` ignores `LEAN_CTX_*_UPSTREAM` env by construction, so
-    /// these assertions are env-independent (no lock needed). Loopback HTTP is an
-    /// always-valid custom upstream (no allowlist / opt-in required).
-    #[test]
-    fn resolve_all_disk_uses_config_then_default() {
-        let cfg = ProxyConfig {
-            openai_upstream: Some("http://127.0.0.1:19101".into()),
-            ..Default::default()
-        };
-        let up = cfg.resolve_all_disk();
-        assert_eq!(up.openai, "http://127.0.0.1:19101");
-        assert_eq!(up.anthropic, "https://api.anthropic.com");
-        assert_eq!(up.chatgpt, "https://chatgpt.com");
-        assert_eq!(up.gemini, "https://generativelanguage.googleapis.com");
-    }
-
-    #[test]
-    fn resolve_all_disk_honors_custom_upstream_via_config_flag() {
-        // #590: `resolve_all_disk` is the env-independent view — exactly what the
-        // managed (service-spawned) proxy serves, since it never sees the shell's
-        // LEAN_CTX_ALLOW_CUSTOM_UPSTREAM. With the config opt-in, a custom HTTPS
-        // host resolves; without it, it falls back to the provider default. This
-        // is the regression guard for the reported bug.
-        let custom = ProxyConfig {
-            anthropic_upstream: Some("https://gw.corp.example/anthropic".into()),
-            allow_custom_upstream: Some(true),
-            ..Default::default()
-        };
-        assert_eq!(
-            custom.resolve_all_disk().anthropic,
-            "https://gw.corp.example/anthropic",
-            "config flag must let the managed proxy honor the custom upstream"
-        );
-
-        let blocked = ProxyConfig {
-            anthropic_upstream: Some("https://gw.corp.example/anthropic".into()),
-            ..Default::default()
-        };
-        // Isolate from a developer shell that may export the env opt-in.
-        let _lock = crate::core::data_dir::test_env_lock();
-        crate::test_env::remove_var("LEAN_CTX_ALLOW_CUSTOM_UPSTREAM");
-        assert_eq!(
-            blocked.resolve_all_disk().anthropic,
-            "https://api.anthropic.com",
-            "without the opt-in the custom host is rejected → provider default"
-        );
-    }
-
-    #[test]
-    fn resolve_all_disk_normalizes_trailing_slash() {
-        let cfg = ProxyConfig {
-            openai_upstream: Some("http://127.0.0.1:19101/".into()),
-            ..Default::default()
-        };
-        assert_eq!(cfg.resolve_all_disk().openai, "http://127.0.0.1:19101");
-    }
-
-    #[test]
-    fn refresh_keeps_last_good_on_invalid_config() {
-        // `refresh_upstreams` is env-aware; isolate from a developer's shell that
-        // may export LEAN_CTX_OPENAI_UPSTREAM (e.g. while reproducing #449).
-        let _lock = crate::core::data_dir::test_env_lock();
-        crate::test_env::remove_var("LEAN_CTX_OPENAI_UPSTREAM");
-
-        // A typo in config.toml must never reroute a live proxy to the default.
-        let last = Upstreams {
-            anthropic: "https://api.anthropic.com".into(),
-            openai: "http://127.0.0.1:19101".into(),
-            chatgpt: "https://chatgpt.com".into(),
-            gemini: "https://generativelanguage.googleapis.com".into(),
-        };
-        let cfg = ProxyConfig {
-            openai_upstream: Some("not-a-valid-url".into()),
-            ..Default::default()
-        };
-        assert_eq!(
-            cfg.refresh_upstreams(&last).openai,
-            "http://127.0.0.1:19101",
-            "invalid upstream → keep last good, never silently fall to default"
-        );
-    }
-
-    #[test]
-    fn refresh_adopts_valid_config_change() {
-        let _lock = crate::core::data_dir::test_env_lock();
-        crate::test_env::remove_var("LEAN_CTX_OPENAI_UPSTREAM");
-
-        let last = Upstreams {
-            anthropic: "https://api.anthropic.com".into(),
-            openai: "http://127.0.0.1:19101".into(),
-            chatgpt: "https://chatgpt.com".into(),
-            gemini: "https://generativelanguage.googleapis.com".into(),
-        };
-        let cfg = ProxyConfig {
-            openai_upstream: Some("http://127.0.0.1:19102".into()),
-            ..Default::default()
-        };
-        assert_eq!(
-            cfg.refresh_upstreams(&last).openai,
-            "http://127.0.0.1:19102"
-        );
-    }
-
-    #[test]
-    fn diagnose_drift_env_set_but_proxy_serves_other() {
-        // The exact #449 / Codex case: env exported in the shell, but the
-        // MCP-spawned proxy serves config.toml → the env never reached it.
-        assert_eq!(
-            diagnose_drift(
-                Some("http://127.0.0.1:2455"),
-                "https://api.openai.com",
-                "https://api.openai.com"
-            ),
-            Some(UpstreamDrift::EnvNotApplied)
-        );
-    }
-
-    #[test]
-    fn diagnose_drift_env_consistent_is_in_sync() {
-        // Proxy was started with the env value and serves it → not drift.
-        assert_eq!(
-            diagnose_drift(
-                Some("http://127.0.0.1:2455"),
-                "https://api.openai.com",
-                "http://127.0.0.1:2455"
-            ),
-            None
-        );
-    }
-
-    #[test]
-    fn diagnose_drift_config_changed_needs_restart() {
-        assert_eq!(
-            diagnose_drift(None, "http://127.0.0.1:2455", "https://api.openai.com"),
-            Some(UpstreamDrift::ConfigNotApplied)
-        );
-    }
-
-    #[test]
-    fn diagnose_drift_in_sync() {
-        assert_eq!(
-            diagnose_drift(None, "https://api.openai.com", "https://api.openai.com"),
-            None
-        );
-    }
-
-    #[test]
-    fn role_aggressiveness_defaults_to_off() {
-        // Opt-in: a fresh config compresses no prose, so the proxy stays
-        // byte-for-byte unchanged until an operator sets a value (#710).
-        let cfg = ProxyConfig::default();
-        // Isolate from a developer shell that may export the override.
-        let _lock = crate::core::data_dir::test_env_lock();
-        crate::test_env::remove_var("LEAN_CTX_PROXY_SYSTEM_AGGR");
-        crate::test_env::remove_var("LEAN_CTX_PROXY_USER_AGGR");
-        assert_eq!(cfg.resolved_role_aggressiveness(ProseRole::System), None);
-        assert_eq!(cfg.resolved_role_aggressiveness(ProseRole::User), None);
-    }
-
-    #[test]
-    fn role_aggressiveness_reads_config_and_clamps() {
-        let _lock = crate::core::data_dir::test_env_lock();
-        crate::test_env::remove_var("LEAN_CTX_PROXY_SYSTEM_AGGR");
-        crate::test_env::remove_var("LEAN_CTX_PROXY_USER_AGGR");
-        let cfg = ProxyConfig {
-            role_aggressiveness: RoleAggressiveness {
-                system: Some(0.7),
-                user: Some(1.5),
-            },
-            ..Default::default()
-        };
-        assert_eq!(
-            cfg.resolved_role_aggressiveness(ProseRole::System),
-            Some(0.7)
-        );
-        // Out-of-range config values are clamped into [0,1].
-        assert_eq!(cfg.resolved_role_aggressiveness(ProseRole::User), Some(1.0));
-    }
-
-    #[test]
-    fn role_aggressiveness_env_overrides_config() {
-        let _lock = crate::core::data_dir::test_env_lock();
-        crate::test_env::set_var("LEAN_CTX_PROXY_SYSTEM_AGGR", "0.25");
-        let cfg = ProxyConfig {
-            role_aggressiveness: RoleAggressiveness {
-                system: Some(0.9),
-                user: None,
-            },
-            ..Default::default()
-        };
-        assert_eq!(
-            cfg.resolved_role_aggressiveness(ProseRole::System),
-            Some(0.25),
-            "env override must win over the configured value"
-        );
-        crate::test_env::remove_var("LEAN_CTX_PROXY_SYSTEM_AGGR");
-    }
-
-    #[test]
-    fn role_aggressiveness_ignores_blank_env() {
-        let _lock = crate::core::data_dir::test_env_lock();
-        crate::test_env::set_var("LEAN_CTX_PROXY_USER_AGGR", "  ");
-        let cfg = ProxyConfig {
-            role_aggressiveness: RoleAggressiveness {
-                system: None,
-                user: Some(0.4),
-            },
-            ..Default::default()
-        };
-        assert_eq!(
-            cfg.resolved_role_aggressiveness(ProseRole::User),
-            Some(0.4),
-            "a blank/garbage env value must fall back to config, not disable it"
-        );
-        crate::test_env::remove_var("LEAN_CTX_PROXY_USER_AGGR");
-    }
-
-    #[test]
-    fn live_compress_defaults_on_and_config_disables() {
-        // #481: default ON (today's behaviour); a config `false` opts into the
-        // meter-only mode. Isolate from a developer shell exporting the override.
-        let _lock = crate::core::data_dir::test_env_lock();
-        crate::test_env::remove_var("LEAN_CTX_PROXY_LIVE_COMPRESS");
-        assert!(
-            ProxyConfig::default().live_compresses(),
-            "live_compress must default to true"
-        );
-        let cfg = ProxyConfig {
-            live_compress: Some(false),
-            ..Default::default()
-        };
-        assert!(!cfg.live_compresses());
-    }
-
-    #[test]
-    fn live_compress_env_overrides_config() {
-        let _lock = crate::core::data_dir::test_env_lock();
-        // env `off` wins over a config `true`.
-        crate::test_env::set_var("LEAN_CTX_PROXY_LIVE_COMPRESS", "off");
-        let cfg = ProxyConfig {
-            live_compress: Some(true),
-            ..Default::default()
-        };
-        assert!(!cfg.live_compresses(), "env off must win over config true");
-        // A garbage env value is ignored → falls back to config.
-        crate::test_env::set_var("LEAN_CTX_PROXY_LIVE_COMPRESS", "maybe");
-        assert!(
-            cfg.live_compresses(),
-            "unparseable env must fall back to config, not flip the mode"
-        );
-        crate::test_env::remove_var("LEAN_CTX_PROXY_LIVE_COMPRESS");
-    }
-
-    #[test]
-    fn live_compress_exclude_defaults_to_serena() {
-        // #481: an unset list protects Serena's code-reading tools, which return
-        // source bodies but are mis-bucketed as `Search` by name.
-        let cfg = ProxyConfig::default();
-        assert!(cfg.is_tool_live_compress_excluded("mcp__serena__find_symbol"));
-        assert!(cfg.is_tool_live_compress_excluded("Serena.search_for_pattern"));
-        assert!(!cfg.is_tool_live_compress_excluded("ctx_shell"));
-    }
-
-    #[test]
-    fn live_compress_exclude_explicit_list_replaces_default() {
-        // An explicit list narrows the exclusion (Serena no longer protected).
-        let cfg = ProxyConfig {
-            live_compress_exclude: Some(vec!["my_reader".into()]),
-            ..Default::default()
-        };
-        assert!(cfg.is_tool_live_compress_excluded("acme_my_reader_v2"));
-        assert!(!cfg.is_tool_live_compress_excluded("mcp__serena__find_symbol"));
-    }
-
-    #[test]
-    fn live_compress_exclude_empty_list_disables_protection() {
-        // `[]` fully clears the exclusion (operator opts every tool back in).
-        let cfg = ProxyConfig {
-            live_compress_exclude: Some(vec![]),
-            ..Default::default()
-        };
-        assert!(!cfg.is_tool_live_compress_excluded("mcp__serena__find_symbol"));
-    }
-
-    #[test]
-    fn compress_protect_unset_is_a_noop() {
-        // #1150: the default protects nothing, so compression stays on for all.
-        let cfg = ProxyConfig::default();
-        assert!(!cfg.is_path_compress_protected("tests/golden/output.snap"));
-        assert!(cfg.compress_protect_globs().is_empty());
-    }
-
-    #[test]
-    fn compress_protect_matches_basename_and_path_globs() {
-        // `*.snap` matches by file name anywhere; `**/golden/**` targets a dir.
-        let cfg = ProxyConfig {
-            compress_protect: Some(vec!["*.snap".into(), "**/golden/**".into()]),
-            ..Default::default()
-        };
-        assert!(cfg.is_path_compress_protected("a/b/c/output.snap"));
-        assert!(cfg.is_path_compress_protected("output.snap"));
-        assert!(cfg.is_path_compress_protected("tests/golden/case1.txt"));
-        assert!(!cfg.is_path_compress_protected("src/main.rs"));
-    }
-
-    #[test]
-    fn compress_protect_normalises_backslashes() {
-        // A Windows-style path still matches a forward-slash glob.
-        let cfg = ProxyConfig {
-            compress_protect: Some(vec!["**/fixtures/*".into()]),
-            ..Default::default()
-        };
-        assert!(cfg.is_path_compress_protected("tests\\fixtures\\big.json"));
-    }
-
-    #[test]
-    fn compress_protect_skips_malformed_globs_without_disabling_rest() {
-        // One bad pattern must not take the valid ones down with it.
-        let cfg = ProxyConfig {
-            compress_protect: Some(vec!["[".into(), "*.lock".into()]),
-            ..Default::default()
-        };
-        assert!(cfg.is_path_compress_protected("Cargo.lock"));
-    }
-}
+#[path = "proxy_tests.rs"]
+mod tests;

@@ -257,6 +257,12 @@ impl MultiRepoManager {
         self.roots.len()
     }
 
+    /// The configured RRF constant, so external fusers (e.g. the hybrid
+    /// multi-repo search) score identically to [`Self::search`].
+    pub fn rrf_k(&self) -> f64 {
+        self.rrf_k
+    }
+
     pub fn is_active(&self) -> bool {
         self.roots.len() > 1
     }
@@ -400,6 +406,17 @@ pub fn resolve_repo_root(repo: &str) -> Option<String> {
     let mgr = manager.lock().ok()?;
     let idx = mgr.resolve_root(repo)?;
     Some(mgr.roots[idx].path.to_string_lossy().to_string())
+}
+
+/// Every registered repo alias, for naming known aliases in an "unknown repo"
+/// error — a bare `resolve_repo_root` miss gives no hint of what *was*
+/// registered, which just invites another guess.
+pub fn known_aliases() -> Vec<String> {
+    let manager = global_manager();
+    let Ok(mgr) = manager.lock() else {
+        return Vec::new();
+    };
+    mgr.roots.iter().map(ActiveRepoRoot::alias).collect()
 }
 
 /// Check if multi-repo mode is active (more than 1 root configured).

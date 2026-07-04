@@ -10,14 +10,16 @@ const INSTRUCTION_CAP_TOKENS: usize = 800;
 /// session. Measured at compression `Off` (the test pins `LEAN_CTX_COMPRESSION=off`)
 /// so the budget is deterministic across dev machines, not just clean CI (#498).
 /// Raised in reviewed steps: 520→540 / 600→640 for the sharpened ctx_* redirects
-/// (#1030), then 540→590 / 640→680 for the v3 agent-loop + navigation-paradox
-/// one-liner now carried in the COMPACT profile (#609). Both stay far under the
-/// 800-token runtime cap (`INSTRUCTION_CAP_TOKENS`), so the guidance ships in
-/// full without truncating anything live.
+/// (#1030), then 540→590 / 640→680 (#609 loop one-liner), then 590→615 / 680→712
+/// (proactive `RECOVER` line). Lowered 615→545 / 712→675 by the v5 rules diet
+/// (#578): the COMPACT skeleton folded loop/paradox into INTENT (measured ~505 /
+/// ~639 + headroom). Clients whose rule file already carries the canonical block
+/// get a one-line anchor instead of the skeleton (`client_loads_rules_from_file`)
+/// and land far below even this.
 #[cfg(test)]
-const STATIC_INSTRUCTION_BUDGET_TOKENS: usize = 590;
+const STATIC_INSTRUCTION_BUDGET_TOKENS: usize = 545;
 #[cfg(test)]
-const STATIC_INSTRUCTION_BUDGET_TDD_TOKENS: usize = 680;
+const STATIC_INSTRUCTION_BUDGET_TDD_TOKENS: usize = 675;
 /// Windows carries a one-line SHELL hint inside the skeleton.
 #[cfg(all(test, windows))]
 const STATIC_INSTRUCTION_SHELL_HINT_TOKENS: usize = 25;
@@ -285,7 +287,32 @@ fn build_full_instructions(
 
     // Skeleton includes tool-mapping rules + compression prompt (if level active).
     // Shadow mode omits BULLETS/NEVER/CRITICAL automatically.
-    let skeleton = rc::render(shadow, Wrapper::Bare, level);
+    //
+    // Cross-channel dedup (#578): when the client's own auto-loaded rule file
+    // already carries the canonical rules block (Cursor mdc, Codex
+    // instructions.md), repeating the skeleton here would bill the same
+    // guidance twice on every session. A one-line anchor keeps the binding;
+    // the compression payload is deduped separately via `level` above.
+    //
+    // Hook-covered hosts (GL #1153) get the hook-aware anchor: repeating
+    // "ctx_* replaces native tools" to a Cursor whose hooks already compress
+    // the native calls re-creates exactly the instruction dissonance the
+    // HookCovered rule profile removes.
+    let skeleton = if client_loads_rules_from_file(client_name) {
+        let anchor = if client_is_hook_covered(client_name) {
+            HOOK_COVERED_ANCHOR
+        } else {
+            SKELETON_ANCHOR
+        };
+        let compression = rc::compression_text(level);
+        if compression.is_empty() {
+            anchor.to_string()
+        } else {
+            format!("{anchor}\n{compression}")
+        }
+    } else {
+        rc::render(shadow, Wrapper::Bare, level)
+    };
 
     // Pointer to the full rule file (honours CLAUDE_CONFIG_DIR): agents load the
     // detailed instructions on demand from there instead of inlining them.
@@ -389,10 +416,34 @@ pub fn claude_code_instructions() -> String {
     build_instructions(CrpMode::Off)
 }
 
+/// One-line replacement for the full rules skeleton when the client already
+/// auto-loads the canonical block from its own rule file (#578). Anchors the
+/// binding ("the rules you loaded apply to THIS server") without re-billing
+/// the guidance.
+const SKELETON_ANCHOR: &str = "lean-ctx active — your auto-loaded lean-ctx rules apply: \
+    ctx_* tools replace native Read/Grep/Shell/Glob (ctx_compose first).";
+
+/// The anchor for hook-covered hosts (GL #1153): consistent with the
+/// HookCovered rule profile — native tools are fine (the hooks compress
+/// them), the MCP call is for the exclusive capabilities.
+const HOOK_COVERED_ANCHOR: &str = "lean-ctx active — hooks compress native Shell/Read/Grep \
+    transparently; call ctx_compose to orient, ctx_semantic_search / ctx_knowledge for \
+    meaning & memory.";
+
 fn client_loads_compression_from_file(client_name: &str) -> bool {
     crate::core::home::resolve_home_dir().is_some_and(|home| {
         crate::core::rules_channel::client_autoloads_compression(client_name, &home)
     })
+}
+
+fn client_loads_rules_from_file(client_name: &str) -> bool {
+    crate::core::home::resolve_home_dir()
+        .is_some_and(|home| crate::core::rules_channel::client_autoloads_rules(client_name, &home))
+}
+
+fn client_is_hook_covered(client_name: &str) -> bool {
+    crate::core::home::resolve_home_dir()
+        .is_some_and(|home| crate::core::rules_channel::client_hook_covered(client_name, &home))
 }
 
 fn build_shell_hint() -> String {
@@ -429,6 +480,114 @@ mod tests {
     fn empty_client_never_dedups_compression() {
         assert!(!client_loads_compression_from_file(""));
         assert!(!client_loads_compression_from_file("totally-unknown-agent"));
+    }
+
+    #[test]
+    fn covered_client_gets_anchor_instead_of_skeleton() {
+        // #578: a client whose rule file carries the canonical block must not
+        // pay for the full skeleton again in every MCP session.
+        let _guard = crate::core::data_dir::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        std::fs::create_dir_all(home.join(".cursor/rules")).unwrap();
+        std::fs::write(
+            home.join(".cursor/rules/lean-ctx.mdc"),
+            rc::render(
+                false,
+                Wrapper::Dedicated,
+                crate::core::config::CompressionLevel::Standard,
+            ),
+        )
+        .unwrap();
+        let old_home = std::env::var("HOME").ok();
+        crate::test_env::set_var("HOME", home);
+        crate::test_env::set_var("LEAN_CTX_MINIMAL", "1");
+
+        let covered = build_instructions_with_client(CrpMode::Off, "cursor");
+        let uncovered = build_instructions_with_client(CrpMode::Off, "some-other-agent");
+
+        if let Some(h) = old_home {
+            crate::test_env::set_var("HOME", h);
+        } else {
+            crate::test_env::remove_var("HOME");
+        }
+        crate::test_env::remove_var("LEAN_CTX_MINIMAL");
+
+        assert!(
+            covered.contains(SKELETON_ANCHOR),
+            "covered client must get the anchor:\n{covered}"
+        );
+        assert!(
+            !covered.contains("MANDATORY MAPPING"),
+            "covered client must not re-pay the skeleton:\n{covered}"
+        );
+        // The mdc also carries the compression block → level dedups to Off.
+        assert!(
+            !covered.contains("OUTPUT STYLE:"),
+            "covered client must not re-pay the compression prompt:\n{covered}"
+        );
+        assert!(
+            uncovered.contains("MANDATORY MAPPING"),
+            "uncovered client keeps the full skeleton:\n{uncovered}"
+        );
+        eprintln!(
+            "instructions footprint: covered={} tok, uncovered={} tok",
+            count_tokens(&covered),
+            count_tokens(&uncovered)
+        );
+        assert!(
+            count_tokens(&covered) < count_tokens(&uncovered),
+            "anchor path must be strictly cheaper"
+        );
+    }
+
+    #[test]
+    fn hook_covered_client_gets_hook_aware_anchor() {
+        // GL #1153: with lean-ctx hooks covering the native tools, the anchor
+        // must not repeat "ctx_* replaces native tools" — that is exactly the
+        // instruction dissonance the HookCovered profile removes.
+        let _guard = crate::core::data_dir::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        std::fs::create_dir_all(home.join(".cursor/rules")).unwrap();
+        std::fs::write(
+            home.join(".cursor/rules/lean-ctx.mdc"),
+            rc::render(
+                false,
+                Wrapper::HookCovered,
+                crate::core::config::CompressionLevel::Off,
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            home.join(".cursor/hooks.json"),
+            r#"{"version":1,"hooks":{"preToolUse":[
+                {"matcher":"Shell","command":"/usr/local/bin/lean-ctx hook rewrite"},
+                {"matcher":"Read|Grep","command":"/usr/local/bin/lean-ctx hook redirect"}
+            ]}}"#,
+        )
+        .unwrap();
+        let old_home = std::env::var("HOME").ok();
+        crate::test_env::set_var("HOME", home);
+        crate::test_env::set_var("LEAN_CTX_MINIMAL", "1");
+
+        let covered = build_instructions_with_client(CrpMode::Off, "cursor");
+
+        if let Some(h) = old_home {
+            crate::test_env::set_var("HOME", h);
+        } else {
+            crate::test_env::remove_var("HOME");
+        }
+        crate::test_env::remove_var("LEAN_CTX_MINIMAL");
+
+        assert!(
+            covered.contains(HOOK_COVERED_ANCHOR),
+            "hook-covered client must get the hook-aware anchor:\n{covered}"
+        );
+        assert!(
+            !covered.contains(SKELETON_ANCHOR) && !covered.contains("MANDATORY MAPPING"),
+            "hook-covered client must not carry the replace-native wording:\n{covered}"
+        );
     }
 
     #[test]

@@ -52,7 +52,7 @@ Top-level configuration keys
 - `path_jail` (bool?, default `null`) — Filesystem path jail. null/true = enforced (tools confined to the project root + allow_paths). false = the blanket "any path" opt-out — every tool path is allowed (for containers/sandboxes where the boundary is external). Compression and secret redaction are unaffected. Flip both planes at once with `lean-ctx yolo` / `lean-ctx secure`
 - `permission_inheritance` (enum: off | on, default `off`) — Mirror the host IDE's permission rules onto lean-ctx tools (v1: OpenCode). When on, ctx_shell honors your bash/rm * rules instead of bypassing them. Override via LEAN_CTX_PERMISSION_INHERITANCE
 - `persona` (string, default `coding` — env `LEAN_CTX_PERSONA`) — Active context persona (persona-spec-v1): selects the domain bundle — tool surface, read-mode/compressor/chunker defaults, intent taxonomy, sensitivity floor. Built-ins: coding (default), research, lead-gen, support, data-analysis; or a custom <name>.toml from the personas dir. Override via LEAN_CTX_PERSONA
-- `prefer_native_editor` (bool, default `false`) — Disable lean-ctx edit tools (ctx_edit) so the host's native editor handles edits (#454)
+- `prefer_native_editor` (bool, default `false`) — Disable lean-ctx edit tools (ctx_edit, ctx_patch) so the host's native editor handles edits (#454)
 - `preserve_compact_formats` (string[], default `["toon"]`) — Already-compact output formats preserved verbatim instead of recompressed (e.g. ["toon"]). Set to [] to disable
 - `profile` (string, default `""`) — Persistent profile name. Checked after LEAN_CTX_PROFILE env var. Set via: lean-ctx config set profile passthrough
 - `project_root` (string?, default `null` — env `LEAN_CTX_PROJECT_ROOT`) — Explicit project root directory. Prevents accidental home-directory scans
@@ -60,7 +60,10 @@ Top-level configuration keys
 - `proxy_port` (u16?, default `null`) — Custom proxy port (default: 4444). Useful for multi-user systems. Env: LEAN_CTX_PROXY_PORT
 - `proxy_require_token` (bool, default `false`) — Require lean-ctx Bearer token authentication and disable provider API key fallback
 - `proxy_timeout_ms` (u64?, default `null`) — Proxy reachability timeout in ms (default: 200). Override via LEAN_CTX_PROXY_TIMEOUT_MS
+- `read_dedup` (enum: auto | on | off, default `auto` — env `LEAN_CTX_READ_DEDUP`) — Controls the PostToolUse native-Read re-read dedup. auto (default): replace only re-reads of unchanged files with the compact stub, and only on guard hosts (Claude Code / CodeBuddy) where the PreToolUse redirect is off — first reads stay byte-identical and the read-before-write guard is untouched. on: dedup wherever the hook fires. off: never replace a Read result
 - `read_only_roots` (string[], default `[]` — env `LEAN_CTX_READ_ONLY_ROOTS`) — Read-only sibling roots: reads allowed, writes always denied (edit/refactor/export)
+- `read_redirect` (enum: auto | on | off, default `auto` — env `LEAN_CTX_READ_REDIRECT`) — Controls the native-Read → ctx_read redirect hook. auto (default): redirect everywhere except hosts with a native read-before-write guard (Claude Code / CodeBuddy), where rewriting Read to a temp copy breaks native Write/Edit (#637). on: always redirect. off: never redirect native Read (ctx_read MCP tool + Grep/Glob redirect stay active)
+- `recovery_hints` (enum: off | minimal | full, default `minimal`) — Verbosity of the reactive recovery footer on compressed output (path-first, MCP-optional)
 - `redirect_exclude` (string[], default `[]`) — URL patterns to exclude from proxy redirection
 - `reference_results` (bool, default `false` — env `LEAN_CTX_REFERENCE_RESULTS`) — Store large tool outputs as references instead of inline content
 - `response_verbosity` (enum: normal | compact | minimal, default `normal` — env `LEAN_CTX_RESPONSE_VERBOSITY`) — Controls how verbose tool responses are
@@ -69,7 +72,7 @@ Top-level configuration keys
 - `sandbox_level` (u8, default `0` — env `LEAN_CTX_SANDBOX_LEVEL`) — Sandbox strictness level (0=default, 1=strict, 2=paranoid)
 - `savings_footer` (enum: auto | always | never, default `always` — env `LEAN_CTX_SAVINGS_FOOTER`) — Controls visibility of token savings footers: always (default, show on every response), never, auto (context-dependent). Also: LEAN_CTX_SHOW_SAVINGS=1|0
 - `shadow_mode` (bool, default `false` — env `LEAN_CTX_SHADOW_MODE`) — Opt-in (default off): transparently route native Read/Grep/Edit/Shell through lean-ctx — via hooks for hook-based agents, via the interception plugin for OpenCode
-- `shell_activation` (enum: always | agents-only | off, default `always` — env `LEAN_CTX_SHELL_ACTIVATION`) — Controls when the shell hook auto-activates aliases
+- `shell_activation` (enum: always | agents-only | off, default `agents-only` — env `LEAN_CTX_SHELL_ACTIVATION`) — Controls when the shell hook auto-activates aliases (agents-only since #699: transparent in plain human terminals)
 - `shell_allow_writes` (bool, default `false` — env `LEAN_CTX_SHELL_ALLOW_WRITES`) — Allow ctx_shell file-write redirects (>, >>, tee, heredoc-to-file, curl -o, wget default mode). Default false — prefer the native Write/Edit tool. The real command gating (allowlist, dangerous-pattern, interpreter-eval) still applies
 - `shell_allowlist` (array, default `[]` — env `LEAN_CTX_SHELL_ALLOWLIST`) — Optional shell command allowlist. When non-empty, only listed binaries are permitted
 - `shell_allowlist_extra` (array, default `[]`) — Commands merged on top of shell_allowlist without replacing the defaults. Managed via `lean-ctx allow <cmd>`
@@ -84,10 +87,10 @@ Top-level configuration keys
 - `team_auto_push` (bool, default `false`) — Opt-in: daemon periodically pushes your signed savings batch to team_url (off by default; requires team_url + team_token)
 - `team_token` (string?, default `null`) — Bearer token for the team server (push needs a member token; pull/auto-push needs the configured team token)
 - `team_url` (string?, default `null`) — Team server base URL for the opt-in savings roll-up (push/pull)
-- `tee_mode` (enum: never | failures | always, default `failures`) — Controls when shell output is tee'd to disk for later retrieval
+- `tee_mode` (enum: never | failures | highcompression | always, default `highcompression`) — Controls when shell output is tee'd to disk for later retrieval
 - `terse_agent` (enum: off | lite | full | ultra, default `off` — env `LEAN_CTX_TERSE_AGENT`) — Controls agent output verbosity via instructions injection
 - `theme` (string, default `default`) — Dashboard color theme
-- `tool_profile` (enum: minimal | standard | power, default `""`) — Tool visibility profile: minimal (5 tools), standard (15), power (all). Override via LEAN_CTX_TOOL_PROFILE
+- `tool_profile` (enum: minimal | standard | power, default `""`) — Tool visibility profile: minimal (5 tools), standard (16), power (all). Override via LEAN_CTX_TOOL_PROFILE
 - `tools_enabled` (string[], default `[]`) — Explicit list of enabled tool names. Used only when no tool_profile is pinned (tool_profile takes precedence); leave tool_profile unset to apply this list. The universal invoker ctx_call stays advertised so unlisted tools remain reachable — add it to disabled_tools (disabled_tools = ["ctx_call"]) to make this allowlist authoritative.
 - `ultra_compact` (bool, default `false`) — Legacy flag for maximum compression (use compression_level instead)
 - `update_check_disabled` (bool, default `false` — env `LEAN_CTX_NO_UPDATE_CHECK`) — Disable the daily version check
@@ -100,6 +103,7 @@ Addon ecosystem security floor: install policy, signature requirement, per-addon
 - `allowlist` (array, default `[]`) — Addon slugs permitted when policy = allowlist
 - `block_risky` (bool, default `false`) — Refuse to install an addon that has a high-risk (Danger) capability
 - `enforce_capabilities` (bool, default `false`) — Fail closed when an addon declares restricted [capabilities] but no OS sandbox launcher is available to enforce them
+- `grammar_auto_fetch` (bool, default `true`) — Zero-config grammar-addon fetch (#690): download a SHA-256-pinned grammar dylib on first use of a covered extension. Off = regex-signature fallback only (strict egress/DLP posture)
 - `metering` (bool, default `true`) — Record per-addon / per-tool gateway usage to <data_dir>/addons/usage.json (analytics + billing base)
 - `policy` (enum: open | verified_only | allowlist | locked, default `open`) — Addon install policy: open (any) | verified_only | allowlist | locked
 - `require_signature` (bool, default `false`) — Honour a user-override registry only if signed by a trusted org key

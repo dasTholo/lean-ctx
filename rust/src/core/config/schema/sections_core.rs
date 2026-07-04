@@ -20,9 +20,17 @@ pub(super) fn build(sections: &mut BTreeMap<String, SectionSchema>) {
     root.insert(
         "tee_mode".into(),
         key_enum(
-            &["never", "failures", "always"],
-            "failures",
+            &["never", "failures", "highcompression", "always"],
+            "highcompression",
             "Controls when shell output is tee'd to disk for later retrieval",
+        ),
+    );
+    root.insert(
+        "recovery_hints".into(),
+        key_enum(
+            &["off", "minimal", "full"],
+            "minimal",
+            "Verbosity of the reactive recovery footer on compressed output (path-first, MCP-optional)",
         ),
     );
     root.insert(
@@ -121,7 +129,7 @@ pub(super) fn build(sections: &mut BTreeMap<String, SectionSchema>) {
         key(
             "bool",
             serde_json::json!(cfg.prefer_native_editor),
-            "Disable lean-ctx edit tools (ctx_edit) so the host's native editor handles edits (#454)",
+            "Disable lean-ctx edit tools (ctx_edit, ctx_patch) so the host's native editor handles edits (#454)",
         ),
     );
     root.insert(
@@ -161,7 +169,7 @@ pub(super) fn build(sections: &mut BTreeMap<String, SectionSchema>) {
             key_enum(
                 &["minimal", "standard", "power"],
                 cfg.tool_profile.as_deref().unwrap_or(""),
-                "Tool visibility profile: minimal (5 tools), standard (15), power (all). Override via LEAN_CTX_TOOL_PROFILE",
+                "Tool visibility profile: minimal (5 tools), standard (16), power (all). Override via LEAN_CTX_TOOL_PROFILE",
             ),
         );
     root.insert(
@@ -418,6 +426,24 @@ pub(super) fn build(sections: &mut BTreeMap<String, SectionSchema>) {
             ),
         );
     root.insert(
+        "read_redirect".into(),
+        key_enum_with_env(
+            &["auto", "on", "off"],
+            "auto",
+            "Controls the native-Read → ctx_read redirect hook. auto (default): redirect everywhere except hosts with a native read-before-write guard (Claude Code / CodeBuddy), where rewriting Read to a temp copy breaks native Write/Edit (#637). on: always redirect. off: never redirect native Read (ctx_read MCP tool + Grep/Glob redirect stay active)",
+            "LEAN_CTX_READ_REDIRECT",
+        ),
+    );
+    root.insert(
+        "read_dedup".into(),
+        key_enum_with_env(
+            &["auto", "on", "off"],
+            "auto",
+            "Controls the PostToolUse native-Read re-read dedup. auto (default): replace only re-reads of unchanged files with the compact stub, and only on guard hosts (Claude Code / CodeBuddy) where the PreToolUse redirect is off — first reads stay byte-identical and the read-before-write guard is untouched. on: dedup wherever the hook fires. off: never replace a Read result",
+            "LEAN_CTX_READ_DEDUP",
+        ),
+    );
+    root.insert(
         "debug_log".into(),
         key_with_env(
             "bool",
@@ -439,8 +465,8 @@ pub(super) fn build(sections: &mut BTreeMap<String, SectionSchema>) {
         "shell_activation".into(),
         key_enum_with_env(
             &["always", "agents-only", "off"],
-            "always",
-            "Controls when the shell hook auto-activates aliases",
+            "agents-only",
+            "Controls when the shell hook auto-activates aliases (agents-only since #699: transparent in plain human terminals)",
             "LEAN_CTX_SHELL_ACTIVATION",
         ),
     );

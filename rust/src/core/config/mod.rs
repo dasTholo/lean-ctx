@@ -15,6 +15,8 @@ mod enums;
 mod memory;
 mod provenance;
 mod proxy;
+mod read_dedup;
+mod read_redirect;
 mod render;
 pub mod risk;
 pub mod schema;
@@ -29,16 +31,19 @@ mod tests;
 
 pub(crate) use defaults_allowlist::{cloud_infra_commands, default_shell_allowlist};
 pub use enums::{
-    CompressionLevel, Effort, OutputDensity, PermissionInheritance, ResponseVerbosity,
-    RulesInjection, RulesScope, SessionDegrade, TeeMode, TerseAgent,
+    CompressionLevel, Effort, OutputDensity, PermissionInheritance, RecoveryHints,
+    ResponseVerbosity, RulesInjection, RulesScope, SessionDegrade, TeeMode, TerseAgent,
 };
 pub use memory::{MemoryCleanup, MemoryGuardConfig, MemoryProfile, SavingsFooter};
 pub use provenance::{ConfigProvenance, EnvOverride};
 pub use proxy::{
-    HistoryMode, ProseRanker, ProseRole, ProxyConfig, ProxyProvider, RoleAggressiveness,
-    UpstreamDrift, Upstreams, diagnose_drift, env_upstream_override, is_local_proxy_url,
-    normalize_url, normalize_url_opt,
+    BaselineConfig, DEFAULT_LOCAL_SHADOW_RATE_PER_MTOK, HistoryMode, ProseRanker, ProseRole,
+    ProviderEntry, ProxyConfig, ProxyProvider, ResolvedProvider, RoleAggressiveness, RoutingRules,
+    UpstreamDrift, Upstreams, WireShape, diagnose_drift, env_upstream_override, is_local_proxy_url,
+    normalize_url, normalize_url_opt, parse_route_target,
 };
+pub use read_dedup::ReadDedup;
+pub use read_redirect::ReadRedirect;
 pub use shell_activation::ShellActivation;
 
 /// Default BM25 cache cap from config (also used by `bm25_index` heuristics).
@@ -65,10 +70,11 @@ const _: () = assert!(DEFAULT_BM25_PERSIST_MB >= 512);
 /// `prefer_native_editor` is set (#454) these are hidden from `list_tools` and
 /// refused at dispatch so the host's native editor handles edits instead.
 ///
-/// Deliberately narrow: only the dedicated edit tool is blocked. LSP refactor
+/// Deliberately narrow: only the dedicated edit tools are blocked — `ctx_edit`
+/// (str_replace) and `ctx_patch` (anchored, #1008). LSP refactor
 /// (`ctx_refactor`) also exposes read-only sub-actions (references/definition),
 /// so it is left available; users wanting it gone can add it to `disabled_tools`.
-pub const EDIT_TOOL_NAMES: &[&str] = &["ctx_edit"];
+pub const EDIT_TOOL_NAMES: &[&str] = &["ctx_edit", "ctx_patch"];
 
 /// Global lean-ctx configuration loaded from `config.toml`, merged with project-local overrides.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,6 +83,10 @@ pub struct Config {
     pub ultra_compact: bool,
     #[serde(default, deserialize_with = "serde_defaults::deserialize_tee_mode")]
     pub tee_mode: TeeMode,
+    /// Verbosity of the reactive recovery footer on compressed output
+    /// (`off|minimal|full`, default `minimal`). See [`RecoveryHints`].
+    #[serde(default)]
+    pub recovery_hints: RecoveryHints,
     #[serde(default)]
     pub output_density: OutputDensity,
     pub checkpoint_interval: u32,
@@ -139,6 +149,31 @@ pub struct Config {
     /// require the token; clients must then send `Authorization: Bearer <token>`.
     #[serde(default)]
     pub proxy_require_token: bool,
+    /// Bind address for the proxy listener (gateway mode, enterprise#8).
+    /// Default `None` = `127.0.0.1` — local-safe, nothing changes for existing
+    /// installs. Set `"0.0.0.0"` (or a specific interface IP) to serve a whole
+    /// org from one host; any non-loopback bind hard-disables the provider-key
+    /// auth fallback (Bearer token becomes mandatory) and enables the
+    /// `proxy_allowed_hosts` Host-header allowlist. Env override:
+    /// `LEAN_CTX_PROXY_BIND_HOST`. An unparseable value falls back to loopback,
+    /// never to an open bind.
+    #[serde(default)]
+    pub proxy_bind_host: Option<String>,
+    /// Host-header allowlist for a non-loopback proxy bind (gateway mode):
+    /// DNS-rebinding protection. Entries are hostnames or IPs without port
+    /// (e.g. `"gateway.example.com"`). Loopback names are always allowed.
+    /// Ignored (loopback-only guard, today's behavior) while the bind is
+    /// loopback. Empty + non-loopback bind = only loopback Host headers pass,
+    /// so configure this when exposing the gateway.
+    #[serde(default)]
+    pub proxy_allowed_hosts: Vec<String>,
+    /// Proxy-wide request rate limit in requests/second (token bucket, burst =
+    /// 2x). `None` (default) = unlimited on a loopback bind — today's behavior —
+    /// and 50 rps with burst 100 on a non-loopback bind (gateway mode ships a
+    /// sane floor, enterprise#37). `0` disables the limiter even in gateway
+    /// mode (explicit opt-out).
+    #[serde(default)]
+    pub proxy_max_rps: Option<u32>,
     /// Require Bearer-token authentication for the dashboard. Default `true`:
     /// the dashboard generates (or uses the pinned) token and rejects `/api/*`
     /// and `/metrics` without it. Set to `false` to run the dashboard with **no
@@ -302,6 +337,15 @@ pub struct Config {
     pub content_defined_chunking: bool,
     /// Skip session/knowledge/gotcha blocks in MCP instructions to minimize token overhead.
     /// Override via LEAN_CTX_MINIMAL env var.
+    ///
+    /// Default `true` (deliberate): initialize-time instructions stay byte-stable
+    /// across sessions, which keeps the provider prompt-cache prefix warm (#498)
+    /// and holds the fixed per-session cost at the `doctor overhead --gate`
+    /// budget. Session continuity is NOT lost — the wakeup briefing (task,
+    /// findings, knowledge) is delivered through the first tool call's
+    /// `--- AUTO CONTEXT ---` block instead, which only bills when the agent
+    /// actually works. Set to `false` to additionally inject the ACTIVE SESSION
+    /// / PROJECT MEMORY blocks directly into the MCP `initialize` instructions.
     #[serde(default)]
     pub minimal_overhead: bool,
     /// Opt-in: substitute long identifiers with short α-codes (+ a `§MAP` table)
@@ -383,13 +427,34 @@ pub struct Config {
     #[serde(default)]
     pub debug_log: bool,
     /// Controls when the shell hook auto-activates aliases.
-    /// - `always`: (Default) Aliases active in every interactive shell.
-    /// - `agents-only`: Aliases only active when an AI agent env var is detected.
+    /// - `agents-only`: (Default since #699) Aliases only active when an AI
+    ///   agent env var is detected — transparent in plain human terminals.
+    /// - `always`: Aliases active in every interactive shell (pre-#699 default).
     /// - `off`: Aliases never auto-activate (user must call `lean-ctx-on` manually).
     ///
     /// Override via `LEAN_CTX_SHELL_ACTIVATION` env var.
     #[serde(default)]
     pub shell_activation: ShellActivation,
+    /// Controls the native-Read → `ctx_read` redirect hook (#637).
+    /// - `auto`: (Default) redirect everywhere except hosts with a native
+    ///   read-before-write guard (Claude Code / CodeBuddy), where the path-swap
+    ///   would break native Write/Edit.
+    /// - `on`: always redirect (legacy behavior).
+    /// - `off`: never redirect native Read.
+    ///
+    /// Override via the `LEAN_CTX_READ_REDIRECT` env var.
+    #[serde(default)]
+    pub read_redirect: ReadRedirect,
+    /// Controls the PostToolUse native-Read re-read dedup (GL #1140).
+    /// - `auto`: (Default) replace only re-reads of unchanged files, and only on
+    ///   guard hosts (Claude Code / CodeBuddy) where the PreToolUse redirect is
+    ///   disabled — the guard-safe way to win the dedup savings back.
+    /// - `on`: dedup wherever the PostToolUse hook fires.
+    /// - `off`: never replace a Read result.
+    ///
+    /// Override via the `LEAN_CTX_READ_DEDUP` env var.
+    #[serde(default)]
+    pub read_dedup: ReadDedup,
     /// Disable the daily version check against leanctx.com/version.txt.
     /// Override via LEAN_CTX_NO_UPDATE_CHECK env var.
     #[serde(default)]
@@ -500,6 +565,12 @@ pub struct Config {
     /// no-op until `gateway.enabled = true`.
     #[serde(default)]
     pub gateway: crate::core::gateway::GatewayConfig,
+    /// Self-hosted org gateway server (`[gateway_server]`, enterprise#20):
+    /// deployment parameters for the usage cockpit — seat count for the
+    /// org-wide projection, display label, and the central admin API the local
+    /// cockpit may read from. All optional; absent = local-only behavior.
+    #[serde(default)]
+    pub gateway_server: GatewayServerConfig,
     /// Addon ecosystem security floor (#863): install policy, registry-signature
     /// requirement and sandboxing for spawned addon servers. Global-only (never
     /// merged from project-local config) and fully permissive by default.
@@ -590,6 +661,7 @@ impl Default for Config {
         Self {
             ultra_compact: false,
             tee_mode: TeeMode::default(),
+            recovery_hints: RecoveryHints::default(),
             output_density: OutputDensity::default(),
             checkpoint_interval: 15,
             excluded_commands: Vec::new(),
@@ -610,6 +682,9 @@ impl Default for Config {
             proxy_port: None,
             proxy_timeout_ms: None,
             proxy_require_token: false,
+            proxy_bind_host: None,
+            proxy_allowed_hosts: Vec::new(),
+            proxy_max_rps: None,
             dashboard_auth: true,
             buddy_enabled: serde_defaults::default_buddy_enabled(),
             enable_wakeup_ctx: true,
@@ -658,6 +733,8 @@ impl Default for Config {
             shadow_mode: false,
             debug_log: false,
             shell_activation: ShellActivation::default(),
+            read_redirect: ReadRedirect::default(),
+            read_dedup: ReadDedup::default(),
             update_check_disabled: false,
             updates: UpdatesConfig::default(),
             context: ContextConfig::default(),
@@ -682,6 +759,7 @@ impl Default for Config {
             secret_detection: SecretDetectionConfig::default(),
             sensitivity: crate::core::sensitivity::SensitivityConfig::default(),
             gateway: crate::core::gateway::GatewayConfig::default(),
+            gateway_server: GatewayServerConfig::default(),
             addons: crate::core::addons::AddonsConfig::default(),
             allow_auto_reroot: false,
             path_jail: None,
@@ -811,6 +889,28 @@ impl Config {
     /// `crush_verbatim_json` config flag, else `false`.
     pub fn crush_verbatim_json_enabled(&self) -> bool {
         std::env::var("LEAN_CTX_CRUSH_VERBATIM_JSON").is_ok() || self.crush_verbatim_json
+    }
+
+    /// Effective proxy bind address (gateway mode, enterprise#8). Precedence:
+    /// `LEAN_CTX_PROXY_BIND_HOST` env > `proxy_bind_host` config > loopback.
+    /// The value must parse as an IP address; anything else (including a blank)
+    /// resolves to `127.0.0.1` — a typo can only ever *narrow* exposure, never
+    /// silently open the listener.
+    #[must_use]
+    pub fn resolved_proxy_bind_host(&self) -> std::net::IpAddr {
+        let raw = std::env::var("LEAN_CTX_PROXY_BIND_HOST")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .or_else(|| self.proxy_bind_host.clone());
+        match raw.as_deref().map(str::trim) {
+            Some(v) if !v.is_empty() => v.parse().unwrap_or_else(|_| {
+                tracing::warn!(
+                    "proxy_bind_host '{v}' is not a valid IP address — binding 127.0.0.1"
+                );
+                std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)
+            }),
+            _ => std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+        }
     }
 
     /// Returns the effective rules scope, preferring env var over config file.
@@ -1440,6 +1540,9 @@ impl Config {
         if local.tee_mode != TeeMode::default() {
             self.tee_mode = local.tee_mode;
         }
+        if local.recovery_hints != RecoveryHints::default() {
+            self.recovery_hints = local.recovery_hints;
+        }
         if local.output_density != OutputDensity::default() {
             self.output_density = local.output_density;
         }
@@ -1680,6 +1783,12 @@ impl Config {
         }
         if local.shell_activation != ShellActivation::default() {
             self.shell_activation = local.shell_activation.clone();
+        }
+        if local.read_redirect != ReadRedirect::default() {
+            self.read_redirect = local.read_redirect;
+        }
+        if local.read_dedup != ReadDedup::default() {
+            self.read_dedup = local.read_dedup;
         }
         if local.bm25_max_cache_mb != default_bm25_max_cache_mb() {
             self.bm25_max_cache_mb = local.bm25_max_cache_mb;

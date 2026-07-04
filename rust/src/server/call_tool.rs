@@ -62,27 +62,44 @@ impl LeanCtxServer {
             return Ok(denied);
         }
 
+        // ctx_call is a meta-dispatcher: the egress DLP and permission-
+        // inheritance gates below must inspect the INNER tool + arguments, or
+        // the universal invoker becomes a policy bypass (#1008 security pass).
+        // Role/rate/workflow gates for the inner tool already run inside the
+        // dispatch layer; these two ran only on the wrapper name before.
+        let inner_call: Option<(String, Option<serde_json::Map<String, serde_json::Value>>)> =
+            if name == "ctx_call" {
+                helpers::get_str(args, "name").map(|inner_name| {
+                    let inner_args = args
+                        .and_then(|m| m.get("arguments"))
+                        .and_then(serde_json::Value::as_object)
+                        .cloned();
+                    (inner_name, inner_args)
+                })
+            } else {
+                None
+            };
+        let (guard_name, guard_args): (&str, Option<&serde_json::Map<_, _>>) = match &inner_call {
+            Some((n, a)) => (n.as_str(), a.as_ref()),
+            None => (name, args),
+        };
+
         // #676 — egress / output DLP on agent writes & actions. Inspect the
         // payload of write/action tools BEFORE dispatch so a forbidden write
         // never touches disk and a forbidden command never runs. Only the
         // agent's tool-driven egress is governed here (a human's own editor
         // writes never pass through this path). No-op unless the active pack has
-        // an `[egress]` section.
+        // an `[egress]` section. Payload mapping (incl. all ctx_patch bodies)
+        // lives in `core::egress::write_payload` — shared with `policy enforce`.
         if let Some(active) = crate::core::policy::runtime::active()
             && active.egress.is_active()
         {
-            let target = match name {
-                "ctx_edit" => helpers::get_str(args, "new_string").map(|s| (s, "Write")),
-                "ctx_shell" | "ctx_execute" => {
-                    helpers::get_str(args, "command").map(|s| (s, "Action"))
-                }
-                _ => None,
-            };
+            let target = crate::core::egress::write_payload(guard_name, guard_args);
             if let Some((payload, kind)) = target {
                 if let Some(reason) = active.egress.check_content(&payload, &active.redaction) {
-                    tracing::warn!(tool = name, %reason, "agent egress blocked by policy");
-                    policy_guard::audit_egress(name, &reason);
-                    return Ok(CallToolResult::success(vec![Content::text(format!(
+                    tracing::warn!(tool = guard_name, %reason, "agent egress blocked by policy");
+                    policy_guard::audit_egress(guard_name, &reason);
+                    return Ok(CallToolResult::success(vec![ContentBlock::text(format!(
                         "[POLICY BLOCKED] {kind} blocked by context policy pack egress rule \
                          ({reason}). Adjust .lean-ctx/policy.toml to proceed."
                     ))]));
@@ -90,9 +107,9 @@ impl LeanCtxServer {
                 if let Some(max) = active.egress.max_writes_per_min
                     && !crate::core::egress::check_rate(max)
                 {
-                    tracing::warn!(tool = name, max, "agent egress rate limit exceeded");
-                    policy_guard::audit_egress(name, "rate-limit");
-                    return Ok(CallToolResult::success(vec![Content::text(format!(
+                    tracing::warn!(tool = guard_name, max, "agent egress rate limit exceeded");
+                    policy_guard::audit_egress(guard_name, "rate-limit");
+                    return Ok(CallToolResult::success(vec![ContentBlock::text(format!(
                         "[POLICY BLOCKED] {kind} rate limit exceeded ({max}/min) by context \
                          policy pack. Slow agent writes/actions or adjust .lean-ctx/policy.toml."
                     ))]));
@@ -116,7 +133,7 @@ impl LeanCtxServer {
                         let mut shown = allowed.clone();
                         shown.sort();
                         shown.truncate(30);
-                        return Ok(CallToolResult::success(vec![Content::text(format!(
+                        return Ok(CallToolResult::success(vec![ContentBlock::text(format!(
                             "Tool '{name}' blocked by workflow '{}' (state: {}). Allowed: {}. Use ctx_workflow(action=\"stop\") to exit.",
                             run.spec.name,
                             run.current,
@@ -244,7 +261,7 @@ impl LeanCtxServer {
 
         if throttle_result.level == crate::core::loop_detection::ThrottleLevel::Blocked {
             let msg = throttle_result.message.unwrap_or_default();
-            return Ok(CallToolResult::success(vec![Content::text(msg)]));
+            return Ok(CallToolResult::success(vec![ContentBlock::text(msg)]));
         }
 
         let throttle_warning =
@@ -261,7 +278,8 @@ impl LeanCtxServer {
         // bash/read/edit/grep permission rules onto the matching lean-ctx tool so
         // e.g. `ctx_shell` honors a `rm *: ask` rule instead of bypassing it.
         // Gated on the cheap effective() check so the default (off) pays no lock
-        // cost on the hot path.
+        // cost on the hot path. Checks the ctx_call-unwrapped inner tool (#1008)
+        // so the invoker cannot side-step an IDE deny.
         if config.permission_inheritance_effective()
             == crate::core::config::PermissionInheritance::On
         {
@@ -269,20 +287,20 @@ impl LeanCtxServer {
             let project_root = self.session.read().await.project_root.clone();
             let perm = permission_inheritance::check(
                 &client_name,
-                name,
-                args,
+                guard_name,
+                guard_args,
                 project_root.as_deref(),
                 &config,
             );
             if let Some(blocked) = permission_inheritance::into_call_tool_result(&perm) {
-                tracing::warn!(tool = name, "held back by IDE permission inheritance");
+                tracing::warn!(tool = guard_name, "held back by IDE permission inheritance");
                 return Ok(blocked);
             }
         }
 
         if let Some(msg) = post_process::budget_exhausted_message(name) {
             tracing::warn!(tool = name, "{msg}");
-            return Ok(CallToolResult::success(vec![Content::text(msg)]));
+            return Ok(CallToolResult::success(vec![ContentBlock::text(msg)]));
         }
 
         if is_shell_tool_name(name) {
@@ -504,6 +522,13 @@ impl LeanCtxServer {
             result_text =
                 post_process::compress_terse(result_text, name, args, &config, is_raw_shell);
         }
+
+        // Snapshot BEFORE any decoration (auto-context prefix, throttle/budget
+        // warnings, hints): auto-findings must parse the clean tool output, or
+        // the injected "--- AUTO CONTEXT ---" header itself becomes a junk
+        // finding ("Read ---") that pollutes the session, the knowledge store,
+        // and every subsequent wakeup briefing (#658).
+        let findings_source = result_text.clone();
 
         // Resolve the active profile once per dispatch: it is stable for the
         // lifetime of a single tool call, and `active_profile()` is an expensive
@@ -763,7 +788,12 @@ impl LeanCtxServer {
             bypass_hint::record_lctx_call();
         }
 
-        if let Some(finding) = crate::core::auto_findings::extract(name, &result_text) {
+        let finding_path_hint = helpers::get_str(args, "path");
+        if let Some(finding) = crate::core::auto_findings::extract(
+            name,
+            &findings_source,
+            finding_path_hint.as_deref(),
+        ) {
             let mut session = self.session.write().await;
             session.add_finding(finding.file.as_deref(), None, &finding.summary);
             let project_root = session.project_root.clone();
@@ -776,7 +806,7 @@ impl LeanCtxServer {
                 });
             }
         }
-        if let Some(extra) = crate::core::auto_capture::extract_extra(name, &result_text) {
+        if let Some(extra) = crate::core::auto_capture::extract_extra(name, &findings_source) {
             let session = self.session.read().await;
             let project_root = session.project_root.clone();
             drop(session);
@@ -1001,6 +1031,10 @@ impl LeanCtxServer {
     /// Resolve project root from MCP client roots (once per session).
     /// Called on the first tool call. If the client supports `roots/list`,
     /// we query it and pick the best root with project markers.
+    ///
+    /// Roots is SEP-2577-deprecated in rmcp 2.0 but still fully functional; we
+    /// keep it for client-driven project-root auto-detection until MCP removes it.
+    #[expect(deprecated)]
     async fn resolve_roots_once(&self) {
         use std::sync::atomic::Ordering;
         if !self.has_client_roots.load(Ordering::Relaxed) {
@@ -1016,7 +1050,22 @@ impl LeanCtxServer {
         let list_result = match peer.list_roots().await {
             Ok(r) => r,
             Err(e) => {
-                tracing::warn!("roots/list failed: {e}");
+                let permanent = roots_list_failure_is_permanent(&e);
+                const MAX_ATTEMPTS: u32 = 3;
+                let attempts = self.roots_list_attempts.fetch_add(1, Ordering::Relaxed) + 1;
+                if !permanent && attempts < MAX_ATTEMPTS {
+                    self.roots_resolved.store(false, Ordering::Relaxed);
+                }
+                tracing::warn!(
+                    "roots/list failed (attempt {attempts}, {}): {e}",
+                    if permanent {
+                        "client does not implement it — giving up"
+                    } else if attempts < MAX_ATTEMPTS {
+                        "will retry on a later tool call"
+                    } else {
+                        "retry budget exhausted"
+                    }
+                );
                 return;
             }
         };
@@ -1078,6 +1127,19 @@ impl LeanCtxServer {
     }
 }
 
+/// Classifies a failed `roots/list` call (GH #694). `-32601 Method not found`
+/// means the client declared the roots capability but does not implement the
+/// request (Cursor's documented behavior, #699) — retrying can never succeed.
+/// Everything else (timeout, transport hiccup while an IDE window is still
+/// starting up) is transient and worth a bounded retry on a later tool call.
+fn roots_list_failure_is_permanent(e: &rmcp::ServiceError) -> bool {
+    matches!(
+        e,
+        rmcp::ServiceError::McpError(mcp)
+            if mcp.code == rmcp::model::ErrorCode::METHOD_NOT_FOUND
+    )
+}
+
 /// Build the final `CallToolResult`, surfacing shell failures in MCP metadata
 /// (GitHub #389): a non-zero exit or a blocked command sets `isError: true`
 /// and a `structuredContent` payload (`{"exitCode": N}` / `{"blocked": true}`),
@@ -1087,7 +1149,7 @@ fn finalize_call_result(
     result_text: String,
     shell_outcome: Option<crate::server::tool_trait::ShellOutcome>,
 ) -> CallToolResult {
-    let mut result = CallToolResult::success(vec![Content::text(result_text)]);
+    let mut result = CallToolResult::success(vec![ContentBlock::text(result_text)]);
     if let Some(outcome) = shell_outcome {
         if outcome.is_error() {
             result.is_error = Some(true);
@@ -1175,5 +1237,40 @@ mod shell_outcome_tests {
         let r = finalize_call_result("file contents".into(), None);
         assert_ne!(r.is_error, Some(true));
         assert!(r.structured_content.is_none());
+    }
+}
+
+#[cfg(test)]
+mod roots_retry_tests {
+    use super::roots_list_failure_is_permanent;
+
+    /// Cursor's pattern (#699): roots capability declared, `roots/list`
+    /// answered with `-32601` — retrying is pointless and must stop.
+    #[test]
+    fn method_not_found_is_permanent() {
+        let err = rmcp::ServiceError::McpError(rmcp::model::ErrorData::new(
+            rmcp::model::ErrorCode::METHOD_NOT_FOUND,
+            "Method not found",
+            None,
+        ));
+        assert!(roots_list_failure_is_permanent(&err));
+    }
+
+    /// The VS Code multi-window pattern (GH #694): the second window's client
+    /// is still starting up, `roots/list` times out or the transport hiccups —
+    /// these must stay retryable so root detection recovers.
+    #[test]
+    fn timeouts_and_other_mcp_errors_are_transient() {
+        let timeout = rmcp::ServiceError::Timeout {
+            timeout: std::time::Duration::from_secs(5),
+        };
+        assert!(!roots_list_failure_is_permanent(&timeout));
+
+        let internal = rmcp::ServiceError::McpError(rmcp::model::ErrorData::new(
+            rmcp::model::ErrorCode::INTERNAL_ERROR,
+            "boom",
+            None,
+        ));
+        assert!(!roots_list_failure_is_permanent(&internal));
     }
 }

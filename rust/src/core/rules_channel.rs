@@ -54,6 +54,51 @@ pub fn cursor_compression_covered(home: &Path) -> bool {
     file_has_compression(&home.join(".cursor/rules/lean-ctx.mdc"))
 }
 
+/// True when the installed Cursor hooks already compress the native tools
+/// (GL #1153): `~/.cursor/hooks.json` carries lean-ctx `preToolUse` entries
+/// for BOTH the Shell rewrite and the Read/Grep redirect. Only then is the
+/// "use ctx_* instead of native" mapping dead weight — with partial or no
+/// hook coverage the full guidance stays.
+pub fn cursor_hooks_cover_native_tools(home: &Path) -> bool {
+    cursor_hooks_json_covers(&home.join(".cursor/hooks.json"))
+}
+
+/// Path-based core of [`cursor_hooks_cover_native_tools`], so the rules
+/// injector can derive the hooks.json location from the mdc target path (the
+/// two always live under the same `.cursor/` dir).
+///
+/// Conservative by construction: unreadable/invalid JSON, a missing file, or
+/// a redirect that was manually removed all mean "not covered".
+pub fn cursor_hooks_json_covers(hooks_json: &Path) -> bool {
+    let Ok(content) = std::fs::read_to_string(hooks_json) else {
+        return false;
+    };
+    let Ok(v) = crate::core::jsonc::parse_jsonc(&content) else {
+        return false;
+    };
+    let Some(pre) = v.pointer("/hooks/preToolUse").and_then(|p| p.as_array()) else {
+        return false;
+    };
+    let has_lean_ctx_hook = |suffix: &str| {
+        pre.iter().any(|e| {
+            e.get("command")
+                .and_then(|c| c.as_str())
+                .is_some_and(|c| c.contains("lean-ctx") && c.contains(suffix))
+        })
+    };
+    has_lean_ctx_hook("hook rewrite") && has_lean_ctx_hook("hook redirect")
+}
+
+/// For the MCP `instructions` block: is `client_name` a host whose installed
+/// lean-ctx hooks already compress the native tools? Drives the hook-aware
+/// anchor wording (GL #1153) — repeating "ctx_* replaces native tools" to a
+/// hook-covered Cursor re-creates exactly the instruction dissonance the
+/// HookCovered profile removes.
+pub fn client_hook_covered(client_name: &str, home: &Path) -> bool {
+    let lower = client_name.to_lowercase();
+    lower.contains("cursor") && cursor_hooks_cover_native_tools(home)
+}
+
 /// Codex's per-user config dir (`~/.codex`, or `$CODEX_HOME`).
 fn codex_dir(home: &Path) -> std::path::PathBuf {
     crate::core::home::resolve_codex_dir().unwrap_or_else(|| home.join(".codex"))
@@ -100,6 +145,43 @@ pub fn client_autoloads_compression(client_name: &str, home: &Path) -> bool {
     }
     if lower.contains("codex") {
         return codex_present(home) && codex_compression_covered(home);
+    }
+    false
+}
+
+fn file_has_canonical_rules(path: &Path) -> bool {
+    std::fs::read_to_string(path)
+        .is_ok_and(|c| crate::core::rules_canonical::RulesFile::parse(&c).has_content())
+}
+
+/// For the MCP `instructions` block: does `client_name` already auto-load the
+/// *canonical rules* block (tool mapping, intent playbook, recovery line, …)
+/// from its own rule file? If so, repeating the whole skeleton in the
+/// per-session instructions bills the same guidance twice on every session
+/// (#578) — the builder collapses it to a one-line anchor instead.
+///
+/// Carrier per client (kept in sync with `rules_inject::targets`):
+///   * Cursor → `~/.cursor/rules/lean-ctx.mdc` (canonical rules block)
+///   * Codex → `$CODEX_HOME/instructions.md` (canonical rules block)
+///
+/// Claude Code deliberately does NOT count: its `CLAUDE.md` block is the
+/// custom tool-mapping summary (`hooks/agents/claude.rs`), not the canonical
+/// set — dropping the skeleton there would lose the intent playbook.
+///
+/// Conservative by construction: only clients whose auto-loaded carrier holds
+/// the canonical block *right now* count. Any stale/removed file falls back to
+/// the full skeleton.
+pub fn client_autoloads_rules(client_name: &str, home: &Path) -> bool {
+    let lower = client_name.to_lowercase();
+    if lower.is_empty() {
+        return false;
+    }
+    if lower.contains("cursor") {
+        return file_has_canonical_rules(&home.join(".cursor/rules/lean-ctx.mdc"));
+    }
+    if lower.contains("codex") {
+        return codex_present(home)
+            && file_has_canonical_rules(&codex_dir(home).join("instructions.md"));
     }
     false
 }
@@ -193,6 +275,97 @@ mod tests {
         std::fs::write(home.join(".codex/AGENTS.md"), &comp).unwrap();
         assert!(agents_md_can_thin(home));
         crate::test_env::remove_var("CODEX_HOME");
+    }
+
+    #[test]
+    fn client_autoloads_rules_requires_canonical_block_on_disk() {
+        let _guard = crate::core::data_dir::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        crate::test_env::set_var("CODEX_HOME", home.join(".codex"));
+
+        // Nothing installed → nobody is covered.
+        assert!(!client_autoloads_rules("cursor", home));
+        assert!(!client_autoloads_rules("codex", home));
+        assert!(!client_autoloads_rules("", home));
+        assert!(!client_autoloads_rules("claude-code", home));
+
+        // Cursor covered once the mdc carries the canonical block.
+        std::fs::create_dir_all(home.join(".cursor/rules")).unwrap();
+        std::fs::write(
+            home.join(".cursor/rules/lean-ctx.mdc"),
+            format!("{FULL_HEADER}\nbody\n"),
+        )
+        .unwrap();
+        assert!(client_autoloads_rules("cursor", home));
+        assert!(client_autoloads_rules("cursor-vscode", home));
+
+        // A pointer-only / non-canonical file must NOT count.
+        std::fs::write(home.join(".cursor/rules/lean-ctx.mdc"), "user notes\n").unwrap();
+        assert!(!client_autoloads_rules("cursor", home));
+
+        // Codex covered via $CODEX_HOME/instructions.md.
+        std::fs::create_dir_all(home.join(".codex")).unwrap();
+        std::fs::write(
+            home.join(".codex/instructions.md"),
+            format!("{FULL_HEADER}\nbody\n"),
+        )
+        .unwrap();
+        assert!(client_autoloads_rules("codex", home));
+        crate::test_env::remove_var("CODEX_HOME");
+    }
+
+    #[test]
+    fn cursor_hook_coverage_requires_both_pretooluse_entries() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        // No hooks.json at all.
+        assert!(!cursor_hooks_cover_native_tools(home));
+        assert!(!client_hook_covered("cursor", home));
+
+        std::fs::create_dir_all(home.join(".cursor")).unwrap();
+        let hooks = home.join(".cursor/hooks.json");
+
+        // Rewrite only (Shell covered, Read/Grep not) → NOT covered.
+        std::fs::write(
+            &hooks,
+            r#"{"version":1,"hooks":{"preToolUse":[
+                {"matcher":"Shell","command":"/usr/local/bin/lean-ctx hook rewrite"}
+            ]}}"#,
+        )
+        .unwrap();
+        assert!(!cursor_hooks_cover_native_tools(home));
+
+        // Rewrite + redirect → covered (exactly what install_cursor_hook_config writes).
+        std::fs::write(
+            &hooks,
+            r#"{"version":1,"hooks":{"preToolUse":[
+                {"matcher":"Shell","command":"/usr/local/bin/lean-ctx hook rewrite"},
+                {"matcher":"Read|Grep","command":"/usr/local/bin/lean-ctx hook redirect"}
+            ]}}"#,
+        )
+        .unwrap();
+        assert!(cursor_hooks_cover_native_tools(home));
+        assert!(client_hook_covered("cursor", home));
+        assert!(client_hook_covered("cursor-vscode", home));
+        // Other clients never count as hook-covered via Cursor's hooks.json.
+        assert!(!client_hook_covered("codex", home));
+        assert!(!client_hook_covered("", home));
+
+        // Foreign hooks (not lean-ctx) must not count.
+        std::fs::write(
+            &hooks,
+            r#"{"version":1,"hooks":{"preToolUse":[
+                {"matcher":"Shell","command":"/opt/other hook rewrite"},
+                {"matcher":"Read|Grep","command":"/opt/other hook redirect"}
+            ]}}"#,
+        )
+        .unwrap();
+        assert!(!cursor_hooks_cover_native_tools(home));
+
+        // Invalid JSON → fail closed (full guidance).
+        std::fs::write(&hooks, "{ not json").unwrap();
+        assert!(!cursor_hooks_cover_native_tools(home));
     }
 
     #[test]

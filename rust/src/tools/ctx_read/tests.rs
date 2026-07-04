@@ -343,6 +343,97 @@ fn map_mode_inlines_task_relevant_body() {
     );
 }
 
+// `lines:5,10-12` is multi-select (comma-separated lines/ranges), not a range.
+// Callers who meant a span get stray lines back — the output must say what
+// the comma did so the mistake is visible (limitations audit 2026-07-03, #7).
+#[test]
+fn lines_comma_multiselect_gets_hint() {
+    let content = (1..=30)
+        .map(|i| format!("line {i}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let tokens = count_tokens(&content);
+    let (out, _) = process_mode(
+        &content,
+        "lines:5,10-12",
+        "F1",
+        "t.txt",
+        "txt",
+        tokens,
+        CrpMode::Off,
+        "t.txt",
+        None,
+    );
+    assert!(out.contains("line 5") && out.contains("line 10"), "{out}");
+    assert!(
+        out.contains("multi-select"),
+        "comma form must carry a hint: {out}"
+    );
+}
+
+// A map/signatures read of a language with no extractor must say so instead of
+// returning a bare header the caller mistakes for "file has no API"
+// (limitations audit 2026-07-03, #4 residual).
+#[test]
+fn map_on_unsupported_language_carries_marker() {
+    let content = "some plain text\nwith no code\nstructure at all\n";
+    let tokens = count_tokens(content);
+    let (out, _) = process_mode(
+        content,
+        "map",
+        "F1",
+        "notes.txt",
+        "txt",
+        tokens,
+        CrpMode::Off,
+        "notes.txt",
+        None,
+    );
+    assert!(
+        out.contains("no extractable structure"),
+        "empty map must carry a marker: {out}"
+    );
+}
+
+#[test]
+fn signatures_on_unsupported_language_carries_marker() {
+    let content = "some plain text\nwith no code\nstructure at all\n";
+    let tokens = count_tokens(content);
+    let (out, _) = process_mode(
+        content,
+        "signatures",
+        "F1",
+        "notes.txt",
+        "txt",
+        tokens,
+        CrpMode::Off,
+        "notes.txt",
+        None,
+    );
+    assert!(
+        out.contains("no extractable structure"),
+        "empty signatures must carry a marker: {out}"
+    );
+}
+
+// UTF-8 BOM must not leak into the first line of ctx_read output
+// (limitations doc #11).
+#[test]
+fn read_file_lossy_strips_utf8_bom() {
+    let p = std::env::temp_dir().join("lean_ctx_bom_test.txt");
+    std::fs::write(&p, b"\xEF\xBB\xBFhello\n").unwrap();
+    let s = read_file_lossy(p.to_str().unwrap()).unwrap();
+    let _ = std::fs::remove_file(&p);
+    assert!(
+        !s.starts_with('\u{feff}'),
+        "BOM must be stripped from read content"
+    );
+    assert!(
+        s.starts_with("hello"),
+        "content after BOM must survive: {s}"
+    );
+}
+
 #[test]
 fn compressed_cache_key_distinguishes_task() {
     let no_task = compressed_cache_key("map", CrpMode::Off, None, None, &[]);
@@ -714,6 +805,66 @@ fn raw_mode_returns_exact_file_content() {
     assert!(!output.contains("deps"), "raw mode must not contain deps");
 }
 
+/// Regression for GH #628: the verbatim views (`full`, `raw`, `lines:N-M`) must
+/// reproduce every source line — including decorative separator comments
+/// (`// ————`, `// ----`) — so the content the model edits never diverges from
+/// disk. The original report saw these silently stripped, which then broke
+/// `ctx_edit` on a whitespace mismatch.
+#[test]
+fn verbatim_modes_preserve_decorative_comment_lines() {
+    let _lock = crate::core::data_dir::test_env_lock();
+    let sep_em = "// ————————————————————————————————————————";
+    let sep_dash = "// ------------------------------------------";
+    let content = format!(
+        "import {{ describe, it, expect }} from \"vitest\";\n\
+         \n\
+         {sep_em}\n\
+         // Section: arithmetic\n\
+         {sep_em}\n\
+         describe(\"add\", () => {{\n  it(\"adds\", () => expect(1 + 1).toBe(2));\n}});\n\
+         \n\
+         {sep_dash}\n\
+         // Section: strings\n\
+         {sep_dash}\n"
+    );
+
+    for mode in ["full", "raw"] {
+        let (output, _) = render::process_mode(
+            &content,
+            mode,
+            "F1",
+            "math.test.ts",
+            "ts",
+            count_tokens(&content),
+            CrpMode::Off,
+            "/tmp/math.test.ts",
+            None,
+        );
+        assert!(
+            output.contains(sep_em) && output.contains(sep_dash),
+            "{mode} mode must keep every separator comment verbatim:\n{output}"
+        );
+        // Every source line is present (modes may add a header/footer, never drop).
+        for line in content.lines().filter(|l| !l.is_empty()) {
+            assert!(
+                output.contains(line),
+                "{mode} mode dropped a source line: {line:?}"
+            );
+        }
+    }
+
+    // A `lines:` window must keep separators too, with original line numbering.
+    let window = render::extract_line_range(&content, "1-5");
+    assert!(
+        window.contains(sep_em),
+        "lines: window dropped the separator comment:\n{window}"
+    );
+    assert!(
+        window.contains("   3| ") && window.contains("   5| "),
+        "lines: window must number the separator lines (3 and 5):\n{window}"
+    );
+}
+
 /// Determinism contract (#498): tool output must be a pure function of
 /// (content, mode, crp_mode, task). Timestamps, counters or random hints in
 /// the body would make otherwise-identical outputs unique and defeat
@@ -770,6 +921,60 @@ fn process_mode_output_is_byte_stable_across_calls() {
             "mode '{mode}' produced non-deterministic output"
         );
     }
+}
+
+/// The reactive recovery footer (#premium-recovery): present on compressed views,
+/// leading with the MCP-free native path; absent from verbatim views and when the
+/// `recovery_hints` tier is `off`; and byte-stable across calls (#498).
+#[test]
+fn recovery_footer_is_compressed_only_and_togglable() {
+    // `isolated_data_dir()` already holds `test_env_lock` for its lifetime; taking
+    // the lock again here would self-deadlock (the mutex is non-reentrant).
+    let _iso = crate::core::data_dir::isolated_data_dir();
+    let content: String = (0..120)
+        .map(|i| format!("pub fn handler_{i}(x: u32) -> u32 {{ x * {i} }}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let tokens = count_tokens(&content);
+    let run = |mode: &str| {
+        render::process_mode(
+            &content,
+            mode,
+            "F1",
+            "rec.rs",
+            "rs",
+            tokens,
+            CrpMode::Off,
+            "/tmp/rec.rs",
+            None,
+        )
+        .0
+    };
+
+    // Default tier (minimal): a compressed view leads its footer with the native,
+    // MCP-free path so an agent needing the full source never reads line-by-line.
+    crate::test_env::set_var("LEAN_CTX_RECOVERY_HINTS", "minimal");
+    let sigs = run("signatures");
+    assert!(
+        sigs.contains("read \"/tmp/rec.rs\" directly (no MCP)"),
+        "compressed view must surface the MCP-free recovery path: {sigs}"
+    );
+    // Determinism (#498): byte-stable across calls.
+    assert_eq!(sigs, run("signatures"), "footer must be byte-stable");
+
+    // The verbatim escape hatch itself carries no footer (nothing to recover).
+    assert!(
+        !run("raw").contains("(no MCP)"),
+        "raw view needs no recovery footer"
+    );
+
+    // The off switch suppresses the footer cleanly.
+    crate::test_env::set_var("LEAN_CTX_RECOVERY_HINTS", "off");
+    assert!(
+        !run("signatures").contains("(no MCP)"),
+        "recovery_hints=off must drop the footer"
+    );
+    crate::test_env::remove_var("LEAN_CTX_RECOVERY_HINTS");
 }
 
 #[test]

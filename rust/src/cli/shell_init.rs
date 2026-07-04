@@ -222,7 +222,7 @@ if (-not $env:LEAN_CTX_ACTIVE -and -not $env:LEAN_CTX_DISABLED -and -not $env:LE
   switch ($_leanCtxActivation) {{
     {{ $_ -in 'off','none','manual' }} {{ $_leanCtxShouldActivate = $false }}
     {{ $_ -in 'agents-only','agents_only','agentsonly' }} {{
-      $_leanCtxShouldActivate = $env:LEAN_CTX_AGENT -or $env:CLAUDECODE -or $env:CODEBUDDY -or $env:CODEX_CLI_SESSION -or $env:GEMINI_SESSION
+      $_leanCtxShouldActivate = $env:LEAN_CTX_AGENT -or $env:CURSOR_AGENT -or $env:CLAUDECODE -or $env:CODEBUDDY -or $env:CODEX_CLI_SESSION -or $env:GEMINI_SESSION
     }}
     default {{ $_leanCtxShouldActivate = $true }}
   }}
@@ -330,7 +330,13 @@ pub fn generate_hook_fish(binary: &str) -> String {
         set -g _lean_ctx_cmds {alias_list}\n\
         \n\
         function _lc_is_agent\n\
-        \tset -q LEAN_CTX_AGENT; or set -q CODEX_CLI_SESSION; or set -q CLAUDECODE; or set -q CODEBUDDY; or set -q GEMINI_SESSION\n\
+        \tset -q LEAN_CTX_AGENT; or set -q CURSOR_AGENT; or set -q CODEX_CLI_SESSION; or set -q CLAUDECODE; or set -q CODEBUDDY; or set -q GEMINI_SESSION\n\
+        end\n\
+        \n\
+        function _lean_ctx_notice\n\
+        \tif isatty stdout; and set -q LEAN_CTX_DEBUG\n\
+        \t\techo $argv\n\
+        \tend\n\
         end\n\
         \n\
         function _lc\n\
@@ -375,7 +381,7 @@ pub fn generate_hook_fish(binary: &str) -> String {
         \tend\n\
         \talias k '_lc kubectl'\n\
         \tset -gx LEAN_CTX_ENABLED 1\n\
-        \tisatty stdout; and echo 'lean-ctx: ON (track mode — output unchanged, token savings recorded)'\n\
+        \t_lean_ctx_notice 'lean-ctx: ON (track mode — output unchanged, token savings recorded)'\n\
         end\n\
         \n\
         function lean-ctx-off\n\
@@ -384,7 +390,7 @@ pub fn generate_hook_fish(binary: &str) -> String {
         \tend\n\
         \tfunctions --erase k 2>/dev/null; true\n\
         \tset -gx LEAN_CTX_ENABLED 0\n\
-        \tisatty stdout; and echo 'lean-ctx: OFF'\n\
+        \t_lean_ctx_notice 'lean-ctx: OFF'\n\
         end\n\
         \n\
         function lean-ctx-mode\n\
@@ -395,7 +401,7 @@ pub fn generate_hook_fish(binary: &str) -> String {
         \t\t\t\tend\n\
         \t\t\talias k '_lc_compress kubectl'\n\
         \t\t\tset -gx LEAN_CTX_ENABLED 1\n\
-        \t\t\tisatty stdout; and echo 'lean-ctx: COMPRESS mode (all output compressed)'\n\
+        \t\t\t_lean_ctx_notice 'lean-ctx: COMPRESS mode (all output compressed)'\n\
         \t\tcase track\n\
         \t\t\tlean-ctx-on\n\
         \t\tcase off\n\
@@ -476,7 +482,11 @@ pub fn generate_hook_posix(binary: &str) -> String {
 _lean_ctx_cmds=({alias_list})
 
 _lc_is_agent() {{
-    [ -n "${{LEAN_CTX_AGENT:-}}" ] || [ -n "${{CODEX_CLI_SESSION:-}}" ] || [ -n "${{CLAUDECODE:-}}" ] || [ -n "${{CODEBUDDY:-}}" ] || [ -n "${{GEMINI_SESSION:-}}" ]
+    [ -n "${{LEAN_CTX_AGENT:-}}" ] || [ -n "${{CURSOR_AGENT:-}}" ] || [ -n "${{CODEX_CLI_SESSION:-}}" ] || [ -n "${{CLAUDECODE:-}}" ] || [ -n "${{CODEBUDDY:-}}" ] || [ -n "${{GEMINI_SESSION:-}}" ]
+}}
+
+_lean_ctx_notice() {{
+    [ -n "${{LEAN_CTX_DEBUG:-}}" ] && [ -t 1 ] && echo "$@"
 }}
 
 _lc() {{
@@ -522,7 +532,7 @@ lean-ctx-on() {{
     done
     alias k='_lc kubectl'
     export LEAN_CTX_ENABLED=1
-    [ -t 1 ] && echo "lean-ctx: ON (track mode — output unchanged, token savings recorded)"
+    _lean_ctx_notice "lean-ctx: ON (track mode — output unchanged, token savings recorded)"
 }}
 
 lean-ctx-off() {{
@@ -531,7 +541,7 @@ lean-ctx-off() {{
     done
     unalias k 2>/dev/null || true
     export LEAN_CTX_ENABLED=0
-    [ -t 1 ] && echo "lean-ctx: OFF"
+    _lean_ctx_notice "lean-ctx: OFF"
 }}
 
 lean-ctx-mode() {{
@@ -543,7 +553,7 @@ lean-ctx-mode() {{
             done
             alias k='_lc_compress kubectl'
             export LEAN_CTX_ENABLED=1
-            [ -t 1 ] && echo "lean-ctx: COMPRESS mode (all output compressed)"
+            _lean_ctx_notice "lean-ctx: COMPRESS mode (all output compressed)"
             ;;
         track)
             lean-ctx-on
@@ -781,7 +791,7 @@ fn shim_script(name: &str, binary: &str, flag: &str) -> String {
          if [ -n \"${{LEAN_CTX_DISABLED:-}}\" ] || [ -n \"${{LEAN_CTX_NO_HOOK:-}}\" ]; then\n\
          \texec \"$@\"\n\
          fi\n\
-         if [ ! -t 1 ] && [ -z \"${{LEAN_CTX_AGENT:-}}\" ] && [ -z \"${{CODEX_CLI_SESSION:-}}\" ] \\\n\
+         if [ ! -t 1 ] && [ -z \"${{LEAN_CTX_AGENT:-}}\" ] && [ -z \"${{CURSOR_AGENT:-}}\" ] && [ -z \"${{CODEX_CLI_SESSION:-}}\" ] \\\n\
          \t&& [ -z \"${{CLAUDECODE:-}}\" ] && [ -z \"${{CODEBUDDY:-}}\" ] && [ -z \"${{GEMINI_SESSION:-}}\" ]; then\n\
          \texec \"$@\"\n\
          fi\n\

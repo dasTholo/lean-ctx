@@ -22,6 +22,7 @@ mod targets;
 mod tests;
 mod write;
 
+pub(crate) use content::cursor_mdc_document;
 pub use content::{
     GEMINI_DEDICATED_CONTEXT_FILENAME, gemini_dedicated_rules_path, opencode_dedicated_rules_path,
 };
@@ -52,6 +53,20 @@ pub fn rules_dedicated_markdown() -> String {
     )
 }
 
+/// Long-form rules for the on-demand project `LEAN-CTX.md` (#578). Same
+/// config-driven shadow/compression handling as the dedicated render, but the
+/// LONGFORM profile with the verbose teaching sections.
+pub fn rules_longform_markdown() -> String {
+    let cfg = crate::core::config::Config::load();
+    let shadow = cfg.shadow_mode;
+    let level = crate::core::config::CompressionLevel::effective(&cfg);
+    crate::core::rules_canonical::render(
+        shadow,
+        crate::core::rules_canonical::Wrapper::Longform,
+        level,
+    )
+}
+
 /// The canonical rules block lean-ctx would write for each target, keyed by the
 /// target's display name.
 ///
@@ -64,6 +79,9 @@ pub fn expected_blocks_by_target(
     home: &std::path::Path,
 ) -> std::collections::HashMap<String, String> {
     let injection = crate::core::config::Config::load().rules_injection_effective();
+    let cfg = crate::core::config::Config::load();
+    let shadow = cfg.shadow_mode;
+    let level = crate::core::config::CompressionLevel::effective(&cfg);
     let shared = canonical_rules_block();
     let dedicated = rules_dedicated_markdown();
     build_rules_targets(home, injection)
@@ -71,10 +89,15 @@ pub fn expected_blocks_by_target(
         .map(|target| {
             let expected = match target.format {
                 RulesFormat::SharedMarkdown => shared.clone(),
-                // CursorMdc embeds the dedicated render verbatim between the
-                // markers (frontmatter lives outside them), so the extracted
-                // section matches the dedicated block.
-                RulesFormat::DedicatedMarkdown | RulesFormat::CursorMdc => dedicated.clone(),
+                RulesFormat::DedicatedMarkdown => dedicated.clone(),
+                // CursorMdc embeds the render verbatim between the markers
+                // (frontmatter lives outside them); the wrapper is dynamic —
+                // HookCovered on hook-covered installs (GL #1153).
+                RulesFormat::CursorMdc => crate::core::rules_canonical::render(
+                    shadow,
+                    content::cursor_wrapper_for_mdc(&target.path),
+                    level,
+                ),
             };
             (target.name.to_string(), expected)
         })

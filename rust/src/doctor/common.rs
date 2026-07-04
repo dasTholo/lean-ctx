@@ -137,7 +137,9 @@ pub(super) fn has_pipe_guard_in_content(content: &str) -> bool {
 }
 
 pub(super) fn rc_references_shell_hook(content: &str) -> bool {
-    content.contains("lean-ctx/shell-hook.") || content.contains("lean-ctx\\shell-hook.")
+    // Match any sourced hook file, not just the default `lean-ctx/` parent:
+    // with LEAN_CTX_CONFIG_DIR the rc block references e.g. `custom/shell-hook.bash`.
+    content.contains("shell-hook.")
 }
 
 pub(super) fn rc_has_pipe_guard(path: &PathBuf) -> bool {
@@ -167,16 +169,25 @@ pub(super) fn rc_has_pipe_guard(path: &PathBuf) -> bool {
 
 pub(super) fn hook_dirs() -> Vec<std::path::PathBuf> {
     let mut dirs = Vec::new();
-    if let Ok(d) = crate::core::data_dir::lean_ctx_data_dir() {
+    // Shell hooks are written to the *config* dir (`lean-ctx init`), which is
+    // relocatable via LEAN_CTX_CONFIG_DIR — without it the pipe-guard check
+    // reads a hook location the installer never used and reports a false
+    // "pipe guard missing" on every custom-config-dir install.
+    if let Ok(d) = crate::core::paths::config_dir() {
+        dirs.push(d);
+    }
+    if let Ok(d) = crate::core::data_dir::lean_ctx_data_dir()
+        && !dirs.contains(&d)
+    {
         dirs.push(d);
     }
     if let Some(home) = dirs::home_dir() {
         let legacy = home.join(".lean-ctx");
-        if !dirs.iter().any(|d| d == &legacy) {
+        if !dirs.contains(&legacy) {
             dirs.push(legacy);
         }
         let xdg = home.join(".config").join("lean-ctx");
-        if !dirs.iter().any(|d| d == &xdg) {
+        if !dirs.contains(&xdg) {
             dirs.push(xdg);
         }
     }
@@ -471,11 +482,18 @@ pub(super) fn has_lean_ctx_mcp_entry(content: &str) -> bool {
                 return true;
             }
         }
-        // mcp.servers.lean-ctx (OpenCode et al.)
+        // mcp.servers.lean-ctx (some multi-level configs)
         if let Some(servers) = json
             .get("mcp")
             .and_then(|v| v.get("servers"))
             .and_then(|v| v.as_object())
+            && servers.contains_key("lean-ctx")
+        {
+            return true;
+        }
+        // mcp.lean-ctx — OpenCode's schema (https://opencode.ai/config.json)
+        // nests servers DIRECTLY under "mcp", no "servers" level (GH #686).
+        if let Some(servers) = json.get("mcp").and_then(|v| v.as_object())
             && servers.contains_key("lean-ctx")
         {
             return true;
@@ -485,6 +503,20 @@ pub(super) fn has_lean_ctx_mcp_entry(content: &str) -> bool {
     }
     // Unparseable even as JSONC: fall back to a substring heuristic.
     content.contains("lean-ctx")
+}
+
+pub(super) fn lean_ctx_mcp_location_names(
+    home: &std::path::Path,
+) -> std::collections::BTreeSet<&'static str> {
+    let mut names = std::collections::BTreeSet::new();
+    for loc in mcp_config_locations(home) {
+        if let Ok(content) = std::fs::read_to_string(&loc.path)
+            && has_lean_ctx_mcp_entry(&content)
+        {
+            names.insert(loc.name);
+        }
+    }
+    names
 }
 
 pub(super) fn proxy_auth_probe(port: u16) -> bool {
@@ -695,8 +727,38 @@ pub(super) fn codebuddy_binary_exists() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{display_user_path, tildify_home};
+    use super::{display_user_path, has_lean_ctx_mcp_entry, tildify_home};
     use std::path::Path;
+
+    // GH #686: OpenCode's schema (https://opencode.ai/config.json) nests
+    // servers DIRECTLY under "mcp" — `mcp.lean-ctx`, no "servers" level. The
+    // doctor used to only walk `mcp.servers.lean-ctx` and reported a working
+    // install as missing.
+    #[test]
+    fn opencode_direct_mcp_child_is_recognized() {
+        let opencode = r#"{
+            "$schema": "https://opencode.ai/config.json",
+            "mcp": {
+                "lean-ctx": { "command": ["/usr/bin/lean-ctx"], "enabled": true, "type": "local" }
+            }
+        }"#;
+        assert!(has_lean_ctx_mcp_entry(opencode));
+    }
+
+    #[test]
+    fn mcp_servers_nested_form_still_recognized() {
+        let nested = r#"{ "mcp": { "servers": { "lean-ctx": { "command": "lean-ctx" } } } }"#;
+        assert!(has_lean_ctx_mcp_entry(nested));
+        let flat = r#"{ "mcpServers": { "lean-ctx": { "command": "lean-ctx" } } }"#;
+        assert!(has_lean_ctx_mcp_entry(flat));
+    }
+
+    #[test]
+    fn unrelated_mcp_children_are_not_a_match() {
+        // A different server directly under "mcp" must not count as ours.
+        let other = r#"{ "mcp": { "some-other-server": { "command": "x" } } }"#;
+        assert!(!has_lean_ctx_mcp_entry(other));
+    }
 
     #[test]
     fn display_user_path_abbreviates_home() {

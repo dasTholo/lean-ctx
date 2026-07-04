@@ -133,6 +133,13 @@ fn has_expanding_substitution_in_args(command: &str) -> bool {
             i += 1;
             continue;
         }
+        // Backslash inhibits expansion outside single quotes (GL #1160):
+        // `\$(`, `\`` and `\<(` are literal data in bash — both unquoted and
+        // inside double quotes.
+        if ch == b'\\' {
+            i = (i + 2).min(len);
+            continue;
+        }
         match ch {
             b'\'' => {
                 in_single_quote = true;
@@ -166,49 +173,6 @@ fn has_expanding_substitution_in_args(command: &str) -> bool {
 /// when `shell_strict_mode = true` (GH #391).
 fn check_pipe_to_bare_interpreter(command: &str, strict: bool) -> Result<(), String> {
     let segments = split_on_operators(command);
-    let pipe_indices: Vec<usize> = {
-        let mut indices = Vec::new();
-        let bytes = command.as_bytes();
-        let len = bytes.len();
-        let mut j = 0;
-        let mut in_sq = false;
-        let mut in_dq = false;
-        while j < len {
-            if in_sq {
-                if bytes[j] == b'\'' {
-                    in_sq = false;
-                }
-                j += 1;
-                continue;
-            }
-            if in_dq {
-                if bytes[j] == b'"' && (j == 0 || bytes[j - 1] != b'\\') {
-                    in_dq = false;
-                }
-                j += 1;
-                continue;
-            }
-            match bytes[j] {
-                b'\'' => {
-                    in_sq = true;
-                    j += 1;
-                }
-                b'"' => {
-                    in_dq = true;
-                    j += 1;
-                }
-                b'|' if j + 1 < len && bytes[j + 1] != b'|' => {
-                    indices.push(j);
-                    j += 1;
-                }
-                _ => {
-                    j += 1;
-                }
-            }
-        }
-        indices
-    };
-    let _ = pipe_indices;
 
     for (idx, seg) in segments.iter().enumerate() {
         if idx == 0 {
@@ -366,13 +330,25 @@ fn check_interpreter_eval_only_inner(segment: &str, depth: usize) -> Result<(), 
         }
     }
     if tokens[1..].iter().any(|t| t.contains("<<")) {
-        return Err(format!(
-            "[BLOCKED — DO NOT RETRY] Interpreter '{base}' with heredoc stdin is blocked. \
-             Use a script file instead.\n\
-             This is a permanent security restriction."
-        ));
+        return Err(heredoc_blocked_message(&base));
     }
     Ok(())
+}
+
+/// Actionable message for the heredoc-stdin block (GL #1161): the restriction
+/// is deliberate — inline code embedded in the command string never exists as
+/// an inspectable artifact, unlike a script file, which leaves an auditable
+/// trail and passes the write path's own guards. Name the exact workaround
+/// instead of leaving the agent to rediscover it by trial and error.
+fn heredoc_blocked_message(base: &str) -> String {
+    format!(
+        "[BLOCKED — DO NOT RETRY] Interpreter '{base}' with heredoc stdin is blocked. \
+         Inline code in the command string leaves no auditable artifact.\n\
+         Do this instead: write the code to a file, then run it —\n\
+           1. create /tmp/snippet with your code (Write/ctx_edit tool)\n\
+           2. {base} /tmp/snippet\n\
+         This is a permanent security restriction."
+    )
 }
 
 /// Commands that are unconditionally blocked regardless of allowlist membership.
@@ -461,11 +437,7 @@ fn check_interpreter_abuse_inner(
             }
         }
         if tokens[1..].iter().any(|t| t.contains("<<")) {
-            return Err(format!(
-                "[BLOCKED — DO NOT RETRY] Interpreter '{base}' with heredoc stdin is blocked. \
-                 Use a script file instead.\n\
-                 This is a permanent security restriction."
-            ));
+            return Err(heredoc_blocked_message(&base));
         }
     }
 
@@ -731,13 +703,18 @@ fn balanced_paren_inner(segment: &str) -> Option<&str> {
             continue;
         }
         if in_double_quote {
-            if ch == b'"' && (i == 0 || bytes[i - 1] != b'\\') {
-                in_double_quote = false;
+            match ch {
+                b'\\' => i += 1, // \" and \\ stay inside the string
+                b'"' => in_double_quote = false,
+                _ => {}
             }
             i += 1;
             continue;
         }
         match ch {
+            // Escaped parens are data (GL #1160): `rg foo\(bar\)` must not
+            // shift the depth this walker uses to find the real closing paren.
+            b'\\' => i += 1,
             b'\'' => in_single_quote = true,
             b'"' => in_double_quote = true,
             b'(' => depth += 1,
@@ -911,7 +888,11 @@ fn extract_all_commands(command: &str) -> Vec<String> {
 }
 
 /// Split command string on shell operators: ;, &&, ||, |
-/// Respects single/double quotes and parentheses nesting.
+/// Respects single/double quotes, parentheses nesting, and backslash escapes
+/// outside single quotes (GL #1160): `rg split\.label\|quantityLabel` is ONE
+/// command — the escaped pipe is regex data, not an operator. The old scanner
+/// split there and blocked the pattern fragment as an unknown command; same
+/// for `find … -exec rm {} \;`.
 fn split_on_operators(command: &str) -> Vec<&str> {
     let mut segments = Vec::new();
     let mut start = 0;
@@ -934,14 +915,24 @@ fn split_on_operators(command: &str) -> Vec<&str> {
         }
 
         if in_double_quote {
-            if ch == b'"' && (i == 0 || bytes[i - 1] != b'\\') {
-                in_double_quote = false;
+            match ch {
+                // \" stays inside the string; \\ consumes both so `"x\\"` closes.
+                b'\\' => i = (i + 2).min(len),
+                b'"' => {
+                    in_double_quote = false;
+                    i += 1;
+                }
+                _ => i += 1,
             }
-            i += 1;
             continue;
         }
 
         match ch {
+            b'\\' => {
+                // Escaped char is data (bash semantics outside quotes) — never
+                // an operator or quote opener.
+                i = (i + 2).min(len);
+            }
             b'\'' => {
                 in_single_quote = true;
                 i += 1;

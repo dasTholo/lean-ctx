@@ -1,10 +1,16 @@
 //! Canonical rules source — single source of truth for all lean-ctx guidance.
 //!
-//! All content is declared as `pub const` at the top. Two profiles (FULL,
-//! COMPACT) define which sections compose each output format. Three wrappers
-//! (Dedicated, Shared, Bare) select the profile and wrapping style. One
-//! `render()` function assembles everything, including the compression-level
-//! output-style prompt (Lite / Standard / Max).
+//! All content is declared as `pub const` at the top. Three profiles (LONGFORM,
+//! FULL, COMPACT) define which sections compose each output format. Four
+//! wrappers (Longform, Dedicated, Shared, Bare) select the profile and wrapping
+//! style. One `render()` function assembles everything, including the
+//! compression-level output-style prompt (Lite / Standard / Max).
+//!
+//! Profile economics (#578): every *injected* file bills its tokens on every
+//! single session, so FULL (dedicated rule files) and COMPACT (shared files +
+//! MCP instructions) stay tight. LONGFORM is carried only by the project
+//! `LEAN-CTX.md`, which agents open on demand — it keeps the verbose teaching
+//! sections (loop taxonomy, navigation paradox, recovery vocabulary, CEP).
 //!
 //! ***Every*** template, injected rule file, AGENTS.md block, and MCP
 //! instructions field MUST derive its content from this module.
@@ -64,9 +70,16 @@ pub const COMPRESSION_BLOCK_END: &str = "<!-- /lean-ctx-compression -->";
 /// injection layer can parse it and decide whether a file is up-to-date.
 ///
 /// History: v3 (#609) adds the `AGENT_LOOP` taxonomy + `NAV_PARADOX` guidance to
-/// the FULL profile and a compact one-liner to COMPACT; bumping it forces every
-/// committed `LEAN-CTX.md` artifact to be regenerated (see `tests/rules_drift.rs`).
-pub const RULES_VERSION: usize = 3;
+/// the FULL profile and a compact one-liner to COMPACT. v4 adds recovery guidance
+/// so agents learn the (MCP-optional) decompression paths proactively instead of
+/// re-reading compressed output line-by-line. v5 (#578) is the self-footprint
+/// diet: the injected FULL profile drops to ~470 tokens (the intent playbook
+/// absorbs the loop taxonomy and navigation paradox; the verbose
+/// `AGENT_LOOP`/`NAV_PARADOX`/`RECOVER`/`CEP` sections move to the LONGFORM
+/// profile that only the on-demand project `LEAN-CTX.md` carries).
+/// Bumping it forces every committed `LEAN-CTX.md` artifact to be regenerated
+/// (see `tests/rules_drift.rs`) and every injected user file to resync.
+pub const RULES_VERSION: usize = 5;
 
 /// Banner placed at the top of dedicated rule files (non-shadow only).
 pub const CRITICAL: &str = "CRITICAL: ALWAYS use lean-ctx ctx_* tools instead of native equivalents. \
@@ -82,13 +95,12 @@ pub const CRITICAL: &str = "CRITICAL: ALWAYS use lean-ctx ctx_* tools instead of
 /// carries its own copy. It is omitted where it would be dead weight: shadow
 /// mode enforces routing at the call layer, and the `Bare`/instructions channel
 /// is capped separately.
-pub const MUST_INVOKE: &str = "MUST actually CALL the ctx_* MCP tools, not just describe them: \
-    before reading, searching, or running a shell command, emit the matching ctx_* tool call \
-    (ctx_compose first, then ctx_read / ctx_search / ctx_shell).";
+pub const MUST_INVOKE: &str = "ACTUALLY EMIT the ctx_* tool call (ctx_compose first) — \
+    describing a tool is not calling it.";
 
 /// Compact bullet-list mapping (for both dedicated and shared contexts).
 pub const BULLETS: &str = "\
-MANDATORY MAPPING (4 core redirects first):\n\
+MANDATORY MAPPING:\n\
 • Read/cat -> ctx_read(path, mode)\n\
 • Grep -> ctx_search(pattern, path)\n\
 • Shell/bash -> ctx_shell(command)\n\
@@ -98,42 +110,38 @@ MANDATORY MAPPING (4 core redirects first):\n\
 /// One-line admonition reinforcing the tool preference.  Always right after
 /// `BULLETS` in both profiles.
 pub const NEVER: &str = "NEVER use native Read/Grep/Shell/Glob when a ctx_* equivalent \
-    exists. SELF-CORRECT: the moment you reach for a native Read/Grep/Shell/Glob, stop \
-    and call the ctx_* tool instead.";
+    exists. SELF-CORRECT: the moment you reach for one, stop and call the ctx_* tool instead.";
 
 /// Intent-to-tool playbook — maps common agent questions to the right tool.
+/// Since v5 it also absorbs the agent-loop phases (#609) and the navigation
+/// paradox one-liner, replacing the separate verbose sections in the injected
+/// profile (they stay verbatim in LONGFORM).
 pub const INTENT: &str = "\
 Tool selection by intent:\n\
-• Understand code / find answers / before editing -> ctx_compose (call FIRST)\n\
-• Read a file -> ctx_read(path, mode=signatures|map|full)\n\
-• Edit code you've read -> ctx_patch (hash-anchored, no exact-recall; read mode=anchored first)\n\
-• Find a symbol by name (exact) -> ctx_symbol\n\
-• Search code by pattern (fuzzy) -> ctx_search\n\
-• Search by meaning (concepts) -> ctx_semantic_search\n\
-• Find files by pattern (glob) -> ctx_glob\n\
-• Project structure -> ctx_tree\n\
-• Who calls this / call graph -> ctx_callgraph\n\
-• Session state / memory -> ctx_session / ctx_knowledge";
+• Orient / understand code (call FIRST) -> ctx_compose\n\
+• Read a file -> ctx_read(path, mode=signatures|map|full); edit after reading -> ctx_patch\n\
+• Exact symbol -> ctx_symbol; pattern -> ctx_search; by meaning -> ctx_semantic_search\n\
+• Files by glob -> ctx_glob; structure -> ctx_tree; callers/impact -> ctx_callgraph\n\
+• Verify after edits -> ctx_shell(test/build); memory -> ctx_session / ctx_knowledge\n\
+Semantic questions -> search tools, not whole-file reads: reading more ≠ understanding more.";
 
 /// Anti-patterns that waste tokens and round-trips.
 pub const ANTI: &str = "\
 Anti-patterns — do NOT:\n\
 • Chain ctx_search -> ctx_read -> ctx_symbol — one ctx_compose replaces all three\n\
-• Grep for symbol definitions — ctx_symbol is faster + more precise\n\
 • Use ctx_read(mode=full) for orientation — use mode=signatures\n\
-• Use ctx_callgraph or ctx_graph for const/static/variable references — they track\n\
-  function call edges and file-level deps only. Use grep or ctx_compose instead";
+• Use ctx_callgraph/ctx_graph for const/static/variable refs — they track call\n\
+  edges and file deps only; use ctx_search instead";
 
 /// Encourages parallel tool calls to reduce round-trips.
 pub const PARALLEL: &str = "\
-PARALLEL tool calls: fire independent calls in the SAME turn — don't sequence them.\n\
-ctx_compose bundles multiple lookups into one call; for anything it doesn't\n\
-cover, batch independent reads/searches together.";
+PARALLEL: fire independent tool calls in the SAME turn — ctx_compose bundles \
+multiple lookups into one call.";
 
 /// Agent-loop tool taxonomy (#609). Names each phase of the gather → act →
 /// verify loop an agent actually runs in and the one lean-ctx tool that serves
-/// it, so the agent maps its *current* intent to a call instead of defaulting to
-/// a full-file read. Complements `INTENT` (lookup framing) with loop framing.
+/// it. Since v5 (#578) LONGFORM-only — the injected profiles carry the phases
+/// folded into `INTENT`.
 pub const AGENT_LOOP: &str = "\
 AGENT LOOP (phase -> tool):\n\
 • Orient — understand before acting -> ctx_compose\n\
@@ -145,25 +153,39 @@ AGENT LOOP (phase -> tool):\n\
 
 /// Navigation-paradox guidance (#609): reading more is not understanding more.
 /// Steers semantic questions to BM25 + meaning search and reserves the call/dep
-/// graph for genuinely hidden architectural edges, so agents stop paging whole
-/// files just to "get context".
+/// graph for genuinely hidden architectural edges. Since v5 LONGFORM-only —
+/// `INTENT` carries the one-line thesis in the injected profiles.
 pub const NAV_PARADOX: &str = "\
 NAVIGATION PARADOX: reading more ≠ understanding more.\n\
 • Semantic question (\"where/how is X handled?\") -> ctx_search (BM25) + ctx_semantic_search (meaning), not whole-file reads\n\
 • Hidden architectural deps (who calls this, what breaks) -> ctx_callgraph / ctx_graph — for these only\n\
 • Navigate structure (signatures, symbols) before reading entire files";
 
-/// One-line condensation of `AGENT_LOOP` + `NAV_PARADOX` for the COMPACT profile
-/// (shared files + the per-session Bare/MCP channel). Deliberately terse so the
-/// Bare skeleton stays within `instructions::INSTRUCTION_CAP_TOKENS`.
-pub const LOOP_NAV_COMPACT: &str = "\
-AGENT LOOP: Orient(ctx_compose) → Find(ctx_symbol) → Read(ctx_read) → Locate(ctx_search) → Trace(ctx_callgraph) → Verify(ctx_shell). \
-Reading more ≠ understanding more: semantic Qs -> ctx_search/ctx_semantic_search; hidden deps -> ctx_callgraph/ctx_graph only.";
-
 /// One-line automation reminder.
 pub const AUTO: &str = "Auto: preload/dedup/compress run in background. \
-    ctx_session=memory, ctx_knowledge=facts, ctx_semantic_search=meaning search, \
-    ctx_shell raw=true=uncompressed. Details: LEAN-CTX.md";
+    ctx_session=memory, ctx_knowledge=facts, ctx_shell raw=true=uncompressed. \
+    Full guide: LEAN-CTX.md";
+
+/// Recovery vocabulary (verbose, LONGFORM profile). lean-ctx compression is fully
+/// reversible (CCR), but agents otherwise only discover the escape hatch reactively
+/// from output hints — so they re-read compressed files line-by-line instead of
+/// expanding (the "too compressed" complaint). The MCP-free path ("read the shown
+/// file path with any tool") covers orgs that forbid MCP. Since v5 every injected
+/// profile (FULL + COMPACT/Bare) carries the terser [`RECOVER_COMPACT`] instead;
+/// the reactive footers in `ctx_read`/`archive`/`ctx_shell` still teach the
+/// `ctx_expand` path in context.
+pub const RECOVER: &str = "RECOVER: compressed output is reversible — never re-read line-by-line. \
+    Need full/exact? Read the shown file path with any tool (no MCP), or \
+    ctx_read(mode=full|raw=true); [Archived]/tee/firewall → ctx_expand(id=...).";
+
+/// Terse injected variant of [`RECOVER`] (FULL + COMPACT/Bare). The cold
+/// first-contact handshake renders the COMPACT profile, so this one-liner keeps
+/// the static char/token budget (`tests/intensive_benchmarks.rs`,
+/// `instructions.rs`); since v5 the FULL dedicated files carry it too (#578).
+/// Keeps the two primary MCP-optional paths and the "never line-by-line" rule.
+/// Must keep the `(no MCP)` clause (asserted in tests).
+pub const RECOVER_COMPACT: &str = "RECOVER: compression is reversible — read the shown path \
+    (no MCP) or ctx_read(raw=true), never re-read line-by-line.";
 
 /// Context Engineering Protocol version reference.
 pub const CEP: &str = "CEP v1: 1.ACT FIRST 2.DELTA ONLY (Fn refs) 3.STRUCTURED (+/-/~) \
@@ -185,6 +207,28 @@ pub const LITM_END: &str = "TOOL PREFERENCE (END): ctx_compose>chain ctx_read>Re
 pub const SHADOW_MINIMAL: &str = "\
 lean-ctx shadow mode: native file/search/shell calls auto-route to ctx_* — no tool-mapping needed.\n\
 Exclusive tools (no native trigger): ctx_compose (understand code, call first), ctx_symbol (exact symbol), ctx_callgraph (callers), ctx_semantic_search (by meaning), ctx_knowledge / ctx_session (memory).";
+
+/// Hook-covered header (GL #1153): the honest replacement for the
+/// `CRITICAL`/`BULLETS`/`NEVER` mapping on hosts whose *installed hooks*
+/// already compress the native tools (Cursor: `preToolUse` rewrite covers
+/// Shell, redirect covers Read/Grep). There a "NEVER use native tools" rule
+/// fights the host's own tool guidance and is unenforceable — the model calls
+/// native tools anyway and the hooks compress them transparently. Saying so
+/// removes the instruction dissonance instead of losing the battle silently.
+pub const HOOK_COVERED_HEADER: &str = "\
+lean-ctx hooks cover this session: native Shell, Read and Grep are compressed \
+transparently (PreToolUse rewrite/redirect) — using them is fine and already saves tokens.";
+
+/// The tools worth an explicit MCP call on a hook-covered host: capabilities
+/// with *no* native equivalent the hooks could intercept. Kept in sync with
+/// [`SHADOW_MINIMAL`]'s exclusive-tools line (same rationale, different cause).
+pub const HOOK_COVERED_TOOLS: &str = "\
+Call the ctx_* MCP tools for what native tools cannot do:\n\
+• ctx_compose — orient in code (bundles search + read + symbols in one call)\n\
+• ctx_symbol / ctx_callgraph — exact definitions, callers, blast radius\n\
+• ctx_semantic_search — search by meaning, not pattern\n\
+• ctx_knowledge / ctx_session — persistent memory across sessions\n\
+• ctx_expand — recover full text from [Archived]/compressed output";
 
 // ── Output-style compression prompts ───────────────────────────
 
@@ -226,7 +270,11 @@ pub fn compression_text(level: CompressionLevel) -> &'static str {
     }
 }
 
-const FULL_NON_SHADOW: &[&str] = &[
+/// The verbose teaching profile — only the on-demand project `LEAN-CTX.md`
+/// carries it (#578). Keeps every section, including the ones the injected
+/// profiles fold away (loop taxonomy, navigation paradox, verbose recovery,
+/// CEP protocol).
+const LONGFORM_NON_SHADOW: &[&str] = &[
     CRITICAL,
     MUST_INVOKE,
     BULLETS,
@@ -237,7 +285,25 @@ const FULL_NON_SHADOW: &[&str] = &[
     NAV_PARADOX,
     PARALLEL,
     AUTO,
+    RECOVER,
     CEP,
+    INTELLIGENCE,
+    LITM_END,
+];
+
+/// The injected dedicated-file profile. Billed on every session, so v5 (#578)
+/// keeps it at ~470 tokens: INTENT absorbs loop + paradox, RECOVER_COMPACT
+/// replaces the verbose block, CEP moves to LONGFORM.
+const FULL_NON_SHADOW: &[&str] = &[
+    CRITICAL,
+    MUST_INVOKE,
+    BULLETS,
+    NEVER,
+    INTENT,
+    ANTI,
+    PARALLEL,
+    AUTO,
+    RECOVER_COMPACT,
     INTELLIGENCE,
     LITM_END,
 ];
@@ -248,22 +314,43 @@ const FULL_NON_SHADOW: &[&str] = &[
 // style survive. Footprint reduction is provable via the #959 delta harness.
 const FULL_SHADOW: &[&str] = &[SHADOW_MINIMAL, INTELLIGENCE];
 
+// GL #1153: the hook-covered profile — for hosts whose installed lean-ctx
+// hooks already compress the native tools (Cursor). Like shadow, the
+// tool-mapping ("NEVER use native …") is dropped: it is unenforceable against
+// the host's own tool guidance and the hooks make it unnecessary. Unlike
+// shadow, the coverage is partial (hooks see Shell/Read/Grep but not e.g.
+// semantic questions), so the exclusive-capability advert is a full section
+// and the recovery line stays.
+const HOOK_COVERED_NON_SHADOW: &[&str] = &[
+    HOOK_COVERED_HEADER,
+    HOOK_COVERED_TOOLS,
+    PARALLEL,
+    RECOVER_COMPACT,
+    INTELLIGENCE,
+];
+
 const COMPACT_NON_SHADOW: &[&str] = &[
     CRITICAL,
     BULLETS,
     NEVER,
     INTENT,
-    LOOP_NAV_COMPACT,
     ANTI,
     PARALLEL,
+    RECOVER_COMPACT,
 ];
 
 const COMPACT_SHADOW: &[&str] = &[SHADOW_MINIMAL];
 
-/// Selects the profile (FULL vs COMPACT) and the wrapping style (markers,
-/// headers, footers) for `render()`.
+/// Selects the profile (LONGFORM / FULL / COMPACT) and the wrapping style
+/// (markers, headers, footers) for `render()`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Wrapper {
+    /// **On-demand long form** (project `LEAN-CTX.md`). LONGFORM profile with
+    /// the same marker wrapping as `Dedicated`. Not auto-loaded by any client
+    /// — agents open it on demand via the AGENTS.md pointer, so it can afford
+    /// the verbose teaching sections.
+    Longform,
+
     /// **Dedicated rule file.**  FULL profile.  Wrapped with `START_MARK`,
     /// `<!-- version: N -->`, and `END_MARK`.  Non-shadow includes the
     /// `CRITICAL` banner before the body.  The whole file is lean-ctx–owned;
@@ -278,6 +365,14 @@ pub enum Wrapper {
     /// **MCP session instructions.**  COMPACT profile.  No markers or
     /// headers — bare content used inline in per-session MCP instructions.
     Bare,
+
+    /// **Hook-covered dedicated rule file** (GL #1153). For hosts whose
+    /// installed lean-ctx hooks already compress the native tools (Cursor:
+    /// PreToolUse rewrite/redirect). Same marker/version wrapping as
+    /// `Dedicated`, but the body swaps the unenforceable tool-mapping for the
+    /// honest hook-coverage note plus the exclusive-capability advert.
+    /// Shadow mode collapses it to the same minimal profile as `Dedicated`.
+    HookCovered,
 }
 
 /// Render lean-ctx rules for a given wrapper, shadow mode, and compression level.
@@ -289,8 +384,12 @@ pub enum Wrapper {
 ///   Max) which is appended to the body. `Off` omits it.
 pub fn render(shadow: bool, wrapper: Wrapper, level: CompressionLevel) -> String {
     let profile = match (wrapper, shadow) {
+        (Wrapper::Longform, false) => LONGFORM_NON_SHADOW,
+        // Shadow collapses Longform + Dedicated + HookCovered to the same
+        // minimal profile (interception supersedes hook coverage).
+        (Wrapper::Longform | Wrapper::Dedicated | Wrapper::HookCovered, true) => FULL_SHADOW,
         (Wrapper::Dedicated, false) => FULL_NON_SHADOW,
-        (Wrapper::Dedicated, true) => FULL_SHADOW,
+        (Wrapper::HookCovered, false) => HOOK_COVERED_NON_SHADOW,
         (_, false) => COMPACT_NON_SHADOW,
         (_, true) => COMPACT_SHADOW,
     };
@@ -322,6 +421,25 @@ pub fn render(shadow: bool, wrapper: Wrapper, level: CompressionLevel) -> String
     let version_line = format!("<!-- version: {RULES_VERSION} -->");
 
     format!("{START_MARK}\n{version_line}\n\n{body}\n{END_MARK}")
+}
+
+/// Unmarked render of the hook-covered profile for ephemeral channels
+/// (the mcp.json `instructions` snapshot on hook-covered hosts, GL #1153).
+/// The `Bare` counterpart of `Wrapper::HookCovered`: same body, no markers —
+/// per-session channels are governed by carrier coverage, so markers would be
+/// noise (see [`COMPRESSION_BLOCK_START`]). Shadow collapses to the regular
+/// bare shadow profile (interception supersedes hook coverage).
+pub fn render_hook_covered_bare(shadow: bool, level: CompressionLevel) -> String {
+    if shadow {
+        return render(true, Wrapper::Bare, level);
+    }
+    let mut body = HOOK_COVERED_NON_SHADOW.join("\n\n");
+    let compression = compression_text(level);
+    if !compression.is_empty() {
+        body.push('\n');
+        body.push_str(compression);
+    }
+    body
 }
 // ============================================================
 // RULES FILE — centralized interface for reading rule files
@@ -566,24 +684,82 @@ mod tests {
     }
 
     #[test]
-    fn full_profile_carries_loop_and_paradox() {
-        let out = render(false, Wrapper::Dedicated, CompressionLevel::Off);
-        assert!(out.contains("AGENT LOOP"), "FULL must carry AGENT_LOOP");
+    fn longform_carries_loop_and_paradox_injected_full_does_not() {
+        // v5 (#578): the verbose teaching sections live only in the on-demand
+        // LEAN-CTX.md (Longform); the injected dedicated files fold the loop
+        // phases + paradox thesis into INTENT.
+        let long = render(false, Wrapper::Longform, CompressionLevel::Off);
         assert!(
-            out.contains("NAVIGATION PARADOX"),
-            "FULL must carry NAV_PARADOX"
+            long.contains("AGENT LOOP"),
+            "LONGFORM must carry AGENT_LOOP"
+        );
+        assert!(
+            long.contains("NAVIGATION PARADOX"),
+            "LONGFORM must carry NAV_PARADOX"
+        );
+        assert!(long.contains(CEP), "LONGFORM must carry CEP");
+
+        let full = render(false, Wrapper::Dedicated, CompressionLevel::Off);
+        assert!(
+            !full.contains("AGENT LOOP (phase -> tool):"),
+            "injected FULL must not inline the multi-line AGENT_LOOP block"
+        );
+        assert!(
+            !full.contains("NAVIGATION PARADOX: reading"),
+            "injected FULL must not inline the multi-line NAV_PARADOX block"
+        );
+        assert!(
+            full.contains('≠'),
+            "INTENT must keep the reading≠understanding thesis in FULL"
+        );
+        for phase_tool in ["ctx_compose", "ctx_symbol", "ctx_search", "ctx_callgraph"] {
+            assert!(
+                full.contains(phase_tool),
+                "FULL keeps the loop tools via INTENT: {phase_tool}"
+            );
+        }
+    }
+
+    #[test]
+    fn injected_profiles_stay_lean() {
+        // The whole point of v5 (#578): injected files bill every session.
+        // chars/4 ≈ tokens — the dedicated body must stay around ~470 tok and
+        // the Longform must be a strict superset.
+        let full = render(false, Wrapper::Dedicated, CompressionLevel::Off);
+        eprintln!(
+            "rules footprint: dedicated={} chars (~{} tok), longform={} chars, bare={} chars",
+            full.len(),
+            full.len() / 4,
+            render(false, Wrapper::Longform, CompressionLevel::Off).len(),
+            render(false, Wrapper::Bare, CompressionLevel::Off).len(),
+        );
+        assert!(
+            full.len() <= 2100,
+            "injected dedicated rules must stay ≤2100 chars (~525 tok), got {} chars (~{} tok)",
+            full.len(),
+            full.len() / 4
+        );
+        let long = render(false, Wrapper::Longform, CompressionLevel::Off);
+        assert!(
+            long.len() > full.len(),
+            "Longform ({}) must carry more than the injected profile ({})",
+            long.len(),
+            full.len()
+        );
+        let compact = render(false, Wrapper::Bare, CompressionLevel::Off);
+        assert!(
+            compact.len() < full.len(),
+            "COMPACT/Bare ({}) must stay below the dedicated profile ({})",
+            compact.len(),
+            full.len()
         );
     }
 
     #[test]
-    fn compact_profile_uses_one_liner_not_full_sections() {
-        // COMPACT (shared + Bare) carries the condensed one-liner, never the
-        // multi-line FULL sections — that keeps the per-session channel lean.
+    fn compact_profile_has_no_multiline_teaching_sections() {
+        // COMPACT (shared + Bare) keeps the per-session channel lean: no
+        // multi-line AGENT_LOOP/NAV_PARADOX blocks; INTENT carries the thesis.
         let out = render(false, Wrapper::Shared, CompressionLevel::Off);
-        assert!(
-            out.contains(LOOP_NAV_COMPACT),
-            "COMPACT must carry one-liner"
-        );
         assert!(
             !out.contains("AGENT LOOP (phase -> tool):"),
             "COMPACT must not inline the multi-line AGENT_LOOP block"
@@ -592,18 +768,67 @@ mod tests {
             !out.contains("NAVIGATION PARADOX: reading"),
             "COMPACT must not inline the multi-line NAV_PARADOX block"
         );
+        assert!(
+            out.contains('≠'),
+            "COMPACT keeps the reading≠understanding thesis via INTENT"
+        );
     }
 
     #[test]
     fn shadow_omits_loop_and_paradox() {
         // #963: shadow collapses to the irreducible minimum — the routing
         // taxonomy is redundant once native calls are intercepted.
-        for wrapper in [Wrapper::Dedicated, Wrapper::Shared] {
+        for wrapper in [Wrapper::Longform, Wrapper::Dedicated, Wrapper::Shared] {
             let out = render(true, wrapper, CompressionLevel::Off);
             assert!(!out.contains("AGENT LOOP"), "{wrapper:?} shadow drops loop");
             assert!(
                 !out.contains("NAVIGATION PARADOX"),
                 "{wrapper:?} shadow drops paradox"
+            );
+        }
+    }
+
+    #[test]
+    fn recover_reaches_every_non_shadow_carrier() {
+        // The recovery vocabulary must reach every non-shadow carrier so agents
+        // never re-read compressed output line-by-line, and every carrier must
+        // keep the MCP-free path ("read the shown path") for orgs that ban MCP.
+        // v5 (#578): only Longform carries the verbose RECOVER; every injected
+        // profile (Dedicated FULL + Shared/Bare COMPACT) carries the terse
+        // RECOVER_COMPACT one-liner.
+        let long = render(false, Wrapper::Longform, CompressionLevel::Off);
+        assert!(
+            long.contains(RECOVER),
+            "Longform must carry the verbose RECOVER verbatim"
+        );
+        for wrapper in [Wrapper::Dedicated, Wrapper::Shared, Wrapper::Bare] {
+            let out = render(false, wrapper, CompressionLevel::Off);
+            assert!(
+                out.contains(RECOVER_COMPACT),
+                "{wrapper:?} must carry RECOVER_COMPACT verbatim"
+            );
+            assert!(
+                !out.contains(RECOVER),
+                "{wrapper:?} must not inline the verbose RECOVER block"
+            );
+        }
+        for wrapper in [
+            Wrapper::Longform,
+            Wrapper::Dedicated,
+            Wrapper::Shared,
+            Wrapper::Bare,
+        ] {
+            assert!(
+                render(false, wrapper, CompressionLevel::Off).contains("(no MCP)"),
+                "{wrapper:?} recovery line must keep the MCP-free path"
+            );
+        }
+        // Shadow stays minimal; the reactive footers still cover recovery there.
+        for wrapper in [Wrapper::Dedicated, Wrapper::Shared] {
+            let out = render(true, wrapper, CompressionLevel::Off);
+            assert!(
+                !out.contains(RECOVER) && !out.contains(RECOVER_COMPACT),
+                "{wrapper:?} shadow drops all RECOVER guidance"
             );
         }
     }
@@ -787,7 +1012,7 @@ mod tests {
     fn carrier_wrappers_wrap_compression_in_markers() {
         // Persistent carriers must delimit the compression payload so coverage
         // and dedup can detect/thin it (#684/#548).
-        for wrapper in [Wrapper::Dedicated, Wrapper::Shared] {
+        for wrapper in [Wrapper::Longform, Wrapper::Dedicated, Wrapper::Shared] {
             let out = render(false, wrapper, CompressionLevel::Standard);
             assert!(
                 out.contains(COMPRESSION_BLOCK_START) && out.contains(COMPRESSION_BLOCK_END),
@@ -813,7 +1038,12 @@ mod tests {
 
     #[test]
     fn compression_off_emits_no_markers_in_any_wrapper() {
-        for wrapper in [Wrapper::Dedicated, Wrapper::Shared, Wrapper::Bare] {
+        for wrapper in [
+            Wrapper::Longform,
+            Wrapper::Dedicated,
+            Wrapper::Shared,
+            Wrapper::Bare,
+        ] {
             let out = render(false, wrapper, CompressionLevel::Off);
             assert!(
                 !out.contains(COMPRESSION_BLOCK_START) && !out.contains(COMPRESSION_BLOCK_END),
@@ -836,7 +1066,12 @@ mod tests {
     #[test]
     fn all_wrappers_produce_output() {
         for shadow in [false, true] {
-            for wrapper in [Wrapper::Dedicated, Wrapper::Shared, Wrapper::Bare] {
+            for wrapper in [
+                Wrapper::Longform,
+                Wrapper::Dedicated,
+                Wrapper::Shared,
+                Wrapper::Bare,
+            ] {
                 let out = render(shadow, wrapper, CompressionLevel::Off);
                 assert!(!out.is_empty(), "{wrapper:?} shadow={shadow} is empty");
             }
@@ -993,5 +1228,69 @@ mod tests {
             CRITICAL.contains("ctx_*"),
             "CRITICAL must name the ctx_* family"
         );
+    }
+
+    // --- HookCovered profile (GL #1153) ---
+
+    #[test]
+    fn hook_covered_drops_unenforceable_mapping() {
+        // The whole point: on a hook-covered host the "NEVER use native"
+        // mapping fights the host's own tool guidance. The profile must
+        // acknowledge the hooks instead of demanding the impossible.
+        let out = render(false, Wrapper::HookCovered, CompressionLevel::Off);
+        assert!(
+            !out.contains("MANDATORY MAPPING") && !out.contains(NEVER) && !out.contains(CRITICAL),
+            "HookCovered must not carry the native-tool prohibition"
+        );
+        assert!(
+            out.contains(HOOK_COVERED_HEADER),
+            "must state that hooks compress native tools"
+        );
+        assert!(
+            out.contains("ctx_compose") && out.contains("ctx_semantic_search"),
+            "must advertise the exclusive capabilities"
+        );
+    }
+
+    #[test]
+    fn hook_covered_keeps_markers_version_and_recovery() {
+        // Coverage detection (rules_channel::carries_full_rules /
+        // client_autoloads_rules) and the injector's drift check both key on
+        // the canonical markers — HookCovered must stay a first-class carrier.
+        let out = render(false, Wrapper::HookCovered, CompressionLevel::Off);
+        assert!(out.contains(START_MARK) && out.contains(END_MARK));
+        assert!(out.contains(&format!("<!-- version: {RULES_VERSION} -->")));
+        assert!(out.contains(RECOVER_COMPACT), "recovery line must survive");
+        assert!(out.contains("(no MCP)"), "MCP-free recovery path stays");
+    }
+
+    #[test]
+    fn hook_covered_is_leaner_than_full() {
+        let covered = render(false, Wrapper::HookCovered, CompressionLevel::Off);
+        let full = render(false, Wrapper::Dedicated, CompressionLevel::Off);
+        assert!(
+            covered.len() < full.len(),
+            "HookCovered ({}) must be a strict reduction of FULL ({})",
+            covered.len(),
+            full.len()
+        );
+    }
+
+    #[test]
+    fn hook_covered_shadow_collapses_to_minimal() {
+        // Interception supersedes hook coverage — same minimal profile as
+        // Dedicated shadow.
+        let covered_shadow = render(true, Wrapper::HookCovered, CompressionLevel::Off);
+        let dedicated_shadow = render(true, Wrapper::Dedicated, CompressionLevel::Off);
+        assert_eq!(covered_shadow, dedicated_shadow);
+    }
+
+    #[test]
+    fn hook_covered_wraps_compression_in_markers() {
+        // The compression payload keeps the carrier markers so cross-channel
+        // dedup (cursor_compression_covered) recognises the mdc as covered.
+        let out = render(false, Wrapper::HookCovered, CompressionLevel::Standard);
+        assert!(out.contains(COMPRESSION_BLOCK_START) && out.contains(COMPRESSION_BLOCK_END));
+        assert!(out.contains("OUTPUT STYLE: dense"));
     }
 }

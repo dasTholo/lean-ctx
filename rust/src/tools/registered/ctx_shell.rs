@@ -3,7 +3,7 @@ use rmcp::model::Tool;
 use serde_json::{Map, Value, json};
 
 use crate::server::tool_trait::{
-    McpTool, ShellOutcome, ToolContext, ToolOutput, get_bool, get_str,
+    McpTool, ShellOutcome, ToolContext, ToolOutput, get_bool, get_int, get_str,
 };
 use crate::tool_defs::tool_def;
 
@@ -27,6 +27,7 @@ impl McpTool for CtxShellTool {
                     "command": { "type": "string", "description": "Shell command" },
                     "raw": { "type": "boolean", "description": "Skip compression (verbatim)" },
                     "cwd": { "type": "string", "description": "Working dir (persists across calls)" },
+                    "timeout_ms": { "type": "integer", "description": "Per-call timeout in ms (max 3600000). Overridden by LEAN_CTX_SHELL_TIMEOUT_MS." },
                     "env": { "type": "object", "description": "Extra env vars", "additionalProperties": { "type": "string" } }
                 },
                 "required": ["command"]
@@ -41,6 +42,7 @@ impl McpTool for CtxShellTool {
     ) -> Result<ToolOutput, ErrorData> {
         let command = get_str(args, "command")
             .ok_or_else(|| ErrorData::invalid_params("command is required", None))?;
+        let timeout_ms = get_int(args, "timeout_ms").and_then(|n| u64::try_from(n).ok());
 
         // The write-doctrine check (no `>`, `tee`, heredoc-to-file, curl -o, …)
         // is an MCP-payload-safety convention, not a security boundary, so it is
@@ -73,13 +75,22 @@ impl McpTool for CtxShellTool {
                 .ok_or_else(|| ErrorData::internal_error("session not available", None))?;
 
             let explicit_cwd = get_str(args, "cwd");
-            let effective_cwd = {
+            let (effective_cwd, cwd_jail_reason) = {
                 let guard = crate::server::bounded_lock::read(session_lock, "ctx_shell_cwd");
                 match guard {
-                    Some(session) => session.effective_cwd(explicit_cwd.as_deref()),
-                    None => explicit_cwd.unwrap_or_else(|| ".".to_string()),
+                    Some(session) => session.effective_cwd_checked(explicit_cwd.as_deref()),
+                    None => (explicit_cwd.unwrap_or_else(|| ".".to_string()), None),
                 }
             };
+            // A `cwd` rejected by the project-root jail is silently replaced with
+            // the root (deliberate sandboxing). Surface that swap as a one-line
+            // hint so the caller does not mistake the run dir for the requested
+            // one (#629); appended at the end of the output like the other hints.
+            let cwd_jail_hint = cwd_jail_reason.map_or_else(String::new, |reason| {
+                format!(
+                    "\n[cwd: requested path rejected by project-root jail ({reason}) \u{2014} ran in {effective_cwd} instead]"
+                )
+            });
 
             {
                 let Some(mut session) =
@@ -99,7 +110,7 @@ impl McpTool for CtxShellTool {
                         })
                         .unwrap_or_default();
                     let (raw_output, exit_code) = crate::server::execute::execute_command_with_env(
-                        &cmd_clone, &cwd_clone, &extra_env,
+                        &cmd_clone, &cwd_clone, &extra_env, timeout_ms,
                     );
                     let output = redact_shell_output_secrets(&raw_output);
                     // Keep failure reporting consistent on this degraded path:
@@ -152,7 +163,7 @@ impl McpTool for CtxShellTool {
                 .unwrap_or_default();
 
             let (raw_output, exit_code) = crate::server::execute::execute_command_with_env(
-                &cmd_clone, &cwd_clone, &extra_env,
+                &cmd_clone, &cwd_clone, &extra_env, timeout_ms,
             );
 
             // Structured diagnostics (#499) — same hook as the CLI path.
@@ -186,14 +197,16 @@ impl McpTool for CtxShellTool {
                             if matches!(cfg.tee_mode, crate::core::config::TeeMode::HighCompression)
                             {
                                 let pct = crate::shell::tee_policy::savings_pct(original, sent);
-                                // The tee is in the shared content-addressed store, so
-                                // ctx_expand can slice it surgically (head/search/json_path)
-                                // instead of re-reading the whole original (#936).
+                                // Recovery grammar (path-first, MCP-optional): the raw
+                                // bytes are a real file the agent can read with any tool
+                                // (no MCP needed) — for orgs that forbid it — and the same
+                                // path doubles as the ctx_expand id for surgical slices
+                                // (head/search/json_path) without re-reading it all (#936).
                                 format!(
-                                    "\n[compressed {pct:.0}%: full output at {p} — ctx_expand(id=\"{p}\", search=\"…\"|head=N|json_path=\"…\") for a slice]"
+                                    "\n[compressed {pct:.0}%: full output at {p} — read it directly (no MCP), or ctx_expand(id=\"{p}\", search=\"…\"|head=N|json_path=\"…\") for a slice]"
                                 )
                             } else {
-                                format!("\n[full output: {p}]")
+                                format!("\n[full output: {p} — read it directly (no MCP), or ctx_expand(id=\"{p}\")]")
                             }
                         })
                         .unwrap_or_default()
@@ -224,7 +237,8 @@ impl McpTool for CtxShellTool {
             } else {
                 String::new()
             };
-            let final_out = format!("{result_out}{tee_hint}{shell_mismatch}{exit_suffix}");
+            let final_out =
+                format!("{result_out}{tee_hint}{shell_mismatch}{cwd_jail_hint}{exit_suffix}");
 
             Ok(ToolOutput {
                 text: final_out,

@@ -41,7 +41,10 @@ lean-ctx automatically persists session context across restarts:
 - **Files**: Touched files with summaries and modification status
 - **Progress**: Task completion state and next steps
 
-This data is injected into every new session via the `ACTIVE SESSION` LITM block.
+This data is delivered through the first tool call's `--- AUTO CONTEXT ---`
+briefing (default `minimal_overhead = true`: initialize instructions stay
+byte-stable for provider prompt caching, #498). With `minimal_overhead = false`
+it is additionally injected at session start via the `ACTIVE SESSION` LITM block.
 
 ### Active Documentation (Agent Responsibility)
 
@@ -86,12 +89,9 @@ any timestamp, counter or random element in tool output bodies defeats it.
 <!-- lean-ctx -->
 ## lean-ctx
 
-Prefer lean-ctx MCP tools over native equivalents for token savings:
-`ctx_read` > Read/cat, `ctx_search` > Grep/rg, `ctx_shell` > bash, `ctx_tree` > ls/find.
-Native Edit/Write/Glob stay as-is; use `ctx_edit` only when Edit needs an unavailable Read.
+lean-ctx is active — the MCP tools replace native equivalents.
 Full rules: LEAN-CTX.md (open on demand — do not auto-load).
 <!-- /lean-ctx -->
-
 <!-- lean-ctx-compression -->
 OUTPUT STYLE: concise
 - Bullet points over paragraphs

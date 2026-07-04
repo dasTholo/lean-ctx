@@ -1,4 +1,6 @@
 pub mod anthropic;
+#[cfg(test)]
+mod auth_tests;
 pub mod cache_aligner;
 pub mod cache_attribution;
 pub mod cache_breakpoint;
@@ -9,27 +11,41 @@ pub mod ccr;
 mod ccr_robustness_tests;
 pub mod chatgpt;
 pub mod chatgpt_cookies;
+pub mod chatgpt_ws;
 pub mod cold_prefix;
 pub mod compress;
 pub mod compress_api;
 pub mod cost;
 pub mod effort;
 pub mod forward;
+pub mod gateway_identity;
 pub mod google;
 pub mod history_prune;
 pub mod holdout;
 pub mod introspect;
 pub mod metrics;
+pub mod models_api;
 pub mod openai;
 pub mod openai_responses;
 pub mod openai_responses_ws;
 pub mod output_savings;
+pub mod pii;
+pub mod policy_gate;
 pub mod prose;
 pub mod prose_ranker;
+pub mod providers;
+pub mod routing;
+#[cfg(feature = "shape-xlat")]
+pub mod shape_xlat;
+#[cfg(test)]
+mod stats_tests;
 pub mod tool_kind;
 pub mod tool_output;
+#[cfg(test)]
+mod upstream_tests;
 pub mod usage;
 pub mod usage_meter;
+pub mod usage_sink;
 pub mod verbosity;
 
 use std::net::SocketAddr;
@@ -56,6 +72,10 @@ pub struct ProxyState {
     /// Live provider upstreams, refreshed from config.toml without a proxy
     /// restart (#449). Read per request via [`ProxyState::openai_upstream`] etc.
     pub upstreams: tokio::sync::watch::Receiver<Arc<Upstreams>>,
+    /// Shared Cloudflare cookie jar (also wired into `client`), so the Codex
+    /// ChatGPT WebSocket passthrough replays the same clearance to chatgpt.com
+    /// that the reqwest rail accumulated (#597).
+    pub(crate) chatgpt_cookies: Arc<chatgpt_cookies::ChatGptCloudflareCookieStore>,
 }
 
 impl ProxyState {
@@ -82,6 +102,16 @@ impl ProxyState {
     /// Current Gemini upstream (live).
     pub fn gemini_upstream(&self) -> String {
         self.upstreams.borrow().gemini.clone()
+    }
+
+    /// Cloudflare `Cookie` header for the current ChatGPT upstream, used by the
+    /// WebSocket passthrough handshake (#597). `None` until a request on the
+    /// reqwest rail has seen Cloudflare clearance.
+    pub fn chatgpt_cookie_header(&self) -> Option<String> {
+        let url = reqwest::Url::parse(&self.chatgpt_upstream()).ok()?;
+        self.chatgpt_cookies
+            .cookie_header(&url)
+            .and_then(|v| v.to_str().ok().map(str::to_owned))
     }
 }
 
@@ -233,77 +263,6 @@ impl ProviderStats {
     }
 }
 
-#[cfg(test)]
-mod stats_tests {
-    use super::*;
-    use std::sync::atomic::Ordering;
-
-    #[test]
-    fn compression_ratio_includes_uncompressed_requests() {
-        let stats = ProxyStats::default();
-
-        stats.record_request(1_000, 500);
-        stats.record_request(1_000, 1_000);
-
-        assert_eq!(stats.requests_total.load(Ordering::Relaxed), 2);
-        assert_eq!(stats.requests_compressed.load(Ordering::Relaxed), 1);
-        assert_eq!(stats.tokens_saved.load(Ordering::Relaxed), 125);
-        assert_eq!(stats.compression_ratio(), 25.0);
-    }
-
-    #[test]
-    fn expanded_requests_count_as_zero_savings() {
-        let stats = ProxyStats::default();
-
-        stats.record_request(1_000, 1_500);
-
-        assert_eq!(stats.requests_total.load(Ordering::Relaxed), 1);
-        assert_eq!(stats.requests_compressed.load(Ordering::Relaxed), 0);
-        assert_eq!(stats.tokens_saved.load(Ordering::Relaxed), 0);
-        assert_eq!(stats.compression_ratio(), 0.0);
-    }
-
-    #[test]
-    fn provider_stats_are_separate() {
-        let stats = ProxyStats::default();
-
-        stats.record_provider_request("OpenAI", 1_000, 500);
-        stats.record_provider_request("ChatGPT", 2_000, 1_000);
-
-        assert_eq!(stats.requests_total.load(Ordering::Relaxed), 2);
-        assert_eq!(stats.openai.requests_total.load(Ordering::Relaxed), 1);
-        assert_eq!(stats.chatgpt.requests_total.load(Ordering::Relaxed), 1);
-        assert_eq!(stats.openai.tokens_saved.load(Ordering::Relaxed), 125);
-        assert_eq!(stats.chatgpt.tokens_saved.load(Ordering::Relaxed), 250);
-        assert_eq!(stats.openai.compression_ratio(), 50.0);
-        assert_eq!(stats.chatgpt.compression_ratio(), 50.0);
-    }
-
-    #[test]
-    fn unlabelled_requests_do_not_count_as_gemini() {
-        let stats = ProxyStats::default();
-
-        stats.record_request(1_000, 500);
-
-        assert_eq!(stats.requests_total.load(Ordering::Relaxed), 1);
-        assert_eq!(stats.gemini.requests_total.load(Ordering::Relaxed), 0);
-    }
-
-    #[test]
-    fn unknown_label_is_not_recorded_to_any_bucket() {
-        let stats = ProxyStats::default();
-
-        stats.record_provider_request("Mystery", 1_000, 500);
-
-        // Totals still count it; no per-upstream bucket is touched.
-        assert_eq!(stats.requests_total.load(Ordering::Relaxed), 1);
-        assert_eq!(stats.anthropic.requests_total.load(Ordering::Relaxed), 0);
-        assert_eq!(stats.openai.requests_total.load(Ordering::Relaxed), 0);
-        assert_eq!(stats.chatgpt.requests_total.load(Ordering::Relaxed), 0);
-        assert_eq!(stats.gemini.requests_total.load(Ordering::Relaxed), 0);
-    }
-}
-
 /// TCP connect timeout (seconds). Configurable via `LEAN_CTX_PROXY_CONNECT_TIMEOUT_SECS`.
 fn connect_timeout_secs() -> u64 {
     std::env::var("LEAN_CTX_PROXY_CONNECT_TIMEOUT_SECS")
@@ -378,6 +337,10 @@ fn log_upstream_change(old: &Upstreams, new: &Upstreams) {
     if old.gemini != new.gemini {
         println!("  ↻ Gemini upstream → {}", new.gemini);
     }
+    if old.providers != new.providers {
+        let ids: Vec<&str> = new.providers.iter().map(|p| p.id.as_str()).collect();
+        println!("  ↻ provider registry → [{}]", ids.join(", "));
+    }
 }
 
 pub async fn start_proxy(port: u16) -> anyhow::Result<()> {
@@ -395,8 +358,25 @@ fn effective_auth_token(auth_token: Option<String>) -> String {
         .unwrap_or_else(|| crate::core::session_token::resolve_proxy_token("LEAN_CTX_PROXY_TOKEN"))
 }
 
+/// Install the process-default rustls `CryptoProvider` for the Codex ChatGPT
+/// WebSocket passthrough (#597).
+///
+/// `tokio-tungstenite`'s rustls connector builds its `ClientConfig` from the
+/// process-default provider. Our tree pulls *both* aws-lc-rs (reqwest) and ring
+/// (lettre/ureq), so rustls cannot auto-pick one and the `wss://chatgpt.com`
+/// handshake aborts with *"Could not automatically determine the process-level
+/// CryptoProvider"*. reqwest is unaffected (it configures aws-lc-rs explicitly),
+/// so we match it here. Idempotent: a prior install just returns the provider
+/// back as `Err`, which we ignore.
+fn install_default_crypto_provider() {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+}
+
 pub async fn start_proxy_with_token(port: u16, auth_token: Option<String>) -> anyhow::Result<()> {
     use crate::core::config::{Config, is_local_proxy_url};
+
+    // Must run before any WebSocket passthrough opens a wss:// upstream (#597).
+    install_default_crypto_provider();
 
     let auth_token = effective_auth_token(auth_token);
 
@@ -404,10 +384,14 @@ pub async fn start_proxy_with_token(port: u16, auth_token: Option<String>) -> an
     // a big refactor) mid-response. Use a connect timeout plus a read (idle)
     // timeout instead: a genuinely hung upstream still fails, but a slow-but-
     // alive stream is never cut off. Both are configurable for edge networks.
-    let client = chatgpt_cookies::with_chatgpt_cloudflare_cookie_store(reqwest::Client::builder())
-        .connect_timeout(std::time::Duration::from_secs(connect_timeout_secs()))
-        .read_timeout(std::time::Duration::from_secs(read_idle_timeout_secs()))
-        .build()?;
+    let chatgpt_cookies = chatgpt_cookies::shared_chatgpt_cloudflare_cookie_store();
+    let client = chatgpt_cookies::with_chatgpt_cloudflare_cookie_store(
+        reqwest::Client::builder(),
+        chatgpt_cookies.clone(),
+    )
+    .connect_timeout(std::time::Duration::from_secs(connect_timeout_secs()))
+    .read_timeout(std::time::Duration::from_secs(read_idle_timeout_secs()))
+    .build()?;
 
     // Seed the measured-spend meter from disk so a proxy restart never zeroes
     // the user's cumulative real provider bill.
@@ -418,7 +402,28 @@ pub async fn start_proxy_with_token(port: u16, auth_token: Option<String>) -> an
 
     let cfg = Config::load();
     // Read once at startup — avoids a Config::load() on every proxied request.
-    let require_token = cfg.proxy_require_token;
+    let bind_host = cfg.resolved_proxy_bind_host();
+    let loopback_bind = bind_host.is_loopback();
+    // Gateway mode (non-loopback bind, enterprise#8) hard-requires the Bearer
+    // token: the provider-key fallback's whole justification is "loopback only",
+    // so it is disabled by construction once the listener is reachable from the
+    // network — regardless of the config flag.
+    let require_token = cfg.proxy_require_token || !loopback_bind;
+    let allowed_hosts: Arc<Vec<String>> = Arc::new(
+        cfg.proxy_allowed_hosts
+            .iter()
+            .map(|h| h.trim().trim_end_matches('.').to_ascii_lowercase())
+            .filter(|h| !h.is_empty())
+            .collect(),
+    );
+    // Rate limit (enterprise#37): explicit config wins; gateway mode ships a
+    // sane default floor; loopback stays unlimited unless configured. `0`
+    // disables the limiter explicitly.
+    let rate_limiter = match (cfg.proxy_max_rps, loopback_bind) {
+        (Some(rps), _) if rps > 0 => Some(Arc::new(RateLimiter::new(rps, rps.saturating_mul(2)))),
+        (None, false) => Some(Arc::new(RateLimiter::new(50, 100))),
+        _ => None,
+    };
     let initial = cfg.proxy.resolve_all();
 
     // The proxy reads its upstreams live from a watch channel: a background task
@@ -433,6 +438,7 @@ pub async fn start_proxy_with_token(port: u16, auth_token: Option<String>) -> an
         openai: openai_upstream,
         chatgpt: chatgpt_upstream,
         gemini: gemini_upstream,
+        providers: initial_providers,
     } = initial;
 
     let state = ProxyState {
@@ -441,8 +447,11 @@ pub async fn start_proxy_with_token(port: u16, auth_token: Option<String>) -> an
         stats: Arc::new(ProxyStats::default()),
         introspect: Arc::new(introspect::IntrospectState::default()),
         upstreams: upstream_rx,
+        chatgpt_cookies,
     };
 
+    // `mut` is only exercised by the gateway-server merge below.
+    #[cfg_attr(not(feature = "gateway-server"), allow(unused_mut))]
     let mut app = Router::new()
         .route("/health", get(health))
         .route("/status", get(status_handler))
@@ -481,18 +490,67 @@ pub async fn start_proxy_with_token(port: u16, auth_token: Option<String>) -> an
         .route("/backend-api", any(chatgpt::backend_api_handler))
         .route("/backend-api/{*rest}", any(chatgpt::backend_api_handler))
         .route("/v1/references/{id}", get(v1_resolve_reference))
+        // Org model catalog (enterprise#63): IDE clients discover the curated
+        // alias namespace (`zuehlke/fast` → provider:model) and verify their
+        // key. Exact-match only — `/v1/models/{...}` subpaths stay Gemini
+        // passthrough in the fallback router.
+        .route("/v1/models", get(models_api::handler))
+        .route("/models", get(models_api::handler))
         // Drop-in `compress(messages, model)` contract (#739): deterministic
         // messages-in / messages-out compression for SDK clients.
         .route("/v1/compress", post(compress_api::handler))
-        .fallback(fallback_router)
-        .layer(axum::middleware::from_fn(host_guard))
+        // Universal provider registry (`[[proxy.providers]]`, enterprise#7):
+        // `/providers/{id}/...` forwards to the registry entry with that id,
+        // speaking its declared wire shape. New provider = config, not code.
+        .route("/providers/{id}/{*rest}", any(providers::handler))
+        .fallback(fallback_router);
+
+    // Personal usage view (enterprise#64): `/me` shell + guarded `/api/me/*`.
+    // Merged before the guard layers so host_guard and auth wrap it too; the
+    // shell paths themselves are exempted inside `proxy_auth_guard`.
+    #[cfg(feature = "gateway-server")]
+    {
+        app = app.merge(crate::gateway_server::user_api::router());
+    }
+
+    let mut app = app
+        .layer(axum::middleware::from_fn(move |req, next| {
+            let allowed = allowed_hosts.clone();
+            host_guard(req, next, allowed)
+        }))
         .with_state(state);
+
+    // Per-person gateway keys (enterprise#11): sha256(bearer) → person/team/
+    // default_project. Loaded once at startup; rotation = restart (the standard
+    // secret-mount flow). A malformed file fails the start loudly.
+    let gateway_keys = match gateway_identity::GatewayKeys::load_default() {
+        Ok(keys) => {
+            if !keys.is_empty() {
+                println!(
+                    "  Identity:  {} gateway key(s) loaded ({})",
+                    keys.len(),
+                    gateway_identity::GatewayKeys::default_path().display()
+                );
+            }
+            Arc::new(keys)
+        }
+        Err(e) => anyhow::bail!("gateway-keys.toml: {e}"),
+    };
 
     {
         let expected = auth_token.clone();
+        let keys = gateway_keys.clone();
         app = app.layer(axum::middleware::from_fn(move |req, next| {
             let expected = expected.clone();
-            proxy_auth_guard(req, next, expected, require_token)
+            let keys = keys.clone();
+            proxy_auth_guard(req, next, expected, require_token, keys)
+        }));
+    }
+
+    if let Some(limiter) = rate_limiter {
+        app = app.layer(axum::middleware::from_fn(move |req, next| {
+            let limiter = limiter.clone();
+            rate_limit_guard(req, next, limiter)
         }));
     }
 
@@ -501,8 +559,14 @@ pub async fn start_proxy_with_token(port: u16, auth_token: Option<String>) -> an
     // regardless of whether the client's base URL includes `/v1` (#353).
     app = app.layer(axum::middleware::from_fn(normalize_provider_path));
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let addr = SocketAddr::from((bind_host, port));
     println!("lean-ctx proxy listening on http://{addr} (token auth enabled)");
+    if !loopback_bind {
+        println!(
+            "  ⚠ gateway mode: non-loopback bind — Bearer token REQUIRED (provider-key \
+             fallback disabled), Host allowlist + rate limit active"
+        );
+    }
     println!("  Anthropic: POST /v1/messages → {anthropic_upstream}");
     println!("  OpenAI:    POST /v1/chat/completions → {openai_upstream}");
     println!(
@@ -518,6 +582,19 @@ pub async fn start_proxy_with_token(port: u16, auth_token: Option<String>) -> an
     println!(
         "  Codex:     WS  ws://{addr}/responses → bridged to {openai_upstream} (HTTP/SSE, #440)"
     );
+    for p in &initial_providers {
+        println!(
+            "  Provider:  any  /providers/{}/... → {} ({} shape{})",
+            p.id,
+            p.base_url,
+            p.shape.as_str(),
+            if p.api_key_env.is_some() {
+                ", gateway-held key"
+            } else {
+                ""
+            }
+        );
+    }
     if openai_upstream.starts_with("http://") && !is_local_proxy_url(&openai_upstream) {
         println!(
             "  ⚠ OpenAI upstream is plaintext HTTP to a non-loopback host \
@@ -616,6 +693,14 @@ async fn status_handler(State(state): State<ProxyState>) -> impl IntoResponse {
             "chatgpt": up.chatgpt.clone(),
             "gemini": up.gemini.clone(),
         },
+        // Universal registry (`[[proxy.providers]]`, enterprise#7). Key names
+        // only — never the key material.
+        "providers": up.providers.iter().map(|p| serde_json::json!({
+            "id": p.id,
+            "shape": p.shape.as_str(),
+            "base_url": p.base_url,
+            "gateway_key": p.api_key_env.is_some(),
+        })).collect::<Vec<_>>(),
         "requests_total": s.requests_total.load(Relaxed),
         "requests_compressed": s.requests_compressed.load(Relaxed),
         "tokens_saved": s.tokens_saved.load(Relaxed),
@@ -646,23 +731,38 @@ async fn status_handler(State(state): State<ProxyState>) -> impl IntoResponse {
 
 #[allow(clippy::result_large_err)]
 async fn proxy_auth_guard(
-    req: axum::extract::Request,
+    mut req: axum::extract::Request,
     next: axum::middleware::Next,
     expected_token: String,
     require_token: bool,
+    gateway_keys: Arc<gateway_identity::GatewayKeys>,
 ) -> Result<Response, Response> {
     let path = req.uri().path();
-    if path == "/health" {
+    if path == "/health" || me_shell_path(path) {
         return Ok(next.run(req).await);
     }
 
-    if let Some(auth) = req
+    let bearer = req
         .headers()
         .get("authorization")
         .and_then(|v| v.to_str().ok())
-        && let Some(token) = auth.strip_prefix("Bearer ")
+        .and_then(|auth| auth.strip_prefix("Bearer "))
+        .map(str::to_string);
+
+    if let Some(token) = bearer.as_deref()
         && constant_time_eq(token.as_bytes(), expected_token.as_bytes())
     {
+        attach_gateway_tags(&mut req, gateway_identity::GatewayTags::default());
+        return Ok(next.run(req).await);
+    }
+
+    // Per-person gateway keys (enterprise#11): a bearer key whose SHA-256 is in
+    // gateway-keys.toml authenticates AND identifies — its person/team/project
+    // tags travel with the request and end up on the usage record.
+    if let Some(token) = bearer.as_deref()
+        && let Some(tags) = gateway_keys.lookup(token)
+    {
+        attach_gateway_tags(&mut req, tags);
         return Ok(next.run(req).await);
     }
 
@@ -676,6 +776,7 @@ async fn proxy_auth_guard(
         has_provider_api_key(&req),
         is_provider_route(path),
     ) {
+        attach_gateway_tags(&mut req, gateway_identity::GatewayTags::default());
         return Ok(next.run(req).await);
     }
 
@@ -699,6 +800,52 @@ async fn proxy_auth_guard(
     });
 
     Err((StatusCode::UNAUTHORIZED, axum::Json(body)).into_response())
+}
+
+/// Resolves the final identity tags for an authenticated request and inserts
+/// them as a request extension (read by `forward.rs::wire_context`).
+///
+/// Project resolution (enterprise#11): the `x-leanctx-project` header wins over
+/// the key's `default_project` — one person books work onto different projects
+/// per request. The header also works without a gateway key (solo/local mode:
+/// project tagging without identity). It is an internal gateway header, not on
+/// `ALLOWED_REQUEST_HEADERS`, so it never reaches the upstream.
+fn attach_gateway_tags(req: &mut axum::extract::Request, mut tags: gateway_identity::GatewayTags) {
+    if let Some(project) = req
+        .headers()
+        .get("x-leanctx-project")
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|p| !p.is_empty() && p.len() <= 128 && !p.chars().any(char::is_control))
+    {
+        tags.project = Some(project.to_string());
+    }
+    // GDPR pseudonymization (enterprise#39): applied at this single
+    // choke-point, so budgets, usage rows, dashboards and logs only ever see
+    // the pseudonym. No-op unless [gateway_server].pseudonymize_persons.
+    if let Some(person) = tags.person.as_deref()
+        && pii::enabled()
+    {
+        tags.person = Some(pii::pseudonymize(person));
+    }
+    if !tags.is_empty() {
+        req.extensions_mut().insert(tags);
+    }
+}
+
+/// The personal view's static shell (`/me` + assets) renders without a key —
+/// like the admin console's login screen, every number behind it comes from
+/// the guarded `/api/me/usage`. Compiled out with the `gateway-server` feature.
+fn me_shell_path(path: &str) -> bool {
+    #[cfg(feature = "gateway-server")]
+    {
+        crate::gateway_server::user_api::is_shell_path(path)
+    }
+    #[cfg(not(feature = "gateway-server"))]
+    {
+        let _ = path;
+        false
+    }
 }
 
 fn has_provider_api_key(req: &axum::extract::Request) -> bool {
@@ -742,14 +889,19 @@ fn is_provider_route(path: &str) -> bool {
         || path.starts_with("/responses")
         || path.starts_with("/messages")
         || path.starts_with("/backend-api")
+        // Bare model-catalog discovery (enterprise#63): clients whose base URL
+        // omits `/v1` send `GET /models` with their provider key.
+        || path == "/models"
 }
 
 /// Decides whether a request authenticates via a provider API key alone, without
 /// the lean-ctx Bearer token. True only in the default, loopback-friendly mode
 /// where a local AI tool's own provider key is accepted on a provider route. When
-/// `require_token` is set (strict, shared-host mode) the fallback is disabled and
-/// the Bearer token becomes mandatory. Pure, so the policy is unit-testable
-/// without axum middleware plumbing.
+/// `require_token` is set the fallback is disabled and the Bearer token becomes
+/// mandatory — the startup path forces this whenever the listener binds a
+/// non-loopback address (gateway mode, enterprise#8), because the fallback's
+/// justification is strictly "loopback only". Pure, so the policy is
+/// unit-testable without axum middleware plumbing.
 fn provider_key_fallback_allowed(
     require_token: bool,
     has_provider_key: bool,
@@ -831,14 +983,90 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 async fn host_guard(
     req: axum::extract::Request,
     next: axum::middleware::Next,
+    allowed_hosts: Arc<Vec<String>>,
 ) -> Result<Response, StatusCode> {
-    if let Some(host) = req.headers().get("host").and_then(|v| v.to_str().ok()) {
-        let h = host.split(':').next().unwrap_or(host);
-        if matches!(h, "127.0.0.1" | "localhost" | "[::1]") {
-            return Ok(next.run(req).await);
-        }
+    if let Some(host) = req.headers().get("host").and_then(|v| v.to_str().ok())
+        && host_allowed(host, &allowed_hosts)
+    {
+        return Ok(next.run(req).await);
     }
     Err(StatusCode::FORBIDDEN)
+}
+
+/// DNS-rebinding guard: loopback Host headers always pass (today's local
+/// behavior); in gateway mode the operator additionally allowlists the names
+/// the gateway is reachable under (`proxy_allowed_hosts`, enterprise#8).
+/// Matching is case-insensitive on the host with the port stripped.
+fn host_allowed(host_header: &str, allowed: &[String]) -> bool {
+    // `[::1]:8080` carries the port after the bracket; plain hosts after `:`.
+    let host = host_header.trim();
+    let h = if let Some(bracketed) = host.strip_prefix('[') {
+        bracketed
+            .split(']')
+            .next()
+            .map(|inner| format!("[{inner}]"))
+    } else {
+        host.split(':').next().map(str::to_string)
+    };
+    let Some(h) = h else {
+        return false;
+    };
+    let h = h.trim_end_matches('.').to_ascii_lowercase();
+    matches!(h.as_str(), "127.0.0.1" | "localhost" | "[::1]") || allowed.contains(&h)
+}
+
+/// Proxy-wide token-bucket rate limit (enterprise#37). `/health` is exempt so
+/// orchestrator liveness probes never get throttled into a false restart.
+async fn rate_limit_guard(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+    limiter: Arc<RateLimiter>,
+) -> Result<Response, StatusCode> {
+    if req.uri().path() != "/health" && !limiter.allow().await {
+        return Err(StatusCode::TOO_MANY_REQUESTS);
+    }
+    Ok(next.run(req).await)
+}
+
+/// Token bucket: `max_rps` sustained, `burst` peak. Mirrors the team server's
+/// limiter; lives here so the proxy stays independent of `http_server`
+/// internals.
+pub(crate) struct RateLimiter {
+    max_rps: f64,
+    burst: f64,
+    state: tokio::sync::Mutex<RateLimiterState>,
+}
+
+struct RateLimiterState {
+    tokens: f64,
+    last: std::time::Instant,
+}
+
+impl RateLimiter {
+    pub(crate) fn new(max_rps: u32, burst: u32) -> Self {
+        Self {
+            max_rps: f64::from(max_rps.max(1)),
+            burst: f64::from(burst.max(1)),
+            state: tokio::sync::Mutex::new(RateLimiterState {
+                tokens: f64::from(burst.max(1)),
+                last: std::time::Instant::now(),
+            }),
+        }
+    }
+
+    pub(crate) async fn allow(&self) -> bool {
+        let mut s = self.state.lock().await;
+        let now = std::time::Instant::now();
+        let refill = now.saturating_duration_since(s.last).as_secs_f64() * self.max_rps;
+        s.tokens = (s.tokens + refill).min(self.burst);
+        s.last = now;
+        if s.tokens >= 1.0 {
+            s.tokens -= 1.0;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 async fn fallback_router(State(state): State<ProxyState>, req: Request<Body>) -> Response {
@@ -861,369 +1089,5 @@ async fn fallback_router(State(state): State<ProxyState>, req: Request<Body>) ->
                 "lean-ctx proxy: no handler for {method} {path}"
             )))
             .expect("BUG: building 404 response should never fail")
-    }
-}
-
-#[cfg(test)]
-mod auth_tests {
-    use super::*;
-
-    // P0-4 (#416): the proxy must never run unauthenticated — `None` means
-    // "resolve the session token", not "no auth".
-    #[test]
-    fn effective_auth_token_never_yields_empty() {
-        let _env = crate::core::data_dir::test_env_lock();
-        let tmp = tempfile::tempdir().unwrap();
-        crate::test_env::set_var("LEAN_CTX_DATA_DIR", tmp.path());
-
-        assert_eq!(effective_auth_token(Some("tok".into())), "tok");
-        let auto = effective_auth_token(None);
-        assert!(!auto.trim().is_empty(), "None must auto-resolve a token");
-        let blank = effective_auth_token(Some("   ".into()));
-        assert!(!blank.trim().is_empty(), "blank tokens must be replaced");
-
-        crate::test_env::remove_var("LEAN_CTX_DATA_DIR");
-    }
-
-    #[test]
-    fn is_provider_route_v1() {
-        assert!(is_provider_route("/v1/chat/completions"));
-        assert!(is_provider_route("/v1/messages"));
-        assert!(is_provider_route("/v1/completions"));
-    }
-
-    #[test]
-    fn is_provider_route_anthropic_subpaths() {
-        assert!(is_provider_route("/v1/messages/count_tokens"));
-        assert!(is_provider_route("/v1/messages/batches"));
-        assert!(is_provider_route("/v1/messages/batches/batch_123"));
-    }
-
-    #[test]
-    fn is_provider_route_v1beta() {
-        assert!(is_provider_route("/v1beta/models"));
-    }
-
-    #[test]
-    fn is_provider_route_chat() {
-        assert!(is_provider_route("/chat/completions"));
-    }
-
-    #[test]
-    fn is_provider_route_chatgpt_backend_api() {
-        assert!(is_provider_route("/backend-api/codex/responses"));
-        assert!(is_provider_route("/backend-api/codex/responses/resp_123"));
-        assert!(is_provider_route("/backend-api/wham/session"));
-        assert!(is_provider_route("/backend-api/ps/mcp"));
-        assert!(is_provider_route("/backend-api/codex_apps"));
-        assert!(is_provider_route("/backend-api/codex_apps/mcp"));
-        assert!(is_provider_route("/backend-api/mcp/codex_apps"));
-        assert!(is_provider_route("/backend-api/apps/codex_apps/mcp"));
-    }
-
-    #[test]
-    fn is_provider_route_rejects_non_provider() {
-        assert!(!is_provider_route("/health"));
-        assert!(!is_provider_route("/api/v2/test"));
-        assert!(!is_provider_route("/"));
-    }
-
-    fn build_request(headers: &[(&str, &str)], path: &str) -> axum::extract::Request {
-        let mut builder = axum::http::Request::builder().uri(path);
-        for (k, v) in headers {
-            builder = builder.header(*k, *v);
-        }
-        builder.body(axum::body::Body::empty()).unwrap()
-    }
-
-    #[test]
-    fn has_provider_api_key_x_api_key() {
-        let req = build_request(&[("x-api-key", "sk-ant-abc123")], "/v1/messages");
-        assert!(has_provider_api_key(&req));
-    }
-
-    #[test]
-    fn has_provider_api_key_x_goog() {
-        let req = build_request(&[("x-goog-api-key", "AIzaSyAbc")], "/v1beta/models");
-        assert!(has_provider_api_key(&req));
-    }
-
-    #[test]
-    fn has_provider_api_key_azure() {
-        let req = build_request(&[("api-key", "deadbeef")], "/v1/completions");
-        assert!(has_provider_api_key(&req));
-    }
-
-    #[test]
-    fn has_provider_api_key_bearer_sk() {
-        let req = build_request(
-            &[("authorization", "Bearer sk-proj-abc123")],
-            "/v1/chat/completions",
-        );
-        assert!(has_provider_api_key(&req));
-    }
-
-    #[test]
-    fn has_provider_api_key_empty_rejected() {
-        let req = build_request(&[("x-api-key", "  ")], "/v1/messages");
-        assert!(!has_provider_api_key(&req));
-    }
-
-    #[test]
-    fn has_provider_api_key_no_headers() {
-        let req = build_request(&[], "/v1/messages");
-        assert!(!has_provider_api_key(&req));
-    }
-
-    #[test]
-    fn has_provider_api_key_accepts_non_sk_bearer() {
-        // #362: OpenAI-*compatible* providers (Azure, OpenRouter, Groq, vLLM/
-        // Ollama gateways, project/service keys) issue keys without the sk-/gsk_
-        // prefix. OpenCode (@ai-sdk/openai) forwards them as `Bearer <key>`; they
-        // must authenticate on a loopback provider route. The upstream validates
-        // the real key — the proxy never injects one.
-        for key in [
-            "Bearer or-v1-9f8e7d6c", // OpenRouter
-            "Bearer gsk_live_1234",  // (still works)
-            "Bearer abc.def.ghi",    // gateway/service token
-            "Bearer 0123456789",     // opaque
-        ] {
-            let req = build_request(&[("authorization", key)], "/v1/responses");
-            assert!(
-                has_provider_api_key(&req),
-                "non-sk Bearer must count as a provider credential: {key}"
-            );
-        }
-    }
-
-    #[test]
-    fn has_provider_api_key_empty_bearer_rejected() {
-        // A blank credential — or a bare scheme word with no token (some HTTP
-        // stacks trim trailing whitespace down to just "Bearer") — is not auth.
-        for bad in ["Bearer    ", "", "Bearer", "bearer", "   "] {
-            let req = build_request(&[("authorization", bad)], "/responses");
-            assert!(
-                !has_provider_api_key(&req),
-                "blank/scheme-only Authorization must not authenticate: {bad:?}"
-            );
-        }
-    }
-
-    // --- #334: opt-in strict proxy auth (proxy_require_token) ---
-
-    #[test]
-    fn provider_key_fallback_allowed_in_default_mode() {
-        // Default (require_token = false): a provider key on a provider route is
-        // sufficient. This is what lets a local AI tool authenticate with its own
-        // key and no lean-ctx Bearer token (the loopback-friendly behavior).
-        assert!(provider_key_fallback_allowed(false, true, true));
-    }
-
-    #[test]
-    fn provider_key_fallback_denied_in_strict_mode() {
-        // Strict (require_token = true, e.g. shared/multi-user host): the
-        // provider-key fallback is disabled, so even a valid provider key on a
-        // provider route is not enough — the Bearer token becomes mandatory.
-        assert!(!provider_key_fallback_allowed(true, true, true));
-    }
-
-    #[test]
-    fn provider_key_fallback_requires_key_and_provider_route() {
-        // The fallback never fires without a provider key, nor off a provider
-        // route — regardless of mode.
-        assert!(!provider_key_fallback_allowed(false, false, true));
-        assert!(!provider_key_fallback_allowed(false, true, false));
-        assert!(!provider_key_fallback_allowed(true, false, true));
-    }
-
-    #[test]
-    fn proxy_require_token_defaults_off() {
-        // The strict mode must be opt-in: a fresh config keeps the loopback
-        // behavior so existing local setups (Claude Code, OpenCode, Codex) keep
-        // working without a token.
-        assert!(!crate::core::config::Config::default().proxy_require_token);
-    }
-
-    // --- #353: bare provider endpoints (OpenCode / @ai-sdk/openai) ---
-
-    #[test]
-    fn is_provider_route_bare_responses_and_messages() {
-        // Clients that point their base URL at the proxy root (no `/v1`) send the
-        // bare endpoint; auth must still recognise it as a provider route.
-        assert!(is_provider_route("/responses"));
-        assert!(is_provider_route("/responses/resp_123/input_items"));
-        assert!(is_provider_route("/messages"));
-    }
-
-    #[test]
-    fn canonical_provider_path_rewrites_bare_endpoints() {
-        assert_eq!(
-            canonical_provider_path("/responses").as_deref(),
-            Some("/v1/responses")
-        );
-        assert_eq!(
-            canonical_provider_path("/chat/completions").as_deref(),
-            Some("/v1/chat/completions")
-        );
-        assert_eq!(
-            canonical_provider_path("/messages").as_deref(),
-            Some("/v1/messages")
-        );
-    }
-
-    #[test]
-    fn canonical_provider_path_preserves_subpaths() {
-        assert_eq!(
-            canonical_provider_path("/responses/resp_abc/cancel").as_deref(),
-            Some("/v1/responses/resp_abc/cancel")
-        );
-        assert_eq!(
-            canonical_provider_path("/messages/batches/batch_1").as_deref(),
-            Some("/v1/messages/batches/batch_1")
-        );
-    }
-
-    #[test]
-    fn canonical_provider_path_ignores_already_canonical_and_unknown() {
-        // Already canonical → no rewrite (avoids `/v1/v1/...`).
-        assert_eq!(canonical_provider_path("/v1/responses"), None);
-        assert_eq!(canonical_provider_path("/v1/chat/completions"), None);
-        // Unrelated paths are untouched.
-        assert_eq!(canonical_provider_path("/health"), None);
-        assert_eq!(canonical_provider_path("/responsesx"), None);
-        assert_eq!(canonical_provider_path("/"), None);
-    }
-
-    #[test]
-    fn canonical_provider_path_collapses_double_v1_prefix() {
-        // OPENAI_BASE_URL now advertises `/v1` (#366); a client treating it as an
-        // origin and appending `/v1/...` itself produces a double prefix.
-        assert_eq!(
-            canonical_provider_path("/v1/v1/responses").as_deref(),
-            Some("/v1/responses")
-        );
-        assert_eq!(
-            canonical_provider_path("/v1/v1/chat/completions").as_deref(),
-            Some("/v1/chat/completions")
-        );
-    }
-
-    #[test]
-    fn normalized_provider_uri_rewrites_path_and_preserves_query() {
-        use axum::http::Uri;
-        let uri: Uri = "/responses?stream=true".parse().unwrap();
-        let rewritten = normalized_provider_uri(&uri).expect("bare /responses must rewrite");
-        assert_eq!(rewritten.path(), "/v1/responses");
-        assert_eq!(rewritten.query(), Some("stream=true"));
-        assert_eq!(
-            rewritten
-                .path_and_query()
-                .map(axum::http::uri::PathAndQuery::as_str),
-            Some("/v1/responses?stream=true")
-        );
-    }
-
-    #[test]
-    fn normalized_provider_uri_noop_for_canonical() {
-        use axum::http::Uri;
-        let uri: Uri = "/v1/responses".parse().unwrap();
-        assert!(normalized_provider_uri(&uri).is_none());
-    }
-}
-
-#[cfg(test)]
-mod upstream_tests {
-    use super::*;
-
-    fn upstreams_with_openai(openai: &str) -> Upstreams {
-        Upstreams {
-            anthropic: "https://api.anthropic.com".into(),
-            openai: openai.into(),
-            chatgpt: "https://chatgpt.com".into(),
-            gemini: "https://generativelanguage.googleapis.com".into(),
-        }
-    }
-
-    /// The #449 core wiring: provider handlers read the upstream per request from
-    /// the watch channel, so a published change is served immediately, without
-    /// rebuilding the `ProxyState`.
-    #[tokio::test]
-    async fn proxy_state_reads_upstream_live_from_watch() {
-        let (tx, rx) =
-            tokio::sync::watch::channel(Arc::new(upstreams_with_openai("https://old.example")));
-        let state = ProxyState {
-            client: reqwest::Client::new(),
-            port: 0,
-            stats: Arc::new(ProxyStats::default()),
-            introspect: Arc::new(introspect::IntrospectState::default()),
-            upstreams: rx,
-        };
-        assert_eq!(state.openai_upstream(), "https://old.example");
-
-        tx.send(Arc::new(upstreams_with_openai("https://new.example")))
-            .unwrap();
-        assert_eq!(
-            state.openai_upstream(),
-            "https://new.example",
-            "a live handler read must reflect the published change"
-        );
-        assert_eq!(state.upstream_snapshot().openai, "https://new.example");
-    }
-
-    /// End-to-end #449 repro (in-process, no network): a `config set`-style edit
-    /// to config.toml is picked up by a *running* proxy's refresh task within the
-    /// reload interval — without any restart. Before the fix this value stayed
-    /// frozen at the start-time upstream forever.
-    ///
-    /// The process-global env lock is intentionally held across the polling
-    /// `.await`s to keep `LEAN_CTX_*` isolated for the whole test; safe because
-    /// each `#[tokio::test]` owns its current-thread runtime, so this std guard
-    /// only makes *other* test threads wait — it can never deadlock this one.
-    #[tokio::test]
-    #[allow(clippy::await_holding_lock)]
-    async fn config_change_is_picked_up_live_without_restart() {
-        use crate::core::config::Config;
-
-        let _lock = crate::core::data_dir::test_env_lock();
-        let tmp = tempfile::tempdir().unwrap();
-        crate::test_env::set_var("LEAN_CTX_DATA_DIR", tmp.path());
-        // Isolate from a developer shell that exports the env override (#449),
-        // and make the reload fast + deterministic.
-        crate::test_env::remove_var("LEAN_CTX_OPENAI_UPSTREAM");
-        crate::test_env::set_var("LEAN_CTX_PROXY_RELOAD_SECS", "1");
-
-        // Start state: config.toml points OpenAI at a loopback upstream.
-        Config::update_global(|c| {
-            c.proxy.openai_upstream = Some("http://127.0.0.1:19101".into());
-        })
-        .unwrap();
-        let initial = Config::load().proxy.resolve_all();
-        assert_eq!(initial.openai, "http://127.0.0.1:19101");
-
-        let (tx, rx) = tokio::sync::watch::channel(Arc::new(initial.clone()));
-        spawn_upstream_refresh(tx, initial);
-
-        // `lean-ctx config set proxy.openai_upstream …` (same safe write path).
-        Config::update_global(|c| {
-            c.proxy.openai_upstream = Some("http://127.0.0.1:19102".into());
-        })
-        .unwrap();
-
-        // Poll the live value the handlers would read — no restart in between.
-        let mut live = rx.borrow().openai.clone();
-        for _ in 0..80 {
-            if live == "http://127.0.0.1:19102" {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            live = rx.borrow().openai.clone();
-        }
-        assert_eq!(
-            live, "http://127.0.0.1:19102",
-            "running proxy must serve the new config.toml upstream without a restart"
-        );
-
-        crate::test_env::remove_var("LEAN_CTX_PROXY_RELOAD_SECS");
-        crate::test_env::remove_var("LEAN_CTX_DATA_DIR");
     }
 }

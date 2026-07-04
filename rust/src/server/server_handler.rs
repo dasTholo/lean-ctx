@@ -178,6 +178,19 @@ impl ServerHandler for LeanCtxServer {
             if maintenance.is_some() {
                 if let Some(home) = dirs::home_dir() {
                     let _ = crate::rules_inject::inject_all_rules(&home);
+                    // The on-demand SKILL.md belongs to the same steering surface
+                    // as the rules block: the session-start heal writes rules for
+                    // every detected client, so a fresh machine that never ran
+                    // `lean-ctx setup` otherwise carries a permanent doctor
+                    // warning ("SKILL.md not installed"). Idempotent + gated on
+                    // the same opt-outs as setup (rules_injection=off inside,
+                    // auto_inject_skills=Some(false) here).
+                    if crate::core::config::Config::load()
+                        .setup
+                        .should_inject_skills()
+                    {
+                        let _ = crate::rules_inject::install_all_skills(&home);
+                    }
                 }
                 crate::hooks::refresh_installed_hooks();
                 crate::core::version_check::check_background();
@@ -312,7 +325,7 @@ impl ServerHandler for LeanCtxServer {
                 }
             };
             let client = self.client_name.read().await.clone();
-            let is_zed = !client.is_empty() && client.to_lowercase().contains("zed");
+            let quirks = crate::server::tool_visibility::ClientQuirks::resolve(&client, candidate);
 
             let active_role = crate::core::roles::active_role();
             let tools: Vec<_> = all_tools
@@ -323,7 +336,7 @@ impl ServerHandler for LeanCtxServer {
                         name,
                         &tool_profile,
                         &disabled,
-                        is_zed,
+                        quirks,
                         active_role.is_tool_allowed(name),
                     )
                 })
@@ -562,7 +575,7 @@ impl ServerHandler for LeanCtxServer {
                     detector.record_error_outcome(&tool_name_for_panic, &args_fp_for_panic);
                 }
 
-                Ok(CallToolResult::error(vec![Content::text(
+                Ok(CallToolResult::error(vec![ContentBlock::text(
                     "ERROR: lean-ctx internal error. The MCP server is still running. \
                      Please retry or use a different approach."
                         .to_string(),
@@ -578,6 +591,9 @@ impl ServerHandler for LeanCtxServer {
         tracing::info!("Received roots/list_changed — will re-resolve on next tool call");
         self.roots_resolved
             .store(false, std::sync::atomic::Ordering::Relaxed);
+        // Fresh client signal — restore the transient-failure retry budget.
+        self.roots_list_attempts
+            .store(0, std::sync::atomic::Ordering::Relaxed);
     }
 }
 

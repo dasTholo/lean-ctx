@@ -3,12 +3,24 @@
 # crate exactly as before — build the SDK explicitly with `-p lean-ctx-sdk` or
 # the whole workspace with `--workspace`.
 [workspace]
-members = [".", "crates/lean-ctx-sdk"]
+members = [
+  ".",
+  "crates/lean-ctx-sdk",
+  # Grammar-addon cdylibs (#690, Phase 1c) — one crate per long-tail
+  # tree-sitter grammar, built per-platform by grammar-addons.yml and
+  # dlopen'd at runtime by core::signatures_ts::grammar_loader. Add a new
+  # `crates/grammar-addons/<lang>` member (mirroring lua/) plus a matrix
+  # entry in the workflow when tiering another grammar out (scope item 1).
+  "crates/grammar-addons/lua",
+  # Standalone manual-verification harness the grammar-addon design proved
+  # out against (Phase 0 spike, #693) — not part of the release pipeline.
+  "experiments/grammar-dlopen-spike/host",
+]
 default-members = ["."]
 
 [package]
 name = "lean-ctx"
-version = "3.8.16"
+version = "3.9.0"
 edition = "2024"
 autobins = false
 description = "Context Runtime for AI Agents with CCP. 71 MCP tools, 10 read modes, 95+ compression patterns, cross-session memory (CCP), persistent AI knowledge with temporal facts + contradiction detection, multi-agent context sharing, LITM-aware positioning, AAAK compact format, adaptive compression with Thompson Sampling bandits. Supports 24+ AI tools. Reduces LLM token consumption by up to 99%."
@@ -82,8 +94,21 @@ default = [
   "embeddings",
   "http-server",
   "team-server",
+  # Self-hosted org gateway (`lean-ctx gateway init|serve|doctor`): ships by
+  # default like team-server so the documented pilot path works with the
+  # standard binary (Local-Free Invariant — free, no license gate).
+  "gateway-server",
+  # Cross-shape routing Anthropic→OpenAI (enterprise#16): org model aliases
+  # (`acme/fast` → Foundry/vLLM/Ollama) must work from Claude-shaped clients
+  # with the shipped binary, so the pilot path needs no custom build
+  # (enterprise#63; Local-Free Invariant — compile-gated only, no license gate).
+  "shape-xlat",
   "secure-update",
   "jemalloc",
+  # Remote dense backends ship in release binaries so LEANCTX_QDRANT_URL /
+  # LEANCTX_PGVECTOR_URL work out of the box (both are env-gated at runtime).
+  "qdrant",
+  "pgvector",
 ]
 jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl"]
 dev-tools = []
@@ -95,9 +120,30 @@ ort-webgpu = ["ort?/webgpu"]
 ort-rocm = ["ort?/rocm"]
 ort-directml = ["ort?/directml"]
 ort-coreml = ["ort?/coreml"]
-http-server = ["dep:axum", "dep:tower-http", "dep:reqwest"]
+http-server = [
+  "dep:axum",
+  "dep:tower-http",
+  "dep:reqwest",
+  "dep:tokio-tungstenite",
+  "dep:rustls",
+]
 qdrant = ["embeddings"]
+pgvector = ["embeddings"]
 team-server = ["http-server"]
+# Self-hostable org gateway (proxy remote-bind + usage store + admin API).
+# LOCAL_OPTIONAL: free, gated by compilation only — never by account/license/plan
+# (Local-Free Invariant; enforcement lives in lean-ctx-enterprise, not here).
+gateway-server = [
+  "http-server",
+  "dep:deadpool-postgres",
+  "dep:tokio-postgres",
+  "dep:tokio-postgres-rustls",
+  "dep:webpki-roots",
+  "dep:hex",
+]
+# N×M shape translation (enterprise#16): Claude clients on OpenAI-shape
+# upstreams (Foundry, vLLM, Ollama…). LOCAL_OPTIONAL: compile-gated only.
+shape-xlat = ["http-server"]
 secure-update = []
 cloud-server = [
   "http-server",
@@ -140,11 +186,14 @@ tree-sitter = [
   "dep:tree-sitter-julia",
   "dep:tree-sitter-solidity",
   "dep:tree-sitter-nix",
+  "dep:tree-sitter-powershell",
+  "dep:tree-sitter-language",
+  "dep:libloading",
 ]
 wasm = ["dep:wasmi"]
 
 [dependencies]
-rmcp = { version = "1.7", features = [
+rmcp = { version = "2", features = [
   "server",
   "client",
   "transport-io",
@@ -225,6 +274,12 @@ tree-sitter-haskell = { version = "0.23", optional = true }
 tree-sitter-julia = { version = "0.23", optional = true }
 tree-sitter-solidity = { version = "1.2", optional = true }
 tree-sitter-nix = { version = "0.3", optional = true }
+tree-sitter-powershell = { version = "0.26", optional = true }
+# Grammar-addon loader (#690, Phase 1b): dlopen a per-platform grammar cdylib
+# and reconstruct a tree_sitter::Language from its exported LanguageFn, same
+# as the Phase 0 spike (experiments/grammar-dlopen-spike).
+tree-sitter-language = { version = "0.1", optional = true }
+libloading = { version = "0.8", optional = true }
 # Exact pin: `ort` 2.0 is still in its release-candidate phase (no stable 2.0.0
 # yet; rc.12 is the upstream-recommended production build). RCs can carry breaking
 # API changes between candidates, so `=` prevents `cargo update` from silently
@@ -248,12 +303,31 @@ ort = { version = "=2.0.0-rc.12", optional = true, default-features = false, fea
 ] }
 ndarray = { version = "0.17", optional = true }
 axum = { version = "0.8", optional = true, features = ["ws"] }
+# Upstream WebSocket client for the Codex ChatGPT remote-control passthrough
+# (#597): tunnels `/backend-api` WS upgrades through to wss://chatgpt.com so
+# Codex Desktop remote-control pairing works while the subscription opt-in routes
+# model turns through the proxy. Already in the tree via axum's `ws` feature.
+tokio-tungstenite = { version = "0.29", default-features = false, features = [
+  "connect",
+  "rustls-tls-webpki-roots",
+], optional = true }
+# tokio-tungstenite's rustls connector relies on the process-default
+# CryptoProvider. The tree pulls both aws-lc-rs (reqwest) and ring (lettre/ureq),
+# so rustls can't auto-pick one; we install aws-lc-rs explicitly at proxy start
+# (#597). Default features keep the aws_lc_rs provider available.
+rustls = { version = "0.23", optional = true }
 tower-http = { version = "0.7", features = ["cors", "auth"], optional = true }
 deadpool-postgres = { version = "0.14", optional = true }
 tokio-postgres = { version = "0.7", features = [
   "with-chrono-0_4",
   "with-uuid-1",
+  # Evidence/GDPR exports read aggregated rows as jsonb (enterprise#36/#39).
+  "with-serde_json-1",
 ], optional = true }
+# Postgres TLS (#54/#58): Azure Database for PostgreSQL enforces TLS — the
+# usage store must speak sslmode=require. Reuses the process rustls provider.
+tokio-postgres-rustls = { version = "0.14", optional = true }
+webpki-roots = { version = "1.0", optional = true }
 lettre = { version = "0.11", default-features = false, features = [
   "tokio1-rustls-tls",
   "smtp-transport",
@@ -398,3 +472,4 @@ harness = false
 [[bench]]
 name = "efficiency"
 harness = false
+

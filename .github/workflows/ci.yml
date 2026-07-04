@@ -139,6 +139,10 @@ jobs:
       - name: Run clippy
         working-directory: rust
         run: cargo clippy --all-features -- -D warnings
+      # Maintainability gate (#660): no Rust file grows past 1500 LOC
+      # (legacy files are frozen at 2000 via the script's allowlist).
+      - name: LOC gate (file size budget)
+        run: ./scripts/loc-gate.sh
 
   # Guards the no-ORT build (#586). The `embeddings`/`neural` features pull the
   # `ort` crate, whose `load-dynamic` dylib resolver has no fallback arm for
@@ -162,6 +166,11 @@ jobs:
       - name: Check build without ORT-backed features
         working-directory: rust
         run: cargo check --no-default-features --features "tree-sitter,http-server,team-server,secure-update,jemalloc"
+      # The no-tree-sitter combo is the slim-binary candidate (#663) and had
+      # rotted silently because only the no-ORT combo was checked.
+      - name: Check build without tree-sitter
+        working-directory: rust
+        run: cargo check --no-default-features --features "embeddings,http-server,team-server,secure-update,jemalloc"
 
   fmt:
     name: Format
@@ -212,6 +221,11 @@ jobs:
       - uses: actions/checkout@v4 # v4
         with:
           persist-credentials: false
+      # Fail fast if pi-lean-ctx / lean-ctx-bin drifted from the engine version,
+      # so the Pi extension can never quietly fall behind (npm skips the publish
+      # of a stale version). Runs on every push/PR — not just at release.
+      - name: Check npm package ↔ engine version coupling
+        run: python3 scripts/check-package-versions.py
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -484,6 +498,22 @@ jobs:
       - name: Build lean-ctx
         working-directory: rust
         run: cargo build --quiet
+      # Self-footprint gate (#578/#964): the fixed per-session cost lean-ctx
+      # itself injects (advertised tool schemas + MCP instructions + wakeup)
+      # must stay under budget. Runs in a scratch HOME + empty cwd so only OUR
+      # footprint is measured — no repo rules files, no developer state.
+      # Baseline after the diet: ~2147 tok (schemas 1685, instructions 462).
+      - name: Self-footprint gate (doctor overhead)
+        shell: bash
+        env:
+          LEAN_CTX_CONTEXT_BUDGET_TOKENS: "2600"
+        run: |
+          set -euo pipefail
+          BIN="$GITHUB_WORKSPACE/rust/target/debug/lean-ctx"
+          SCRATCH=$(mktemp -d)
+          mkdir -p "$SCRATCH/home" "$SCRATCH/data" "$SCRATCH/work"
+          cd "$SCRATCH/work"
+          HOME="$SCRATCH/home" LEAN_CTX_DATA_DIR="$SCRATCH/data" "$BIN" doctor overhead --gate
       # Deterministic with/without output-quality proof. Three modes, in priority order:
       #   1. A committed recording (rust/eval/recording.json) → byte-stable replay, no secrets,
       #      and the gate BLOCKS on a regression.

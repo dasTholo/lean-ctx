@@ -17,7 +17,9 @@ mod dedup;
 mod edit_health;
 mod observe;
 mod payload;
+mod read_dedup;
 pub use observe::*;
+pub use read_dedup::handle_read_dedup;
 #[cfg(test)]
 mod tests;
 
@@ -818,6 +820,26 @@ fn redirect_read(tool_input: Option<&serde_json::Value>) -> String {
         );
         return build_dual_allow_output();
     };
+    // #637: on hosts with a native read-before-write guard (Claude Code /
+    // CodeBuddy), rewriting the Read to a temp `.lctx` copy makes the guard track
+    // the temp path, so a later native Write/Edit to the real file fails with
+    // "File has not been read yet". `read_redirect = auto` (default) disables the
+    // Read redirect there so native Read reads the real file and the guard stays
+    // intact; compression flows through the explicit ctx_read MCP tool instead.
+    // Evaluated per hook fire (fresh Config + env), so it also covers headless
+    // `claude -p` and never needs to fight the settings.json self-heal.
+    if !crate::core::config::ReadRedirect::read_redirect_enabled(
+        &crate::core::config::Config::load(),
+    ) {
+        debug_log::log_hook_decision(
+            "redirect",
+            "Read",
+            Route::Native,
+            &path,
+            "read redirect disabled (host guard/config)",
+        );
+        return build_dual_allow_output();
+    }
     if should_passthrough(&path) {
         debug_log::log_hook_decision(
             "redirect",
@@ -1240,6 +1262,32 @@ pub(crate) fn emit_session_start_additional_context(additional_context: &str) {
     );
 }
 
+/// Codex SessionStart guidance for the shell-hook surface (GH #625).
+///
+/// The Codex `PreToolUse` hook already rewrites every rewritable Bash command to
+/// `lean-ctx -c "<cmd>"` automatically (`codex_rewrite_output`: `allow` +
+/// `updatedInput`), so the old "prefer `lean-ctx -c`" line was redundant *and*
+/// taught nothing about getting raw output back — the one thing an agent cannot
+/// reach on its own once a command is auto-compressed. That gap is the shell-side
+/// twin of the MCP "too compressed" complaint: lacking an escape hatch, agents
+/// re-read the compressed view in tiny chunks instead of asking for raw bytes.
+///
+/// This hint mirrors the MCP `RECOVER` rule
+/// ([`crate::core::rules_canonical::RECOVER`]) on the non-MCP CLI surface: it
+/// states that the compressed view is not exact evidence and names the raw escape
+/// (`lean-ctx raw "<exact command>"`), which the rewrite hook leaves untouched (it
+/// already starts with `lean-ctx `, so `rewrite_candidate` returns `None`). The
+/// blocked-command sentence still covers the allowlist gate.
+pub(crate) const CODEX_SHELL_RECOVERY_HINT: &str = r#"RAW OUTPUT RULE (shell)
+
+Compressed shell output is not exact evidence. When you need exact content
+(file text, log lines, quotes, counts, line numbers), you MUST re-run the
+command as `lean-ctx raw "<exact command>"` — never reconstruct it from the
+compressed view with chunked reads (`cat`/`sed`/`head`/`tail`), and never quote
+compressed output as if it were exact. If a Bash call is blocked, re-run the
+exact command the hook suggests.
+
+Rule of thumb: back every exact claim with `lean-ctx raw` output."#;
 pub fn handle_codex_session_start() {
     if is_quiet() {
         return;
@@ -1250,9 +1298,7 @@ pub fn handle_codex_session_start() {
     if crate::core::config::Config::load().dedicated_session_context_active() {
         return;
     }
-    emit_session_start_additional_context(
-        "For shell commands matched by lean-ctx compression rules, prefer `lean-ctx -c \"<command>\"`. If a Bash call is blocked, rerun it with the exact command suggested by the hook.",
-    );
+    emit_session_start_additional_context(CODEX_SHELL_RECOVERY_HINT);
 }
 
 /// Dedicated Copilot PreToolUse handler (dispatched via `hook copilot`).

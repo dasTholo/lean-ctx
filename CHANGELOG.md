@@ -3,6 +3,715 @@
 All notable changes to lean-ctx are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Changed
+- **The shell hook is now transparent in plain human terminals: default
+  activation is `agents-only` (GH #699).** With the old `always` default the
+  hook aliased git/docker/kubectl in every interactive shell — so a human in
+  a plain terminal (no agent anywhere) saw lean-ctx allowlist diagnostics for
+  their own commands. lean-ctx exists to save *agent* tokens; the aliases now
+  auto-activate only when an agent session is detected (`LEAN_CTX_AGENT`,
+  `CURSOR_AGENT` — newly recognized across every guard — `CLAUDECODE`,
+  `CODEBUDDY`, `CODEX_CLI_SESSION`, `GEMINI_SESSION`). Set
+  `shell_activation = "always"` (or `LEAN_CTX_SHELL_ACTIVATION=always`) to
+  keep the old behavior, e.g. to feed your own shell usage into
+  `lean-ctx wrapped`; `lean-ctx-on` still opts a single session in manually.
+  The "[CLI] Command would be blocked in MCP mode" allowlist diagnostic is
+  also downgraded to debug level for interactive TTY callers — it's agent
+  telemetry, not human feedback. Thanks @DerPate for the precise report.
+
+### Added
+- **Persistent per-extension grammar telemetry (GH #690 Phase 2 groundwork).**
+  The tiering cut needs to know which of the ~27 static tree-sitter grammars
+  actually earn their binary bytes, but the only signal was a pair of
+  process-lifetime counters with no language dimension (flagged by @getappz).
+  `core/grammar_usage` now records tree-sitter vs regex-fallback hits per file
+  extension, persisted across sessions in `grammar_usage.json` (aggregate
+  counters only — no paths or project data). `ctx_metrics` shows the all-time
+  top extensions in its SIGNATURE BACKEND section.
+
+### Fixed
+- **Grammar-addon dylibs refuse to load from world-writable dirs/files
+  (GH #690 review point 3, PR #697 — thanks @getappz).** A group/other-
+  writable grammar dir would let any local account swap the dylib between
+  hash check and `dlopen`; the loader now rejects that layout outright.
+- **`ctx_read` gains `repo` param parity in multi-repo mode (GH #696,
+  PR #698 — thanks @getappz).** `ctx_search`/`ctx_glob`/`ctx_tree` could
+  already target a registered root via `repo=<alias>`, but `ctx_read` could
+  not — you could find a file in another root yet not read it. Read-only by
+  design (`ctx_edit`/`ctx_patch` stay session-rooted until undo history is
+  multi-repo-aware); unknown aliases error with the list of known ones, and
+  jail + secret screening apply against the resolved repo root.
+
+## [3.9.0] — 2026-07-04
+
+### Added
+- **The AI Gateway (team mode).** The engine can now run as a shared
+  org gateway — one deployment your whole team points its IDEs at, with
+  per-person attribution, governance and audited savings. Compiled into the
+  default binary (`gateway-server` feature), local-free invariant intact:
+  nothing changes for solo use until you run it.
+  - **`lean-ctx gateway serve`** — multi-provider reverse proxy
+    (Anthropic / OpenAI / Gemini / Ollama / custom registry) with per-person
+    bearer keys, usage metering to Postgres (`usage_events`), wire-shape
+    translation (an Anthropic-speaking IDE can call an OpenAI-hosted model and
+    vice versa) and a token-protected admin console on a separate port.
+  - **`lean-ctx gateway init`** — plug-and-play scaffold: docker compose,
+    `.env`, key file and a step-by-step README in one command;
+    `gateway doctor` preflights config, secrets, DB and ports.
+  - **`lean-ctx gateway keys add|list|rotate|revoke`** — key lifecycle
+    without storing plaintext (SHA-256 hashes only, shown once).
+    `rotate` (GL enterprise#67) replaces every key of a person in one atomic
+    file swap — no window where the person has zero valid keys — and keeps
+    team/project attribution.
+  - **`GET /v1/models`** (GL enterprise#63) — the curated org model catalog
+    from `[proxy.routing.aliases]`, content-negotiated: OpenAI-shape and
+    Anthropic-shape clients each get their native list format. IDEs discover
+    org names like `zuehlke/fast`; the gateway resolves the alias, injects
+    upstream credentials and stamps `routed_from` into the ledger.
+  - **`/me` personal usage view** (GL enterprise#64/#65) — each person signs
+    in with their own gateway key and sees exactly their spend, savings,
+    trend, models and projects — never anyone else's. Dark/light, 24h–90d
+    windows, savings-share KPI.
+  - **Signed org-policy gates** (GL enterprise#25/#66) — under a signed,
+    pinned, `enforced = true` org policy the forward path refuses:
+    models outside the `[routing].allowed_models` ceiling (403), spend above
+    `[budgets]` caps per person/UTC-day or project/UTC-month (429), and — new —
+    requests beyond `[budgets].max_requests_per_minute_per_person` (429 with
+    an honest `Retry-After` of the seconds until the minute rolls). Errors
+    arrive in the caller's wire shape; refusals are counted on
+    `leanctx_policy_blocked_total{reason="model_ceiling"|"budget"|"rate_limit"}`.
+    Without an enforced org policy every gate is a no-op.
+  - **Evidence & GDPR** (GL enterprise#36/#39) — usage retention windows,
+    Ed25519-signed evidence exports (`gateway evidence` / `evidence verify`),
+    person-scoped `gateway gdpr export|delete`, and Blake3 pseudonymization
+    for person identifiers at rest.
+- **Multi-window visibility (GH #694).** `lean-ctx doctor` no longer claims
+  "no active session" when sessions exist for other workspaces: run from a
+  directory that isn't an open project root it now reports
+  `none for this directory — recent: frontend (4m ago), backend (1h ago)`,
+  naming every workspace with a live session. The dashboard overview gains a
+  "Connected workspaces" panel (new `/api/workspaces` endpoint) listing each
+  project with status (active <10 min, idle <24 h, stale), last activity,
+  tokens saved and current task — shown as soon as two or more workspaces
+  have sessions.
+
+### Added
+- **Grammar addons: long-tail tree-sitter grammars as signed runtime dylibs
+  (GH #690 Phase 1, PR #695 — thanks @getappz).** Structural understanding no
+  longer has to be compiled in: an extension not covered by the 27 built-in
+  grammars can now resolve through a SHA-256-pinned, per-platform grammar
+  dylib that is `dlopen`'d at runtime — manifest + curated registry
+  (`data/grammar_registry.json`, user-overridable under the same signed-
+  override policy as the addon registry), a loader that verifies the hash pin
+  **on every load** plus the tree-sitter ABI version before handing the
+  grammar to the parser, a five-platform CI build matrix, and a zero-config
+  fetch on first use. Fully offline-safe: no addon installed (or no network,
+  or `addons.policy = locked`, or the new `addons.grammar_auto_fetch = false`
+  for strict-egress orgs) degrades to the regex-signature fallback exactly as
+  before. Installed dylibs land read-only and ad-hoc-signed on macOS; every
+  fetch is logged with its source URL. The registry ships empty — which of
+  the 27 static grammars (if any) move to the addon tier is a separate,
+  telemetry-gated Phase 2 decision.
+
+### Changed
+- **The heredoc-to-interpreter refusal now hands the agent the recovery path
+  (GL #1161).** Policy review outcome: the block stays — inline code embedded
+  in the command string never exists as an inspectable artifact, while a
+  script file passes the write path's own guards and leaves an audit trail.
+  But the old message ("Use a script file instead") left agents rediscovering
+  the workaround by trial and error; the refusal now spells it out: write the
+  code to a file (Write/ctx_edit), then `python3 /tmp/snippet`.
+
+### Fixed
+- **A transient `roots/list` failure no longer disables project-root detection
+  for the whole MCP session (GH #694).** The first tool call resolves client
+  roots exactly once; when that single attempt failed (e.g. the IDE window was
+  still starting up — the VS Code second-window pattern), the server never
+  asked again and fell back to cwd guessing for the session's lifetime. Failed
+  attempts now re-arm resolution for up to 3 tries; a `-32601 Method not found`
+  (client declares the capability but doesn't implement it — Cursor) still
+  gives up immediately, and `roots/list_changed` restores the retry budget.
+- **`dev-install` on Windows no longer hard-fails with `ACCESS_DENIED` while an
+  IDE holds the old binary open (GH #691).** The final swap did a bare
+  replace-rename, which Windows refuses for as long as any process runs the old
+  image — and dev-install deliberately never kills the IDE-owned MCP server
+  (#1036), so no retry budget could ever succeed (measured: identical failure
+  after 60 s). The install now uses the rustup-style sidecar swap: the running
+  binary is renamed aside to `lean-ctx.old.exe` (allowed for mapped images),
+  the fresh binary lands at the real path, and the sidecar is reclaimed on the
+  next install once its holder exited. If even the rename-aside is blocked
+  (AV/EDR-style zero-sharing lock), the error now explains the cause and the
+  fix instead of a bare OS error code. Thanks @getappz for the measurement
+  work in #691/#692.
+- **`ctx_share` handovers with org agent ids (`team:alice`) are now pullable on
+  Windows.** The share filename embedded the agent id verbatim; NTFS interprets
+  `:` as an Alternate Data Stream, so the write "succeeded" but the file never
+  appeared in the store — the receiving agent saw "No shared contexts for you".
+  Filenames now use a filesystem-safe slug (`[A-Za-z0-9._-]`, everything else
+  `-`); the true agent id still lives inside the JSON payload.
+- **Background knowledge writers can no longer clobber facts a parallel
+  `remember` just committed (lost-update, #326 class).** The consolidation
+  pipeline (`apply_artifacts_to_stores`) and the gateway memory adapter
+  (`addon_memory` ingest) both did load → modify → blind `save()` from a
+  background thread; a fact committed between their load and save was silently
+  dropped — surfacing as flaky "no current fact exists" errors on
+  `ctx_knowledge relate` right after a successful `remember`. Both writers now
+  go through `ProjectKnowledge::mutate_locked` like every other writer.
+- **CI: three timing/environment flakes hardened.** The
+  `session_lock_timeout` prompt-timeout bounds (400 ms) fired falsely on loaded
+  Windows runners — the assertion only distinguishes "timed out" from "hung",
+  so the bound is now 5 s; the lock-ordering check now skips `#[cfg(test)]`-gated
+  statics (test-only locks need no production lock-ordering documentation); the
+  two production gateway locks from enterprise#25 (`SNAPSHOT`, `LEDGER`) are
+  documented in `LOCK_ORDERING.md` (L58/L59).
+- **`max_ram_percent` is now actually enforced under Cursor/MCP load — no more
+  75 GB OOM-kill-respawn cycles (GH #685).** Two compounding gaps, both closed:
+  *Uncontrolled build growth:* the parallel BM25/graph index builds fanned the
+  whole corpus across the rayon pool in one shot — on a 1M+-file multi-root
+  setup the transient build state outran the 3 s memory guardian straight into
+  the kernel OOM killer. Builds now run in 2000-file batches with a guardian
+  check between batches (order-preserving, so indexes stay byte-identical —
+  equivalence-tested), a new admission gate (`index_admission`) degrades
+  corpora whose estimated peak exceeds the RSS headroom to the sequential
+  build up front, and extra workspace roots are indexed one at a time on a
+  single supervisor thread instead of up to 8 concurrent graph+BM25 pairs.
+  *Eviction blind spots:* the eviction orchestrator reasoned over session-cache
+  token utilization, which cannot see the HNSW/ANN graph, the resident trigram
+  search indexes or the materialized graph indexes — under Hard/Critical RSS
+  pressure it could conclude "nothing to do" while those structures dominated
+  RSS. RSS pressure now enforces a floor action (Hard ⇒ unload indices,
+  Critical ⇒ emergency drop), and `UnloadIndices`/`EmergencyDrop` additionally
+  clear the ANN cache (new `ann_cache::clear()` + `memory_usage_bytes()`), the
+  resident search indexes (`search_index::clear_resident()`) and the graph
+  cache. All evicted structures rebuild transparently on next use.
+- **`sed`/`awk` file dumps are verbatim output — no more dictionary-mangled
+  source (GH #688).** A range-print like `sed -n '10,50p' file.ps1` fell into
+  the generic terse pipeline, whose dictionary layer word-substitutes code
+  identifiers with no code-awareness (`function`→`fn`, `return`→`ret`, bare
+  `else` lines dropped) — corrupting code read via sed/awk instead of `cat`.
+  `sed`/`awk`/`gawk`/`mawk`/`nawk` now classify as file viewers like
+  `cat`/`head`/`tail`. In-place edits are excluded via a token-based flag check
+  (`-i`, `-i.bak`, `-ni` clusters, `--in-place[=suffix]`, gawk `-i inplace`) —
+  deliberately NOT a substring match, so filenames like `my-input.txt` or
+  `data-import.csv` can't silently re-enter the terse pipeline. Byte-exact
+  regression test with the original PowerShell repro. Thanks @getappz for the
+  report and the PR the fix is based on (#689).
+- **`setup` no longer panics when a client's MCP-instructions cap lands inside
+  a multi-byte character (GH #680).** The Claude Code / CodeBuddy 2048-char
+  truncation used a raw byte slice; when the cut fell inside an em-dash the
+  whole setup crashed ("end byte index 2048 is not a char boundary",
+  live-reported at setup level 3, step 3/13). The cut now backs up to the
+  previous char boundary (`truncate_instructions`, unit-tested with the exact
+  crash shape).
+- **`doctor` no longer false-flags a working OpenCode install (GH #686).**
+  Two gaps: `has_lean_ctx_mcp_entry` only walked `mcp.servers.lean-ctx`, but
+  OpenCode's schema (opencode.ai/config.json) nests servers DIRECTLY under
+  `mcp` — the direct-child form is now recognized too; and OpenCode was absent
+  from the SKILL.md candidate list (checked: `~/.config/opencode/skills/
+  lean-ctx/SKILL.md`) — it is now both checked by doctor AND installed by
+  `install_all_skills` when OpenCode is detected, so check and installer can't
+  drift apart.
+- **Anchored line-1 edits of UTF-8-BOM files no longer conflict forever
+  (GH #683 follow-up).** With ctx_read stripping the BOM (output honesty #683),
+  the anchor hash the model holds for line 1 is over the BOM-less text — but
+  `ctx_patch` validated anchors against the raw preimage, so the hashes could
+  never match and every retry conflicted again. The edit side now validates
+  against the same BOM-less view and re-prepends the BOM on write (the BOM is
+  an encoding artifact of the file, not of the edit).
+- **Shell allowlist no longer splits commands at backslash-escaped operators
+  (GL #1160).** In restricted (allowlisted) mode, `rg -n split\.label\|foo src/`
+  was split at the escaped pipe, so the pattern fragment after it was validated
+  — and blocked — as an unknown command (field report: `rg` dying with
+  "not in the allowlist" on regex tokens, exit 126). The operator scanner,
+  the subshell-paren walker and the substitution detector now honour bash
+  backslash semantics outside single quotes: `\|`, `\;`, `\&`, `\(`, `\)` and
+  `\$(` are data, never operators. Real (unescaped) pipes still split and
+  every segment is still validated — over-blocking removed, deny-by-default
+  unchanged. Also drops a dead pipe-index scanner from
+  `check_pipe_to_bare_interpreter`.
+- **Marked-block surgery no longer eats user content when a marker is quoted
+  in prose (GL #1158).** `marked_block` (and the Claude/CodeBuddy
+  `remove_block` twin) located `<!-- lean-ctx -->` markers via substring
+  search, so a documentation sentence like ``(see the `<!-- lean-ctx -->`
+  block below)`` anchored the block replacement at the prose mention and
+  silently deleted everything down to the real end marker — live-reproduced
+  on this repo's own AGENTS.md, where a session-start heal wiped ~75 lines
+  (Development Workflow, Session Continuity, Provider Pipeline, Quality Bar).
+  Markers now match only as whole (trimmed) lines — the exact shape every
+  writer emits — and the end marker is searched strictly after the start
+  line, so stray end markers above the block can't create bogus spans.
+  All upsert/replace/remove trigger checks (`hooks/mod.rs`,
+  `hooks/support.rs`, `rules_dedup`) use the same line-based predicate;
+  prose mentions are now invisible to the block machinery. Regression tests
+  cover the exact live-repro shape.
+
+### Added
+- **Anchored editing end-to-end — `ctx_patch` becomes the first-class edit path
+  (#1008, "Edit Loop v1").** The anchored editor now closes the loop the rules
+  already routed: read with `ctx_read(mode="anchored")` (or tag hits via
+  `ctx_search(anchored=true)`), then patch by `line + hash` anchor — the agent
+  never reproduces old text byte-for-byte, saving output tokens (~5x input cost)
+  on every edit.
+  - **Advertised where it earns its tokens**: `ctx_patch` joins the lazy core
+    and the `standard` profile (now 16 tools). Client-aware quirks keep the
+    default surface lean — clients with a reliable native editor (Cursor, Zed,
+    Windsurf, Antigravity, OpenCode) skip it and pay zero extra schema tokens;
+    Claude Code, CodeBuddy, pi/SDK and headless clients get it. Pinned profiles
+    are client-agnostic and always include it.
+  - **Schema diet**: the advertised `ctx_patch` schema shrank ~625 → ~263
+    tokens; rarely-used params (`expected_md5`, `backup`, `validate_syntax`,
+    `evidence`) stay supported but are no longer advertised.
+  - **`op=create`**: `ctx_patch` can create new files (strictly new — existing
+    files are refused; not mixable with anchored ops in one batch), so MCP-only
+    harnesses get the complete edit story from one tool.
+  - **Guidance coherence**: Claude/CodeBuddy pointer blocks (v5/v3, keeping the
+    MCP-aware guard semantics of v4/v2), agent templates, skills and per-editor
+    guides now teach anchored-editing-first; `ctx_edit` (str_replace) is
+    documented as the legacy power-profile fallback. New troubleshooting FAQ:
+    "Where did `ctx_edit` go?".
+  - **Edit-efficiency metering (honest, #361-style)**: a separate metric
+    channel measures the anchored-editing claim per applied op —
+    `tokens(replaced span) − tokens(anchor args)`, i.e. output the model did
+    not re-emit — plus stale-anchor `CONFLICT` retries, against the
+    str_replace baseline (`old_string` tokens paid, `old_string` misses).
+    Never estimated, never folded into the read-gain ledger, never printed in
+    tool bodies (#498). Surfaced in `ctx_metrics`, `/api/stats →
+    edit_efficiency` and a dashboard ROI "Edit Efficiency" card
+    (`~/.lean-ctx/edit_metering.json`). Contract:
+    `docs/contracts/edit-metering-v1.md`.
+  - **A/B benchmark, reliability + cost**: the hermetic `edit_reliability`
+    suite fixes identical mechanical bugs across 5 languages with both tools —
+    anchored 10/10 vs minimal str_replace 5/10 (recovering to 10/10 only by
+    paying extra recalled context), and ~41% fewer argument output tokens on
+    identical successful fixes (tiny-span exceptions reported honestly).
+- **Hook-aware Cursor guidance — the honest profile (GL #1153–#1157).** On
+  hosts whose installed lean-ctx hooks already compress the native tools
+  (Cursor: PreToolUse `rewrite` covers Shell, `redirect` covers Read/Grep),
+  the injected `~/.cursor/rules/lean-ctx.mdc` now carries a new
+  `HookCovered` profile instead of the full mapping: it states that native
+  Shell/Read/Grep are compressed transparently (using them is fine) and
+  advertises only the capabilities with no native equivalent (`ctx_compose`,
+  `ctx_symbol`/`ctx_callgraph`, `ctx_semantic_search`,
+  `ctx_knowledge`/`ctx_session`, `ctx_expand`). Rationale: Cursor's harness
+  makes native tools first-class, so a "NEVER use native" rule there is
+  unenforceable and only produces instruction dissonance — the model follows
+  neither rulebook consistently. The MCP `initialize` anchor for covered
+  Cursor sessions is reworded the same way. Detection is conservative
+  (both PreToolUse entries must be present; invalid/missing `hooks.json`
+  falls back to the full `Dedicated` mapping), the byte-exact drift check
+  re-syncs the profile when hooks are installed or removed later, and the
+  Cursor hook installer now honours `shadow_mode`/`compression_level`
+  instead of hardcoding them (GL #1156). ~55% smaller Cursor rules payload
+  on hook-covered installs, billed every session.
+- **Guard-safe re-read dedup for Claude Code / CodeBuddy (GL #1140, follow-up
+  to #637).** `read_redirect = auto` keeps the read-before-write guard intact
+  by letting native Read run on the real path — which also forfeited the Read
+  dedup savings on those hosts. A new `PostToolUse` hook (`lean-ctx hook
+  read-dedup`, matcher `Read` only) wins them back without touching the guard:
+  the *result* of a re-read of an unchanged, already-read file is replaced with
+  a compact `[unchanged]` stub via the documented `updatedToolOutput` channel.
+  First reads stay byte-identical (edit safety: `old_string` always comes from
+  real content), the incoming response shape is mirrored with only the content
+  field swapped (unknown shapes pass through), every failure path fails open,
+  replacement happens only when strictly smaller, a host compaction
+  (`PreCompact`) purges the session's records so post-compaction re-reads
+  deliver full content again, and Cursor's double-fired hooks are recognised by
+  `tool_use_id` so a duplicate first read is never mistaken for a re-read.
+  Config `read_dedup = auto | on | off` (env `LEAN_CTX_READ_DEDUP`); `auto`
+  (default) activates only on guard hosts, where the PreToolUse redirect is
+  off. Verified end-to-end against headless `claude -p` 2.1.139: first read
+  byte-identical, second read served as the ~40-token stub, native Edit of the
+  same file still passes the read-before-write gate.
+- **Hybrid multi-repo search (Context Hub, GL#1133).** `ctx_multi_repo
+  action=search` now runs the full hybrid stack per root — BM25 + dense
+  embeddings + SPLADE boost + graph ranks, the same pipeline as single-root
+  semantic search — and fuses the per-root rankings with RRF (identical key and
+  score semantics as before, so fusion behavior is unchanged; only the per-root
+  signal got stronger). A root with a cold dense index degrades to its BM25
+  ranking with a warning instead of failing or inline-embedding under the query
+  (#512 semantics). `mode="bm25"` forces the legacy lexical-only path,
+  byte-identical to the previous output.
+
+### Changed
+- **Benchmark numbers refreshed & self-footprint made a headline metric (#659).**
+  `BENCHMARKS.md` regenerated with v3.8.18 (map 98.1% / signatures 96.7% on the
+  50-file corpus; cold start 2.69s → 0.67s). The README benchmarks section now
+  also states lean-ctx's *own* fixed per-session cost (~2.1K tok, CI-gated via
+  `doctor overhead --gate`) and links the deterministic dual-arm self-verify
+  (digest `f5ed145e61ce3689`) with its methodology. The CGB self-assessment
+  (C2 — Managed) is surfaced from the README security section and Journey 13.
+
+### Fixed
+- **`dev-install` honours redirected cargo target dirs (GH #671).** Both
+  `rust/dev-install.sh` and the `lean-ctx dev-install` command located the
+  built binary at a hardcoded `target/release/…`; with `CARGO_TARGET_DIR` or a
+  `~/.cargo/config.toml` `[build] target-dir` override (one shared build cache
+  across worktrees) they silently symlinked/installed a stale or missing
+  binary. The target dir is now resolved via `cargo metadata` (env, config
+  files and workspace settings all honoured) with a `./target` fallback, the
+  shell script fails loudly when the binary is absent instead of planting a
+  dead symlink on PATH, the Rust path gained the same resolution plus the
+  Windows `.exe` suffix, and `tests/pre_release_check.sh` follows suit.
+  Follow-up: `install.sh`'s source-build path (served at
+  `leanctx.com/install.sh`) had the same hardcode and could link a stale
+  binary from an earlier default-layout build — it now resolves via
+  `cargo metadata` identically and names the override in its error hint.
+  Thanks [@getappz](https://github.com/getappz) for the report and the initial
+  fix (#672)!
+- **pi-lean-ctx ships with zero runtime npm dependencies (GH #670).** pi
+  installs every package into one shared npm prefix and re-reifies the whole
+  tree on each `pi install`/`pi remove`; an interrupted rewrite (Windows
+  AV/file locks) stranded `zod/v3/locales/en.js` and the extension failed to
+  load — unrepairable by reinstalling, because npm never re-extracts a package
+  whose version matches. The MCP SDK (incl. zod) is now vendored as one
+  self-contained bundle (`extensions/vendor/mcp-sdk.cjs`, built at `prepack`),
+  so no corruptible dependency tree exists in the first place. Verified by an
+  isolation smoke: bundle in an empty dir, real initialize + tools/list
+  roundtrip, plus a jiti-loaded co-install with `pi-markdown-preview`.
+- **MCP server answers `initialize` before doing housekeeping (GH #669).**
+  Orphan-process sweep (one `ps` per running lean-ctx), proxy autostart (TCP
+  probe + detached spawn) and the throttled savings-recap publish ran in front
+  of the stdio transport bind — on a cold WSL2 / VS Code Server start this
+  widened the window in which VS Code's start-on-demand first tool call races
+  server readiness and dies with `Cannot read properties of undefined
+  (reading 'invoke')` (upstream: microsoft/vscode#321150). That work is now
+  deferred onto the blocking pool, concurrent with the handshake; a
+  `time_to_initialize_ms` log line makes the span measurable, `lean-ctx
+  doctor` surfaces the upstream race on WSL2 + VS Code setups, and a
+  regression test drives the exact race pattern (tools/call immediately after
+  the initialized notification) against the real binary.
+- **Zero-config golden path: `onboard --yes` now leaves `doctor` fully green.**
+  Three healers that silently disagreed are aligned: the session-start heal
+  installs the agent `SKILL.md` files alongside rules (previously `doctor`
+  warned "run: lean-ctx setup" forever), `doctor`'s shell-hook probe honours a
+  relocated `LEAN_CTX_CONFIG_DIR` (no more false "pipe guard missing"), and
+  `setup`/`onboard` detect Claude Code / CodeBuddy by their state dir
+  (`~/.claude/`, `~/.codebuddy/`) exactly like `doctor` and the rules injector
+  do — killing the dead loop where `doctor` pointed at `setup` but `setup`
+  skipped the client. A new integration gate (`onboard_doctor_clean`) runs the
+  full journey in an isolated `HOME` and asserts `doctor` exits green.
+- **`ctx_knowledge remember` never stalls on the embedding model again.** The
+  first `remember` on a fresh install used to block up to the 120s tool
+  watchdog while the ~30MB embedding model downloaded. It now uses non-blocking
+  engine access: the fact commits immediately, the engine warms up in the
+  background.
+- **Semantic recall self-heals missing vectors.** Facts written by the
+  consolidation/ETL writers (and by `remember` while the engine is still
+  warming up) never got an embedding, and only a manual `embeddings_reindex`
+  repaired that — on a live machine most projects sat at 0 vectors, invisible
+  to `mode=semantic` recall. `remember` now backfills up to 32 missing vectors
+  per call (one batched inference, most-valuable-first, under the per-project
+  lock), so active projects converge to full coverage without any manual step.
+- **`minimal_overhead=true` (the default) is now documented honestly:** session
+  continuity is delivered via the `AUTO CONTEXT` block on the first tool call
+  (prompt-cache-friendly) instead of an `ACTIVE SESSION` block at initialize.
+- **CLAUDE.md block v4: MCP-aware guidance (GL #1138, second half of #637).**
+  The injected CLAUDE.md/CODEBUDDY.md block recommended `ctx_read`-first and a
+  `ctx_edit` fallback *unconditionally* — in sessions without a connected
+  lean-ctx MCP server those tools do not exist, stranding agents on shell
+  heredocs. The block (v4 / CodeBuddy v2, session-heal updates existing
+  installs) now scopes every ctx_* recommendation to "when the ctx_* MCP tools
+  are listed in this session", documents native `Read` → `Edit` as the primary
+  editing path under the read-before-write gate, and says explicitly to use
+  native tools throughout when no ctx_* tools are available. `doctor` gains an
+  `Instructions/MCP consistency` check (GL #1139) that flags the hazardous
+  combination — instructions advertising ctx_* while no lean-ctx entry is
+  registered in the Claude MCP config — with a `lean-ctx setup` repair hint.
+
+### Security
+- **`ctx_call` can no longer bypass egress DLP or permission inheritance.** The
+  guarded dispatch path unwraps `ctx_call(name=…, args=…)` and runs both checks
+  against the *inner* tool and its arguments (nested `ctx_call` is already
+  refused by the handler). Egress payload extraction is centralized in one
+  helper shared by the MCP server and `lean-ctx policy enforce`, and now also
+  covers `ctx_patch` write bodies (`new_text`, `new_body`, `ops[].new_text`).
+  `prefer_native_editor` (#454) now hides/refuses `ctx_patch` alongside
+  `ctx_edit`.
+- **Bundled addons now spawn with a scrubbed environment (addon env isolation).**
+  Every runnable registry addon (Headroom, Sophon, Repomix, Serena, …) now
+  declares a `[capabilities]` block. Its mere presence flips the single gateway
+  spawn point from the legacy "inherit the full host environment" path to the
+  scrubbed path (`env_clear` + base allowlist), so host API keys/tokens no longer
+  reach an untrusted addon child process. Network/filesystem grants are declared
+  honestly to match each tool's real needs (registry fetch, cache/index/vault
+  writes) — the empty env allowlist is the isolation win. A regression test
+  asserts every runnable bundled addon carries a capability block.
+
+### Added
+- **Doc corpora as first-class retrieval sources (Context Hub, GL#1132).** The
+  artifact index now ingests **PDF** (panic-safe local text extraction; a
+  scanned or malformed PDF becomes a warning, not a failed build), and the
+  artifact registry (`.lean-ctx-artifacts.json`) accepts **absolute/`~` paths**
+  so external doc folders — an Obsidian vault, `~/notes` — become searchable
+  corpora. PathJail stays the gate: external entries resolve only when
+  allow-listed (`read_only_roots` / `extra_roots` / `LEAN_CTX_ALLOW_PATH`); a
+  leading slash that matches an existing project path keeps its legacy
+  project-relative meaning. New CLI flag `semantic-search --artifacts` searches
+  the doc corpus; new guide `docs/guides/docs-sources.md`. Determinism guard:
+  re-indexing an unchanged corpus is byte-identical (#498).
+- **pgvector dense backend (Context Hub, GL#1136).** Teams that already operate
+  PostgreSQL can point the dense half of hybrid retrieval at it:
+  `LEANCTX_PGVECTOR_URL=postgres://…` (or `LEANCTX_DENSE_BACKEND=pgvector`)
+  stores embeddings in per-project, per-dimension `vector(N)` tables — same
+  namespacing, point-id scheme and delete-by-file incremental sync as the
+  qdrant backend, so switching backends never mixes identities. Implemented
+  through the `psql` CLI (zero new crate dependencies, mirrors the postgres
+  provider); rows return as per-line JSON for robust parsing; identifiers and
+  literals are strictly validated/escaped. The `qdrant` + `pgvector` features
+  join the default feature set, so release binaries support all three backends
+  out of the box; a live end-to-end test (`pgvector_e2e_round_trip`, `--ignored`)
+  verifies table creation, cosine search, incremental replace and quote-escaping
+  against a real pgvector container. Guide: `docs/guides/dense-backends.md`.
+- **Addon registry: `qmd` + `memgraph-ingester` (Context Hub, GL#1134).** Two
+  community tools from the Discord retrieval thread are now 1-command installs:
+  `qmd` (on-device Markdown/notes search — BM25 + vectors + reranking, via
+  `npx -y @tobilu/qmd@2.5.3 mcp`) and `memgraph-ingester` (structure-aware RAG
+  on a Memgraph code graph, via `uvx memgraph-ingester-mcp==0.6.6`; needs a
+  running Memgraph). Both ship scrubbed-env capability blocks; the memgraph
+  Bolt-URI/read-only toggles joined the reviewed env passthrough allowlist.
+- **Docs: the context-infrastructure map (GL#1135).** New
+  `docs/guides/context-infrastructure.md` (sources → one pipeline → hybrid
+  retrieval → OKF/ctxpkg portability → addons) and
+  `docs/guides/dense-backends.md` documenting the previously undocumented
+  Qdrant dense backend (`LEANCTX_DENSE_BACKEND`, `LEANCTX_QDRANT_URL`/`_API_KEY`
+  /`_TIMEOUT_SECS`/`_COLLECTION_PREFIX`) next to the default in-process store.
+- **Portable OKF knowledge export/import** (`knowledge export --format okf` /
+  `knowledge import <dir>`, `ctx_knowledge`). Renders facts, patterns and typed
+  relations from one shared `KnowledgeSnapshot` to the vendor-neutral Open
+  Knowledge Format (git-diffable Markdown + YAML, relations as Markdown links) or
+  the signed `.ctxpkg` bundle. Round-trips byte-identically, accepts foreign OKF
+  bundles, and never leaves dangling relations. Fully local and free.
+- **Addon registry version-staleness check (`scripts/check-addon-versions.py`).**
+  Resolves every pinned upstream (PyPI / npm / NuGet / crates.io) against its
+  registry and reports drift as GitHub annotations. Wired into a dedicated,
+  non-blocking `Addon Registry Freshness` workflow (weekly + whenever the registry
+  changes) so a curated pin is never silently stale — and an upstream release
+  never breaks our own build.
+- **Cognee is now 1-click installable** (`addon add cognee`). It ships a published
+  MCP package (`cognee-mcp`) and runs fully local by default (SQLite + LanceDB +
+  Kuzu), so it fits the standard `uv tool install` bootstrap; the only runtime
+  requirement is an `LLM_API_KEY`, which is passed through via a reviewed
+  single-entry capability allowlist (all other host env stays scrubbed). The
+  remaining memory/graph listings (mem0, graphiti, zep, letta, claude-context)
+  stay directory-only because they need external infrastructure (a vector/graph
+  DB, or a managed account) that a one-command install cannot provision.
+- **`session new` aliases `session reset` (#653).** `lean-ctx session new` now clears
+  the active session just like `session reset`, matching the "start a new session"
+  mental model; covered by a CLI characterization test.
+- **Deterministic markdown compaction + progress-log folding in aggressive
+  compression (#655).** `.md`/`.markdown`/`.mdown` reads (and `.txt` files that
+  carry a real ATX heading) are structurally compacted: every heading survives,
+  fenced code blocks are atomic (kept verbatim or dropped whole, never split by
+  an omission marker), and body lines are ranked by an IDF-style scorer over
+  ordered token sets so the output is byte-stable (#498). Shell compression now
+  folds repetitive cargo/pytest/package-manager progress runs into stable
+  markers while still honoring the verbatim token cap — diagnostics stay
+  verbatim, oversized logs keep safety-needle preservation. Thanks @ousatov-ua!
+
+### Changed
+- **RMCP SDK upgraded `1.7 → 2.0` (MCP `2025-11-25` alignment, #656).** The MCP
+  server/client stack now builds on rmcp 2.0: `Content` is the spec-unified
+  `ContentBlock`, prompt roles use the shared `Role`, resources are plain
+  `Resource` structs, and progress notifications use the new constructor API.
+  Pulls in rmcp 2.0's security fixes (OAuth resource-spoofing/metadata-SSRF
+  hardening, streamable-HTTP session-leak fix) and unlocks 2025-11-25 protocol
+  features (tool icons, URL-mode elicitation, tasks) for future releases.
+  Protocol negotiation with older clients (`2025-06-18` and earlier) is
+  unchanged — verified end-to-end over stdio against the 1.7 baseline (identical
+  tool surface, identical negotiated protocol). Client-facing roots-based
+  project-root auto-detection stays in place (SEP-2577 deprecation
+  acknowledged upstream, still fully functional).
+- Refreshed bundled addon pins to current upstream: Headroom `0.27.0 → 0.28.0`,
+  Repomix `1.15.0 → 1.16.0`.
+
+### Fixed
+- **Zero-config first-session frictions closed after a fresh-install E2E audit
+  (#658).** A scripted fresh journey (isolated `$HOME`, real MCP handshake like
+  an editor) surfaced eight frictions; all are fixed with regression tests:
+  auto-findings now parse the pre-decoration tool output, so the injected
+  `--- AUTO CONTEXT ---` header can no longer become a junk `Read ---` finding
+  polluting session memory and every wakeup briefing (F1); `setup`/`onboard`
+  `--help` prints help instead of executing setup side effects (F2);
+  `ctx_call` with misspelled keys (`tool`/`args`/`params`) fails with the
+  exact fix instead of silently dispatching without arguments (F3);
+  `ctx_knowledge remember` derives a deterministic key slug when `key` is
+  omitted and accepts `content=` as value alias — matching what our own
+  injected instructions document (F4); Rust call edges inside macro bodies
+  (`println!`, `assert_eq!`, …) are extracted at the token level, so a fresh
+  Rust project no longer reports `0 edges` (F5); the project-overview header
+  surfaces persisted call-graph edges instead of contradicting `ctx_callgraph`
+  with `0 edges` (F6); bare `ctx_knowledge recall` lists recent facts instead
+  of erroring (F7); and `ctx_session show` is accepted as a synonym of
+  `status` (F8).
+- **MCP PathJail auto-corrects a stale markerless root instead of rejecting the
+  workspace (#649).** An MCP server launched by VS Code/WSL could adopt a
+  markerless client cwd (e.g. `/mnt/c/Users/<user>`) as its jail root; the first
+  absolute path into the real workspace on another mount was then rejected with
+  `path escapes project root`, breaking `ctx_compose` / `ctx_read` / `ctx_patch`.
+  `resolve_path` now reroots opt-in-free from such a markerless root to the
+  marker-bearing project derived from the requested path — the same rationale as
+  the agent-config-dir case (#580) — while a markerless target with no derivable
+  project stays blocked, so PathJail enforcement is unchanged.
+- **Local daemon IPC no longer 401s on tool calls (#651, #652).** The daemon writes
+  an auto-generated auth token, but the IPC client (Unix domain socket / Windows
+  named pipe) sends no `Authorization` header, so `/v1/tools/call` failed with 401
+  while `/health` passed. Router construction is now split: TCP HTTP keeps Bearer
+  auth, while local IPC serving disables the HTTP Bearer — the socket/pipe is already
+  a user-local OS boundary (Unix `0o600`, user-specific pipe name). TCP auth is
+  unchanged, a regression test guards the IPC path, and a security review found no
+  weakening of network auth.
+- **Codex stops reconstructing compressed shell output in chunks (#625, #654).** The
+  SessionStart hint now states plainly that compressed output is not exact evidence
+  and hard-requires re-running `lean-ctx raw "<exact command>"` for exact content,
+  forbidding chunked reconstruction (`cat`/`sed`/`head`/`tail`) and quoting
+  compressed output as exact — so Codex uses the reversible raw escape instead of
+  re-reading the compressed view piecemeal.
+- **Enterprise/OS TLS roots are honored by every HTTP client (#643).** All ureq
+  clients are now built through `core::http_client`, which injects
+  `RootCerts::PlatformVerifier` so requests trust the system/enterprise trust store
+  instead of only the bundled WebPKI roots — fixing `UnknownIssuer` failures behind
+  TLS-intercepting corporate proxies (updates, version check, embeddings download,
+  Qdrant, Datadog/FinOps export, LLM enhance, SSO/billing, web fetch, webhooks).
+- **Shell hook is quiet by default (#646).** The activation notice (`lean-ctx: ON …`)
+  no longer prints on every new interactive terminal; mode-change notices now route
+  through a `_lean_ctx_notice` helper that speaks only when `LEAN_CTX_DEBUG=1` (and
+  stdout is a TTY). `lean-ctx-status` still reports the current state on demand.
+- **`doctor` recognizes its own running dashboard on port 3333 (#644).** The
+  dashboard port check reported a conflict whenever port 3333 was busy — even when
+  the occupant was lean-ctx's own dashboard. It now probes `/api/version` on bind
+  failure and reads the port as healthy only when the response is the dashboard's
+  own version JSON; unrelated services still surface the conflict. Implemented by
+  strengthening and reusing the dashboard's existing `dashboard_responding` probe,
+  so the browser-open guard and `doctor` share one source of truth.
+- **Native Read no longer breaks Claude Code's read-before-write guard (#637).**
+  The `PreToolUse` redirect hook rewrote a native `Read` to a temp `.lctx` copy, so
+  Claude Code's Write/Edit read-before-write guard tracked the temp path and a
+  follow-up native Write/Edit to the *real* file failed with "File has not been read
+  yet" — worst in headless `claude -p`, with no supported off-switch (the hook
+  self-healed back into `settings.json`). A new `read_redirect = auto | on | off`
+  key (env `LEAN_CTX_READ_REDIRECT`) now governs the Read redirect and is evaluated
+  per hook fire, so it also covers headless runs and never fights the self-heal. The
+  default `auto` disables only the Read path-swap on hosts carrying that guard —
+  Claude Code / CodeBuddy, detected inside the hook via the `CLAUDE_PROJECT_DIR`
+  marker Claude Code exports to every hook subprocess (`CLAUDECODE` / `CODEBUDDY` are
+  honored too) — so native Read → Write/Edit works out of the box; the `ctx_read` MCP
+  tool and the Grep/Glob redirects keep compressing. `on` restores always-redirect;
+  `off` disables the Read redirect everywhere.
+
+## [3.8.18] — 2026-06-30
+
+### Added
+- **Compressed output is now visibly reversible — a first-class recovery layer on
+  every surface (#625).** Agents (Codex especially) were re-reading compressed
+  views line-by-line because nothing taught them how to get the raw bytes back —
+  the real cause behind "too compressed" reports. The escape hatch already
+  existed; it is now *discoverable* and *consistent*, with the non-MCP path
+  treated as first-class (many orgs forbid MCP):
+  - **Proactive (MCP rules v4).** A new `RECOVER` rule states the invariant —
+    compressed output is reversible, never re-read it line-by-line — and names the
+    recovery grammar: read the shown file path with any tool (no MCP), or
+    `ctx_read(mode=full|raw=true)`; `[Archived]`/tee/firewall handles →
+    `ctx_expand(id=…)`.
+  - **Reactive (ctx_read footer).** Every lossy `ctx_read` view ends with a
+    recovery footer that leads with the native file path, then the MCP fallbacks;
+    `full`/`raw` views carry no footer (deduped by mode). `ctx_read` gained an
+    explicit `raw` parameter (verbatim bytes, unframed escape hatch).
+  - **CLI / shell-hook surface.** `lean-ctx raw "<command>"` is now surfaced in
+    `help`, `help all` and the cheatsheet, so the raw path is reachable without
+    MCP.
+  - **Guaranteed raw on disk.** The default `tee_mode` is now `high-compression`:
+    whenever a view compresses heavily a verbatim copy is one `ctx_expand`/file
+    read away. The new `recovery_hints` config (`off|minimal|full`) tunes footer
+    verbosity. All recovery grammar (archive, firewall, spill, tee, ctx_shell)
+    flows through one `recovery` module, so every channel speaks the same
+    non-MCP-first sentence.
+
+### Fixed
+- **Source reads are no longer silently stripped of decorative separator comments,
+  which had broken follow-up edits (#628).** A file read carries lossless-only
+  intent — the model edits exactly what it sees — so the proxy never lossy-
+  compresses a recognized file read. The safety net for reads routed through an
+  *unrecognized* tool (the content heuristic) under-counted real source, though: a
+  decorative separator comment (`// ————`, `// ----`) and the call-shaped
+  scaffolding of a test file (`describe(…) {`, `});`) scored as non-code, so a
+  genuine `.test.ts` could be compressed on the wire and lose those separator
+  lines — after which `ctx_edit` failed on a whitespace mismatch against the
+  on-disk file. The heuristic now treats comment lines as neutral (they never
+  dilute the code ratio) and recognizes top-level call/closer shapes as code, so
+  real source is protected regardless of the originating tool. Regression tests
+  pin the verbatim `ctx_read` modes (`full`/`raw`/`lines:N-M`) to reproduce every
+  source line, including decorative comments.
+- **The Codex `lean-ctx -c` SessionStart hook is no longer a redundant nag (#625).**
+  Codex's `PreToolUse` hook already rewrites every rewritable Bash command to
+  `lean-ctx -c "<command>"` transparently (`permissionDecision: allow` +
+  `updatedInput`), so the old SessionStart line ("prefer `lean-ctx -c`") taught
+  nothing actionable — and crucially said nothing about getting *raw* output,
+  which is the one thing an agent cannot reach once a command is auto-compressed.
+  The hint now teaches the raw escape (`lean-ctx raw "<command>"`) and forbids the
+  small-chunk re-read anti-pattern. The raw spellings (`lean-ctx raw`,
+  `lean-ctx -c --raw`) are reentrance-safe: the rewrite hook leaves any command
+  starting with `lean-ctx ` untouched, so the agent always reaches verbatim bytes.
+- **`ctx_shell` now surfaces when a requested `cwd` was rejected by the project-root
+  jail (#629).** A `cwd` resolving outside the session's `project_root` is rejected
+  by the path jail and silently replaced with the project root — correct sandboxing
+  (it stops MCP clients escaping the workspace), but the *silent* fallback made the
+  parameter look ignored: a caller running `pwd && ls` in what they thought was dir
+  A actually ran in the root with no indication why. The jail is untouched;
+  `effective_cwd_checked` now returns the rejection reason and `ctx_shell` appends a
+  one-line `[cwd: …]` hint naming the reason and the directory it ran in instead.
+  Thanks to @mahmoudps for the report and the original patch (#630).
+- **`ctx_search` no longer returns a false `No matches` for content edited after
+  the index warmed (#624).** The resident trigram index treated itself as *fresh*
+  for a fixed 15 s TTL with no per-file change detection, so in hybrid setups
+  where edits are applied natively a freshly edited or created file was invisible
+  to trigram narrowing — for a word-literal query a missing trigram made the
+  candidate set provably empty, yielding `0 matches` even though the text was on
+  disk (and `get_fresh` even served a stale index past the TTL, so results
+  flipped between hits and misses depending on timing). Index freshness is now a
+  function of *corpus state*, not the clock: the build records a cheap,
+  order-independent signature over the eligible files' `(path, mtime, size)`, and
+  every lookup re-derives it via a stat-only walk that shares the build's exact
+  filter path — the resident index is served only when the signature matches the
+  live filesystem, otherwise lean-ctx walks accurately for that call and rebuilds
+  the index in the background. The optional `LEAN_CTX_SEARCH_INDEX_COALESCE_MS`
+  (default `0` = always verify) coalesces the stat-walk under bursty load on very
+  large indexed trees. `ctx_read` was never affected (it is mtime + MD5 verified).
+- **No-auth dashboard no longer 403s behind a port-remapped Docker publish (#623).** In
+  no-auth mode every `/api/*` request is gated on a `Host` allowlist built from the
+  *bound* port. When a container binds `0.0.0.0:3333` but Docker publishes it on a
+  different host port (`-p 60000:3333`), the browser reaches `127.0.0.1:60000` and
+  sends `Host: 127.0.0.1:60000` — the *published* port, which the bind-port
+  allowlist (`127.0.0.1:3333`) rejected, so every API call returned 403 and the
+  dashboard's cards failed to load. The gate now accepts any **loopback** host
+  (`127.0.0.0/8`, `localhost`, `::1`) on **any port**: a loopback `Host` can't be a
+  DNS-rebinding target, so this is safe, and cross-origin/CSRF is still blocked by
+  the `Sec-Fetch-Site`/`Origin` checks. Port-remapped loopback publishes now work
+  out of the box without `LEAN_CTX_DASHBOARD_ALLOWED_HOSTS`.
+
+## [3.8.17] — 2026-06-30
+
+### Fixed
+- **Codex Desktop remote-control pairing now works with the ChatGPT-subscription
+  opt-in (#597).** When `[proxy] codex_chatgpt_proxy` routes Codex through the
+  proxy, `chatgpt_base_url` points every `/backend-api/*` call at lean-ctx —
+  including Codex Desktop's remote-control pairing, which opens a **WebSocket** to
+  chatgpt.com. The `/backend-api` handler only spoke HTTP/SSE (it even stripped the
+  `Upgrade`/`Connection` headers), so the pairing handshake never completed and
+  remote control stayed broken. The proxy now detects a WebSocket upgrade on
+  `/backend-api` and tunnels it verbatim through to `wss://chatgpt.com`, replaying
+  the client's auth plus the shared Cloudflare clearance and relaying every frame
+  in both directions. Opening that `wss://` socket needs a process-default rustls
+  `CryptoProvider`; because the dependency tree pulls **both** aws-lc-rs (reqwest)
+  and ring (lettre/ureq), `tokio-tungstenite` couldn't auto-pick one and the TLS
+  handshake aborted — so the proxy now installs aws-lc-rs (reqwest's provider) at
+  startup. Model-turn compression on `/backend-api/codex/responses` is unchanged,
+  and the default native ChatGPT path (opt-in off) was never affected.
+  Verified end-to-end against the live ChatGPT backend: the remote-control enroll
+  + WebSocket now reach chatgpt.com identically whether Codex connects directly or
+  through the proxy (the proxy is fully transparent).
+
 ## [3.8.16] — 2026-06-30
 
 ### Added

@@ -31,8 +31,6 @@ pub struct ReadOutput {
     pub output_tokens: usize,
 }
 
-const COMPRESSED_HINT: &str = "[lean-ctx: compact view — nothing lost, full source on request]";
-
 /// SSOT via [`ReadMode`] (#528): the `map`/`signatures` summaries whose rendered
 /// body is stored per-file in `compressed_outputs`. Unknown modes are not
 /// cacheable, matching the prior `["map","signatures"].contains(mode)`.
@@ -102,16 +100,16 @@ fn compressed_cache_key(
     key
 }
 
+/// Appends the reactive recovery footer to a compressed view, leading with the
+/// MCP-free "read the path directly" route. Tier (`off|minimal|full`) and wording
+/// are resolved centrally in [`crate::core::recovery`] so `ctx_read`, the shell
+/// tee and archive handles all speak the same grammar. Only lossy/compressed
+/// modes reach this helper, so the footer is naturally absent from `full`/`raw`.
 fn append_compressed_hint(output: &str, file_path: &str) -> String {
-    if !crate::core::profiles::active_profile()
-        .output_hints
-        .compressed_hint()
-    {
-        return output.to_string();
+    match crate::core::recovery::read_footer(file_path) {
+        Some(footer) => format!("{output}\n{footer}"),
+        None => output.to_string(),
     }
-    format!(
-        "{output}\n{COMPRESSED_HINT}\n  full: ctx_read(\"{file_path}\", mode=\"full\")  ·  exact bytes: ctx_read(\"{file_path}\", raw=true)  ·  recover: ctx_retrieve(\"{file_path}\")"
-    )
 }
 
 /// Reads a file as UTF-8 with lossy fallback, enforcing binary detection and max read size limit.
@@ -161,10 +159,11 @@ pub fn read_file_lossy(path: &str) -> Result<String, std::io::Error> {
     use std::io::Read;
     let mut bytes = Vec::with_capacity(meta.len() as usize);
     std::io::BufReader::new(file).read_to_end(&mut bytes)?;
-    match String::from_utf8(bytes) {
-        Ok(s) => Ok(s),
-        Err(e) => Ok(String::from_utf8_lossy(e.as_bytes()).into_owned()),
-    }
+    let s = match String::from_utf8(bytes) {
+        Ok(s) => s,
+        Err(e) => String::from_utf8_lossy(e.as_bytes()).into_owned(),
+    };
+    Ok(crate::core::io_boundary::strip_utf8_bom(s))
 }
 
 /// Opens a file, retrying once after a brief pause on NotFound.

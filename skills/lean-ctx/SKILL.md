@@ -79,7 +79,8 @@ lean-ctx read <file> -m diff            # Only changed lines since last read
 
 Use `map` mode when you need to understand what a file does without reading every line.
 Use `signatures` mode when you need the API surface of a module (tree-sitter for 26 languages).
-Use `full` mode only when you will edit the file.
+Use `anchored` mode (MCP: `ctx_read(mode="anchored")`) when you will edit the file — it adds
+`N:hh|` anchors so `ctx_patch` can edit by reference without echoing old text.
 
 ## AI Tool Integration
 
@@ -122,7 +123,7 @@ If MCP is enabled for your IDE, the same capabilities are also available as MCP 
 
 ## Additional Intelligence Tools
 
-- `ctx_edit(path, old_string, new_string)` — search-and-replace file editing without native Read/Edit
+- `ctx_patch(path, ops)` — anchored editing: `N:hh|` line+hash anchors from `ctx_read(mode="anchored")`, batch-atomic, `op=create` for new files (`ctx_edit` is the legacy str-replace fallback)
 - `ctx_overview(task)` — task-relevant project map at session start
 - `ctx_preload(task)` — proactive context loader, caches task-relevant files
 - `ctx_semantic_search(query)` — BM25 code search by meaning across the project
@@ -134,6 +135,7 @@ If MCP is enabled for your IDE, the same capabilities are also available as MCP 
 ```bash
 lean-ctx sessions list          # List all CCP sessions
 lean-ctx sessions show          # Show latest session state
+lean-ctx sessions delete <id>   # Delete one saved session
 lean-ctx wrapped                # Weekly savings report card
 lean-ctx wrapped --month        # Monthly savings report card
 lean-ctx benchmark run          # Real project benchmark (terminal output)

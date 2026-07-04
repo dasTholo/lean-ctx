@@ -158,6 +158,232 @@ allow_custom_upstream = true
 > `LEAN_CTX_ALLOW_CUSTOM_UPSTREAM` set and a custom upstream configured — or set the
 > flag yourself with `lean-ctx config set proxy.allow_custom_upstream true`.
 
+**Universal provider registry — `[[proxy.providers]]`.** Beyond the four built-in
+provider routes, any OpenAI/Anthropic/Gemini-*compatible* endpoint (Azure AI
+Foundry, OpenRouter, Groq, vLLM, Ollama, a corporate gateway…) can be declared as
+data — no code change. Each entry is served under `/providers/{id}/...` with full
+compression, introspection and usage metering for its wire shape:
+
+```toml
+[[proxy.providers]]
+id = "foundry"                                          # route: /providers/foundry/...
+shape = "openai"                                        # anthropic | openai | gemini
+base_url = "https://acme.services.ai.azure.com"
+api_key_env = "FOUNDRY_API_KEY"                         # optional: gateway-held key
+
+[[proxy.providers]]
+id = "openrouter"
+shape = "openai"
+base_url = "https://openrouter.ai/api"
+
+[[proxy.providers]]
+id = "local"
+shape = "openai"
+base_url = "http://host.docker.internal:11434"          # gateway container → host Ollama
+local = true                                            # bill at the shadow rate
+```
+
+- **Shape ≠ identity.** The proxy speaks three wire dialects; any number of
+  provider identities map onto them. A declared HTTPS entry is itself the
+  custom-host opt-in (no separate `allow_custom_upstream` needed); plaintext HTTP
+  still requires loopback or `allow_insecure_http_upstream`.
+- **`api_key_env` set** → the gateway holds the upstream credential: every caller
+  credential header is stripped and replaced (callers authenticate with the
+  lean-ctx Bearer token and never see the provider key). Unset → the caller's own
+  credentials are forwarded verbatim, exactly like the built-ins.
+- **`local`** marks the endpoint as local inference for metering: usage is booked
+  at the transparent `local_shadow_rate` instead of cloud list prices. Unset, it
+  is derived from the URL (loopback hosts count as local) — declare it explicitly
+  when the endpoint is local but not loopback, e.g. the containerized gateway
+  reaching the host's Ollama via `host.docker.internal`, or an in-cluster vLLM
+  service. `local = false` likewise pins a loopback-tunneled cloud endpoint to
+  list-price billing.
+- Invalid entries are logged and skipped; the registry is hot-reloaded from
+  `config.toml` like every upstream. Active entries appear on `/status` under
+  `providers`.
+
+**Gateway mode — serving a whole org from one host** (`proxy_bind_host`). By
+default the proxy binds `127.0.0.1` (nothing changes for local installs). Binding
+a non-loopback address turns on gateway hardening **by construction**:
+
+```toml
+proxy_bind_host = "0.0.0.0"                       # env: LEAN_CTX_PROXY_BIND_HOST
+proxy_allowed_hosts = ["ai-gateway.example.com"]  # Host-header allowlist (DNS rebinding)
+proxy_max_rps = 100                               # optional; gateway default: 50 rps
+```
+
+- The provider-API-key auth fallback is **hard-disabled** (its justification is
+  strictly "loopback only") — every caller must send `Authorization: Bearer
+  <LEAN_CTX_PROXY_TOKEN>`, regardless of `proxy_require_token`.
+- The Host allowlist extends the loopback-only guard; loopback names always pass.
+- A token-bucket rate limit activates (default 50 rps, burst 100; `proxy_max_rps`
+  overrides, `0` disables). `/health` is exempt for orchestrator liveness probes.
+- An unparseable bind value falls back to `127.0.0.1` — a typo can only ever
+  narrow exposure, never open the listener.
+
+**Per-person gateway keys — metering identity** (`gateway-keys.toml`). An org
+gateway can issue one bearer key per person instead of sharing the proxy token.
+The file lives at `<config_dir>/gateway-keys.toml` (override:
+`LEAN_CTX_GATEWAY_KEYS`), holds **only SHA-256 hashes** of the keys, and is
+loaded at proxy startup (rotation = restart, the standard secret-mount flow; a
+malformed file fails the start loudly):
+
+```toml
+[[keys]]
+sha256_hex = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+person     = "alice@example.com"
+team       = "platform"          # optional
+default_project = "billing"      # optional
+```
+
+- A request whose `Authorization: Bearer <key>` hash matches an entry
+  authenticates **and** tags the turn's measured usage with
+  `person`/`team`/`project` — the basis for per-person/per-project metering.
+- The `x-leanctx-project: <name>` request header overrides the key's
+  `default_project` per request (also works without a key, for solo setups). It
+  is an internal gateway header and is never forwarded upstream.
+- Compute a key's hash with `shasum -a 256` (or `sha256sum`):
+  `printf '%s' "gk-alice-secret" | shasum -a 256`.
+
+**Active routing — `[proxy.routing]`.** The gateway can rewrite the requested
+model in-flight: exact **aliases** (stable org names, transparent swaps) and
+intent-based **tier downgrades** (the last user message is classified
+`fast|standard|premium`; the tier picks a target). Targets are `"model"` (same
+upstream) or `"provider:model"` (re-target to a `[[proxy.providers]]` entry or a
+built-in `anthropic|openai|gemini` — same wire shape only; cross-shape
+translation is not in M1):
+
+```toml
+[proxy.routing]
+enabled = true
+
+[proxy.routing.aliases]
+"acme/fast" = "foundry:Phi-4-mini-instruct"   # stable org-level model name
+"claude-opus-4-5" = "claude-sonnet-4-5"       # transparent downgrade, same upstream
+
+[proxy.routing.tiers]
+fast     = "foundry:Phi-4-mini-instruct"      # explore/debug-style requests
+standard = ""                                 # "" / absent = keep requested model
+premium  = ""                                 # premium work is never auto-downgraded
+```
+
+- **Fail-open by construction:** any miss (rule/classification/unknown provider/
+  shape mismatch) forwards the request unchanged — a routing bug can cost
+  savings, never availability. Aliases win over tiers.
+- Routed usage events carry `routed_from` (the originally requested model) and
+  the serving provider, so the savings ledger can prove what the router did.
+- Gemini (model in URL path) and the ChatGPT/Codex OAuth route stay passthrough
+  in M1.
+
+**Counterfactual baseline — `[proxy.baseline]`.** The parameters that make
+avoided-cost claims auditable. Frozen per deployment (contract annex), not
+tunable at runtime by the vendor:
+
+```toml
+[proxy.baseline]
+reference_model = "claude-opus-4.5"   # what the org would have used without lean-ctx
+local_shadow_rate_per_mtok = 0.25     # USD/MTok booked for local/loopback inference
+```
+
+- Every usage event stores `reference_cost_usd` = the request's **uncompressed**
+  input tokens priced at the reference model's input rate — the counterfactual
+  the ledger settles against. Unset `reference_model` = no counterfactual is
+  claimed.
+- `is_local` traffic books the **shadow rate** as its actual cost (default 0.25
+  USD/MTok, never 0): local compute is free of provider fees, not of hardware
+  and power — keeping "savings vs. local" honest instead of infinite.
+
+**Self-hosted org gateway — `lean-ctx gateway serve`** (build with
+`--features gateway-server`). One process bundling the hardened proxy, the
+Postgres usage store and an admin listener:
+
+```bash
+DATABASE_URL="postgres://gateway@db/leanctx" \
+LEAN_CTX_GATEWAY_ADMIN_TOKEN="$(openssl rand -hex 24)" \
+lean-ctx gateway serve --port=8484 --admin-port=8485
+```
+
+- **Proxy** (`--port`): the exposed surface — all `proxy_bind_host` /
+  allowlist / Bearer / rate-limit rules above apply unchanged.
+- **Usage store** (`DATABASE_URL`): every measured turn becomes a
+  `usage_events` row (person/team/project × provider/model × tokens/cost +
+  baseline fields). Schema is applied idempotently at start. **Fail-open:** an
+  unreachable Postgres degrades metering (events dropped and counted), never
+  live LLM traffic; without `DATABASE_URL` the store is simply off.
+  `?sslmode=require` in the URL activates TLS (rustls, webpki roots —
+  certificate *and* hostname always verified); required for managed Postgres
+  (Azure/AWS/GCP). Plain TCP stays available for in-cluster databases.
+- **Admin listener** (`--admin-port`, default proxy port + 1): binds
+  `127.0.0.1` by default — widening is an explicit decision via
+  `[gateway_server].admin_bind_host` (or `LEAN_CTX_GATEWAY_ADMIN_BIND_HOST`);
+  invalid values fall back to loopback. Keep it cluster-internal (no ingress).
+  Requires `LEAN_CTX_GATEWAY_ADMIN_TOKEN` (env-only, like all tokens); without
+  it only the proxy runs. Every response carries hardened headers (CSP
+  `default-src 'self'`, `frame-ancestors 'none'`, `nosniff`, `no-referrer`;
+  `Cache-Control: no-store` on APIs); failed auth is throttled per source IP
+  (10/min → 429) and audit-logged (IP + path, SIEM-collectable).
+  - `GET /` — the **Gateway Console**: an embedded admin dashboard (login with
+    the admin token; kept in `sessionStorage` only). Org overview, spend/savings
+    trend, sortable breakdowns by person/project/model/provider with one-click
+    CSV export, provider credential status, drop counter, seat projection,
+    live "last updated" indicator. No CDN, no build step — served from the
+    binary.
+  - `GET /api/admin/usage?from=<ISO>&to=<ISO>` — person × project × model ×
+    provider breakdown with cost/savings sums, totals and the seat projection
+    (window defaults to the last 30 days).
+  - `GET /api/admin/timeseries?from=<ISO>&to=<ISO>` — per-UTC-day
+    requests/cost/saved/reference series (gapless; empty days are explicit
+    zeros) for trend charts.
+  - `GET /api/admin/status` — live health/config card: version, uptime, store
+    connectivity (probed per request), drop counter, provider registry with
+    credential presence, routing/baseline posture.
+  - `GET /metrics` — Prometheus text: per-model requests/tokens/cost, verified
+    ledger savings (total + per mechanism), dropped-event counter.
+  - `GET /healthz` — unauthenticated liveness.
+
+```toml
+[gateway_server]
+seats     = 800                     # projection divisor ("if all seats saved like active users")
+org_label = "Acme AI Gateway"       # display name on cockpit + reports
+# Admin listener bind (default 127.0.0.1 — secure by default). Containers set
+# "0.0.0.0" so the pod/compose port mapping reaches it; exposure then stays
+# governed by the mapping/Service, not the bind.
+admin_bind_host = "127.0.0.1"
+# admin_url: set on *client* machines to show the org-wide breakdown in their
+# cockpit (ROI view) via GET /api/usage-breakdown; without it the cockpit shows
+# the local snapshot of this machine only.
+admin_url = "https://gateway.internal:8485"
+```
+
+**Gateway lifecycle CLI** (all under `lean-ctx gateway …`, `gateway-server`
+builds):
+
+```bash
+lean-ctx gateway init pilot --org="Acme AG" --seats=800 \
+  --reference-model=claude-opus-4.5 --person=alice@acme.com   # plug-and-play instance
+cd pilot && docker compose up -d                              # gateway + Postgres 17
+lean-ctx gateway doctor --dir .                               # go-live preflight (exit≠0 on FAIL)
+lean-ctx gateway keys add --person=bob@acme.com --team=core   # key shown once, hash stored
+lean-ctx gateway keys list && lean-ctx gateway keys revoke --person=bob@acme.com
+lean-ctx gateway report --out=q3.html                         # printable value report (usage_events)
+```
+
+- `init` generates `config.toml`, `.env` (0600; proxy/admin tokens + Postgres
+  password + `DATABASE_URL`), `docker-compose.yml` (healthchecks, restart
+  policies, admin port bound to `127.0.0.1`), `gateway-keys.toml`, `.gitignore`
+  and a README — and never overwrites an existing instance.
+- `doctor` checks config posture (open bind without required tokens = FAIL),
+  security posture (admin exposure, upstream-TLS and Postgres-TLS stance),
+  key-set validity, token presence/strength, Postgres connectivity
+  (`SELECT 1`), provider `api_key_env` presence and live ports — each line with
+  a concrete fix command.
+- **Upstream resilience:** the proxy retries exactly once (150–350 ms jittered
+  backoff) on connect errors and on 429/502/503 — statuses where the upstream
+  provably did not process the request. 500/504 and mid-stream failures are
+  never retried. On a failed retry the *original* upstream response is passed
+  through. On SIGTERM the gateway finishes in-flight requests and drains the
+  usage-event queue (bounded, 5 s) before exit.
+
 **Live upstream — `config.toml` is the source of truth for a running proxy**
 ([#449](https://github.com/yvgude/lean-ctx/issues/449)). A long-lived proxy
 (LaunchAgent / systemd / IDE-spawned) re-reads its upstreams from `config.toml`

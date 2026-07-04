@@ -129,7 +129,7 @@ Your AI agent reads files and runs commands. LeanCTX compresses both automatical
 - **Target density** (`density:0.4`): SDE-style budget compression — keeps the highest-entropy lines until ~40% of the original tokens remain, deterministic
 - **JIT disclosure**: `signatures` carries line spans and points at `lines:N-M` for targeted expansion — outline first, bodies on demand
 - **Shell output**: 95+ shell-output patterns compress git, npm, cargo, docker, kubectl, terraform and more (270 passthrough rules)
-- **Tree-sitter AST**: structural understanding for 26 languages — not just text compression
+- **Tree-sitter AST**: structural understanding for 27 languages — not just text compression
 - **Reversible by design (CCR)**: compression never *discards* content — pruned or truncated payloads move to a content-addressed store with a deterministic handle, so the model can pull the original bytes back on demand via `ctx_expand`, `ctx_retrieve`, an in-band marker, or `GET /v1/references/{id}`. [Five recovery paths →](docs/comparisons/vs-headroom.md#reversibility)
 
 ### 2. Routing — the right fidelity per read
@@ -173,6 +173,28 @@ Performance is accuracy, not just speed. You stay in control of the window.
 - **HTTP mode**: `lean-ctx serve` for Streamable HTTP MCP + `/v1/tools/call` (used by the Cookbook + SDK)
 
 </details>
+
+## Addons — run the ecosystem through one gateway
+
+You don't have to choose between LeanCTX and the other context tools you already
+like. An **addon** wraps any MCP server in a tiny `lean-ctx-addon.toml` manifest;
+LeanCTX runs it behind its gateway with one command, then treats what it returns
+like your own reads instead of just proxying it.
+
+```bash
+lean-ctx addon search memory   # browse the registry by category
+lean-ctx addon add headroom    # installs the upstream package + wires the MCP server, on add
+lean-ctx addon list            # what's wired into your gateway
+```
+
+- **One command to add** — `addon add <name>` installs the upstream package via its native manager (uv, pip, cargo, npm, brew, dotnet) and wires the MCP server into your gateway. No fork, no recompile.
+- **Folded in, not just proxied** — opt-in post-processing runs addon output through the same pipeline as your code: compress to a budget, spill oversized blobs to a `ctx_expand` handle, index into BM25 / graph / knowledge. Typed adapters route specific tools straight into `ctx_expand`, `ctx_callgraph` and `ctx_knowledge`.
+- **Untrusted by default** — every addon's output is scrubbed for secrets and tagged untrusted before it reaches the model. Always on, not a flag.
+- **You stay in control** — pin a machine or fleet to verified-only, an allowlist, or off entirely via one `[addons]` policy a single repo can't override.
+
+The registry spans compression (Headroom, Sophon), code intelligence (Repomix,
+Serena), memory (Mem0, Cognee, Letta) and reasoning (Sequential Thinking). See the
+**[addon guide](docs/guides/addons.md)** or [browse them all](https://leanctx.com/addons/).
 
 ## Where it's going
 
@@ -551,10 +573,18 @@ guessed.
 
 | Read mode | Compression | Tokens (50 files) | Quality |
 |---|---:|---:|---:|
-| Raw read | 0% | 457.6K | 100% |
-| `map` | **97.7%** | 8.9K | 83% |
-| `signatures` | **97.0%** | 11.8K | 92% |
+| Raw read | 0% | 533.2K | 100% |
+| `map` | **98.1%** | 8.0K | 78% |
+| `signatures` | **96.7%** | 14.0K | 96% |
 | Cached re-read | ~99.99% | ~13 tok | 100% |
+
+lean-ctx's **own cost is measured too**: the fixed per-session footprint it
+injects (advertised tool schemas + MCP instructions) is ~2.1K tokens and
+CI-gated via `lean-ctx doctor overhead --gate`, so it can only shrink. And the
+long-lived proxy rail has a deterministic self-verify —
+`lean-ctx benchmark dual-arm --json` replays a 15-turn session and prices it per
+model (digest `f5ed145e61ce3689`, 99.4% input-side saving on cache-priced rails;
+methodology: [bench/agent-task/r2](bench/agent-task/r2/README.md)).
 
 Accuracy isn't a vibe: the lossy stages are **CI-gated**. A model-free A/B gate
 proves the JSON crusher keeps *every* gold answer while cutting tokens, and proxy
@@ -571,7 +601,7 @@ committed recorded subset that blocks CI on any regression.
 
 ## By the numbers
 
-- **2,900+ GitHub stars** — and counting
+- **3,000+ GitHub stars** — and counting
 - **280+ forks** — active community contributions
 - **200+ releases** — shipped near-daily since launch
 - **30+ supported AI coding agents** — broadest MCP compatibility
@@ -601,6 +631,7 @@ committed recorded subset that blocks CI on any regression.
 - **Optional anonymous stats sharing** (opt-in during setup)
 - **Disableable update check** (config `update_check_disabled = true` or `LEAN_CTX_NO_UPDATE_CHECK=1`)
 - **40+ security hardening fixes** in v3.5.16 (path traversal, injection, CSPRNG, CSP, resource limits — [details](CHANGELOG.md))
+- **Context Governance Benchmark self-assessment**: graded **C2 — Managed** against the 32-control [CGB v1.0-draft](https://github.com/yvgude/context-governance-benchmark) spec, gaps declared — [docs/compliance/cgb-self-assessment.md](docs/compliance/cgb-self-assessment.md)
 - Runs locally; your code never leaves your machine unless you explicitly enable cloud sync
 
 See [SECURITY.md](SECURITY.md).

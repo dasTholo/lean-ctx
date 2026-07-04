@@ -807,6 +807,14 @@ export default async function (pi: ExtensionAPI) {
         lines.push(`Config: ${PI_CONFIG.configPath}`);
       }
       lines.push(`Mode: ${PI_MODE}`);
+      // The bridge advertises whatever surface this profile requests from the
+      // engine. The lean default includes the anchored editor ctx_patch (#1008);
+      // everything else lives behind ctx_call — point users at the power switch
+      // so nothing looks "missing".
+      const profileHint = PI_CONFIG.toolProfile === "lean"
+        ? ' (lazy core incl. ctx_patch + ctx_call gateway — set "toolProfile": "power" for ctx_edit & the full surface)'
+        : "";
+      lines.push(`Tool profile: ${PI_CONFIG.toolProfile}${profileHint}`);
       if (!enableMcpBridge) {
         lines.push("MCP bridge: disabled (CLI-first)");
         lines.push('  Enable: LEAN_CTX_PI_ENABLE_MCP=1 or "enableMcp": true in config.json, then restart Pi');

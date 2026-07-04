@@ -405,6 +405,22 @@ fn rewrite_candidate_returns_none_for_existing_lean_ctx_command() {
 }
 
 #[test]
+fn rewrite_candidate_leaves_raw_escape_hatch_untouched() {
+    // GH #625: the raw escape hatch the SessionStart hint teaches must not be
+    // re-wrapped back into a compressing `lean-ctx -c "…"`, or the agent could
+    // never actually reach raw bytes. Both spellings already start with
+    // `lean-ctx `, so the rewrite hook leaves them as-is (reentrance-safe).
+    assert_eq!(
+        rewrite_candidate("lean-ctx raw \"git diff\"", "lean-ctx"),
+        None
+    );
+    assert_eq!(
+        rewrite_candidate("lean-ctx -c --raw \"git diff\"", "lean-ctx"),
+        None
+    );
+}
+
+#[test]
 fn rewrite_candidate_wraps_single_command() {
     assert_eq!(
         rewrite_candidate("git status", "lean-ctx"),
@@ -838,6 +854,43 @@ fn session_start_uses_codex_additional_context_channel() {
 }
 
 #[test]
+fn codex_session_start_hint_teaches_the_raw_escape_hatch() {
+    // GH #625: the PreToolUse hook already auto-compresses every Bash command, so
+    // the SessionStart hint's job is to teach the *raw* escape — otherwise agents
+    // re-read the compressed view in small chunks (the shell-side "too compressed"
+    // complaint). It must state that compressed output is not exact evidence, name
+    // the concrete raw CLI (`lean-ctx raw "<exact command>"`), and forbid the
+    // chunked-read anti-pattern; the redundant "prefer `lean-ctx -c`" coaching is
+    // gone (compression is automatic).
+    let hint = CODEX_SHELL_RECOVERY_HINT;
+    assert!(
+        hint.contains("lean-ctx raw \"<exact command>\""),
+        "names the raw CLI: {hint}"
+    );
+    assert!(
+        hint.contains("is not exact evidence"),
+        "states compressed output is not exact evidence: {hint}"
+    );
+    assert!(
+        hint.contains("chunked reads"),
+        "forbids chunk-based reconstruction: {hint}"
+    );
+    assert!(
+        !hint.contains("prefer `lean-ctx -c`"),
+        "drops the redundant prefer-c coaching (auto-rewrite handles it): {hint}"
+    );
+    // The hint must survive the additionalContext JSON channel byte-for-byte.
+    let json = session_start_additional_context_json(hint);
+    let v: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+    assert_eq!(
+        v["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap_or_default(),
+        hint
+    );
+}
+
+#[test]
 fn is_shell_tool_matches_powershell_variants() {
     // #556: Copilot CLI's `powershell` shell tool was bypassing rewrite on
     // Windows because it was not recognised as a shell tool.
@@ -964,6 +1017,62 @@ fn redirect_output_omits_additional_context_without_shadow() {
     assert!(
         p["hookSpecificOutput"].get("additionalContext").is_none(),
         "no shadow note => no additionalContext key"
+    );
+}
+
+#[test]
+fn redirect_read_passes_through_when_disabled_by_config() {
+    // #637: read_redirect=off must make a native Read fall through untouched —
+    // the exact dual-allow response, with no path-swap to a temp copy — so the
+    // host's read-before-write guard tracks the real file and Write/Edit works.
+    let _lock = crate::core::data_dir::test_env_lock();
+    crate::test_env::remove_var("CLAUDE_PROJECT_DIR");
+    crate::test_env::remove_var("CLAUDECODE");
+    crate::test_env::remove_var("CODEBUDDY");
+    crate::test_env::set_var("LEAN_CTX_READ_REDIRECT", "off");
+
+    let tool_input = serde_json::json!({ "file_path": "/repo/src/main.rs" });
+    let out = redirect_read(Some(&tool_input));
+
+    crate::test_env::remove_var("LEAN_CTX_READ_REDIRECT");
+
+    assert_eq!(
+        out,
+        build_dual_allow_output(),
+        "disabled Read redirect must emit the plain dual-allow passthrough"
+    );
+    assert!(
+        !out.contains(".lctx") && !out.contains("updatedInput") && !out.contains("modifiedArgs"),
+        "disabled Read redirect must not rewrite the path to a temp copy: {out}"
+    );
+}
+
+#[test]
+fn redirect_read_auto_passes_through_under_claude_code() {
+    // #637: with the default `auto`, the marker Claude Code exports to hook
+    // subprocesses — CLAUDE_PROJECT_DIR — must disable the Read path-swap out of the
+    // box, no config edit. This is exactly what fixes headless `claude -p`
+    // (CLAUDECODE is NOT propagated to hook children, so it cannot be the signal).
+    let _lock = crate::core::data_dir::test_env_lock();
+    crate::test_env::set_var("LEAN_CTX_READ_REDIRECT", "auto");
+    crate::test_env::remove_var("CLAUDECODE");
+    crate::test_env::remove_var("CODEBUDDY");
+    crate::test_env::set_var("CLAUDE_PROJECT_DIR", "/repo");
+
+    let tool_input = serde_json::json!({ "file_path": "/repo/src/main.rs" });
+    let out = redirect_read(Some(&tool_input));
+
+    crate::test_env::remove_var("CLAUDE_PROJECT_DIR");
+    crate::test_env::remove_var("LEAN_CTX_READ_REDIRECT");
+
+    assert_eq!(
+        out,
+        build_dual_allow_output(),
+        "auto must disable the Read redirect under Claude Code hooks (#637)"
+    );
+    assert!(
+        !out.contains(".lctx"),
+        "no temp path-swap under Claude Code: {out}"
     );
 }
 
