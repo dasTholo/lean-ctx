@@ -17,13 +17,23 @@ fn ctx_read_lmd_md_returns_raw_source() {
     // No addon installed (default CI state) → a read of a `.lmd.md` must surface
     // the raw source, never an error or a half-rendered document. We assert the
     // marker survives the read.
-    let dir = std::env::temp_dir().join("delegation_raw_e2e");
-    std::fs::create_dir_all(&dir).unwrap();
-    let f = dir.join("d.lmd.md");
+    //
+    // Hermetic isolation: a direct CLI `read` caches by design (read_cmd.rs), and
+    // the persistent stub index lives under `LEAN_CTX_DATA_DIR`. If the fixture
+    // path (or a prior run/retry on the same runner) already seeded that index,
+    // the read returns an `[unchanged …]` cache stub instead of the body and this
+    // assertion breaks — an artefact of test hygiene, not of `.lmd.md` handling.
+    // So we give the spawned binary a fresh, private data dir and force `--fresh`,
+    // making this an unconditional first read that never depends on nor pollutes
+    // the real store.
+    let fixture = tempfile::tempdir().expect("fixture dir");
+    let data_dir = tempfile::tempdir().expect("isolated LEAN_CTX_DATA_DIR");
+    let f = fixture.path().join("d.lmd.md");
     std::fs::write(&f, "@date\nRAW_DELEGATION_MARKER\n").unwrap();
 
     let out = Command::new(LEAN_CTX_BIN)
-        .args(["read", f.to_str().unwrap(), "--mode", "full"])
+        .env("LEAN_CTX_DATA_DIR", data_dir.path())
+        .args(["read", f.to_str().unwrap(), "--mode", "full", "--fresh"])
         .output()
         .expect("lean-ctx read");
     let text = String::from_utf8_lossy(&out.stdout);
