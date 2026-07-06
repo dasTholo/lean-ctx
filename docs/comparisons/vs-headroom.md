@@ -1,6 +1,6 @@
 # lean-ctx vs Headroom
 
-> **Last updated:** June 2026 | Both expose a drop-in `compress(messages, model)`,
+> **Last updated:** July 2026 | Both expose a drop-in `compress(messages, model)`,
 > but that shared surface hides the real difference: Headroom is a stateless
 > compression *library*; lean-ctx is a stateful context-engineering *layer* that
 > remembers, proves, and (next) replays the context it shapes.
@@ -53,6 +53,8 @@ stateless library has nothing to anchor such a timeline to.
 | Deterministic / prompt-cache safe | Yes (#498, CI-guarded) | Not stated |
 | Vercel AI SDK middleware | `leanCtxMiddleware` / `withLeanCtx` | `headroomMiddleware` / `withHeadroom` |
 | LiteLLM hook | `LeanCtxLiteLLMHandler` | `HeadroomCallback` |
+| LiteLLM proxy guardrail (`pre_call` sidecar) | Yes — `/v1/compress` speaks the guardrail wire contract (#700) | Yes — native `guardrail: headroom` (July 2026) |
+| LiteLLM CCR agentic loop (`hash=` markers + `/v1/retrieve/{hash}`) | Yes — regex-locked contract test (#702) | Yes (native) |
 | LangChain | `compress_messages` + retriever | wrap model |
 | ML / learned compression | No (deterministic by design) | Yes (Kompress, torch) |
 | JSON array crusher (row dedup) | `json_crush` — lossless + opt-in lossy with CCR, deterministic (#935) | Smart Crusher (statistical) |
@@ -150,7 +152,11 @@ agent case — compress far more. See [`bench/compress/`](../../bench/compress/R
 
 ## Where Headroom leads
 
-- **Momentum & mindshare** — a fast-moving, popular library with broad adoption.
+- **Momentum & mindshare** — a fast-moving, popular library with broad adoption,
+  amplified by the **native LiteLLM guardrail** (July 2026): `guardrail: headroom`
+  ships in LiteLLM ≥ v1.92, giving Headroom first-mover distribution on every
+  LiteLLM gateway. (lean-ctx speaks the same sidecar wire contract — see below —
+  so the channel is open to both; the mindshare is theirs.)
 - **Learned compression** — the ML (Kompress) path can beat rule-based squeezing
   on free-form prose.
 - **More framework wrappers out of the box** — Agno, Strands, agent-wrap commands.
@@ -182,6 +188,12 @@ agent case — compress far more. See [`bench/compress/`](../../bench/compress/R
 - Want a pure-Python (or Node) library with no separate daemon for the inline path
 - Need learned/ML prose compression and accept a `torch` dependency
 - Use Agno / Strands or want the widest set of prebuilt framework wrappers
+
+Running a LiteLLM gateway is **not** by itself a reason to pick either: the
+guardrail's `api_base` can point at a lean-ctx daemon just as well (deterministic,
+prompt-cache-safe output — see the
+[compress() SDK cookbook](../guides/compress-sdk.md#litellm-proxy-guardrail-zero-code-gateway-side)),
+which makes a one-URL A/B between the two trivially easy.
 
 ### Choose lean-ctx if you...
 - Need deterministic, prompt-cache-preserving compression

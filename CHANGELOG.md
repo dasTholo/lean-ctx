@@ -3,7 +3,21 @@
 All notable changes to lean-ctx are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [3.9.1] — 2026-07-05
+
+### Fixed
+- **`gateway keys add` corrupted the key file scaffolded by `gateway init`
+  (GH #716).** `init` writes the canonical empty set `keys = []`; `keys add`
+  appended a `[[keys]]` table to that body, leaving BOTH representations in
+  the file — invalid TOML (`duplicate key`), so the documented onboarding flow
+  (`init` → `keys add`) failed on first use, and a full `revoke` re-armed the
+  same trap. `add` now strips the empty-array form before appending, and all
+  key-file writers (`add`/`rotate`/`revoke`) validate the assembled body
+  **before** the atomic swap — a bad assembly can never replace a good file on
+  disk. Regression tests cover init → add → revoke-to-empty → add and verify
+  a poisoned file is refused byte-for-byte untouched.
+
+## [3.9.0] — 2026-07-05
 
 ### Changed
 - **The shell hook is now transparent in plain human terminals: default
@@ -22,6 +36,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   telemetry, not human feedback. Thanks @DerPate for the precise report.
 
 ### Added
+- **`/v1/compress` is wire-compatible with LiteLLM's prompt-compression
+  guardrail (GH #700).** LiteLLM ≥ v1.92 can call a compression sidecar during
+  `pre_call` (`guardrail: headroom`); the response now carries the
+  `tokens_before` / `tokens_after` / `compression_ratio` telemetry fields that
+  guardrail logs, alongside the existing richer `stats` block. Point the
+  guardrail's `api_base` at the lean-ctx daemon and every request through a
+  LiteLLM gateway is compressed deterministically (prompt-cache-safe, #498) —
+  no client change, including Claude Code via `ANTHROPIC_BASE_URL`. Cookbook:
+  `docs/guides/compress-sdk.md`.
+- **Provider-verified savings receipts (GH #701, opt-in
+  `proxy.counterfactual_metering`).** Wire savings were estimated (bytes/4 or
+  local tokenizer). With metering on, every request the proxy rewrites also
+  fires Anthropic's free `count_tokens` endpoint with the original,
+  uncompressed body — concurrently with the real forward, spawned detached so
+  it can never delay, mutate or fail the request — and pairs the
+  provider-counted "would have billed N" with the same response's actually
+  billed usage. Same request, same moment: no traffic-mix confound
+  (methodology adopted from pxpipe's counterfactual metering). `/status` gains
+  a `verified_savings` block and `lean-ctx proxy status` a `Verified:` line
+  beside the estimate; per-model pairs persist across restarts in
+  `proxy_usage.json` (pre-#701 files load unchanged). Net-negative results are
+  reported signed, never clamped. Anthropic only (no free counting endpoint
+  elsewhere); probe failures silently degrade the row to the estimate.
+- **CCR round-trips through LiteLLM's agentic loop (GH #702).** A lossy
+  `/v1/compress` rewrite now advertises its retrieval hash in the guardrail's
+  regex-locked `hash=<24-hex>` form, and the new `GET /v1/retrieve/{hash}`
+  endpoint resolves it from the content-addressed tee store
+  (`{"original_content": …}`). LiteLLM (BerriAI/litellm#31681) injects its
+  retrieve tool on seeing the marker, validates the hash per call id, and
+  replays the model with the verbatim original — compression behind a LiteLLM
+  gateway is reversible end-to-end, with zero lean-ctx-specific client code.
+  The marker shape is pinned by a contract test so drift fails CI; the hash is
+  a pure function of the content, so stubs stay byte-stable (#498). The
+  existing local handles (`<lc_expand:…>`, tee paths, `/v1/references/{id}`)
+  are unchanged.
 - **Persistent per-extension grammar telemetry (GH #690 Phase 2 groundwork).**
   The tiering cut needs to know which of the ~27 static tree-sitter grammars
   actually earn their binary bytes, but the only signal was a pair of
@@ -32,6 +81,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   top extensions in its SIGNATURE BACKEND section.
 
 ### Fixed
+- **Multi-window MCP starts can no longer trip the crash-loop backoff
+  (GH #694 follow-up — thanks @ITFinesse).** The crash-loop guard counts
+  server starts in a 60s window, but a healthy burst — N editor windows each
+  spawning a server, plus the client's own retries while a slow host
+  initializes — could cross the threshold with zero crashes. The resulting
+  pre-handshake backoff sleep (up to 30s) then *caused* the very
+  "Waiting for server to respond to `initialize` request" timeouts it exists
+  to prevent, wedging the second window. A completed MCP handshake now clears
+  the start history (a handshake proves binary + config are healthy; true
+  crash loops die before it), so only genuinely crashing servers back off.
+- **VS Code Insiders is now a first-class MCP target (GH #694 follow-up —
+  thanks @ITFinesse).** Insiders keeps a fully separate profile dir
+  (`Code - Insiders/User`), so registering lean-ctx in stable's
+  `Code/User/mcp.json` left Insiders with an empty `MCP: Open User
+  Configuration` — exactly the "server missing in one window" confusion from
+  the multi-window report. `setup`/`init` now detect and write the dedicated
+  Insiders config on all platforms (agent key `vscode-insiders`), `doctor`
+  lists it as its own MCP location, and uninstall cleans it up.
 - **Grammar-addon dylibs refuse to load from world-writable dirs/files
   (GH #690 review point 3, PR #697 — thanks @getappz).** A group/other-
   writable grammar dir would let any local account swap the dylib between
@@ -43,10 +110,71 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   design (`ctx_edit`/`ctx_patch` stay session-rooted until undo history is
   multi-repo-aware); unknown aliases error with the list of known ones, and
   jail + secret screening apply against the resolved repo root.
-
-## [3.9.0] — 2026-07-04
+- **A corrupt `stats.json` is quarantined, never silently reset (GH #706 —
+  thanks @getappz).** A crash mid-write (or disk-full) could leave truncated
+  JSON; the loader's `unwrap_or_default()` then wiped months of savings
+  history without a trace on the next write. Unparseable stats now move to
+  `stats.json.corrupt` (one warning log; the file is evidence and stays
+  recoverable by hand), and `doctor` reports the quarantine with recovery
+  guidance instead of everyone silently starting from zero.
+- **Relative paths follow a mid-session worktree switch (GH #707 — thanks
+  @getappz).** `project_root` is captured once at MCP `initialize`; when the
+  client later enters a git worktree (Claude Code `EnterWorktree` nests a
+  full checkout under `.claude/worktrees/<n>/`), every relative path kept
+  resolving into the *stale* root — silently, because the same layout exists
+  in both trees. Resolution now walks both `shell_cwd` and `project_root` up
+  to their nearest `.git` entry (dir or worktree file); when the boundaries
+  differ, the live `shell_cwd` wins. A plain `cd rust/` inside the same
+  checkout shares the boundary and is untouched, and a `shell_cwd` with no
+  git upward gives no signal — so the monorepo behavior stays exactly as
+  before.
+- **`ctx_read` raw mode no longer swallows markdown table delimiters
+  (GH #709 — thanks @getappz).** The output sanitizer's symbol-flood guard
+  (meant for degenerate model output like `@@@@@@…`) also matched legitimate
+  document structure — `|----|----|` delimiter rows, `====`/`----` setext
+  underlines and HR lines vanished from raw reads, breaking the mode's
+  byte-fidelity contract. Structural characters no longer count toward the
+  flood check, and a removed flood line no longer eats the file's trailing
+  newline.
+- **`ctx_shell`'s explicit `cwd` param now updates the live shell cwd
+  (GH #707 follow-up).** The worktree-divergence detection reads
+  `session.shell_cwd`, but that field only tracked `cd` commands *inside*
+  command text — clients that switch checkouts pass the new directory as the
+  `cwd` argument of every call, so the switch was invisible to path
+  resolution. A jail-accepted explicit `cwd` is now persisted, verified
+  end-to-end over a real MCP session (read resolves into the worktree copy
+  after `ctx_shell cwd=<worktree>`).
+- **`lean-ctx stop`/`dev-install` no longer SIGTERM their own process tree
+  (GH #714).** Run under the lean-ctx shell wrapper (`lean-ctx -c … → sh →
+  lean-ctx dev-install`), the process sweep matched the wrapper parent and
+  killed the pipeline mid-install (exit 143) — after the binary swap but
+  before autostart was re-enabled. The sweep now excludes the full
+  `ps ppid` ancestor chain *and* every member of its own foreground process
+  group — agent harnesses (Cursor's shell) reparent intermediaries to PID 1
+  mid-run, which broke the ancestor walk alone; the group covers the wrapper
+  regardless of reparenting. Verified: `dev-install` under the Cursor agent
+  shell now completes end-to-end, including autostart re-enable.
+- **Unknown MCP tool names now suggest the nearest registered tool
+  (GH #712 — thanks @getappz).** `ctx_serach` returned a bare "Unknown tool"
+  while the CLI has long offered "did you mean" for typos; the
+  Levenshtein suggester is now shared (`core::levenshtein`) and the MCP
+  dispatch error appends "— did you mean 'ctx_search'?" within a
+  length-scaled edit budget, so agents self-correct in one turn instead of
+  falling back to native tools.
 
 ### Added
+- **Portable hook binary for synced agent configs (GH #708,
+  `hook_binary` / `LEAN_CTX_HOOK_BINARY`).** Generated hook commands bake
+  the machine-absolute binary path (#367: agent hosts run hooks without your
+  PATH). If you sync `~/.claude/settings.json` between machines with
+  different usernames, that absolute path is wrong on every other machine —
+  and re-running `init`/`doctor --fix` there rewrites the file, ping-ponging
+  your sync forever. Setting `hook_binary = "$HOME/.local/bin/lean-ctx"`
+  (config) or `LEAN_CTX_HOOK_BINARY` (env) emits that expression verbatim
+  into every shell-executed hook command — the hook host's shell expands it
+  at run time — and `doctor` accepts it as current, ending the rewrite
+  cycle. MCP server registrations and launchd/systemd autostart units keep
+  the real absolute path: nothing expands variables there.
 - **The AI Gateway (team mode).** The engine can now run as a shared
   org gateway — one deployment your whole team points its IDEs at, with
   per-person attribution, governance and audited savings. Compiled into the

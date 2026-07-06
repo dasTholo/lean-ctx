@@ -293,6 +293,23 @@ local_shadow_rate_per_mtok = 0.25     # USD/MTok booked for local/loopback infer
   USD/MTok, never 0): local compute is free of provider fees, not of hardware
   and power — keeping "savings vs. local" honest instead of infinite.
 
+**Provider-verified savings — `proxy.counterfactual_metering` (#701).** The
+baseline above still *estimates* the uncompressed side (bytes/4). Opt in to
+replace the estimate with a receipt: for every request the proxy actually
+rewrote, it fires Anthropic's **free** `count_tokens` endpoint with the
+original, uncompressed body — concurrently with the real forward, never
+delaying or mutating it — and pairs the provider-counted answer with the same
+response's billed usage. `/status` then carries a `verified_savings` block
+(`counterfactual_input_tokens`, `billed_input_tokens`, signed
+`verified_saved_tokens`) and `lean-ctx proxy status` prints a `Verified:` line
+next to the estimate. Same-request pairing means no traffic-mix confounds; a
+net-negative result (stub overhead exceeding the squeeze) is reported honestly,
+never clamped. Anthropic only — OpenAI/Gemini have no free counting endpoint.
+
+```bash
+lean-ctx config set proxy.counterfactual_metering true
+```
+
 **Self-hosted org gateway — `lean-ctx gateway serve`** (build with
 `--features gateway-server`). One process bundling the hardened proxy, the
 Postgres usage store and an admin listener:
@@ -574,6 +591,25 @@ lean-ctx hook <rewrite|redirect|observe|copilot|codex-pretooluse|codex-session-s
 (Cursor/Claude/Copilot/Codex). They are invoked by the editor's hook mechanism,
 not typed manually — listed here so the integration surface is fully accounted
 for.
+
+**Portable hook binary — `hook_binary` / `LEAN_CTX_HOOK_BINARY` (#708).**
+Generated hook commands normally bake the machine-absolute binary path
+(agent hosts run hooks under a minimal shell without your `PATH`, #367). If
+you sync agent settings such as `~/.claude/settings.json` across machines
+with different usernames, that absolute path is wrong everywhere else — and
+each machine's `init`/`doctor --fix` rewrites it, turning your settings sync
+into permanent ping-pong. Set a verbatim, env-based expression instead:
+
+```bash
+lean-ctx config set hook_binary '$HOME/.local/bin/lean-ctx'
+# or per-invocation: LEAN_CTX_HOOK_BINARY='$HOME/.local/bin/lean-ctx' lean-ctx init
+```
+
+Every *shell-executed* hook command then emits the expression verbatim — the
+hook host's shell expands `$HOME` at run time — and `doctor` accepts it as
+current. MCP server registrations and launchd/systemd autostart units are
+deliberately unaffected: nothing expands shell variables there, so they keep
+the real absolute path.
 
 ---
 

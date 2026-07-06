@@ -3,8 +3,11 @@
 //! Drop-in parity with library-style `compress(messages, model)` gateways: the
 //! caller sends a chat-style `messages` array, the proxy rewrites every text
 //! payload through the same deterministic funnel used on the wire
-//! ([`super::compress::compress_tool_result`]), and returns the rewritten
-//! messages plus a structured token-savings summary.
+//! ([`super::compress::compress_tool_result_gateway`]), and returns the
+//! rewritten messages plus a structured token-savings summary. A lossy rewrite
+//! embeds a `hash=<24hex>` retrieval marker (#702) that LiteLLM's headroom
+//! guardrail resolves through `GET /v1/retrieve/{hash}` — the CCR agentic loop
+//! (BerriAI/litellm#31681) works against lean-ctx unchanged.
 //!
 //! ## Contract
 //! Request:  `{ "messages": [ … ], "model": "…"? }`
@@ -14,6 +17,14 @@
 //! {type:"tool_result"…} ]`) message shapes are accepted. Only text payloads are
 //! compressed; images, `tool_use` blocks, ids and every other field pass through
 //! untouched. lean-ctx's own `ctx_*` tool results are left verbatim (#479).
+//!
+//! ## Gateway compatibility (#700)
+//! The response also carries `tokens_before` / `tokens_after` /
+//! `compression_ratio` at the top level — the field names LiteLLM's
+//! prompt-compression guardrail reads for its per-request savings log. That
+//! makes lean-ctx a drop-in `api_base` for `guardrail: headroom` deployments:
+//! LiteLLM only requires `messages` in the reply and treats the token fields
+//! as optional telemetry.
 //!
 //! ## Determinism (#498)
 //! Output is a pure function of `(messages, model)`. Compression runs footer-free
@@ -27,7 +38,7 @@ use serde_json::Value;
 use crate::core::protocol::strip_trailing_savings_footer;
 use crate::core::tokens::count_tokens;
 
-use super::compress::compress_tool_result;
+use super::compress::compress_tool_result_gateway;
 
 /// Default tokenizer behind [`count_tokens`]; surfaced so SDK clients can label
 /// the savings figures correctly.
@@ -58,6 +69,15 @@ pub struct CompressStats {
 pub struct CompressResponse {
     pub messages: Vec<Value>,
     pub stats: CompressStats,
+    /// LiteLLM-guardrail telemetry aliases (#700): duplicates of
+    /// `stats.original_tokens` / `stats.compressed_tokens` under the field
+    /// names the LiteLLM headroom guardrail logs (`tokens_before` →
+    /// `tokens_after`, ratio `after/before`).
+    pub tokens_before: usize,
+    pub tokens_after: usize,
+    /// `tokens_after / tokens_before`, rounded to 2 decimals; `1.0` when the
+    /// input had no compressible text.
+    pub compression_ratio: f64,
 }
 
 #[derive(Default)]
@@ -86,6 +106,11 @@ pub fn compress_messages(req: CompressRequest) -> CompressResponse {
     } else {
         0.0
     };
+    let compression_ratio = if totals.original > 0 {
+        ((totals.compressed as f64 / totals.original as f64) * 100.0).round() / 100.0
+    } else {
+        1.0
+    };
 
     CompressResponse {
         messages,
@@ -97,6 +122,9 @@ pub fn compress_messages(req: CompressRequest) -> CompressResponse {
             tokenizer: TOKENIZER,
             model: req.model,
         },
+        tokens_before: totals.original,
+        tokens_after: totals.compressed,
+        compression_ratio,
     }
 }
 
@@ -146,7 +174,10 @@ fn compress_block(block: &mut Value, name: Option<&str>, totals: &mut Totals) {
 
 fn squeeze_in_place(s: &mut String, name: Option<&str>, totals: &mut Totals) {
     let before = count_tokens(s);
-    let compressed = compress_tool_result(s, name);
+    // Gateway audience (#702): a lossy rewrite carries the `hash=<24hex>`
+    // retrieval marker LiteLLM's CCR loop scans for; the savings footer is
+    // stripped inside the gateway funnel (stats carry the numbers instead).
+    let compressed = compress_tool_result_gateway(s, name);
     let clean = strip_trailing_savings_footer(&compressed);
     let after = count_tokens(clean);
     totals.original += before;
@@ -179,6 +210,7 @@ mod tests {
 
     #[test]
     fn string_content_is_compressed_and_stats_reported() {
+        let _lock = crate::core::data_dir::test_env_lock();
         let resp = run(
             vec![json!({"role": "user", "content": dedupable_prose()})],
             Some("claude-sonnet-4"),
@@ -196,19 +228,79 @@ mod tests {
     }
 
     #[test]
+    fn litellm_guardrail_fields_present_and_consistent() {
+        let _lock = crate::core::data_dir::test_env_lock();
+        // LiteLLM's headroom guardrail logs `tokens_before`/`tokens_after`/
+        // `compression_ratio` from the /v1/compress reply (#700). They must
+        // exist at the top level and agree with `stats`.
+        let resp = run(
+            vec![json!({"role": "user", "content": dedupable_prose()})],
+            None,
+        );
+        assert_eq!(resp.tokens_before, resp.stats.original_tokens);
+        assert_eq!(resp.tokens_after, resp.stats.compressed_tokens);
+        assert!(resp.compression_ratio > 0.0 && resp.compression_ratio < 1.0);
+
+        let wire = serde_json::to_value(&resp).unwrap();
+        assert!(wire["tokens_before"].is_u64());
+        assert!(wire["tokens_after"].is_u64());
+        assert!(wire["compression_ratio"].is_f64());
+
+        // No compressible text → ratio pins to 1.0, not 0/0.
+        let empty = run(vec![json!({"role": "user", "content": "hi"})], None);
+        assert_eq!(empty.compression_ratio, 1.0);
+    }
+
+    #[test]
     fn message_bodies_stay_footer_free() {
+        let _lock = crate::core::data_dir::test_env_lock();
         let resp = run(
             vec![json!({"role": "user", "content": dedupable_prose()})],
             None,
         );
         let out = resp.messages[0]["content"].as_str().unwrap();
         assert!(!out.contains('\u{2500}'), "no box-drawing footer in body");
-        assert!(!out.contains("[lean-ctx:"), "no verbatim footer in body");
+        assert!(!out.contains("[lean-ctx:"), "no savings footer in body");
         assert!(resp.stats.model.is_none());
+    }
+
+    /// #702: a lossy rewrite through the gateway contract must advertise its
+    /// retrieval hash in LiteLLM's regex-locked `hash=<24hex>` form, and the
+    /// hash must resolve back to the verbatim original — the wire half of the
+    /// guardrail's CCR agentic loop.
+    #[test]
+    fn lossy_rewrite_carries_litellm_retrieval_marker() {
+        let _lock = crate::core::data_dir::test_env_lock();
+        let original = dedupable_prose();
+        let resp = run(
+            vec![json!({"role": "user", "content": original.clone()})],
+            None,
+        );
+        let out = resp.messages[0]["content"].as_str().unwrap();
+
+        let litellm_regex = regex::Regex::new(r"hash=([a-f0-9]{24})").unwrap();
+        let hash = litellm_regex
+            .captures(out)
+            .unwrap_or_else(|| panic!("lossy body must carry the hash= marker: {out}"))
+            .get(1)
+            .unwrap()
+            .as_str();
+        let recovered = super::super::ccr::retrieve_litellm(hash)
+            .expect("marker hash must resolve via /v1/retrieve");
+        assert!(
+            recovered.contains("fearless concurrency"),
+            "retrieve returns the verbatim pre-compression original"
+        );
+        assert_eq!(
+            recovered.matches("fearless concurrency").count(),
+            8,
+            "all deduped paragraphs are recoverable"
+        );
     }
 
     #[test]
     fn output_is_deterministic() {
+        let _lock = crate::core::data_dir::test_env_lock();
         let msgs = vec![
             json!({"role": "system", "content": "You are a helpful assistant."}),
             json!({"role": "user", "content": dedupable_prose()}),
@@ -228,6 +320,7 @@ mod tests {
 
     #[test]
     fn anthropic_blocks_text_compressed_image_passthrough() {
+        let _lock = crate::core::data_dir::test_env_lock();
         let resp = run(
             vec![json!({
                 "role": "user",
@@ -253,6 +346,7 @@ mod tests {
 
     #[test]
     fn anthropic_tool_result_block_is_compressed() {
+        let _lock = crate::core::data_dir::test_env_lock();
         let resp = run(
             vec![json!({
                 "role": "user",
@@ -306,6 +400,7 @@ mod tests {
     /// counter/timestamp) would silently destroy the cache discount.
     #[test]
     fn determinism_regression_full_conversation_498() {
+        let _lock = crate::core::data_dir::test_env_lock();
         let conversation = || {
             vec![
                 json!({"role": "system", "content": "You are a helpful assistant."}),

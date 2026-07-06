@@ -96,6 +96,42 @@ litellm.callbacks = [LeanCtxLiteLLMHandler(model="gpt-4o")]
 For non-LiteLLM code, `compress_request_data(data)` rewrites the `messages` of
 any OpenAI-style request dict in place.
 
+### LiteLLM proxy guardrail (zero-code, gateway-side)
+
+LiteLLM ≥ v1.92 ships a native prompt-compression guardrail that calls a
+sidecar's `POST {api_base}/v1/compress` during `pre_call` and swaps in the
+returned `messages`. lean-ctx's `/v1/compress` speaks that wire contract
+(request `{"messages": [...], "model": "..."}`; response `messages` +
+`tokens_before`/`tokens_after`/`compression_ratio`, #700), so the lean-ctx
+daemon can be the compression sidecar — no client change, works for every
+model behind the gateway, including Claude Code via `ANTHROPIC_BASE_URL`:
+
+```yaml
+# litellm config.yaml
+guardrails:
+  - guardrail_name: prompt-compression
+    litellm_params:
+      guardrail: headroom          # LiteLLM's generic compress-sidecar hook
+      mode: pre_call
+      api_base: http://127.0.0.1:<lean-ctx-proxy-port>
+      api_key: <lean-ctx proxy token>   # sent as Bearer; see `lean-ctx proxy token`
+      default_on: true
+```
+
+The guardrail's **CCR agentic loop** works against lean-ctx too (#702): when a
+rewrite is lossy, the compressed text carries a `hash=<24-hex>` retrieval
+marker (the exact `hash=([a-f0-9]{24})` shape LiteLLM scans for). LiteLLM then
+injects its retrieve tool, and when the model asks for the original, LiteLLM
+calls `GET {api_base}/v1/retrieve/{hash}` — lean-ctx resolves the hash against
+the same content-addressed tee store that backs `ctx_expand`, and returns
+`{"original_content": "..."}`. Compression stays reversible end-to-end through
+the gateway, with no lean-ctx-specific client code.
+
+Because lean-ctx's output is deterministic (#498), the compressed prefix stays
+byte-stable across turns — provider prompt caching keeps working even behind
+the gateway. Attach the guardrail to a virtual key to A/B compression per
+developer; the `x-litellm-applied-guardrails` response header confirms it ran.
+
 ## 5. LangChain (Python)
 
 ```python

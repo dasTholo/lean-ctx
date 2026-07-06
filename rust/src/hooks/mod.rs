@@ -245,13 +245,37 @@ fn file_contains_lean_ctx(path: &std::path::Path) -> bool {
 /// resolved absolute path makes hook execution deterministic and matches what
 /// MCP setup (`setup/mcp.rs`) and `doctor` already do. Existing configs with a
 /// bare command are rewritten on the next `lean-ctx init` / `doctor` run.
+///
+/// Kept strictly absolute — also used for MCP server `command` fields, which
+/// hosts spawn **directly** (no shell), so `$HOME/...` forms would break
+/// there. Shell-executed hook commands go through
+/// [`resolve_hook_command_binary`], which honors the portable override (#708).
 fn resolve_binary_path() -> String {
     crate::core::portable_binary::resolve_portable_binary()
 }
 
+/// Binary token for **shell-executed** hook commands (`<binary> hook rewrite`
+/// in Claude/Cursor/Gemini/… hook configs and generated `#!/bin/sh` scripts).
+///
+/// Portable override (#708): `LEAN_CTX_HOOK_BINARY` env, then config
+/// `hook_binary`, is emitted **verbatim** — for settings files synced across
+/// machines with different usernames (`$HOME/.local/bin/lean-ctx`). Hook
+/// hosts run these commands through a shell, so the variable expands at
+/// execution time; `doctor` accepts the override as current, so
+/// `init`/`--fix`/`update` stop rewriting synced files. MCP registrations
+/// and autostart units keep the absolute path (no shell there).
+fn resolve_hook_command_binary() -> String {
+    if let Some(portable) = crate::core::portable_binary::hook_binary_override() {
+        return portable;
+    }
+    resolve_binary_path()
+}
+
 fn resolve_binary_path_for_bash() -> String {
-    let path = resolve_binary_path();
-    to_bash_compatible_path(&path)
+    if let Some(portable) = crate::core::portable_binary::hook_binary_override() {
+        return portable;
+    }
+    to_bash_compatible_path(&resolve_binary_path())
 }
 
 pub fn to_bash_compatible_path(path: &str) -> String {
@@ -759,6 +783,11 @@ pub fn install_agent_hook_with_mode(agent: &str, global: bool, mode: HookMode) {
         "windsurf" => install_windsurf_rules(global),
         "cline" | "roo" => install_cline_rules(global),
         "copilot" | "vscode" => install_copilot_hook(global),
+        // VS Code Insiders needs no hook install of its own: the MCP entry in
+        // its separate `Code - Insiders/User/mcp.json` is written by the
+        // editor-registry writer (GH #694), and the Copilot hook layer is
+        // user-global (`~/.copilot`), already covered by copilot/vscode.
+        "vscode-insiders" => {}
         "pi" => install_pi_hook_with_mode(global, mode),
         "qoder" => install_qoder_hook_with_mode(mode),
         "qoderwork" => install_mcp_json_agent(

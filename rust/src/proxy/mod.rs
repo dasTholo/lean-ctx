@@ -16,6 +16,7 @@ pub mod cold_prefix;
 pub mod compress;
 pub mod compress_api;
 pub mod cost;
+pub mod counterfactual;
 pub mod effort;
 pub mod forward;
 pub mod gateway_identity;
@@ -490,6 +491,9 @@ pub async fn start_proxy_with_token(port: u16, auth_token: Option<String>) -> an
         .route("/backend-api", any(chatgpt::backend_api_handler))
         .route("/backend-api/{*rest}", any(chatgpt::backend_api_handler))
         .route("/v1/references/{id}", get(v1_resolve_reference))
+        // LiteLLM headroom-guardrail CCR retrieval (#702): resolves the 24-hex
+        // `hash=` marker `/v1/compress` emits back to the verbatim original.
+        .route("/v1/retrieve/{hash}", get(v1_retrieve_ccr))
         // Org model catalog (enterprise#63): IDE clients discover the curated
         // alias namespace (`zuehlke/fast` → provider:model) and verify their
         // key. Exact-match only — `/v1/models/{...}` subpaths stay Gemini
@@ -660,6 +664,33 @@ async fn v1_resolve_reference(
     }
 }
 
+/// `GET /v1/retrieve/{hash}` (#702) — LiteLLM headroom-guardrail CCR contract
+/// (BerriAI/litellm#31681): resolve a 24-hex `hash=` marker emitted by
+/// `/v1/compress` back to the verbatim original from the tee store. The reply
+/// carries `original_content` (the field LiteLLM's `_call_retrieve` reads
+/// first). The optional `?query=` the guardrail forwards is accepted but the
+/// full original is always returned — a superset of any ranked slice, and the
+/// stored blobs are single tool outputs, not corpora worth ranking. Auth: the
+/// standard proxy bearer guard wraps this route (LiteLLM sends the configured
+/// `api_key` as a Bearer token); the tee store is loopback-scoped local state.
+async fn v1_retrieve_ccr(
+    axum::extract::Path(hash): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    match ccr::retrieve_litellm(&hash) {
+        Some(content) => (
+            StatusCode::OK,
+            axum::Json(serde_json::json!({ "original_content": content })),
+        ),
+        None => (
+            StatusCode::NOT_FOUND,
+            axum::Json(serde_json::json!({
+                "error": "hash not found or expired",
+                "hash": hash,
+            })),
+        ),
+    }
+}
+
 async fn status_handler(State(state): State<ProxyState>) -> impl IntoResponse {
     use std::sync::atomic::Ordering::Relaxed;
     let s = &state.stats;
@@ -705,6 +736,10 @@ async fn status_handler(State(state): State<ProxyState>) -> impl IntoResponse {
         "requests_compressed": s.requests_compressed.load(Relaxed),
         "tokens_saved": s.tokens_saved.load(Relaxed),
         "tokens_saved_estimated": true,
+        // Provider-verified savings (#701, opt-in counterfactual metering):
+        // both sides counted by Anthropic on the same request. `null` until
+        // the first probe-covered request lands.
+        "verified_savings": usage_meter::verified_savings(),
         "bytes_original": s.bytes_original.load(Relaxed),
         "bytes_compressed": s.bytes_compressed.load(Relaxed),
         "compression_ratio_pct": format!("{:.1}", s.compression_ratio()),
