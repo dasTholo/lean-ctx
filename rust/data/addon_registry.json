@@ -393,20 +393,6 @@
     },
     {
       "addon": {
-        "name": "lmd",
-        "display_name": "Lean-MarkDown (LMD)",
-        "description": "Directive-driven Markdown for agent plans. Reusable macros, phase-isolation and single-sourcing keep plans token-lean and cache-safe — written hard against lean-ctx, inspired by MarkdownAI.",
-        "author": "dasTholo",
-        "homepage": "https://github.com/dasTholo/lean-ctx/tree/feat-lmd-v1",
-        "license": "Apache-2.0",
-        "categories": ["plans", "workflow"],
-        "integration": "none",
-        "keywords": ["markdown", "plans", "macros", "directives", "phase-isolation", "subagents"],
-        "min_lean_ctx": "3.8.0"
-      }
-    },
-    {
-      "addon": {
         "name": "everything",
         "display_name": "Everything (MCP smoke-test)",
         "description": "Official MCP reference server that exercises every protocol feature — install it to verify your lean-ctx gateway can discover and call downstream tools.",
