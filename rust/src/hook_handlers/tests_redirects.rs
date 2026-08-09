@@ -89,17 +89,13 @@ fn classify_redirect_passes_through_shell_and_unknown() {
 
 #[test]
 fn redirect_read_args_smart_mode_selection() {
-    // Windowed reads (offset/limit) use full-compact to preserve line structure.
+    // Both windowed and full reads serve uncompressed content ("full")
+    // to prevent StrReplace failures when agents edit compressed views.
     let windowed = redirect_read_args("/repo/src/main.rs", true);
-    assert_eq!(
-        windowed,
-        ["read", "/repo/src/main.rs", "-m", "full-compact"]
-    );
+    assert_eq!(windowed, ["read", "/repo/src/main.rs", "-m", "full"]);
 
-    // Full reads use auto for smart compression (87-97% savings).
-    // Safe on Cursor: StrReplace does NOT fire Read PreToolUse (edit-probe PoC).
     let full = redirect_read_args("/repo/src/main.rs", false);
-    assert_eq!(full, ["read", "/repo/src/main.rs", "-m", "auto"]);
+    assert_eq!(full, ["read", "/repo/src/main.rs", "-m", "full"]);
 }
 
 #[test]
