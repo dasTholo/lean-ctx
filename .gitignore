@@ -57,30 +57,6 @@ rust/lean-ctx-report.html
 
 # ── IDE local config (may contain tokens/env) ──
 **/.cursor/
-# Track repository-owned Cursor skills while keeping all other local Cursor
-# state (including existing personal skills) ignored.
-!/.cursor/
-/.cursor/*
-!/.cursor/skills/
-/.cursor/skills/*
-!/.cursor/skills/release-checklist/
-!/.cursor/skills/release-checklist/**
-!/.cursor/skills/enterprise-deploy/
-!/.cursor/skills/enterprise-deploy/**
-!/.cursor/skills/new-api-endpoint/
-!/.cursor/skills/new-api-endpoint/**
-!/.cursor/skills/crate-quality-check/
-!/.cursor/skills/crate-quality-check/**
-!/.cursor/skills/frontend-dev/
-!/.cursor/skills/frontend-dev/**
-!/.cursor/skills/README.md
-!/.cursor/skills/lean-ctx-dev/
-!/.cursor/skills/lean-ctx-dev/**
-!/.cursor/skills/agent-orchestration/
-/.cursor/skills/agent-orchestration/*
-!/.cursor/skills/agent-orchestration/SKILL.md
-!/.cursor/skills/agent-orchestration/scripts/
-!/.cursor/skills/agent-orchestration/scripts/**
 .vscode/mcp.json
 .github/mcp.json
 *.mcp.json.bak
