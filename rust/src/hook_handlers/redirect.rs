@@ -103,13 +103,17 @@ fn produce_redirect_output(kind: RedirectKind, tool_args: Option<&serde_json::Va
 /// selects the optimal compression mode (signatures, map, etc.) — achieving
 /// 87-97% compression vs ~5% for full-compact. Safe on Cursor because
 /// StrReplace does NOT fire a Read PreToolUse (validated by edit-probe PoC).
-pub(super) fn redirect_read_args(path: &str, is_windowed: bool) -> Vec<String> {
-    let mode = if is_windowed { "full-compact" } else { "auto" };
+pub(super) fn redirect_read_args(path: &str, _is_windowed: bool) -> Vec<String> {
+    // Always serve full (uncompressed) content through the redirect hook.
+    // Compression happens only via explicit ctx_read MCP calls where the
+    // agent knows the content is compressed and won't attempt StrReplace
+    // with compressed old_string. The redirect still provides caching
+    // benefits (warm BM25/session cache for subsequent reads).
     vec![
         "read".to_string(),
         path.to_string(),
         "-m".to_string(),
-        mode.to_string(),
+        "full".to_string(),
     ]
 }
 
