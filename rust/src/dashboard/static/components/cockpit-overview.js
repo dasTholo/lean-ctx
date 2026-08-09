@@ -1,6 +1,111 @@
-cockpit-overview.js 902L cognitive
-// /Users/yvesgugger/Documents/Privat/Projects/lean-ctx/rust/src/dashboard/static/components/cockpit-overview.js
-§ function  (L109-L151)
+/**
+ * Overview Cockpit — hero metrics, buddy, cost analysis, charts, command table.
+ */
+
+function api() {
+  return window.LctxApi && window.LctxApi.apiFetch ? window.LctxApi.apiFetch : null;
+}
+
+function fmtLib() {
+  return window.LctxFmt || {};
+}
+
+function chartsLib() {
+  return window.LctxCharts || {};
+}
+
+function sharedLib() {
+  return window.LctxShared || {};
+}
+
+function tip(k) {
+  return window.LctxShared && window.LctxShared.tip ? window.LctxShared.tip(k) : '';
+}
+
+// Slim Home (GL #486): one trend chart. Activity/rate/source/task charts
+// live in Proof → Trends now.
+var CKO_CHARTS = ['cko-chartCumSavings'];
+
+function lvlTier(level) {
+  if (level >= 30) return 'lvl-t4';
+  if (level >= 20) return 'lvl-t3';
+  if (level >= 10) return 'lvl-t2';
+  return 'lvl-t1';
+}
+
+function miniGauge(val, color) {
+  var S = window.LctxShared;
+  if (S && S.miniGauge) return S.miniGauge(val, color);
+  var v = Math.max(0, Math.min(100, Number(val) || 0));
+  var gap = 100 - v;
+  return '<div class="stat-gauge"><svg width="36" height="36" viewBox="0 0 36 36"><circle class="bg" cx="18" cy="18" r="15.91549430918954" /><circle class="fg" cx="18" cy="18" r="15.91549430918954" stroke="' + color + '" stroke-dasharray="' + v + ' ' + gap + '" stroke-dashoffset="' + gap + '" /></svg></div>';
+}
+
+class CockpitOverview extends HTMLElement {
+  constructor() {
+    super();
+    this._range = 30;
+    this._sortKey = 'saved';
+    this._sortDir = 'desc';
+    this._animTimer = null;
+    this._animFrame = 0;
+    this._onRefresh = this._onRefresh.bind(this);
+    this._onViewChange = this._onViewChange.bind(this);
+    this._data = null;
+    this._error = null;
+    this._loading = true;
+  }
+
+  connectedCallback() {
+    if (this._ready) return;
+    this._ready = true;
+    this.style.display = 'block';
+    this._onSessionData = function (e) { if (e.detail) this._cachedSession = e.detail; }.bind(this);
+    this._onStatsData = function (e) { if (e.detail) this._cachedStats = e.detail; }.bind(this);
+    document.addEventListener('lctx:refresh', this._onRefresh);
+    document.addEventListener('lctx:view', this._onViewChange);
+    document.addEventListener('lctx:session-data', this._onSessionData);
+    document.addEventListener('lctx:stats-data', this._onStatsData);
+    this.render();
+    // Lazy-load (#452): the router's view loader fetches when this view becomes
+    // active, so opening any deep link no longer fans out one request storm
+    // across every mounted cockpit component.
+  }
+
+  disconnectedCallback() {
+    document.removeEventListener('lctx:refresh', this._onRefresh);
+    document.removeEventListener('lctx:view', this._onViewChange);
+    document.removeEventListener('lctx:session-data', this._onSessionData);
+    document.removeEventListener('lctx:stats-data', this._onStatsData);
+    this._stopAnim();
+    this._destroyCharts();
+  }
+
+  _onViewChange(e) {
+    var viewId = e && e.detail && e.detail.viewId;
+    if (viewId !== 'overview') this._stopAnim();
+  }
+
+  _onRefresh() {
+    var v = document.getElementById('view-overview');
+    if (v && v.classList.contains('active')) this.loadData();
+  }
+
+  _stopAnim() {
+    if (this._animTimer) {
+      clearInterval(this._animTimer);
+      this._animTimer = null;
+    }
+  }
+
+  _destroyCharts() {
+    var Ch = chartsLib();
+    if (!Ch.destroyIfNeeded) return;
+    for (var i = 0; i < CKO_CHARTS.length; i++) {
+      Ch.destroyIfNeeded(CKO_CHARTS[i]);
+    }
+  }
+
   async loadData() {
     var fetchJson = api();
     if (!fetchJson) {
@@ -44,8 +149,39 @@ cockpit-overview.js 902L cognitive
       this._error = String(err.__path) + ': ' + String(err.__error);
     }
 
-// ... 33 lines omitted
-§ function s (L185-L223)
+    function ok(r) {
+      return r && !r.__error ? r : null;
+    }
+
+    this._data = {
+      stats: ok(results[0]) || this._cachedStats || null,
+      gain: ok(results[1]),
+      buddy: ok(results[2]),
+      session: ok(results[3]) || this._cachedSession || null,
+      slos: ok(results[4]),
+      verification: ok(results[5]),
+      graphStats: ok(results[6]),
+      roi: ok(results[7]),
+      spend: ok(results[8]),
+      workspaces: ok(results[9]),
+      kernel: ok(results[10]),
+    };
+    // De-hardcode the estimated cost model's blended rate from the server.
+    var Fp = fmtLib();
+    if (this._data.spend && this._data.spend.pricing && Fp.applyServerPricing) {
+      Fp.applyServerPricing(this._data.spend.pricing);
+    }
+
+    this._loading = false;
+    this._stopAnim();
+    this._destroyCharts();
+    this.render();
+    this._renderAllCharts();
+    this._startBuddyAnim();
+  }
+
+  /* ── Render orchestrator ───────────────────────────── */
+
   render() {
     var F = fmtLib();
     var esc = F.esc || function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; }); };
@@ -85,8 +221,38 @@ cockpit-overview.js 902L cognitive
     this._bindContextHealthCard();
     this._bindVerifiedBridge();
   }
-// ... 32 lines omitted
-§ function  (L256-L341)
+
+  /* ── Time filter bar ───────────────────────────────── */
+
+  _renderTimeFilter(esc) {
+    var ranges = [
+      { label: '7d', val: 7 },
+      { label: '30d', val: 30 },
+      { label: '90d', val: 90 },
+      { label: 'All', val: 0 },
+    ];
+    // Label makes explicit that the range only affects the charts below —
+    // the hero numbers above stay all-time (audit finding: users assumed 7d
+    // would filter everything).
+    var html = '<div class="tf-bar">' +
+      '<span style="font-size:11px;color:var(--muted);margin-right:6px" ' +
+      'title="The big numbers above are always all-time. These buttons change the time range of the charts below.">' +
+      'Chart range</span>';
+    for (var i = 0; i < ranges.length; i++) {
+      var r = ranges[i];
+      html +=
+        '<button type="button" class="tf-btn' +
+        (this._range === r.val ? ' active' : '') +
+        '" data-range="' + r.val + '" ' +
+        'title="Changes the charts below \u2014 the totals above are always all-time">' +
+        esc(r.label) + '</button>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  /* ── Hero metrics (5 cards) ────────────────────────── */
+
   _renderHero(esc, ff, fmt, fu, pc) {
     var stats = this._data.stats;
     var gain = this._data.gain;
@@ -177,8 +343,28 @@ cockpit-overview.js 902L cognitive
       '</div>'
     );
   }
-// ... 22 lines omitted
-§ function function (L364-L387)
+
+  /**
+   * Measured spend hero card — the real provider bill (proxy-routed clients),
+   * shown only when the proxy has recorded usage. The *measured* counterpart to
+   * the estimated "Cost saved" card beside it. Full per-model detail lives in
+   * ROI & Plan → Measured spend.
+   */
+  _measuredSpendCard(esc, fu) {
+    var spend = this._data && this._data.spend;
+    if (!spend || !spend.available) return '';
+    return (
+      '<div class="hc">' +
+      '<span class="hl">Measured spend' +
+      '<span class="tag tg" style="margin-left:6px">measured</span></span>' +
+      '<div class="hv" style="color:var(--green)">' + esc(fu(spend.total_usd)) + '</div>' +
+      '<p class="hs">real provider bill (proxy-routed)</p>' +
+      '</div>'
+    );
+  }
+
+  /* ── Verified-ledger bridge line (estimated ⇄ signed, links to ROI) ── */
+
   _verifiedBridge(esc, ff, fu) {
     var roiPayload = this._data && this._data.roi;
     var roi = roiPayload && roiPayload.roi ? roiPayload.roi : null;
@@ -203,8 +389,93 @@ cockpit-overview.js 902L cognitive
       ' <span class="hc-health-go">ROI &amp; Plan \u2192</span></p>'
     );
   }
-// ... 87 lines omitted
-§ function function (L475-L537)
+
+  _bindVerifiedBridge() {
+    var el = document.getElementById('cko-verifiedBridge');
+    if (!el || el.dataset.bound === '1') return;
+    el.dataset.bound = '1';
+    var go = function () {
+      if (window.LctxRouter) window.LctxRouter.navigateTo('roi');
+    };
+    el.addEventListener('click', go);
+    el.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); }
+    });
+  }
+
+  /* ── Context Health hero card (compact, links to Commander) ───── */
+
+  _healthHeroCard(esc, ff) {
+    if (!this._triageData) {
+      var self = this;
+      var fetchJson = api();
+      if (fetchJson) {
+        fetchJson('/api/context-triage', { timeoutMs: 8000 }).then(function (data) {
+          if (data && !data.__error) {
+            self._triageData = data;
+            var placeholder = document.getElementById('cko-healthCard');
+            if (placeholder) {
+              placeholder.innerHTML = self._buildHealthHeroInner(esc, ff, data);
+              self._bindContextHealthCard();
+            }
+          }
+        }).catch(function () {});
+      }
+      return '<div class="hc hc--link" id="cko-healthCard" role="button" tabindex="0" ' +
+        'title="Open Context Triage">' +
+        '<span class="hl">Context Health' + tip('context_health') + '</span>' +
+        '<div class="hv" style="color:var(--muted)">\u2014</div>' +
+        '<p class="hs">checking\u2026</p>' +
+        '</div>';
+    }
+
+    return '<div class="hc hc--link" id="cko-healthCard" role="button" tabindex="0" ' +
+      'title="Open Context Triage">' +
+      this._buildHealthHeroInner(esc, ff, this._triageData) + '</div>';
+  }
+
+  _buildHealthHeroInner(esc, ff, data) {
+    var b = data.budget || {};
+    var s = data.summary || {};
+    var band = b.band || 'green';
+
+    var bandLabels = { green: 'Optimal', yellow: 'Moderate', orange: 'High', red: 'Critical' };
+    var bandColors = { green: 'var(--accent)', yellow: 'var(--yellow)', orange: 'var(--orange)', red: 'var(--red)' };
+    var pct = Math.round((b.utilization || 0) * 100);
+    var col = bandColors[band] || 'var(--accent)';
+    var label = bandLabels[band] || 'Unknown';
+
+    var sub = pct + '% used \u00b7 ' + (s.total_files || 0) + ' files';
+    if (s.risk_count > 0) sub += ' \u00b7 ' + s.risk_count + ' at risk';
+    // Live value that drifts quickly while agents work — show the fetch time
+    // so a stale number can't silently contradict the Triage page.
+    var now = new Date();
+    var hh = String(now.getHours()).padStart(2, '0');
+    var mm = String(now.getMinutes()).padStart(2, '0');
+    sub += ' \u00b7 as of ' + hh + ':' + mm;
+
+    return '<span class="hl">Context Health' + tip('context_health') + '</span>' +
+      '<div class="hv hc-health-v" style="color:' + col + '">' +
+      '<span class="hc-health-dot" style="background:' + col + '"></span>' + esc(label) +
+      '</div>' +
+      '<p class="hs">' + esc(sub) + '<span class="hc-health-go">Triage \u2192</span></p>';
+  }
+
+  _bindContextHealthCard() {
+    var card = document.getElementById('cko-healthCard');
+    if (!card || card.dataset.bound === '1') return;
+    card.dataset.bound = '1';
+    var go = function () {
+      if (window.LctxRouter) window.LctxRouter.navigateTo('commander');
+    };
+    card.addEventListener('click', go);
+    card.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); }
+    });
+  }
+
+  /* ── Buddy card ────────────────────────────────────── */
+
   _renderBuddy(esc) {
     var b = this._data.buddy;
     if (!b || !b.name) return '';
@@ -268,8 +539,146 @@ cockpit-overview.js 902L cognitive
       '</div>'
     );
   }
-// ... 140 lines omitted
-§ function  (L678-L717)
+
+  _startBuddyAnim() {
+    var b = this._data && this._data.buddy;
+    if (!b) return;
+    var frames = b.ascii_frames;
+    if (!frames || !Array.isArray(frames) || frames.length < 2) return;
+    var ms = b.anim_ms || 500;
+    var self = this;
+    this._animFrame = 0;
+    this._animTimer = setInterval(function () {
+      self._animFrame = (self._animFrame + 1) % frames.length;
+      var el = document.getElementById('cko-buddyArt');
+      if (!el) return;
+      var frame = frames[self._animFrame];
+      el.textContent = Array.isArray(frame) ? frame.join('\n') : String(frame);
+    }, ms);
+  }
+
+  /* ── The one Home trend: cumulative savings ────────── */
+  // Cost analysis moved to Proof → ROI & Plan (GL #486); the per-day
+  // activity/rate charts live in Proof → Trends.
+
+  _renderTrendRow() {
+    return (
+      '<div class="card" style="margin-bottom:20px">' +
+      '<h3>Cumulative token savings' + tip('cumulative_savings') + '</h3>' +
+      '<canvas id="cko-chartCumSavings" height="180"' +
+      ' aria-label="Cumulative savings chart"></canvas>' +
+      '</div>'
+    );
+  }
+
+  /* ── Status strip: session/reliability/verification/graph in one line ── */
+  // Replaces the former 4-card health row (GL #486). Same signals, one
+  // compact strip — full views live in the job areas.
+
+  _renderStatusStrip(esc) {
+    var session = this._data.session;
+    var slos = this._data.slos;
+    var verif = this._data.verification;
+    var graph = this._data.graphStats;
+
+    var taskDesc = session && session.task
+      ? session.task.description || '\u2014' : '\u2014';
+    var shortTask = taskDesc.length > 48
+      ? taskDesc.slice(0, 48) + '\u2026' : taskDesc;
+    var filesCount = session && session.files_touched
+      ? session.files_touched.length : 0;
+
+    var sloSnap = slos && slos.snapshot ? slos.snapshot : null;
+    var sloArr = sloSnap && Array.isArray(sloSnap.slos) ? sloSnap.slos : [];
+    var sloTotal = sloArr.length;
+    var sloPassed = sloArr.filter(function (s) { return !s.violated; }).length;
+    var sloPct = sloTotal > 0
+      ? Math.round((sloPassed / sloTotal) * 100) : 0;
+    var sloCol = sloPct >= 80
+      ? 'var(--green)' : sloPct >= 50
+        ? 'var(--yellow)' : 'var(--red)';
+
+    var vTotal = verif ? verif.total || 0 : 0;
+    var vPassed = verif ? verif.pass || 0 : 0;
+    var vPct = vTotal > 0 ? Math.round((vPassed / vTotal) * 100) : 0;
+    var vValue = vTotal > 0
+      ? vPct + '% <span class="status-chip-sub">(' + vPassed + '/' + vTotal + ')</span>'
+      : 'No runs <span class="status-chip-sub">(0/0)</span>';
+    var vCol = vTotal === 0
+      ? 'var(--muted)' : vPct >= 80
+        ? 'var(--green)' : vPct >= 50
+          ? 'var(--yellow)' : 'var(--red)';
+
+    var gNodes = graph ? graph.node_count || 0 : 0;
+    var gEdges = graph ? graph.edge_count || 0 : 0;
+
+    function chip(label, value, color, tipKey) {
+      return (
+        '<span class="status-chip">' +
+        '<span class="sl">' + label + (tipKey ? tip(tipKey) : '') + '</span>' +
+        '<span class="sv"' + (color ? ' style="color:' + color + '"' : '') + '>' +
+        value + '</span></span>'
+      );
+    }
+
+    return (
+      '<div class="card status-strip" style="margin-bottom:20px">' +
+      chip('Session', '<span title="' + esc(taskDesc) + '">' + esc(shortTask) + '</span>', null, 'session_overview') +
+      chip('Files touched', String(filesCount), null, null) +
+      chip('Reliability', sloPct + '% <span class="status-chip-sub">(' + sloPassed + '/' + sloTotal + ')</span>', sloCol, 'slo_compliance') +
+      chip('Verification', vValue, vCol, 'verification') +
+      chip('Graph', gNodes + ' nodes \u00b7 ' + gEdges + ' edges', null, 'property_graph') +
+      chip('Kernel', (this._data.kernel && this._data.kernel.enabled) ? this._data.kernel.health : 'off', (this._data.kernel && this._data.kernel.health === 'healthy') ? 'var(--green)' : (this._data.kernel && this._data.kernel.health === 'degraded') ? 'var(--yellow)' : 'var(--muted)', 'kernel_status') +
+      (session && session.terse_mode ? chip('Terse', '<span class="tag tg">on</span>', null, null) : '') +
+      '</div>'
+    );
+  }
+
+  /* ── Connected workspaces (GH #694, multi-window) ──── */
+
+  _renderWorkspaces(esc, fmt) {
+    var data = this._data.workspaces;
+    var list = data && Array.isArray(data.workspaces) ? data.workspaces : [];
+    // One window is self-evident from the Session chip — the panel earns its
+    // space once several workspaces compete for attention.
+    if (list.length < 2) return '';
+
+    var rows = '';
+    for (var i = 0; i < list.length && i < 8; i++) {
+      var w = list[i];
+      var col = w.status === 'active' ? 'var(--green)'
+        : w.status === 'idle' ? 'var(--yellow)' : 'var(--muted)';
+      var age = w.age_minutes < 1 ? 'just now'
+        : w.age_minutes < 60 ? w.age_minutes + 'm ago'
+          : w.age_minutes < 2880 ? Math.round(w.age_minutes / 60) + 'h ago'
+            : Math.round(w.age_minutes / 1440) + 'd ago';
+      var task = w.task ? String(w.task) : '\u2014';
+      var shortTask = task.length > 60 ? task.slice(0, 60) + '\u2026' : task;
+      rows +=
+        '<tr>' +
+        '<td><span style="color:' + col + '">\u25CF</span> ' +
+        '<span title="' + esc(w.root) + '">' + esc(w.name) + '</span></td>' +
+        '<td style="color:' + col + '">' + esc(w.status) + '</td>' +
+        '<td class="r">' + esc(age) + '</td>' +
+        '<td class="r">' + fmt(w.tool_calls || 0) + '</td>' +
+        '<td class="r">' + fmt(w.tokens_saved || 0) + '</td>' +
+        '<td title="' + esc(task) + '">' + esc(shortTask) + '</td>' +
+        '</tr>';
+    }
+
+    return (
+      '<div class="card" style="margin-bottom:20px">' +
+      '<h3>Connected workspaces ' +
+      '<span class="badge">' + list.length + ' projects</span></h3>' +
+      '<div class="table-scroll"><table><thead><tr>' +
+      '<th>Workspace</th><th>Status</th><th class="r">Last activity</th>' +
+      '<th class="r">Tool calls</th><th class="r">Tokens saved</th><th>Task</th>' +
+      '</tr></thead><tbody>' + rows + '</tbody></table></div></div>'
+    );
+  }
+
+  /* ── Command breakdown table ───────────────────────── */
+
   _renderCommandTable(esc, ff, fmt, pc) {
     var stats = this._data.stats;
     var cmds = stats && stats.commands ? stats.commands : {};
@@ -310,8 +719,86 @@ cockpit-overview.js 902L cognitive
     });
 
     var sortDir = this._sortDir;
-// ... 80 lines omitted
-§ function function (L798-L833)
+    function th(key, label, cls) {
+      var active = sk === key;
+      var ind = active ? (sortDir === 'asc' ? ' \u25B2' : ' \u25BC') : ' \u25C7';
+      return (
+        '<th class="' + (cls || '') + (active ? ' th-sort-active' : '') +
+        '" data-cko-sort="' + key +
+        '" style="cursor:pointer;user-select:none">' +
+        label + '<span class="sort-ind">' + ind + '</span></th>'
+      );
+    }
+
+    // Slim Home (GL #486): top-3 by default, one click expands the full table.
+    var expanded = this._cmdExpanded === true;
+    var visible = expanded ? rows : rows.slice(0, 3);
+
+    var trs = '';
+    for (var j = 0; j < visible.length; j++) {
+      var r = visible[j];
+      var barW = maxSaved > 0 ? Math.round((r.saved / maxSaved) * 100) : 0;
+      trs +=
+        '<tr>' +
+        '<td>' + sb(r.name) + ' ' + esc(r.name) + '</td>' +
+        '<td class="r">' + esc(ff(r.count)) + '</td>' +
+        '<td class="r">' + esc(fmt(r.input)) + '</td>' +
+        '<td class="r">' + esc(fmt(r.output)) + '</td>' +
+        '<td class="r">' + esc(fmt(r.saved)) + '</td>' +
+        '<td class="r">' + r.pct + '%</td>' +
+        '<td style="min-width:80px">' +
+        '<div class="bar-bg"><div class="bar-f" style="width:' +
+        barW + '%;background:var(--green)"></div></div></td>' +
+        '</tr>';
+    }
+
+    var toggle = rows.length > 3
+      ? '<button type="button" class="cko-cmd-toggle" id="cko-cmdToggle">' +
+        (expanded
+          ? 'Show top 3 only'
+          : 'Show all ' + keys.length + ' commands \u2192') +
+        '</button>'
+      : '';
+
+    return (
+      '<div class="card">' +
+      '<h3>Top commands ' +
+      '<span class="badge">' + (expanded ? keys.length + ' commands' : 'top 3 of ' + keys.length) + '</span>' +
+      tip('command_breakdown') + '</h3>' +
+      '<div class="table-scroll"><table>' +
+      '<thead><tr>' +
+      th('name', 'Command') +
+      th('count', 'Calls', 'r') +
+      th('input', 'Input', 'r') +
+      th('output', 'Output', 'r') +
+      th('saved', 'Saved', 'r') +
+      th('pct', 'Rate', 'r') +
+      '<th>Distribution</th>' +
+      '</tr></thead>' +
+      '<tbody>' + trs + '</tbody>' +
+      '</table></div>' + toggle + '</div>'
+    );
+  }
+
+  /* ── Chart rendering (runs after DOM exists) ───────── */
+
+  _renderAllCharts() {
+    var self = this;
+    requestAnimationFrame(function () {
+      try { self._chartCumSavings(); } catch (_) {}
+    });
+  }
+
+  _filteredDaily() {
+    var stats = this._data && this._data.stats;
+    var daily = stats && Array.isArray(stats.daily) ? stats.daily : [];
+    var F = fmtLib();
+    var fd = F.fd || function (d, r) {
+      return !r || r === 0 ? d : d.slice(-r);
+    };
+    return fd(daily, this._range);
+  }
+
   _chartCumSavings() {
     var Ch = chartsLib();
     if (!Ch.lineChart || typeof Chart === 'undefined') return;
@@ -348,5 +835,72 @@ cockpit-overview.js 902L cognitive
       '#34d399', 'rgba(52,211,153,.06)'
     );
   }
-7/54 chunks shown (3552 tokens)
-[lean-ctx] full source: read "/Users/yvesgugger/Documents/Privat/Projects/lean-ctx/rust/src/dashboard/static/components/cockpit-overview.js" directly (no MCP)  ·  or ctx_read("/Users/yvesgugger/Documents/Privat/Projects/lean-ctx/rust/src/dashboard/static/components/cockpit-overview.js", mode="full")
+
+  /* ── Event binding ─────────────────────────────────── */
+
+  _bind() {
+    var self = this;
+
+    this.querySelectorAll('.tf-btn[data-range]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var val = parseInt(btn.getAttribute('data-range'), 10);
+        if (isNaN(val)) val = 0;
+        self._range = val;
+        self._stopAnim();
+        self._destroyCharts();
+        self.render();
+        self._renderAllCharts();
+        self._startBuddyAnim();
+      });
+    });
+
+    var cmdToggle = this.querySelector('#cko-cmdToggle');
+    if (cmdToggle) {
+      cmdToggle.addEventListener('click', function () {
+        self._cmdExpanded = self._cmdExpanded !== true;
+        self._stopAnim();
+        self._destroyCharts();
+        self.render();
+        self._renderAllCharts();
+        self._startBuddyAnim();
+      });
+    }
+
+    this.querySelectorAll('th[data-cko-sort]').forEach(function (h) {
+      h.addEventListener('click', function () {
+        var k = h.getAttribute('data-cko-sort');
+        if (self._sortKey === k) {
+          self._sortDir = self._sortDir === 'asc' ? 'desc' : 'asc';
+        } else {
+          self._sortKey = k;
+          self._sortDir = 'desc';
+        }
+        self._stopAnim();
+        self._destroyCharts();
+        self.render();
+        self._renderAllCharts();
+        self._startBuddyAnim();
+      });
+    });
+
+    var S = sharedLib();
+    if (S.injectExpandButtons) S.injectExpandButtons(this);
+    if (S.bindHowItWorks) S.bindHowItWorks(this);
+  }
+}
+
+/* ── Route loader registration ──────────────────────── */
+
+(function registerOverviewLoader() {
+  var R = window.LctxRouter;
+  if (R && R.registerLoader) {
+    R.registerLoader('overview', function () {
+      var el = document.querySelector('cockpit-overview');
+      if (el && typeof el.loadData === 'function') return el.loadData();
+    });
+  }
+})();
+
+customElements.define('cockpit-overview', CockpitOverview);
+
+export { CockpitOverview };

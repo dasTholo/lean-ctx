@@ -43,6 +43,11 @@ pub(super) fn maybe_emit(input: &str) {
         return;
     };
     let root = resolve_root(&v);
+
+    // Guard: detect and auto-restore files corrupted by compression markers.
+    // Shadow-mode can compress content that StrReplace/Write then writes back.
+    check_and_restore_corrupted(&v, &root);
+
     if let Some(notice) = edit_health_notice(&v, &root) {
         // Always persist to non-destructive channels (#778)
         persist_notice_to_knowledge(&notice, &v, &root);
@@ -237,6 +242,69 @@ fn emit_post_tool_use_context(notice: &str) {
         }
     });
     println!("{payload}");
+}
+
+/// Compression markers that indicate a file was corrupted by shadow-mode
+/// content being written back to disk by an edit tool.
+const CORRUPTION_MARKERS: &[&str] = &[
+    "§ function",
+    "§ block",
+    "§ impl",
+    "§ struct",
+    "§ enum",
+    "§ trait",
+    "§ mod",
+    "[lean-ctx: omitted",
+];
+
+/// After a native edit, check if the written file contains lean-ctx compression
+/// markers. If so, restore the file from git HEAD and log a warning.
+/// This prevents accidental corruption when shadow-mode compressed content
+/// leaks through edit tools (StrReplace, Write).
+fn check_and_restore_corrupted(v: &Value, root: &str) {
+    let Some(args) = payload::resolve_tool_args(v) else {
+        return;
+    };
+    let Some((_field, file)) = payload::resolve_path_field(Some(&args), payload::READ_PATH_FIELDS)
+    else {
+        return;
+    };
+    let Some(contents) = read_jailed(&file, root) else {
+        return;
+    };
+
+    let has_marker = CORRUPTION_MARKERS.iter().any(|m| contents.contains(m));
+    if !has_marker {
+        return;
+    }
+
+    eprintln!(
+        "[lean-ctx] CORRUPTION DETECTED in {file}: compression markers found after edit. Restoring from git HEAD."
+    );
+
+    let abs_path = if std::path::Path::new(&file).is_absolute() {
+        file.clone()
+    } else {
+        format!("{root}/{file}")
+    };
+
+    let restore = std::process::Command::new("git")
+        .args(["checkout", "HEAD", "--", &abs_path])
+        .current_dir(root)
+        .output();
+
+    match restore {
+        Ok(out) if out.status.success() => {
+            eprintln!("[lean-ctx] Restored {file} from git HEAD successfully.");
+        }
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            eprintln!("[lean-ctx] Failed to restore {file}: {stderr}");
+        }
+        Err(e) => {
+            eprintln!("[lean-ctx] Failed to run git restore for {file}: {e}");
+        }
+    }
 }
 
 #[cfg(test)]
