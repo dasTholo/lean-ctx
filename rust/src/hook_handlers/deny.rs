@@ -217,6 +217,21 @@ fn has_compression_markers(content: &str) -> bool {
     if content.contains("[lean-ctx:") || content.contains("--- lean-ctx:") {
         return true;
     }
+    // Cognitive/signatures mode section markers (#1444).
+    for marker in [
+        "§ function",
+        "§ block",
+        "§ impl",
+        "§ struct",
+        "§ enum",
+        "§ trait",
+        "§ mod",
+        "§ const",
+    ] {
+        if content.contains(marker) {
+            return true;
+        }
+    }
     // Detect ctx_read build_header corruption (#1323): "filename.ext NNL"
     // followed by " deps " or " exports " on the next line.
     static HEADER_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
@@ -280,9 +295,9 @@ fn extract_write_content(payload: &str) -> Option<String> {
 fn print_deny_compression_markers(tool_name: &str) {
     let msg = format!(
         "Blocked {tool_name}: payload contains lean-ctx compression markers \
-         ([lean-ctx: omitted ...] or similar). Writing compressed ctx_read \
-         output to disk corrupts files. Use ctx_read(raw=true) or ctx_expand \
-         to recover full content before editing. \
+         (§ function, [lean-ctx: omitted ...], or similar). The file was \
+         read in compressed mode — re-read with ctx_read(raw=true) or \
+         ctx_expand before editing. \
          Set LEAN_CTX_ALLOW_COMPRESSED_WRITE=1 to override."
     );
     let output = serde_json::json!({
@@ -494,6 +509,30 @@ mod tests {
         // Must NOT trigger on normal Rust content
         assert!(!has_compression_markers("let x = 1225;\n deps: vec![]\n"));
         assert!(!has_compression_markers("// mod.rs has 1225 lines\n"));
+    }
+
+    #[test]
+    fn has_compression_markers_detects_cognitive_section_markers() {
+        assert!(has_compression_markers("§ function foo(x: i32) → bool"));
+        assert!(has_compression_markers("§ block main_loop"));
+        assert!(has_compression_markers("§ impl Display for Foo"));
+        assert!(has_compression_markers("§ struct Config { .. }"));
+        assert!(has_compression_markers("§ enum State { .. }"));
+        assert!(has_compression_markers("§ trait Handler"));
+        assert!(has_compression_markers("§ mod utils"));
+        assert!(has_compression_markers("§ const MAX_SIZE: usize"));
+        assert!(!has_compression_markers("// § is a section sign"));
+        assert!(!has_compression_markers("let section = \u{a7}"));
+    }
+
+    #[test]
+    fn denies_str_replace_with_cognitive_markers() {
+        let payload = r#"{"tool_name":"StrReplace","input":{"path":"mod.rs","old_string":"§ function process(ctx) → Result","new_string":"fn process(ctx: &Context) -> Result<()> {}"}}"#;
+        let content = extract_write_content(payload).unwrap();
+        assert!(
+            has_compression_markers(&content),
+            "old_string with § markers must trigger the guard"
+        );
     }
 
     #[test]
