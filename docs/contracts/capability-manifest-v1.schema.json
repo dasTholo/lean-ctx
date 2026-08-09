@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://leanctx.com/schemas/lean-ctx-protocol/v1/capability-manifest.json",
+  "title": "LeanCTX CapabilityManifestV1",
+  "description": "Version-one capability and conformance manifest; additive fields are retained.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_version",
+    "capability_id",
+    "provider",
+    "kind",
+    "version",
+    "surfaces",
+    "support_matrix",
+    "local",
+    "remote",
+    "reversibility",
+    "determinism",
+    "data_movement",
+    "supported_classifications",
+    "measurement_support",
+    "conformance_version"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "capability_id": { "$ref": "#/$defs/identifier" },
+    "provider": { "type": "string", "minLength": 1 },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "tool",
+        "model",
+        "provider",
+        "context_source",
+        "validator",
+        "scheduler",
+        "other"
+      ]
+    },
+    "version": { "type": "string", "minLength": 1 },
+    "surfaces": { "type": "array", "items": { "type": "string" } },
+    "support_matrix": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/surfaceSupport" }
+    },
+    "local": { "type": "boolean" },
+    "remote": { "type": "boolean" },
+    "reversibility": {
+      "type": "string",
+      "enum": ["reversible", "irreversible", "conditional"]
+    },
+    "determinism": {
+      "type": "string",
+      "enum": ["deterministic", "seeded", "non_deterministic"]
+    },
+    "data_movement": {
+      "type": "string",
+      "enum": ["none", "local_only", "remote", "cross_region"]
+    },
+    "supported_classifications": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["Public", "Internal", "Confidential", "Restricted"]
+      }
+    },
+    "measurement_support": { "$ref": "#/$defs/measurementSupport" },
+    "input_schema_ref": { "type": ["string", "null"] },
+    "output_schema_ref": { "type": ["string", "null"] },
+    "conformance_version": { "type": "integer", "minimum": 0 }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[^\\u0000-\\u001F\\u007F]+$"
+    },
+    "measurementSupport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["latency", "tokens", "quality"],
+      "properties": {
+        "latency": { "type": "boolean" },
+        "tokens": { "type": "boolean" },
+        "quality": { "type": "boolean" }
+      }
+    },
+    "surfaceSupport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["supported"],
+      "properties": {
+        "supported": { "type": "boolean" },
+        "input_schema_ref": { "type": ["string", "null"] },
+        "output_schema_ref": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

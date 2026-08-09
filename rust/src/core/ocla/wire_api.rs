@@ -651,6 +651,8 @@ mod tests {
             content_ref: "blake3:content".into(),
             tenant_id: None,
             trace_id: "trace-1".into(),
+            task_id: None,
+            parent_task_id: None,
         }
     }
 

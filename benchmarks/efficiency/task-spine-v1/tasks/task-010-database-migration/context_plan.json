@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "task_id": "task-spine-v1-010",
+  "synthetic": true,
+  "data_classification": "Public",
+  "strategy": "comprehensive",
+  "budget_tokens": 8800,
+  "planned_context_tokens": 6700,
+  "planned_sources": ["migrations/20260801_add_status.sql", "src/storage/migrations.rs", "tests/storage/migrations.rs", "src/models/job.rs"],
+  "planned_views": [
+    {"path": "migrations/20260801_add_status.sql", "mode": "full", "reason": "Review DDL and rollback"},
+    {"path": "src/storage/migrations.rs", "mode": "task", "reason": "Follow Rust migration runner"},
+    {"path": "tests/storage/migrations.rs", "mode": "task", "reason": "Preserve migration fixtures"},
+    {"path": "src/models/job.rs", "mode": "signatures", "reason": "Update model mapping"}
+  ],
+  "expected_tool_calls": 8,
+  "rationale": "Database work needs DDL, runner, model mapping, and rollback-aware tests in one planned context."
+}

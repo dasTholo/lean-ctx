@@ -1,0 +1,59 @@
+{
+  "kind": "manifest",
+  "manifest": {
+    "schema_version": 1,
+    "capability_id": "capability://leanctx/tool-output-optimizer",
+    "provider": "leanctx",
+    "kind": "tool",
+    "version": "1.0.0",
+    "surfaces": ["mcp", "shell"],
+    "support_matrix": {
+      "mcp": {
+        "supported": true,
+        "input_schema_ref": "schema://leanctx/tool-output/v1/input",
+        "output_schema_ref": "schema://leanctx/tool-output/v1/output"
+      },
+      "shell": {"supported": true}
+    },
+    "local": true,
+    "remote": false,
+    "reversibility": "conditional",
+    "determinism": "deterministic",
+    "data_movement": "local_only",
+    "supported_classifications": ["Public", "Internal", "Confidential"],
+    "measurement_support": {
+      "latency": true,
+      "tokens": true,
+      "quality": true
+    },
+    "input_schema_ref": "schema://leanctx/tool-output/v1/input",
+    "output_schema_ref": "schema://leanctx/tool-output/v1/output",
+    "conformance_version": 1,
+    "failure_taxonomy": ["timeout", "policy_rejected", "invalid_input"],
+    "latency_bounds_ms": {"min_ms": 0, "max_ms": 250},
+    "schemas": {
+      "schema://leanctx/tool-output/v1/input": {
+        "type": "object",
+        "required": ["text"],
+        "properties": {"text": {"type": "string", "minLength": 1}},
+        "additionalProperties": false
+      },
+      "schema://leanctx/tool-output/v1/output": {
+        "type": "object",
+        "required": ["text", "tokens_saved"],
+        "properties": {
+          "text": {"type": "string", "minLength": 1},
+          "tokens_saved": {"type": "integer", "minimum": 0}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "expected": {
+    "capability_id": "capability://leanctx/tool-output-optimizer",
+    "version": "1.0.0",
+    "checks_passed": 6,
+    "checks_failed": 0,
+    "failures": []
+  }
+}

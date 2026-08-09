@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "task_id": "task-spine-v1-009",
+  "synthetic": true,
+  "data_classification": "Public",
+  "method": "without_optimization",
+  "input_tokens": 11600,
+  "output_tokens": 1700,
+  "reasoning_tokens": 2100,
+  "total_tokens": 15400,
+  "accepted_outcomes": 1,
+  "etpao_milli": 15400000,
+  "tool_calls": 14,
+  "latency_ms": 7600,
+  "cost_micros": 9500
+}

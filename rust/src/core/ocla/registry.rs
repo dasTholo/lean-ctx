@@ -7,6 +7,8 @@
 
 use std::sync::{Arc, OnceLock};
 
+use lean_ctx_protocol::CapabilityManifestV1;
+
 #[cfg(test)]
 use std::cell::Cell;
 
@@ -20,6 +22,7 @@ use super::builtin::{
     response_optimizer::BuiltinResponseOptimizer, savings_ledger::BuiltinSavingsLedger,
     usage_sink::BuiltinUsageSink,
 };
+use super::policy_constraints::PolicyConstraints;
 use super::traits::{
     AgentGateway, CompressionProvider, ConfigTuner, ConnectorScheduler, DeliveryRegistry,
     EfficiencyAnalyzer, ExperimentRunner, IntentClassifier, MetricsExporter, ModelRouter,
@@ -108,6 +111,22 @@ impl Drop for TestRegistryGuard {
     }
 }
 
+/// Discover capabilities compatible with the given policy constraints.
+pub fn discover_compatible(
+    registered: &[CapabilityManifestV1],
+    constraints: &PolicyConstraints,
+) -> Vec<CapabilityManifestV1> {
+    registered
+        .iter()
+        .filter(|manifest| {
+            constraints
+                .allowed_providers
+                .as_ref()
+                .is_none_or(|allowed| allowed.contains(&manifest.provider))
+        })
+        .cloned()
+        .collect()
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,6 +216,8 @@ mod tests {
             content_ref: "file:test.rs".into(),
             tenant_id: None,
             trace_id: "tr-unit".into(),
+            task_id: None,
+            parent_task_id: None,
         }
     }
 

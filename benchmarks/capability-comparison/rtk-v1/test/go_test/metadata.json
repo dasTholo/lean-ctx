@@ -1,0 +1,6 @@
+{
+  "command": "go test ./...",
+  "working_dir": "/workspace/lean-ctx/examples/telemetry",
+  "expected_tokens": 226,
+  "category": "test"
+}

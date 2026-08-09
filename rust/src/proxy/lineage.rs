@@ -38,6 +38,8 @@ pub(super) fn from_trusted_headers(
         content_ref: content_ref_v1(exact_bounded_body),
         tenant_id: None,
         trace_id: "tr-unit".into(),
+        task_id: None,
+        parent_task_id: None,
     })
 }
 

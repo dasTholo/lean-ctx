@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "task_id": "task-spine-v1-006",
+  "synthetic": true,
+  "data_classification": "Public",
+  "strategy": "balanced",
+  "budget_tokens": 9000,
+  "planned_context_tokens": 6800,
+  "planned_sources": ["src/profile/ProfileForm.tsx", "src/profile/ProfileForm.test.tsx", "src/components/StatusMessage.tsx", "src/styles/forms.css"],
+  "planned_views": [
+    {"path": "src/profile/ProfileForm.tsx", "mode": "full", "reason": "Add optimistic state"},
+    {"path": "src/profile/ProfileForm.test.tsx", "mode": "task", "reason": "Preserve interaction coverage"},
+    {"path": "src/components/StatusMessage.tsx", "mode": "signatures", "reason": "Reuse accessible status API"},
+    {"path": "src/styles/forms.css", "mode": "task", "reason": "Match visual states"}
+  ],
+  "expected_tool_calls": 8,
+  "rationale": "Plan includes the component, its tests, the existing status primitive, and the form styling boundary."
+}

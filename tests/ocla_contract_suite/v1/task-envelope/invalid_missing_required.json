@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "trace_id": "tr_01J5XK7Q2A6M8N4P0R3S5T7V9W",
+  "project_id": "project://leanctx/lean-ctx",
+  "session_id": "session_01J5XK7Q2A6M8N4P0R3S5T7V9W",
+  "agent_id": "agent://leanctx/codex",
+  "complexity": "medium",
+  "created_at": "2026-08-09T10:15:30Z"
+}

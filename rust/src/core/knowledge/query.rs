@@ -1,4 +1,5 @@
 use chrono::{DateTime, Duration, Utc};
+use lean_ctx_protocol::knowledge::{ClassificationLevel, KnowledgeObjectV1};
 
 use super::ranking::sort_fact_for_output;
 use super::types::{KnowledgeFact, ProjectKnowledge};
@@ -6,6 +7,74 @@ use crate::core::cognitive_gate::full_science_enabled;
 use crate::core::memory_scheduler::{initial_state, retrievability};
 
 const DEFAULT_ELAPSED_DAYS: f64 = 7.0;
+
+/// Filters understood by portable Knowledge Hub stores.
+#[derive(Debug, Clone, Default)]
+pub struct KnowledgeQuery {
+    pub source: Option<String>,
+    pub classification: Option<ClassificationLevel>,
+    pub valid_at: Option<DateTime<Utc>>,
+    pub tags: Vec<String>,
+}
+
+impl KnowledgeQuery {
+    /// Match objects that are valid and not superseded at `timestamp`.
+    pub fn valid_at(timestamp: DateTime<Utc>) -> Self {
+        Self {
+            valid_at: Some(timestamp),
+            ..Self::default()
+        }
+    }
+
+    /// Return whether an object satisfies every configured filter.
+    pub fn matches(&self, object: &KnowledgeObjectV1) -> bool {
+        if self.source.as_ref().is_some_and(|source| {
+            object
+                .source_ref
+                .as_ref()
+                .is_none_or(|reference| reference.uri != *source)
+        }) {
+            return false;
+        }
+        if self.classification.is_some_and(|level| {
+            object
+                .classification
+                .as_ref()
+                .is_none_or(|classification| classification.level != level)
+        }) {
+            return false;
+        }
+        if let Some(timestamp) = self.valid_at {
+            let Some(validity) = &object.validity else {
+                return false;
+            };
+            if validity.superseded_by.is_some() {
+                return false;
+            }
+            let Ok(valid_from) = DateTime::parse_from_rfc3339(&validity.valid_from) else {
+                return false;
+            };
+            if timestamp < valid_from.with_timezone(&Utc) {
+                return false;
+            }
+            if let Some(valid_until) = &validity.valid_until {
+                let Ok(valid_until) = DateTime::parse_from_rfc3339(valid_until) else {
+                    return false;
+                };
+                if timestamp > valid_until.with_timezone(&Utc) {
+                    return false;
+                }
+            }
+        }
+        let object_tags = object
+            .extra
+            .get("tags")
+            .and_then(serde_json::Value::as_array);
+        self.tags.iter().all(|tag| {
+            object_tags.is_some_and(|tags| tags.iter().any(|value| value.as_str() == Some(tag)))
+        })
+    }
+}
 
 fn fact_elapsed_days(fact: &KnowledgeFact, now: DateTime<Utc>) -> f64 {
     match fact.last_retrieved {

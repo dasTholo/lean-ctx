@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://leanctx.com/schemas/lean-ctx-protocol/v1/execution-receipt.json",
+  "title": "LeanCTX ExecutionReceiptV1",
+  "description": "Version-one execution accounting and evidence receipt.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "receipt_id",
+    "task_id",
+    "plan_id",
+    "context_balance",
+    "fresh_input_tokens",
+    "cached_input_tokens",
+    "output_tokens",
+    "reasoning_tokens",
+    "requested_model",
+    "selected_model",
+    "provider",
+    "model_calls",
+    "retries",
+    "latency_ms",
+    "actual_cost_micros",
+    "baseline_cost_micros",
+    "avoided_cost_micros",
+    "etpao_milli",
+    "decision_refs",
+    "evidence_refs",
+    "signature"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "receipt_id": { "$ref": "#/$defs/identifier" },
+    "task_id": { "$ref": "#/$defs/identifier" },
+    "plan_id": { "$ref": "#/$defs/identifier" },
+    "context_balance": { "$ref": "#/$defs/contextBalance" },
+    "fresh_input_tokens": { "type": "integer", "minimum": 0 },
+    "cached_input_tokens": { "type": "integer", "minimum": 0 },
+    "output_tokens": { "type": "integer", "minimum": 0 },
+    "reasoning_tokens": { "type": "integer", "minimum": 0 },
+    "requested_model": { "type": "string", "minLength": 1 },
+    "selected_model": { "type": "string", "minLength": 1 },
+    "provider": { "type": "string", "minLength": 1 },
+    "model_calls": { "type": "integer", "minimum": 0 },
+    "retries": { "type": "integer", "minimum": 0 },
+    "latency_ms": { "type": "integer", "minimum": 0 },
+    "actual_cost_micros": { "type": "integer", "minimum": 0 },
+    "baseline_cost_micros": { "type": "integer", "minimum": 0 },
+    "avoided_cost_micros": { "type": "integer", "minimum": 0 },
+    "etpao_milli": { "type": "integer", "minimum": 0 },
+    "outcome_ref": { "type": ["string", "null"] },
+    "decision_refs": { "type": "array", "items": { "type": "string" } },
+    "evidence_refs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/evidenceRef" }
+    },
+    "signature": { "type": "string", "minLength": 1 }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[^\\u0000-\\u001F\\u007F]+$"
+    },
+    "contextBalance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "original_tokens",
+        "materialized_tokens",
+        "delivered_tokens",
+        "provider_billed_tokens"
+      ],
+      "properties": {
+        "original_tokens": { "type": "integer", "minimum": 0 },
+        "materialized_tokens": { "type": "integer", "minimum": 0 },
+        "delivered_tokens": { "type": "integer", "minimum": 0 },
+        "provider_billed_tokens": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "evidenceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "uri", "digest", "signature_status"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "ProviderReceipt",
+            "RuntimeLog",
+            "SignedBatch",
+            "QualityMeasurement",
+            "ExperimentOutcome"
+          ]
+        },
+        "uri": { "type": "string", "minLength": 1 },
+        "digest": { "type": "string", "minLength": 1 },
+        "signature_status": {
+          "type": "string",
+          "enum": ["Verified", "Unverified", "NotSigned"]
+        }
+      }
+    }
+  }
+}

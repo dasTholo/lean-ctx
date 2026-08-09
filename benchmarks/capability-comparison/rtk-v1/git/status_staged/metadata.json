@@ -1,0 +1,6 @@
+{
+  "command": "git status",
+  "working_dir": "/workspace/lean-ctx",
+  "expected_tokens": 86,
+  "category": "git"
+}

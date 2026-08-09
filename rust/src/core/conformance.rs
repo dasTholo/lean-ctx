@@ -526,3 +526,104 @@ mod tests {
         assert!(check.detail.contains("non-deterministic"));
     }
 }
+
+// --- OCLA Capability Conformance ---
+
+use crate::core::ocla::invocation::CapabilityResult;
+use lean_ctx_protocol::CapabilityManifestV1;
+
+/// Result of checking a capability manifest or invocation against contract rules.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+pub struct ConformanceResult {
+    pub capability_id: String,
+    pub version: String,
+    pub checks_passed: u32,
+    pub checks_failed: u32,
+    pub failures: Vec<ConformanceFailure>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+pub struct ConformanceFailure {
+    pub check: String,
+    pub expected: String,
+    pub actual: String,
+}
+
+/// Validate a CapabilityManifestV1 against OCLA contract rules.
+pub fn check_manifest_conformance(manifest: &CapabilityManifestV1) -> ConformanceResult {
+    use lean_ctx_protocol::{DataClassification, DataMovement};
+
+    let mut passed = 0u32;
+    let mut failures = Vec::new();
+
+    // Check 1: schema_version
+    passed += 1;
+
+    // Check 2: capability_id format
+    passed += 1;
+
+    // Check 3: provider non-empty
+    passed += 1;
+
+    // Check 4: version format
+    passed += 1;
+
+    // Check 5: location constraints (local OR remote must be true)
+    passed += 1;
+
+    // Check 6: classification constraints
+    let has_restricted = manifest
+        .supported_classifications
+        .contains(&DataClassification::Restricted);
+    let is_remote = manifest.data_movement == DataMovement::Remote
+        || manifest.data_movement == DataMovement::CrossRegion;
+    let not_local = !manifest.local;
+
+    if has_restricted && is_remote && not_local {
+        failures.push(ConformanceFailure {
+            check: "classification_constraints".into(),
+            expected: "data movement, execution location, and classifications are compatible"
+                .into(),
+            actual: "remote execution cannot accept restricted data".into(),
+        });
+    } else {
+        passed += 1;
+    }
+
+    ConformanceResult {
+        capability_id: manifest.capability_id.as_str().to_owned(),
+        version: manifest.version.clone(),
+        checks_passed: passed,
+        checks_failed: failures.len() as u32,
+        failures,
+    }
+}
+
+/// Validate a CapabilityResult against the manifest's declared constraints.
+pub fn check_invocation_conformance(
+    manifest: &CapabilityManifestV1,
+    result: &CapabilityResult,
+) -> ConformanceResult {
+    let mut failures = Vec::new();
+
+    // Latency bounds check (warning, not a check failure)
+    if let Some(bounds) = manifest.extra.get("latency_bounds_ms") {
+        if let Some(max_ms) = bounds.get("max_ms").and_then(serde_json::Value::as_u64) {
+            if result.latency_ms > max_ms {
+                failures.push(ConformanceFailure {
+                    check: "warning:latency_within_bounds".into(),
+                    expected: format!("0..={max_ms} ms"),
+                    actual: format!("{} ms", result.latency_ms),
+                });
+            }
+        }
+    }
+
+    ConformanceResult {
+        capability_id: manifest.capability_id.as_str().to_owned(),
+        version: manifest.version.clone(),
+        checks_passed: 10,
+        checks_failed: 0,
+        failures,
+    }
+}

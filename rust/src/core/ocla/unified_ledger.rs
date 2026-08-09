@@ -396,6 +396,8 @@ mod tests {
             content_ref: "content".into(),
             tenant_id: None,
             trace_id: "tr-request".into(),
+            task_id: None,
+            parent_task_id: None,
         }
     }
 

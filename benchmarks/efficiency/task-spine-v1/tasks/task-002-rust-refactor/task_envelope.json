@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "task_id": "task-spine-v1-002",
+  "trace_id": "trace-spine-v1-002",
+  "project_id": "fixture-rust-large",
+  "session_id": "session-spine-v1-002",
+  "agent_id": "agent-task-spine",
+  "complexity": "high",
+  "created_at": "2026-08-01T10:00:00Z",
+  "parent_task_id": null,
+  "tenant_id": null,
+  "intent": "Refactor the indexing pipeline behind a stable provider interface",
+  "task_class": "refactor",
+  "risk_class": "high",
+  "quality_requirement_milli": 880,
+  "cost_budget_micros": 3000000,
+  "latency_budget_ms": 180000,
+  "data_classification": "Public",
+  "region_policy_ref": "policy:fixture-public",
+  "model_policy_ref": "policy:benchmark-default",
+  "context_state_ref": "context:task-spine-v1-002",
+  "outcome_contract_ref": "contract:accepted-outcome-v1"
+}

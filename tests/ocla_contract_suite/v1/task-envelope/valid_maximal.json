@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "task_id": "task_01J5XK7Q2A6M8N4P0R3S5T7V9W",
+  "trace_id": "tr_01J5XK7Q2A6M8N4P0R3S5T7V9W",
+  "session_id": "session_01J5XK7Q2A6M8N4P0R3S5T7V9W",
+  "agent_id": "agent://leanctx/codex",
+  "created_at": "2026-08-09T10:15:30Z",
+  "complexity": "medium",
+  "parent_task_id": "task_01J5XK6M1B4D7G9H2K5N8P0Q3R",
+  "tenant_id": "tenant://acme-labs",
+  "project_id": "project://acme-labs/lean-ctx",
+  "intent": "add_contract_fixtures_and_boundary_ci",
+  "task_class": "software_engineering",
+  "risk_class": "medium",
+  "quality_requirement_milli": 950,
+  "cost_budget_micros": 500000,
+  "latency_budget_ms": 60000,
+  "data_classification": "Internal",
+  "region_policy_ref": "policy://region/eu-central",
+  "model_policy_ref": "policy://model/approved-v1",
+  "context_state_ref": "ctx://state/acme-labs/lean-ctx/01J5XK7Q",
+  "outcome_contract_ref": "outcome://software-change/v1"
+}

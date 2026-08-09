@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "task_id": "task-spine-v1-004",
+  "trace_id": "trace-spine-v1-004",
+  "project_id": "fixture-markdown-docs",
+  "session_id": "session-spine-v1-004",
+  "agent_id": "agent-task-spine",
+  "complexity": "low",
+  "created_at": "2026-08-01T12:00:00Z",
+  "parent_task_id": null,
+  "tenant_id": null,
+  "intent": "Update the deployment guide with the rollback checklist",
+  "task_class": "documentation",
+  "risk_class": "low",
+  "quality_requirement_milli": 850,
+  "cost_budget_micros": 400000,
+  "latency_budget_ms": 30000,
+  "data_classification": "Public",
+  "region_policy_ref": "policy:fixture-public",
+  "model_policy_ref": "policy:benchmark-default",
+  "context_state_ref": "context:task-spine-v1-004",
+  "outcome_contract_ref": "contract:accepted-outcome-v1"
+}

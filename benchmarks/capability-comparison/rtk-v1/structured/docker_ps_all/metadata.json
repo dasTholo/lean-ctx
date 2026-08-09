@@ -1,0 +1,6 @@
+{
+  "command": "docker ps -a --no-trunc",
+  "working_dir": "/workspace/lean-ctx",
+  "expected_tokens": 284,
+  "category": "structured"
+}

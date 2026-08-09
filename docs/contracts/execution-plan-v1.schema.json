@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://leanctx.com/schemas/lean-ctx-protocol/v1/execution-plan.json",
+  "title": "LeanCTX ExecutionPlanV1",
+  "description": "Version-one bounded execution plan derived from a task envelope.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "plan_id",
+    "task_id",
+    "context_budget_tokens",
+    "context_strategy",
+    "knowledge_refs",
+    "capability_ids",
+    "model",
+    "provider",
+    "reasoning_allocation_milli",
+    "max_retries",
+    "fallback_refs",
+    "stop_condition",
+    "expected_cost_micros",
+    "expected_quality_milli",
+    "expected_latency_ms"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "plan_id": { "$ref": "#/$defs/identifier" },
+    "task_id": { "$ref": "#/$defs/identifier" },
+    "context_budget_tokens": { "type": "integer", "minimum": 0 },
+    "context_strategy": {
+      "type": "string",
+      "enum": ["minimal", "balanced", "comprehensive", "cached_first"]
+    },
+    "knowledge_refs": { "type": "array", "items": { "type": "string" } },
+    "capability_ids": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/identifier" }
+    },
+    "model": { "type": "string", "minLength": 1 },
+    "provider": { "type": "string", "minLength": 1 },
+    "reasoning_allocation_milli": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000
+    },
+    "max_retries": { "type": "integer", "minimum": 0 },
+    "fallback_refs": { "type": "array", "items": { "type": "string" } },
+    "stop_condition": {
+      "type": "string",
+      "enum": [
+        "on_completion",
+        "on_acceptance",
+        "on_budget_exhaustion",
+        "on_error",
+        "manual"
+      ]
+    },
+    "expected_cost_micros": { "type": "integer", "minimum": 0 },
+    "expected_quality_milli": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000
+    },
+    "expected_latency_ms": { "type": "integer", "minimum": 0 },
+    "policy_decision_ref": { "type": ["string", "null"] },
+    "scheduler_decision_ref": { "type": ["string", "null"] }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[^\\u0000-\\u001F\\u007F]+$"
+    }
+  }
+}

@@ -65,6 +65,10 @@ pub struct OclaRequestContext {
     /// [PII] Trace identifier that correlates requests across boundaries.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub trace_id: String,
+    #[serde(default)]
+    pub task_id: Option<String>,
+    #[serde(default)]
+    pub parent_task_id: Option<String>,
 }
 
 thread_local! {
@@ -132,6 +136,10 @@ struct WireContext {
     /// [PII] Trace identifier that correlates requests across boundaries.
     #[serde(default)]
     trace_id: Option<String>,
+    #[serde(default)]
+    task_id: Option<String>,
+    #[serde(default)]
+    parent_task_id: Option<String>,
 }
 
 impl<'de> Deserialize<'de> for OclaRequestContext {
@@ -140,14 +148,17 @@ impl<'de> Deserialize<'de> for OclaRequestContext {
         D: serde::Deserializer<'de>,
     {
         let wire = WireContext::deserialize(deserializer)?;
-        Ok(Self::new(
+        let mut context = Self::new(
             wire.request_id,
             wire.session_id,
             wire.agent_id,
             wire.content_ref,
             wire.tenant_id.into_option(),
             wire.trace_id,
-        ))
+        );
+        context.task_id = wire.task_id;
+        context.parent_task_id = wire.parent_task_id;
+        Ok(context)
     }
 }
 
@@ -265,6 +276,8 @@ impl OclaRequestContext {
             content_ref,
             tenant_id,
             trace_id: trace_id.unwrap_or_else(generate_trace_id),
+            task_id: None,
+            parent_task_id: None,
         }
     }
 
@@ -976,6 +989,8 @@ mod tests {
             content_ref: "blake3:content".into(),
             tenant_id: None,
             trace_id: "tr-test".into(),
+            task_id: None,
+            parent_task_id: None,
         };
         assert!(matches!(
             context.validate(),
@@ -1067,6 +1082,8 @@ mod tests {
                 content_ref: "blake3:content".into(),
                 tenant_id: None,
                 trace_id: "tr-test".into(),
+                task_id: None,
+                parent_task_id: None,
             },
             from_agent_id: "owner-agent".into(),
             to_agent_id: "reviewer-agent".into(),

@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "task_id": "task-spine-v1-010",
+  "trace_id": "trace-spine-v1-010",
+  "project_id": "fixture-sql-rust-migration",
+  "session_id": "session-spine-v1-010",
+  "agent_id": "agent-task-spine",
+  "complexity": "high",
+  "created_at": "2026-08-01T19:00:00Z",
+  "parent_task_id": null,
+  "tenant_id": null,
+  "intent": "Add an indexed status column and backfill it safely",
+  "task_class": "database_migration",
+  "risk_class": "high",
+  "quality_requirement_milli": 920,
+  "cost_budget_micros": 2400000,
+  "latency_budget_ms": 150000,
+  "data_classification": "Public",
+  "region_policy_ref": "policy:fixture-public",
+  "model_policy_ref": "policy:migration-review",
+  "context_state_ref": "context:task-spine-v1-010",
+  "outcome_contract_ref": "contract:accepted-outcome-v1"
+}

@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://leanctx.com/schemas/lean-ctx-protocol/v1/knowledge-object.json",
+  "title": "LeanCTX KnowledgeObjectV1",
+  "description": "Version-one content-addressed knowledge provenance record with additive extensions.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_version",
+    "source_ref",
+    "source_type",
+    "authority",
+    "owner",
+    "classification",
+    "validity",
+    "content_hash",
+    "evidence_digest",
+    "policy_ref"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "source_ref": { "type": "string", "minLength": 1 },
+    "source_type": {
+      "type": "string",
+      "enum": [
+        "repository",
+        "documentation",
+        "provider",
+        "user_input",
+        "build_artifact",
+        "test_result",
+        "other"
+      ]
+    },
+    "authority": {
+      "type": "string",
+      "enum": ["primary", "verified", "secondary", "derived", "user_provided"]
+    },
+    "owner": { "type": "string", "minLength": 1 },
+    "classification": {
+      "type": "string",
+      "enum": ["Public", "Internal", "Confidential", "Restricted"]
+    },
+    "validity": { "$ref": "#/$defs/validity" },
+    "supersedes": { "type": ["string", "null"] },
+    "content_hash": { "type": "string", "minLength": 1 },
+    "evidence_digest": { "type": "string", "minLength": 1 },
+    "policy_ref": { "type": "string", "minLength": 1 }
+  },
+  "$defs": {
+    "validity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["valid_from"],
+      "properties": {
+        "valid_from": { "type": "string", "format": "date-time", "minLength": 1 },
+        "valid_until": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        }
+      }
+    }
+  }
+}

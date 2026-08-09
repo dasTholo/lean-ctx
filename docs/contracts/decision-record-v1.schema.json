@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://leanctx.com/schemas/lean-ctx-protocol/v1/decision-record.json",
+  "title": "LeanCTX DecisionRecordV1",
+  "description": "Version-one signed decision record with policy and evidence references.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "decision_id",
+    "task_id",
+    "plan_id",
+    "decision_kind",
+    "input_refs",
+    "constraint_refs",
+    "selected_result",
+    "rationale_code",
+    "decision_system_name",
+    "decision_system_version",
+    "evidence_refs",
+    "observed_at",
+    "signature"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "decision_id": { "$ref": "#/$defs/identifier" },
+    "task_id": { "$ref": "#/$defs/identifier" },
+    "plan_id": { "$ref": "#/$defs/identifier" },
+    "decision_kind": {
+      "type": "string",
+      "enum": [
+        "routing",
+        "scheduling",
+        "capability_selection",
+        "context_selection",
+        "policy",
+        "fallback",
+        "retry",
+        "stop",
+        "other"
+      ]
+    },
+    "input_refs": { "type": "array", "items": { "type": "string" } },
+    "constraint_refs": { "type": "array", "items": { "type": "string" } },
+    "selected_result": {},
+    "rationale_code": { "type": "string", "minLength": 1 },
+    "rationale_ref": { "type": ["string", "null"] },
+    "policy_ref": { "type": ["string", "null"] },
+    "decision_system_name": { "type": "string", "minLength": 1 },
+    "decision_system_version": { "type": "string", "minLength": 1 },
+    "evidence_refs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/evidenceRef" }
+    },
+    "observed_at": { "type": "string", "format": "date-time", "minLength": 1 },
+    "signature": { "type": "string", "minLength": 1 },
+    "supersedes": {
+      "anyOf": [{ "$ref": "#/$defs/identifier" }, { "type": "null" }]
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[^\\u0000-\\u001F\\u007F]+$"
+    },
+    "evidenceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "uri", "digest", "signature_status"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "ProviderReceipt",
+            "RuntimeLog",
+            "SignedBatch",
+            "QualityMeasurement",
+            "ExperimentOutcome"
+          ]
+        },
+        "uri": { "type": "string", "minLength": 1 },
+        "digest": { "type": "string", "minLength": 1 },
+        "signature_status": {
+          "type": "string",
+          "enum": ["Verified", "Unverified", "NotSigned"]
+        }
+      }
+    }
+  }
+}

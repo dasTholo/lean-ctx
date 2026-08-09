@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "task_id": "task-spine-v1-003",
+  "synthetic": true,
+  "data_classification": "Public",
+  "strategy": "balanced",
+  "budget_tokens": 5000,
+  "planned_context_tokens": 3900,
+  "planned_sources": ["src/hooks/useSearch.ts", "src/hooks/useSearch.test.ts", "package.json"],
+  "planned_views": [
+    {"path": "src/hooks/useSearch.ts", "mode": "task", "reason": "Understand pagination state"},
+    {"path": "src/hooks/useSearch.test.ts", "mode": "full", "reason": "Match test helpers"},
+    {"path": "package.json", "mode": "map", "reason": "Confirm test runner"}
+  ],
+  "expected_tool_calls": 5,
+  "rationale": "Keep the plan focused on the hook, its neighboring tests, and the package test command."
+}

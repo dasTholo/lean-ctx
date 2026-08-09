@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "source_ref": "source://acme-labs/policy/open-core-boundary-v1",
+  "source_type": "documentation",
+  "authority": "verified",
+  "owner": "identity://acme-labs/architecture",
+  "classification": "Internal",
+  "validity": {
+    "valid_from": "2026-08-09T00:00:00Z"
+  },
+  "content_hash": "sha256:content-open-core-boundary-v1",
+  "evidence_digest": "sha256:evidence-open-core-boundary-v1",
+  "policy_ref": "policy://acme-labs/knowledge/engineering",
+  "future_provenance": {
+    "reviewed_by": "identity://acme-labs/trust-plane"
+  }
+}

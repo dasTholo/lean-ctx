@@ -316,6 +316,8 @@ fn record_outcome(
         content_ref: format!("file:{path}"),
         tenant_id: None,
         trace_id: "tr-unit".into(),
+        task_id: None,
+        parent_task_id: None,
     };
     let outcome = crate::core::ocla::Outcome {
         context,
@@ -371,6 +373,8 @@ fn read_density_with_analyzer(
                 content_ref: path.to_string(),
                 tenant_id: None,
                 trace_id: "tr-unit".into(),
+                task_id: None,
+                parent_task_id: None,
             },
             original_tokens: original_tokens as u64,
             delivered_tokens: output_tokens as u64,
@@ -586,6 +590,8 @@ fn project_ocla_compression(path: &str, source_tokens: u64, output_tokens: u64) 
             content_ref: source_ref.clone(),
             tenant_id: None,
             trace_id: "tr-unit".into(),
+            task_id: None,
+            parent_task_id: None,
         },
         source_ref,
         source_tokens,
@@ -610,6 +616,8 @@ fn project_ocla_savings(path: &str, original_tokens: u64, output_tokens: u64) {
         content_ref: format!("file:{path}"),
         tenant_id: None,
         trace_id: String::new(),
+        task_id: None,
+        parent_task_id: None,
     };
     let evidence = SavingsEvidence {
         context,

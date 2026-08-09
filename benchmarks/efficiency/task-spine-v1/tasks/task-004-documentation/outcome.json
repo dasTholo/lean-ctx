@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "outcome_id": "outcome-spine-v1-004",
+  "task_id": "task-spine-v1-004",
+  "accepted": "accepted",
+  "quality_score_milli": 980,
+  "signals": {
+    "build": "not_run",
+    "tests": "not_run",
+    "lint": "not_run",
+    "typecheck": "not_run",
+    "completion": "passed",
+    "pr": "not_run",
+    "correction": "not_run",
+    "rollback": "not_run",
+    "retry": "not_run"
+  },
+  "contract_ref": "contract:accepted-outcome-v1",
+  "evidence_refs": [
+    {
+      "kind": "QualityMeasurement",
+      "uri": "urn:task-spine-v1:outcome:004",
+      "digest": "sha256:task-spine-v1-004-outcome",
+      "signature_status": "Verified"
+    }
+  ],
+  "observed_at": "2026-08-01T12:12:00Z"
+}

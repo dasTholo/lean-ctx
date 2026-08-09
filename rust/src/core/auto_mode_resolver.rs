@@ -351,6 +351,8 @@ fn resolve_adaptive(ctx: &AutoModeContext) -> Option<ResolvedMode> {
             content_ref: ctx.path.to_string(),
             tenant_id: None,
             trace_id: "tr-unit".into(),
+            task_id: None,
+            parent_task_id: None,
         },
         config_ref: predicted.clone(),
         objective_ref: ctx.task.unwrap_or_default().to_string(),

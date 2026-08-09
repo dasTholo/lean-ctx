@@ -237,6 +237,8 @@ fn cmd_routing(args: &[String]) {
             content_ref: suite_path.to_string_lossy().into_owned(),
             tenant_id: None,
             trace_id: "tr-unit".into(),
+            task_id: None,
+            parent_task_id: None,
         },
         experiment_ref: suite_path.to_string_lossy().into_owned(),
         cohort_ref: "cohort:routing-eval".into(),

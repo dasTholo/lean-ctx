@@ -33,6 +33,8 @@ pub(super) fn classify_and_store_proxy_intent(
             content_ref,
             tenant_id: None,
             trace_id: "tr-unit".into(),
+            task_id: None,
+            parent_task_id: None,
         }
     });
     let request = crate::core::ocla::types::IntentRequest {

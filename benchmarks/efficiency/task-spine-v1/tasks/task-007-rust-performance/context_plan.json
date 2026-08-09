@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "task_id": "task-spine-v1-007",
+  "synthetic": true,
+  "data_classification": "Public",
+  "strategy": "cached_first",
+  "budget_tokens": 8500,
+  "planned_context_tokens": 6300,
+  "planned_sources": ["src/scoring/window.rs", "src/scoring/bench.rs", "src/scoring/tests.rs", "Cargo.toml"],
+  "planned_views": [
+    {"path": "src/scoring/window.rs", "mode": "full", "reason": "Inspect allocation hot path"},
+    {"path": "src/scoring/bench.rs", "mode": "task", "reason": "Use existing benchmark fixture"},
+    {"path": "src/scoring/tests.rs", "mode": "signatures", "reason": "Keep behavior assertions"},
+    {"path": "Cargo.toml", "mode": "map", "reason": "Check benchmark feature"}
+  ],
+  "expected_tool_calls": 7,
+  "rationale": "Pair the hot implementation with benchmark and correctness evidence before changing allocation strategy."
+}

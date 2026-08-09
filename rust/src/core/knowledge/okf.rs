@@ -776,6 +776,10 @@ mod tests {
             patterns: Vec::new(),
             insights: Vec::new(),
             relations: graph.edges,
+            task_id: None,
+            policy_version: None,
+            knowledge_refs: Vec::new(),
+            snapshot_hash: None,
         }
     }
 

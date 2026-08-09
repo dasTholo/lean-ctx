@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "task_id": "task-spine-v1-001",
+  "synthetic": true,
+  "data_classification": "Public",
+  "strategy": "cached_first",
+  "budget_tokens": 2200,
+  "planned_context_tokens": 1800,
+  "planned_sources": ["src/cache.py", "tests/test_cache.py", "pyproject.toml"],
+  "planned_views": [
+    {"path": "src/cache.py", "mode": "task", "reason": "Locate expiry branch"},
+    {"path": "tests/test_cache.py", "mode": "signatures", "reason": "Reuse test conventions"},
+    {"path": "pyproject.toml", "mode": "map", "reason": "Confirm test command"}
+  ],
+  "expected_tool_calls": 3,
+  "rationale": "Read the target branch and its focused tests before making a one-line fix."
+}
