@@ -39,12 +39,26 @@ pub(crate) fn write_opencode_config(
 
         let existing = mcp_obj.get("lean-ctx").cloned();
         if existing.as_ref() == Some(&desired) {
+            // MCP entry unchanged — but stale deny permissions may linger (#1451).
+            if strip_shadow_denies_if_disabled(obj) {
+                let formatted = serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?;
+                crate::config_io::write_atomic_with_backup(&target.config_path, &formatted)?;
+                return Ok(WriteResult {
+                    action: WriteAction::Updated,
+                    note: Some("removed stale shadow-mode deny permissions".into()),
+                });
+            }
             return Ok(WriteResult {
                 action: WriteAction::Already,
                 note: None,
             });
         }
         mcp_obj.insert("lean-ctx".to_string(), desired);
+
+        // #1451: strip shadow-mode deny entries when shadow_mode is off.
+        // Without this, an MCP update preserves stale deny entries that
+        // the hook installer would have removed — but only if it ran after.
+        let _ = strip_shadow_denies_if_disabled(obj);
 
         let formatted = serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?;
         crate::config_io::write_atomic_with_backup(&target.config_path, &formatted)?;
@@ -76,4 +90,28 @@ pub(crate) fn write_opencode_fresh(
         },
         note,
     })
+}
+
+/// Strip shadow-mode permission denies when the user has `shadow_mode = false`.
+/// Keeps permission entries the user set themselves (external_directory, rm *, etc.).
+fn strip_shadow_denies_if_disabled(obj: &mut serde_json::Map<String, serde_json::Value>) -> bool {
+    let cfg = crate::core::config::Config::load();
+    if cfg.shadow_mode {
+        return false;
+    }
+    let Some(perms) = obj.get_mut("permission").and_then(|p| p.as_object_mut()) else {
+        return false;
+    };
+    const SHADOW_TOOLS: &[&str] = &["read", "grep", "glob", "bash"];
+    let mut changed = false;
+    for &tool in SHADOW_TOOLS {
+        if perms.get(tool).and_then(|v| v.as_str()) == Some("deny") {
+            perms.remove(tool);
+            changed = true;
+        }
+    }
+    if changed && perms.is_empty() {
+        obj.remove("permission");
+    }
+    changed
 }
