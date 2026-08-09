@@ -76,7 +76,6 @@ fn auto_reread_of_fully_delivered_file_serves_unchanged_stub() {
 fn mode_change_clears_full_delivered_flag() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("readme.md");
-    let p = path.to_string_lossy().to_string();
     let body = (0..50)
         .map(|i| {
             format!(
@@ -98,6 +97,12 @@ Content for section {i}."
         ),
     )
     .unwrap();
+    // Canonicalize after writing so the path is stable for cache key lookups.
+    // On Windows CI, tempdir short names (8.3) can race with canonicalization.
+    let p = std::fs::canonicalize(&path)
+        .unwrap_or_else(|_| path.clone())
+        .to_string_lossy()
+        .to_string();
 
     let mut cache = SessionCache::new();
 
