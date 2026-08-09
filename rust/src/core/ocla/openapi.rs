@@ -580,7 +580,7 @@ pub fn ocla_openapi_spec() -> Value {
                 },
                 "SavingsEvent": savings_event_schema(),
                 "LedgerModelTotals": {"type": "array", "prefixItems": [{"type": "string"}, {"type": "integer", "minimum": 0}, {"type": "number"}], "minItems": 3, "maxItems": 3},
-                "LedgerDayTotals": {"type": "array", "prefixItems": [{"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"}, {"type": "integer", "minimum": 0}, {"type": "number"}], "minItems": 3, "maxItems": 3},
+                "LedgerDayTotals": {"type": "array", "prefixItems": [{"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"}, {"type": "integer", "minimum": 0}, {"type": "number"}, {"type": "integer", "minimum": 0}], "minItems": 3, "maxItems": 4},
                 "LedgerToolTotals": {"type": "array", "prefixItems": [{"type": "string"}, {"type": "integer", "minimum": 0}], "minItems": 2, "maxItems": 2},
                 "LedgerMechanismTotals": {"type": "array", "prefixItems": [{"type": "string"}, {"type": "integer", "minimum": 0}, {"type": "number"}], "minItems": 3, "maxItems": 3},
                 "LedgerSummary": ledger_summary_schema(),

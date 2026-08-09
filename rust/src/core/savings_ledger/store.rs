@@ -319,8 +319,8 @@ pub struct LedgerSummary {
     pub tokenizers: Vec<String>,
     /// (model_id, saved_tokens, saved_usd), descending by tokens.
     pub by_model: Vec<(String, u64, f64)>,
-    /// (YYYY-MM-DD, saved_tokens, saved_usd), ascending by day.
-    pub by_day: Vec<(String, u64, f64)>,
+    /// (YYYY-MM-DD, saved_tokens, saved_usd, baseline_tokens), ascending by day.
+    pub by_day: Vec<(String, u64, f64, u64)>,
     /// (tool, saved_tokens), descending by tokens.
     pub by_tool: Vec<(String, u64)>,
     /// (mechanism, saved_tokens, saved_usd), descending by USD — the
@@ -384,7 +384,7 @@ pub fn summarize(path: &Path) -> LedgerSummary {
 
     let mut s = LedgerSummary::default();
     let mut by_model: HashMap<String, (u64, f64)> = HashMap::new();
-    let mut by_day: HashMap<String, (u64, f64)> = HashMap::new();
+    let mut by_day: HashMap<String, (u64, f64, u64)> = HashMap::new();
     let mut by_tool: HashMap<String, u64> = HashMap::new();
     let mut by_mechanism: HashMap<String, (u64, f64)> = HashMap::new();
     let mut tokenizers: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
@@ -426,6 +426,7 @@ pub fn summarize(path: &Path) -> LedgerSummary {
             let d = by_day.entry(day).or_default();
             d.0 = d.0.saturating_add(ev.saved_tokens);
             d.1 += ev.saved_usd;
+            d.2 = d.2.saturating_add(ev.baseline_tokens);
 
             *by_tool.entry(ev.tool.clone()).or_default() += ev.saved_tokens;
         }
@@ -459,7 +460,10 @@ pub fn summarize(path: &Path) -> LedgerSummary {
     s.by_model = by_model.into_iter().map(|(k, (t, u))| (k, t, u)).collect();
     s.by_model.sort_by_key(|row| std::cmp::Reverse(row.1));
 
-    s.by_day = by_day.into_iter().map(|(k, (t, u))| (k, t, u)).collect();
+    s.by_day = by_day
+        .into_iter()
+        .map(|(k, (t, u, b))| (k, t, u, b))
+        .collect();
     s.by_day.sort_by(|a, b| a.0.cmp(&b.0));
 
     s.by_tool = by_tool.into_iter().collect();

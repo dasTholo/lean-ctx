@@ -229,19 +229,30 @@ pub fn record_at_turn(command: &str, input_tokens: usize, output_tokens: usize, 
     store
         .command_classes
         .insert(cmd_key.clone(), classify_command(&cmd_key));
+    let is_compressible = classify_command(&cmd_key) == TrafficClass::Compressible;
     let entry = store.commands.entry(cmd_key).or_default();
     entry.count = entry.count.saturating_add(1);
     entry.input_tokens = entry.input_tokens.saturating_add(input_tokens as u64);
     entry.output_tokens = entry.output_tokens.saturating_add(output_tokens as u64);
 
     let current_version = env!("CARGO_PKG_VERSION").to_string();
+    let ci = if is_compressible {
+        input_tokens as u64
+    } else {
+        0
+    };
+    let co = if is_compressible {
+        output_tokens as u64
+    } else {
+        0
+    };
     if let Some(day) = store.daily.last_mut() {
         if day.date == today {
             day.commands = day.commands.saturating_add(1);
             day.input_tokens = day.input_tokens.saturating_add(input_tokens as u64);
             day.output_tokens = day.output_tokens.saturating_add(output_tokens as u64);
-            // Stamp the running version so a mid-day update attributes the day
-            // to the release in use for its latest activity (#307).
+            day.compressible_input_tokens = day.compressible_input_tokens.saturating_add(ci);
+            day.compressible_output_tokens = day.compressible_output_tokens.saturating_add(co);
             day.version = current_version;
         } else {
             store.daily.push(DayStats {
@@ -249,6 +260,8 @@ pub fn record_at_turn(command: &str, input_tokens: usize, output_tokens: usize, 
                 commands: 1,
                 input_tokens: input_tokens as u64,
                 output_tokens: output_tokens as u64,
+                compressible_input_tokens: ci,
+                compressible_output_tokens: co,
                 version: current_version,
             });
         }
@@ -258,6 +271,8 @@ pub fn record_at_turn(command: &str, input_tokens: usize, output_tokens: usize, 
             commands: 1,
             input_tokens: input_tokens as u64,
             output_tokens: output_tokens as u64,
+            compressible_input_tokens: ci,
+            compressible_output_tokens: co,
             version: current_version,
         });
     }
@@ -674,6 +689,8 @@ mod tests {
             input_tokens: 1000,
             output_tokens: 200,
             version: "3.7.0".to_string(),
+            compressible_input_tokens: 0,
+            compressible_output_tokens: 0,
         }];
         let mut merged_daily = vec![DayStats {
             date: "2026-04-18".to_string(),
@@ -681,6 +698,8 @@ mod tests {
             input_tokens: 500,
             output_tokens: 490,
             version: String::new(),
+            compressible_input_tokens: 0,
+            compressible_output_tokens: 0,
         }];
 
         io::merge_daily(&mut merged_daily, &current_daily, &baseline_daily);
