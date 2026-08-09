@@ -58,6 +58,22 @@ while IFS= read -r file; do
             exit 1
         fi
     fi
+    # Detect cognitive/signatures mode section markers (#1444)
+    if echo "$staged" | grep -qF '§ function'; then
+        echo "pre-commit: BLOCKED — '$file' contains §-section markers (cognitive mode corruption)."
+        echo "  Fix: LEAN_CTX_DISABLE=1 git restore --source=HEAD -- $file"
+        exit 1
+    fi
+    if echo "$staged" | grep -qF '§ block'; then
+        echo "pre-commit: BLOCKED — '$file' contains §-section markers (cognitive mode corruption)."
+        echo "  Fix: LEAN_CTX_DISABLE=1 git restore --source=HEAD -- $file"
+        exit 1
+    fi
+    if echo "$staged" | grep -qF '§ impl'; then
+        echo "pre-commit: BLOCKED — '$file' contains §-section markers (cognitive mode corruption)."
+        echo "  Fix: LEAN_CTX_DISABLE=1 git restore --source=HEAD -- $file"
+        exit 1
+    fi
 done < <(git diff --cached --name-only --diff-filter=d)
 
 # ── Rust quality checks ──────────────────────────────────────────
