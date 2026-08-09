@@ -213,6 +213,13 @@ pub struct DayStats {
     /// (#307). Empty for days recorded before this field existed.
     #[serde(default)]
     pub version: String,
+    /// Tokens from operations classified as `Compressible` (file reads, shell
+    /// output). Excludes terminal polling, meta-tools, and stream-tracking to
+    /// give the dashboard an undiluted compression rate.
+    #[serde(default)]
+    pub compressible_input_tokens: u64,
+    #[serde(default)]
+    pub compressible_output_tokens: u64,
 }
 
 /// High-level token savings summary for display.

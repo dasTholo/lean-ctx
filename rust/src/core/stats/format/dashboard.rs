@@ -957,6 +957,7 @@ mod tests {
                 input_tokens: 10_000 + day as u64 * 1_000,
                 output_tokens: 5_000,
                 version: "3.9.12".to_string(),
+                ..DayStats::default()
             })
             .collect();
 

@@ -251,6 +251,12 @@ pub(super) fn merge_daily(merged: &mut Vec<DayStats>, current: &[DayStats], base
         let do_ = day
             .output_tokens
             .saturating_sub(base.map_or(0, |b| b.output_tokens));
+        let dci = day
+            .compressible_input_tokens
+            .saturating_sub(base.map_or(0, |b| b.compressible_input_tokens));
+        let dco = day
+            .compressible_output_tokens
+            .saturating_sub(base.map_or(0, |b| b.compressible_output_tokens));
         if dc == 0 && di == 0 && do_ == 0 {
             continue;
         }
@@ -258,7 +264,8 @@ pub(super) fn merge_daily(merged: &mut Vec<DayStats>, current: &[DayStats], base
             existing.commands += dc;
             existing.input_tokens += di;
             existing.output_tokens += do_;
-            // Prefer the most recent known version for the day (#307).
+            existing.compressible_input_tokens += dci;
+            existing.compressible_output_tokens += dco;
             if !day.version.is_empty() {
                 existing.version.clone_from(&day.version);
             }
@@ -268,6 +275,8 @@ pub(super) fn merge_daily(merged: &mut Vec<DayStats>, current: &[DayStats], base
                 commands: dc,
                 input_tokens: di,
                 output_tokens: do_,
+                compressible_input_tokens: dci,
+                compressible_output_tokens: dco,
                 version: day.version.clone(),
             });
         }

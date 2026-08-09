@@ -85,10 +85,12 @@ class CockpitLearning extends HTMLElement {
         cached('/api/stats', { timeoutMs: 10000 }),
         fetchJson('/api/gain', { timeoutMs: 10000 }).catch(function () { return null; }),
         fetchJson('/api/learning', { timeoutMs: 10000 }).catch(function () { return null; }),
+        fetchJson('/api/roi', { timeoutMs: 10000 }).catch(function () { return null; }),
       ]);
       this._data = results[0];
       this._gain = results[1];
       this._learning = results[2];
+      this._roi = results[3];
     } catch (e) {
       this._error = e && e.error ? e.error : String(e || 'load failed');
       this._data = null;
@@ -121,7 +123,7 @@ class CockpitLearning extends HTMLElement {
       '<div class="row r3">' +
       '<div class="card"><div class="card-header"><h3>Savings Growth' + tip('savings_growth') + '</h3></div>' +
       '<canvas id="ckle-savings" height="200"></canvas></div>' +
-      '<div class="card"><div class="card-header"><h3>Compression Trend' + tip('compression_trend') + '</h3></div>' +
+      '<div class="card"><div class="card-header"><h3>Token Savings (verified)' + tip('compression_trend') + '</h3></div>' +
       '<canvas id="ckle-compression" height="200"></canvas></div>' +
       '<div class="card"><div class="card-header"><h3>Command Volume' + tip('command_volume') + '</h3></div>' +
       '<canvas id="ckle-volume" height="200"></canvas></div>' +
@@ -329,6 +331,26 @@ class CockpitLearning extends HTMLElement {
       compression.push(rate);
 
       volume.push(Number(d.count || d.commands || d.calls || 0));
+    }
+
+    // Honest compression rate: verified savings (ledger) / total input (stats).
+    // Ledger savings are hash-chained and signed; stats input is the total
+    // token volume processed by lean-ctx (all tool calls + proxy observations).
+    var roiTrend = this._roi && this._roi.trend ? this._roi.trend : [];
+    if (roiTrend.length > 0) {
+      var savedMap = {};
+      for (var j = 0; j < roiTrend.length; j++) {
+        var tDay = String(roiTrend[j][0] || '');
+        savedMap[tDay] = Number(roiTrend[j][1] || 0);
+      }
+      for (var k = 0; k < labels.length; k++) {
+        var fullDate = (daily[k] && (daily[k].date || daily[k].day)) || '';
+        var dailyInput = Number(daily[k] && (daily[k].input_tokens || daily[k].total_input) || 0);
+        var verifiedSaved = savedMap[fullDate];
+        if (verifiedSaved !== undefined && dailyInput > 0) {
+          compression[k] = Math.round((verifiedSaved / dailyInput) * 100);
+        }
+      }
     }
 
     if (labels.length === 0) {

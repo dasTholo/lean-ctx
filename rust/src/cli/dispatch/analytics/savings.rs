@@ -594,7 +594,7 @@ fn format_savings_summary() -> String {
         out.push(String::new());
         out.push(format!("  {}", t.box_top_labeled(w, "RECENT DAYS")));
         let recent: Vec<_> = s.by_day.iter().rev().take(7).collect();
-        for (day, tok, usd) in recent.into_iter().rev() {
+        for (day, tok, usd, _baseline) in recent.into_iter().rev() {
             out.push(sl(&format!(
                 "  {m}{day}{rst}  {:>10} tok  {sc}${usd:.2}{rst}",
                 format_tokens(*tok)

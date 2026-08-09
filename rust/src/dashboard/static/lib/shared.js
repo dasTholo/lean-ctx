@@ -500,7 +500,7 @@
     health_anomaly: 'Performance anomalies detected by statistical analysis of system metrics.',
     health_gotchas: 'Known error patterns and workarounds stored in Bug Memory.',
     savings_growth: 'Chart tracking cumulative token savings growth over time.',
-    compression_trend: 'Trend chart of compression ratio changes over recent activity.',
+    compression_trend: 'Verified token savings as % of total input — numerator from the signed savings ledger, denominator from all tool-call input tokens.',
     command_volume: 'Chart showing command execution volume over time.',
     buddy_cache: 'Cache hit rate \u2013 share of reads served from cache instead of re-reading files.',
     buddy_mood: 'Current mood \u2013 reflects recent compression performance and activity level.',
