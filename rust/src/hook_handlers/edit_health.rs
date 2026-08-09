@@ -279,7 +279,7 @@ fn check_and_restore_corrupted(v: &Value, root: &str) {
     }
 
     eprintln!(
-        "[lean-ctx] CORRUPTION DETECTED in {file}: compression markers found after edit. Auto-restoring."
+        "[lean-ctx] CORRUPTION DETECTED in {file}: compression markers found after edit. Restoring from git HEAD."
     );
 
     let abs_path = if std::path::Path::new(&file).is_absolute() {
@@ -288,20 +288,6 @@ fn check_and_restore_corrupted(v: &Value, root: &str) {
         format!("{root}/{file}")
     };
 
-    // Try the .lctx-orig backup first (saved during redirect_read).
-    // This works even for new files not yet in git.
-    let orig_backup = super::redirect::redirect_orig_path(&abs_path);
-    if orig_backup.exists() {
-        if let Ok(original) = std::fs::read(&orig_backup) {
-            if std::fs::write(&abs_path, &original).is_ok() {
-                eprintln!("[lean-ctx] Restored {file} from pre-compression backup.");
-                let _ = std::fs::remove_file(&orig_backup);
-                return;
-            }
-        }
-    }
-
-    // Fallback: restore from git HEAD
     let restore = std::process::Command::new("git")
         .args(["checkout", "HEAD", "--", &abs_path])
         .current_dir(root)
@@ -309,14 +295,14 @@ fn check_and_restore_corrupted(v: &Value, root: &str) {
 
     match restore {
         Ok(out) if out.status.success() => {
-            eprintln!("[lean-ctx] Restored {file} from git HEAD (fallback).");
+            eprintln!("[lean-ctx] Restored {file} from git HEAD.");
         }
         Ok(out) => {
             let stderr = String::from_utf8_lossy(&out.stderr);
-            eprintln!("[lean-ctx] CRITICAL: Failed to restore {file}: {stderr}");
+            eprintln!("[lean-ctx] CRITICAL: could not restore {file}: {stderr}");
         }
         Err(e) => {
-            eprintln!("[lean-ctx] CRITICAL: Failed to run git restore for {file}: {e}");
+            eprintln!("[lean-ctx] CRITICAL: git restore failed for {file}: {e}");
         }
     }
 }

@@ -272,15 +272,6 @@ pub(super) fn redirect_read(tool_input: Option<&serde_json::Value>) -> String {
         if !final_output.is_empty() && std::fs::write(&temp_path, &final_output).is_ok() {
             let temp_str = temp_path.to_str().unwrap_or("");
 
-            // Save original file content for corruption recovery.
-            // If StrReplace/Write later corrupts the file with compressed
-            // content, the PostToolUse guard in edit_health.rs can restore
-            // from this backup without depending on git.
-            if let Ok(original) = std::fs::read(&path) {
-                let orig_path = redirect_orig_path(&path);
-                let _ = std::fs::write(&orig_path, &original);
-            }
-
             // Warm daemon cache: subsequent ctx_read(mode=full) hits warm
             // BM25/session cache → instant edit-safe content. The redirect
             // gives compressed exploration view; ctx_read gives full content.
@@ -580,21 +571,6 @@ fn redirect_temp_path(key: &str) -> std::path::PathBuf {
         let _ = std::fs::set_permissions(&temp_dir, std::fs::Permissions::from_mode(0o700));
     }
     temp_dir.join(format!("{hash:016x}.lctx"))
-}
-
-/// Path to the original (uncompressed) file backup, used by the PostToolUse
-/// corruption guard to restore files without depending on git.
-pub(super) fn redirect_orig_path(path: &str) -> std::path::PathBuf {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let mut hasher = DefaultHasher::new();
-    path.hash(&mut hasher);
-    let hash = hasher.finish();
-
-    let temp_dir = std::env::temp_dir().join("lean-ctx-hook");
-    let _ = std::fs::create_dir_all(&temp_dir);
-    temp_dir.join(format!("{hash:016x}.lctx-orig"))
 }
 
 /// #778: Whether `additionalContext` injection is allowed.
