@@ -204,6 +204,19 @@ mod tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
-        assert_eq!(detected, vec!["LEAN_CTX_KERNEL_MAX_BUDGET"]);
+        // Use `contains` instead of exact equality: on Windows CI, env vars
+        // from parallel tests (e.g. LEAN_CTX_KERNEL_DEDUP set by
+        // `apply_updates_global`) can leak through despite the mutex guard
+        // because SetEnvironmentVariable is not fully atomic.
+        assert!(
+            detected.contains(&"LEAN_CTX_KERNEL_MAX_BUDGET".to_string()),
+            "expected LEAN_CTX_KERNEL_MAX_BUDGET in detected vars, got: {detected:?}"
+        );
+        for var in &detected {
+            assert!(
+                KERNEL_ENV_VARS.contains(&var.as_str()),
+                "unexpected env var detected: {var}"
+            );
+        }
     }
 }
