@@ -251,7 +251,13 @@ pub(super) fn redirect_read(tool_input: Option<&serde_json::Value>) -> String {
     let args = redirect_read_args(&path, is_windowed);
     let args_refs: Vec<&str> = args.iter().map(String::as_str).collect();
 
-    if let Some(output) = run_with_timeout(&binary, &args_refs, REDIRECT_SUBPROCESS_TIMEOUT) {
+    let project_cwd = git_root_for_path(&path);
+    if let Some(output) = run_with_timeout_cwd(
+        &binary,
+        &args_refs,
+        REDIRECT_SUBPROCESS_TIMEOUT,
+        project_cwd.as_deref(),
+    ) {
         // #1019: never prepend a banner to `output` — it is written to the temp
         // file the host reads *as the file's content*, so an edit would round-trip
         // the banner back into the real file (it corrupted config.toml). The
@@ -493,15 +499,38 @@ fn redirect_glob(tool_input: Option<&serde_json::Value>) -> String {
 
 const REDIRECT_SUBPROCESS_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Detect the git repository root from a file path by walking up ancestors.
+fn git_root_for_path(path: &str) -> Option<std::path::PathBuf> {
+    let p = std::path::Path::new(path);
+    let start = if p.is_file() { p.parent()? } else { p };
+    for ancestor in start.ancestors() {
+        if ancestor.join(".git").exists() {
+            return Some(ancestor.to_path_buf());
+        }
+    }
+    None
+}
+
 /// Run a lean-ctx subprocess with a hard timeout. Returns stdout on success.
 /// Kills the child if it exceeds the timeout to prevent orphan processes.
 fn run_with_timeout(binary: &str, args: &[&str], timeout: Duration) -> Option<Vec<u8>> {
-    let mut child = std::process::Command::new(binary)
-        .args(args)
+    run_with_timeout_cwd(binary, args, timeout, None)
+}
+
+fn run_with_timeout_cwd(
+    binary: &str,
+    args: &[&str],
+    timeout: Duration,
+    cwd: Option<&std::path::Path>,
+) -> Option<Vec<u8>> {
+    let mut cmd = std::process::Command::new(binary);
+    cmd.args(args)
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .ok()?;
+        .stderr(std::process::Stdio::null());
+    if let Some(dir) = cwd {
+        cmd.current_dir(dir);
+    }
+    let mut child = cmd.spawn().ok()?;
 
     let deadline = std::time::Instant::now() + timeout;
     loop {
