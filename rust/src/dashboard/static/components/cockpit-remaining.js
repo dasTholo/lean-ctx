@@ -348,7 +348,7 @@ class CockpitLearning extends HTMLElement {
         var dailyInput = Number(daily[k] && (daily[k].input_tokens || daily[k].total_input) || 0);
         var verifiedSaved = savedMap[fullDate];
         if (verifiedSaved !== undefined && dailyInput > 0) {
-          compression[k] = Math.round((verifiedSaved / dailyInput) * 100);
+          compression[k] = Math.min(100, Math.round((verifiedSaved / dailyInput) * 100));
         }
       }
     }
