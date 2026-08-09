@@ -1,7 +1,7 @@
 //! Types and data structures for deep query analysis.
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct ImportInfo {
+pub struct ImportInfo {
     pub source: String,
     pub names: Vec<String>,
     pub kind: ImportKind,
@@ -10,7 +10,7 @@ pub(crate) struct ImportInfo {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) enum ImportKind {
+pub enum ImportKind {
     Named,
     Default,
     Star,
@@ -20,7 +20,7 @@ pub(crate) enum ImportKind {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct CallSite {
+pub struct CallSite {
     pub callee: String,
     pub line: usize,
     pub col: usize,
@@ -29,7 +29,7 @@ pub(crate) struct CallSite {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct TypeDef {
+pub struct TypeDef {
     pub name: String,
     pub kind: TypeDefKind,
     pub line: usize,
@@ -49,14 +49,14 @@ pub(crate) struct TypeDef {
 /// written at the call site (GH #398 follow-up). Kept deliberately small —
 /// only what the host-resolution needs.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ExtMethodDef {
+pub struct ExtMethodDef {
     pub name: String,
     pub line: usize,
     pub end_line: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum TypeDefKind {
+pub enum TypeDefKind {
     Class,
     Interface,
     TypeAlias,
@@ -75,13 +75,13 @@ pub(crate) enum TypeDefKind {
 /// import statement, so type usages are the only reliable file-dependency
 /// signal there (GH #398).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct TypeUse {
+pub struct TypeUse {
     pub name: String,
     pub line: usize,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct DeepAnalysis {
+pub struct DeepAnalysis {
     pub imports: Vec<ImportInfo>,
     pub calls: Vec<CallSite>,
     pub types: Vec<TypeDef>,
@@ -91,7 +91,7 @@ pub(crate) struct DeepAnalysis {
 }
 
 impl DeepAnalysis {
-    pub(crate) fn empty() -> Self {
+    pub fn empty() -> Self {
         Self {
             imports: Vec::new(),
             calls: Vec::new(),

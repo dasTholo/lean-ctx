@@ -8,7 +8,7 @@ use super::coverage_class::CoverageClass;
 
 /// Token usage and client metadata for one request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct RequestMetrics {
+pub struct RequestMetrics {
     /// Tokens supplied as model input.
     pub input_tokens: usize,
     /// Tokens produced by the model.
@@ -29,7 +29,7 @@ pub(crate) struct RequestMetrics {
 
 /// Observed result of one client request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct OutcomeMetrics {
+pub struct OutcomeMetrics {
     /// Whether the client accepted the result.
     pub accepted: bool,
     /// Normalized result quality reported by the evaluator.
@@ -42,7 +42,7 @@ pub(crate) struct OutcomeMetrics {
 
 /// Aggregate snapshot of live ETPAO measurements.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct EtpaoSummary {
+pub struct EtpaoSummary {
     /// Tokens consumed per accepted outcome across all clients.
     pub etpao: f64,
     /// Total tokens consumed by all recorded requests.
@@ -59,29 +59,29 @@ pub(crate) struct EtpaoSummary {
 
 /// In-memory collector for live request and outcome measurements.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct EtpaoLive {
+pub struct EtpaoLive {
     requests: Vec<RequestMetrics>,
     outcomes: Vec<OutcomeMetrics>,
 }
 
 impl EtpaoLive {
     /// Creates an empty live measurement collector.
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self::default()
     }
 
     /// Records token usage for one request.
-    pub(crate) fn record_request(&mut self, req: RequestMetrics) {
+    pub fn record_request(&mut self, req: RequestMetrics) {
         self.requests.push(req);
     }
 
     /// Records the evaluated outcome of one request.
-    pub(crate) fn record_outcome(&mut self, outcome: OutcomeMetrics) {
+    pub fn record_outcome(&mut self, outcome: OutcomeMetrics) {
         self.outcomes.push(outcome);
     }
 
     /// Returns aggregate tokens per accepted outcome.
-    pub(crate) fn current_etpao(&self) -> f64 {
+    pub fn current_etpao(&self) -> f64 {
         let tokens = self
             .requests
             .iter()
@@ -91,7 +91,7 @@ impl EtpaoLive {
     }
 
     /// Returns tokens per accepted outcome for a client with recorded requests.
-    pub(crate) fn etpao_for_client(&self, client_id: &str) -> Option<f64> {
+    pub fn etpao_for_client(&self, client_id: &str) -> Option<f64> {
         let mut requests = self
             .requests
             .iter()
@@ -109,7 +109,7 @@ impl EtpaoLive {
     }
 
     /// Returns the fraction of tokens consumed by requests with retries.
-    pub(crate) fn retry_tax(&self) -> f64 {
+    pub fn retry_tax(&self) -> f64 {
         let total = self
             .requests
             .iter()
@@ -128,7 +128,7 @@ impl EtpaoLive {
     }
 
     /// Builds an aggregate serializable measurement snapshot.
-    pub(crate) fn summary(&self) -> EtpaoSummary {
+    pub fn summary(&self) -> EtpaoSummary {
         let total_tokens = self.requests.iter().map(total_request_tokens).sum();
         let accepted_outcomes = self.accepted_outcomes();
         let first_pass_rate = if self.outcomes.is_empty() {
@@ -151,12 +151,12 @@ impl EtpaoLive {
     }
 
     /// Returns the number of recorded requests.
-    pub(crate) fn request_count(&self) -> usize {
+    pub fn request_count(&self) -> usize {
         self.requests.len()
     }
 
     /// Returns the number of recorded outcomes.
-    pub(crate) fn outcome_count(&self) -> usize {
+    pub fn outcome_count(&self) -> usize {
         self.outcomes.len()
     }
 
@@ -194,7 +194,7 @@ impl EtpaoLive {
 }
 
 /// Returns all token categories accounted for by one request.
-pub(crate) fn total_request_tokens(req: &RequestMetrics) -> usize {
+pub fn total_request_tokens(req: &RequestMetrics) -> usize {
     req.input_tokens
         .saturating_add(req.output_tokens)
         .saturating_add(req.reasoning_tokens)
@@ -204,7 +204,7 @@ pub(crate) fn total_request_tokens(req: &RequestMetrics) -> usize {
 
 #[cfg(test)]
 #[rustfmt::skip]
-mod tests {
+pub mod tests {
     use super::{EtpaoLive, OutcomeMetrics, RequestMetrics};
     use crate::core::context_kernel::coverage_class::CoverageClass;
 

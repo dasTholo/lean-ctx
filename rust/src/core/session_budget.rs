@@ -16,7 +16,7 @@ static CUMULATIVE_TOKENS: AtomicUsize = AtomicUsize::new(0);
 
 /// Session budget pressure tiers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PressureTier {
+pub enum PressureTier {
     Green,
     Yellow,
     Orange,
@@ -25,7 +25,7 @@ pub(crate) enum PressureTier {
 
 impl PressureTier {
     /// Suggested read mode downgrade for this pressure tier.
-    pub(crate) fn suggested_mode(&self) -> Option<&'static str> {
+    pub fn suggested_mode(&self) -> Option<&'static str> {
         match self {
             PressureTier::Green => None,
             PressureTier::Yellow => Some("signatures"),
@@ -34,7 +34,7 @@ impl PressureTier {
         }
     }
 
-    pub(crate) fn label(&self) -> &'static str {
+    pub fn label(&self) -> &'static str {
         match self {
             PressureTier::Green => "green",
             PressureTier::Yellow => "yellow",
@@ -45,17 +45,17 @@ impl PressureTier {
 }
 
 /// Record `n` fresh tokens delivered in this session.
-pub(crate) fn record_delivery(n: usize) {
+pub fn record_delivery(n: usize) {
     CUMULATIVE_TOKENS.fetch_add(n, Ordering::Relaxed);
 }
 
 /// Current cumulative fresh token count.
-pub(crate) fn cumulative_tokens() -> usize {
+pub fn cumulative_tokens() -> usize {
     CUMULATIVE_TOKENS.load(Ordering::Relaxed)
 }
 
 /// Current pressure tier based on cumulative usage vs session limit.
-pub(crate) fn current_tier(session_limit: usize) -> PressureTier {
+pub fn current_tier(session_limit: usize) -> PressureTier {
     if session_limit == 0 {
         return PressureTier::Green;
     }
@@ -73,12 +73,12 @@ pub(crate) fn current_tier(session_limit: usize) -> PressureTier {
 }
 
 /// Reset session budget (for testing or session restart).
-pub(crate) fn reset() {
+pub fn reset() {
     CUMULATIVE_TOKENS.store(0, Ordering::Relaxed);
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]

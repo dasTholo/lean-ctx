@@ -29,7 +29,7 @@ use crate::core::context_kernel::bounded::BoundedQueue;
 /// The 10 OCLA event types defined in the P2 spec.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
-pub(crate) enum OclaEvent {
+pub enum OclaEvent {
     /// A proxy request completed (usage_meter.rs).
     RequestCompleted {
         model: String,
@@ -110,7 +110,7 @@ pub(crate) enum OclaEvent {
 /// Feedback outcome enum.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum FeedbackOutcome {
+pub enum FeedbackOutcome {
     Accept,
     Reject,
     Partial,
@@ -119,7 +119,7 @@ pub(crate) enum FeedbackOutcome {
 /// Threshold metric that shifted.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum ThresholdMetric {
+pub enum ThresholdMetric {
     Entropy,
     Jaccard,
 }
@@ -127,7 +127,7 @@ pub(crate) enum ThresholdMetric {
 /// Source of savings.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum SavingsSource {
+pub enum SavingsSource {
     Compression,
     Cache,
     Routing,
@@ -139,7 +139,7 @@ pub(crate) enum SavingsSource {
 
 /// A timestamped OCLA event in the bus ring buffer.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct OclaBusRecord {
+pub struct OclaBusRecord {
     pub id: u64,
     pub timestamp_ms: u64,
     pub event: OclaEvent,
@@ -148,7 +148,7 @@ pub(crate) struct OclaBusRecord {
 /// Policy applied when the OCLA bus reaches its configured capacity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum OverflowPolicy {
+pub enum OverflowPolicy {
     /// Retain the new event and evict the oldest queued event.
     DropOldest,
     /// Retain queued events and reject the new event.
@@ -176,7 +176,7 @@ impl OverflowPolicy {
 
 /// Details recorded whenever an event cannot be retained without overflow.
 #[derive(Debug, Clone)]
-pub(crate) struct OverflowEvent {
+pub struct OverflowEvent {
     /// Policy active when the overflow occurred.
     pub policy: OverflowPolicy,
     /// Number of overflows observed by this bus since creation.
@@ -191,7 +191,7 @@ pub(crate) struct OverflowEvent {
 ///
 /// Global usage: `ocla_bus::emit(event)` — checks the global enable flag first.
 /// Test usage: `OclaBus::scoped(cap)` — isolated instance, no global state.
-pub(crate) struct OclaBus {
+pub struct OclaBus {
     enabled: AtomicBool,
     ring: Mutex<BoundedQueue<OclaBusRecord>>,
     capacity: usize,
@@ -218,7 +218,7 @@ impl OclaBus {
     }
 
     /// Create a scoped (isolated) bus for testing. Does NOT affect the global bus.
-    pub(crate) fn scoped(capacity: usize) -> Self {
+    pub fn scoped(capacity: usize) -> Self {
         let bus = Self::new_with_policy(capacity, OverflowPolicy::DropOldest);
         bus.enabled.store(true, Ordering::Relaxed);
         bus
@@ -232,24 +232,24 @@ impl OclaBus {
     }
 
     /// Enable the bus. Events will be recorded after this call.
-    pub(crate) fn enable(&self) {
+    pub fn enable(&self) {
         self.enabled.store(true, Ordering::Release);
     }
 
     /// Disable the bus. Events will be discarded (< 5ns per call).
-    pub(crate) fn disable(&self) {
+    pub fn disable(&self) {
         self.enabled.store(false, Ordering::Release);
     }
 
     /// Check if the bus is enabled.
     #[inline]
-    pub(crate) fn is_enabled(&self) -> bool {
+    pub fn is_enabled(&self) -> bool {
         self.enabled.load(Ordering::Acquire)
     }
 
     /// Emit an event if the bus is enabled. Returns the event ID, or 0 if disabled.
     #[inline]
-    pub(crate) fn emit_if_enabled(&self, event: OclaEvent) -> u64 {
+    pub fn emit_if_enabled(&self, event: OclaEvent) -> u64 {
         if !self.is_enabled() {
             return 0;
         }
@@ -298,7 +298,7 @@ impl OclaBus {
     }
 
     /// Drain all events from the ring (consumes them). Useful for test assertions.
-    pub(crate) fn drain(&self) -> Vec<OclaBusRecord> {
+    pub fn drain(&self) -> Vec<OclaBusRecord> {
         let mut ring = self
             .ring
             .lock()
@@ -308,7 +308,7 @@ impl OclaBus {
     }
 
     /// Read events since a given ID (non-consuming).
-    pub(crate) fn events_since(&self, after_id: u64) -> Vec<OclaBusRecord> {
+    pub fn events_since(&self, after_id: u64) -> Vec<OclaBusRecord> {
         let ring = self
             .ring
             .lock()
@@ -317,7 +317,7 @@ impl OclaBus {
     }
 
     /// Read the last N events.
-    pub(crate) fn latest(&self, n: usize) -> Vec<OclaBusRecord> {
+    pub fn latest(&self, n: usize) -> Vec<OclaBusRecord> {
         let ring = self
             .ring
             .lock()
@@ -327,7 +327,7 @@ impl OclaBus {
     }
 
     /// Current ring buffer occupancy.
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.ring
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -335,22 +335,22 @@ impl OclaBus {
     }
 
     /// Whether the ring is empty.
-    pub(crate) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     /// Total events emitted (including those evicted from the ring).
-    pub(crate) fn total_emitted(&self) -> u64 {
+    pub fn total_emitted(&self) -> u64 {
         self.next_id.load(Ordering::Relaxed) - 1
     }
 
     /// Total queue overflows observed by this bus since creation.
-    pub(crate) fn overflow_count(&self) -> usize {
+    pub fn overflow_count(&self) -> usize {
         self.overflow_count.load(Ordering::Relaxed)
     }
 
     /// Overflow policy active for this bus.
-    pub(crate) fn overflow_policy(&self) -> OverflowPolicy {
+    pub fn overflow_policy(&self) -> OverflowPolicy {
         self.overflow_policy
     }
 }
@@ -380,48 +380,48 @@ fn global_bus() -> &'static OclaBus {
 
 /// Emit an OCLA event on the global bus. No-op (< 5ns) when disabled.
 #[inline]
-pub(crate) fn emit(event: OclaEvent) -> u64 {
+pub fn emit(event: OclaEvent) -> u64 {
     global_bus().emit_if_enabled(event)
 }
 
 /// Enable the global OCLA bus.
-pub(crate) fn enable() {
+pub fn enable() {
     global_bus().enable();
 }
 
 /// Disable the global OCLA bus.
-pub(crate) fn disable() {
+pub fn disable() {
     global_bus().disable();
 }
 
 /// Check if the global OCLA bus is enabled.
 #[inline]
-pub(crate) fn is_enabled() -> bool {
+pub fn is_enabled() -> bool {
     global_bus().is_enabled()
 }
 
 /// Read events since a given ID from the global bus.
-pub(crate) fn events_since(after_id: u64) -> Vec<OclaBusRecord> {
+pub fn events_since(after_id: u64) -> Vec<OclaBusRecord> {
     global_bus().events_since(after_id)
 }
 
 /// Read the last N events from the global bus.
-pub(crate) fn latest(n: usize) -> Vec<OclaBusRecord> {
+pub fn latest(n: usize) -> Vec<OclaBusRecord> {
     global_bus().latest(n)
 }
 
 /// Total events emitted on the global bus.
-pub(crate) fn total_emitted() -> u64 {
+pub fn total_emitted() -> u64 {
     global_bus().total_emitted()
 }
 
 /// Total queue overflows observed by the global bus since startup.
-pub(crate) fn overflow_count() -> usize {
+pub fn overflow_count() -> usize {
     global_bus().overflow_count()
 }
 
 /// Overflow policy active for the global bus.
-pub(crate) fn overflow_policy() -> OverflowPolicy {
+pub fn overflow_policy() -> OverflowPolicy {
     global_bus().overflow_policy()
 }
 
@@ -430,7 +430,7 @@ pub(crate) fn overflow_policy() -> OverflowPolicy {
 /// Bridge: emit an OCLA event AND forward it to the existing events.rs system.
 /// This ensures backward compatibility — the dashboard, CLI, and JSONL all
 /// continue to see events through the legacy path.
-pub(crate) fn emit_and_bridge(event: OclaEvent) -> u64 {
+pub fn emit_and_bridge(event: OclaEvent) -> u64 {
     bridge_to_legacy(&event);
     emit(event)
 }
@@ -510,7 +510,7 @@ fn current_timestamp_ms() -> u64 {
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     fn savings_event(input_saved: u64) -> OclaEvent {

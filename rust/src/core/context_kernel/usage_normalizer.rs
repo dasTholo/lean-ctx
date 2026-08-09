@@ -8,7 +8,7 @@ use super::token_envelope::TokenEnvelope;
 
 /// Aggregated usage for one session.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub(crate) struct SessionUsage {
+pub struct SessionUsage {
     /// Session identifier.
     pub session_id: String,
     /// Per-model token totals.
@@ -27,7 +27,7 @@ pub(crate) struct SessionUsage {
 
 /// Aggregated usage for one model.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub(crate) struct ModelUsageEntry {
+pub struct ModelUsageEntry {
     /// Number of requests served by the model.
     pub requests: usize,
     /// Input tokens delivered to the model.
@@ -44,7 +44,7 @@ pub(crate) struct ModelUsageEntry {
 
 /// Aggregated usage for one provider.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub(crate) struct ProviderUsageEntry {
+pub struct ProviderUsageEntry {
     /// Number of requests served by the provider.
     pub requests: usize,
     /// Input, output, and reasoning tokens combined.
@@ -57,7 +57,7 @@ pub(crate) struct ProviderUsageEntry {
 
 /// Compression totals and the model with the highest savings ratio.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub(crate) struct CompressionOverview {
+pub struct CompressionOverview {
     /// Input, output, and reasoning tokens combined.
     pub total_tokens: usize,
     /// Tokens removed by compression.
@@ -89,7 +89,7 @@ fn compression_ratio(input_tokens: usize, tokens_saved: usize) -> f64 {
 }
 
 /// Records one canonical envelope in the global session snapshot.
-pub(crate) fn record_envelope(envelope: &TokenEnvelope) {
+pub fn record_envelope(envelope: &TokenEnvelope) {
     let total_tokens = envelope.total_tokens();
     let cost = envelope.cost_usd.unwrap_or_default();
     let mut usage = usage_guard();
@@ -120,12 +120,12 @@ pub(crate) fn record_envelope(envelope: &TokenEnvelope) {
 }
 
 /// Returns a clone of the current session usage.
-pub(crate) fn session_usage() -> SessionUsage {
+pub fn session_usage() -> SessionUsage {
     usage_guard().clone()
 }
 
 /// Returns per-model usage sorted by descending input and output tokens.
-pub(crate) fn model_breakdown() -> Vec<(String, ModelUsageEntry)> {
+pub fn model_breakdown() -> Vec<(String, ModelUsageEntry)> {
     let mut entries = usage_guard()
         .per_model
         .clone()
@@ -139,7 +139,7 @@ pub(crate) fn model_breakdown() -> Vec<(String, ModelUsageEntry)> {
 
 /// Returns per-provider usage sorted by descending total tokens.
 #[must_use]
-pub(crate) fn provider_breakdown() -> Vec<(String, ProviderUsageEntry)> {
+pub fn provider_breakdown() -> Vec<(String, ProviderUsageEntry)> {
     let mut entries = usage_guard()
         .per_provider
         .clone()
@@ -151,7 +151,7 @@ pub(crate) fn provider_breakdown() -> Vec<(String, ProviderUsageEntry)> {
 
 /// Returns aggregate compression metrics for the current session.
 #[must_use]
-pub(crate) fn compression_overview() -> CompressionOverview {
+pub fn compression_overview() -> CompressionOverview {
     let usage = usage_guard();
     let total_input = usage
         .per_model
@@ -177,12 +177,12 @@ pub(crate) fn compression_overview() -> CompressionOverview {
 }
 
 /// Clears all accumulated usage while preserving the allocated global mutex.
-pub(crate) fn reset_usage() {
+pub fn reset_usage() {
     *usage_guard() = SessionUsage::default();
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::{compression_overview as overview, model_breakdown, provider_breakdown};
     use super::{record_envelope, reset_usage, session_usage};
     use crate::core::context_kernel::token_envelope::{ProviderKind, TokenEnvelope};

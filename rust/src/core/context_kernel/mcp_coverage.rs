@@ -6,11 +6,7 @@ use super::coverage_class::CoverageClass;
 
 /// Detects the context coverage available for an MCP client and its capabilities.
 #[must_use]
-pub(crate) fn detect_mcp_coverage(
-    client: &str,
-    has_roots: bool,
-    has_sampling: bool,
-) -> CoverageClass {
+pub fn detect_mcp_coverage(client: &str, has_roots: bool, has_sampling: bool) -> CoverageClass {
     let base = match client.to_ascii_lowercase().as_str() {
         "cursor" | "cursor-ide" => CoverageClass::FullInline,
         "vscode" | "visual-studio-code" | "zed" => CoverageClass::ContextControlled,
@@ -26,7 +22,7 @@ pub(crate) fn detect_mcp_coverage(
 
 /// Builds the kernel efficiency profile for an MCP client.
 #[must_use]
-pub(crate) fn mcp_client_profile(client: &str) -> ClientEfficiencyProfile {
+pub fn mcp_client_profile(client: &str) -> ClientEfficiencyProfile {
     let context_window = match client.to_ascii_lowercase().as_str() {
         "cursor" | "cursor-ide" => 200_000,
         "vscode" | "visual-studio-code" => 128_000,
@@ -41,7 +37,7 @@ pub(crate) fn mcp_client_profile(client: &str) -> ClientEfficiencyProfile {
 
 /// Returns the optimization level supported by an MCP client.
 #[must_use]
-pub(crate) fn mcp_optimization_level(client: &str) -> OptimizationLevel {
+pub fn mcp_optimization_level(client: &str) -> OptimizationLevel {
     match detect_mcp_coverage(client, false, false) {
         CoverageClass::FullInline => OptimizationLevel::Full,
         CoverageClass::ContextControlled => OptimizationLevel::Partial,
@@ -52,12 +48,12 @@ pub(crate) fn mcp_optimization_level(client: &str) -> OptimizationLevel {
 
 /// Returns the maximum schema-token budget for an MCP client.
 #[must_use]
-pub(crate) fn client_schema_budget(client: &str) -> usize {
+pub fn client_schema_budget(client: &str) -> usize {
     mcp_client_profile(client).tool_budget.max_schema_tokens
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]

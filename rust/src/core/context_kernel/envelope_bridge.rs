@@ -11,7 +11,7 @@ use super::{evidence_wiring, kernel_config, usage_normalizer};
 
 /// Aggregate request statistics for one provider.
 #[derive(Debug, Clone, Default, Serialize)]
-pub(crate) struct ProviderStat {
+pub struct ProviderStat {
     /// Provider represented by this aggregate.
     pub provider: ProviderKind,
     /// Number of recorded requests.
@@ -55,7 +55,7 @@ fn record_stats(envelope: &TokenEnvelope) {
 }
 
 /// Records one proxy envelope in enabled kernel pipelines and provider statistics.
-pub(crate) fn record_proxy_envelope(envelope: &TokenEnvelope) {
+pub fn record_proxy_envelope(envelope: &TokenEnvelope) {
     if kernel_config::is_enabled() {
         let provider = format!("{:?}", envelope.provider);
         evidence_wiring::record_from_proxy_dispatch(
@@ -71,7 +71,7 @@ pub(crate) fn record_proxy_envelope(envelope: &TokenEnvelope) {
 }
 
 /// Records one MCP envelope in enabled kernel pipelines and provider statistics.
-pub(crate) fn record_mcp_envelope(tool_name: &str, envelope: &TokenEnvelope) {
+pub fn record_mcp_envelope(tool_name: &str, envelope: &TokenEnvelope) {
     if kernel_config::is_enabled() {
         evidence_wiring::record_from_tool_dispatch(
             tool_name,
@@ -86,7 +86,7 @@ pub(crate) fn record_mcp_envelope(tool_name: &str, envelope: &TokenEnvelope) {
 
 /// Returns provider aggregates sorted by descending request count.
 #[must_use]
-pub(crate) fn provider_stats() -> Vec<ProviderStat> {
+pub fn provider_stats() -> Vec<ProviderStat> {
     let mut stats = stats_guard()
         .iter()
         .map(|(provider, accum)| ProviderStat {
@@ -103,12 +103,12 @@ pub(crate) fn provider_stats() -> Vec<ProviderStat> {
 }
 
 /// Clears all provider statistics.
-pub(crate) fn reset() {
+pub fn reset() {
     stats_guard().clear();
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::{provider_stats, record_mcp_envelope, record_proxy_envelope, reset};
     use crate::core::context_kernel::token_envelope::{ProviderKind, TokenEnvelope};
     use crate::core::context_kernel::{evidence_wiring, kernel_config, usage_normalizer};

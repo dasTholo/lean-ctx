@@ -25,13 +25,13 @@ static PROACTIVE_INJECTED_TOKENS: AtomicUsize = AtomicUsize::new(0);
 
 /// Record tokens appended as proactive context so savings reports can account
 /// for the dynamic response-side injection separately from fixed overhead.
-pub(crate) fn record_proactive_injection(tokens: usize) {
+pub fn record_proactive_injection(tokens: usize) {
     PROACTIVE_INJECTED_TOKENS.fetch_add(tokens, Ordering::Relaxed);
 }
 
 /// Total proactive context tokens appended by this process.
 #[must_use]
-pub(crate) fn proactive_injected_tokens() -> usize {
+pub fn proactive_injected_tokens() -> usize {
     PROACTIVE_INJECTED_TOKENS.load(Ordering::Relaxed)
 }
 
@@ -42,7 +42,7 @@ fn reset_proactive_injection() {
 
 /// A measured breakdown, in tokens, of the per-turn context lean-ctx adds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) struct ContextOverhead {
+pub struct ContextOverhead {
     /// Number of MCP tools exposed (the schema-bearing surface).
     pub tool_count: usize,
     /// Tokens for all exposed tool descriptions + input schemas.
@@ -56,7 +56,7 @@ pub(crate) struct ContextOverhead {
 impl ContextOverhead {
     /// Total per-turn overhead in tokens.
     #[must_use]
-    pub(crate) fn total_tokens(&self) -> usize {
+    pub fn total_tokens(&self) -> usize {
         self.tool_schema_tokens + self.instruction_tokens + self.rules_block_tokens
     }
 
@@ -66,7 +66,7 @@ impl ContextOverhead {
     /// repeatedly (the `gain` dashboard re-renders every second in `--live`) —
     /// it avoids per-tick disk I/O and re-tokenization.
     #[must_use]
-    pub(crate) fn cached() -> Self {
+    pub fn cached() -> Self {
         static CACHE: OnceLock<ContextOverhead> = OnceLock::new();
         *CACHE.get_or_init(Self::measure)
     }
@@ -76,7 +76,7 @@ impl ContextOverhead {
     /// set, profile gates, invoker, description compression), so the number
     /// reflects what this install actually advertises (#572).
     #[must_use]
-    pub(crate) fn measure() -> Self {
+    pub fn measure() -> Self {
         let tools = crate::server::tool_visibility::advertised_tool_defs_default();
         let tool_count = tools.len();
         let tool_schema_tokens = tools.iter().map(tool_tokens).sum();
@@ -109,7 +109,7 @@ impl ContextOverhead {
 
 /// Description + input-schema tokens for one tool definition — exactly the two
 /// fields a client re-sends in every request's tool list.
-pub(crate) fn tool_tokens(t: &rmcp::model::Tool) -> usize {
+pub fn tool_tokens(t: &rmcp::model::Tool) -> usize {
     let desc = t
         .description
         .as_ref()
@@ -121,7 +121,7 @@ pub(crate) fn tool_tokens(t: &rmcp::model::Tool) -> usize {
 /// Estimated per-turn overhead of native IDE tools (Read, Grep, Shell, Glob,
 /// Write, StrReplace) — lean-ctx replaces these 1:1, so only the delta above
 /// this baseline is attributable lean-ctx overhead.
-pub(crate) const NATIVE_BASELINE_TOKENS_PER_TURN: u64 = 2400;
+pub const NATIVE_BASELINE_TOKENS_PER_TURN: u64 = 2400;
 
 /// Conservative provider prompt-cache hit rate. Anthropic achieves ~90% on
 /// stable prefixes (#498), OpenAI ~50%. Default 75% cross-provider estimate.
@@ -140,7 +140,7 @@ std::thread_local! {
     static NO_CACHE_ADJUST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-pub(crate) fn set_no_cache_adjust(v: bool) {
+pub fn set_no_cache_adjust(v: bool) {
     NO_CACHE_ADJUST.with(|c| c.set(v));
 }
 
@@ -156,11 +156,7 @@ fn no_cache_adjust_active() -> bool {
 /// 2. **Cache**: stable prefixes are cached by providers (Anthropic 90%,
 ///    OpenAI 50%) — effective cost is `delta × (1 - cache_rate)`.
 #[must_use]
-pub(crate) fn net_of_injection(
-    tokens_saved: u64,
-    overhead_per_turn: u64,
-    turns: u64,
-) -> (u64, i64) {
+pub fn net_of_injection(tokens_saved: u64, overhead_per_turn: u64, turns: u64) -> (u64, i64) {
     let delta = overhead_per_turn.saturating_sub(NATIVE_BASELINE_TOKENS_PER_TURN);
     let cache_rate = provider_cache_hit_rate();
     let effective_per_turn = (delta as f64 * (1.0 - cache_rate)) as u64;
@@ -175,12 +171,12 @@ pub(crate) fn net_of_injection(
 /// tax. `0` when the proxy is not in the request path — we never guess turns we
 /// did not see, so [`net_of_injection`] then collapses to the gross savings.
 #[must_use]
-pub(crate) fn observed_turns() -> u64 {
+pub fn observed_turns() -> u64 {
     crate::proxy::metrics::load_persisted().map_or(0, |m| m.requests_total)
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]

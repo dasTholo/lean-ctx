@@ -10,7 +10,7 @@ use super::partial::{EdgeKind, NodeInfo, PartialGraph};
 /// Expand `k` hops from a center symbol using the provided edge lookup.
 ///
 /// The edge lookup returns neighbor name, file, kind, and relation for a symbol.
-pub(crate) fn expand_neighborhood<F>(
+pub fn expand_neighborhood<F>(
     center: &str,
     center_file: &str,
     center_kind: &str,
@@ -67,7 +67,7 @@ where
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::{EdgeKind, expand_neighborhood};
 
     fn test_edges(symbol: &str) -> Vec<(String, String, String, EdgeKind)> {

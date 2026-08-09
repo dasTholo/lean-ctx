@@ -5,7 +5,7 @@
 /// Compression measured before kernel enrichment and server decorations can
 /// overstate the savings visible to the LLM. This type records both views.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub(crate) struct PostDeliveryAccounting {
+pub struct PostDeliveryAccounting {
     /// Tokens in the original raw content before any processing.
     pub original_tokens: usize,
     /// Tokens after compression but before kernel enrichment and decorations.
@@ -26,7 +26,7 @@ pub(crate) struct PostDeliveryAccounting {
 
 /// Validation of a savings claim against actual delivery data.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub(crate) struct SavingsValidation {
+pub struct SavingsValidation {
     /// Tokens the system claimed it saved.
     pub claimed_saved: usize,
     /// Tokens actually saved, or zero when delivery met or exceeded the input.
@@ -38,7 +38,7 @@ pub(crate) struct SavingsValidation {
 }
 
 /// Computes token accounting after kernel and server additions are included.
-pub(crate) fn compute_honest_accounting(
+pub fn compute_honest_accounting(
     original: usize,
     compressed: usize,
     kernel_added: usize,
@@ -70,11 +70,7 @@ pub(crate) fn compute_honest_accounting(
 }
 
 /// Validates claimed savings against the tokens actually sent to the LLM.
-pub(crate) fn validate_savings(
-    claimed_saved: usize,
-    original: usize,
-    sent: usize,
-) -> SavingsValidation {
+pub fn validate_savings(claimed_saved: usize, original: usize, sent: usize) -> SavingsValidation {
     let actual_saved = original.saturating_sub(sent);
     let phantom = claimed_saved.saturating_sub(actual_saved);
     let is_valid = phantom == 0 || (phantom as f64) < (original as f64 * 0.05);
@@ -88,7 +84,7 @@ pub(crate) fn validate_savings(
 }
 
 /// Formats a privacy-safe summary containing only token counts and ratios.
-pub(crate) fn format_honest_summary(accounting: &PostDeliveryAccounting) -> String {
+pub fn format_honest_summary(accounting: &PostDeliveryAccounting) -> String {
     format!(
         "Original: {} → Compressed: {} → +Kernel: {} → +Decorations: {} → Delivered: {}\n\
          Actual compression: {:.2}% (reported: {:.2}%, phantom: {:.2}%)",
@@ -104,7 +100,7 @@ pub(crate) fn format_honest_summary(accounting: &PostDeliveryAccounting) -> Stri
 }
 
 /// Returns whether post-compression additions make delivery exceed the input.
-pub(crate) fn detect_negative_savings(accounting: &PostDeliveryAccounting) -> bool {
+pub fn detect_negative_savings(accounting: &PostDeliveryAccounting) -> bool {
     accounting.delivered_tokens > accounting.original_tokens
 }
 
@@ -112,7 +108,7 @@ pub(crate) fn detect_negative_savings(accounting: &PostDeliveryAccounting) -> bo
 ///
 /// Takes raw proxy metrics and produces a complete accounting record
 /// including phantom savings detection.
-pub(crate) fn account_proxy_request(
+pub fn account_proxy_request(
     original_tokens: usize,
     compressed_tokens: usize,
     kernel_supplement_tokens: usize,
@@ -127,7 +123,7 @@ pub(crate) fn account_proxy_request(
 }
 
 /// Formats a one-line accounting summary suitable for logging.
-pub(crate) fn format_proxy_accounting(accounting: &PostDeliveryAccounting) -> String {
+pub fn format_proxy_accounting(accounting: &PostDeliveryAccounting) -> String {
     format!(
         "delivered={} actual={:.1}% reported={:.1}% phantom={:.1}%",
         accounting.delivered_tokens,
@@ -139,12 +135,12 @@ pub(crate) fn format_proxy_accounting(accounting: &PostDeliveryAccounting) -> St
 
 /// Returns true if the accounting shows negative net savings (kernel adds
 /// more tokens than compression removes).
-pub(crate) fn has_negative_savings(accounting: &PostDeliveryAccounting) -> bool {
+pub fn has_negative_savings(accounting: &PostDeliveryAccounting) -> bool {
     detect_negative_savings(accounting)
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::{
         account_proxy_request, compute_honest_accounting, detect_negative_savings,
         format_honest_summary, format_proxy_accounting, has_negative_savings, validate_savings,

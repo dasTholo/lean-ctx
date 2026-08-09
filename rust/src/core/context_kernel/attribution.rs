@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use super::types::{ContextPlanV1, ContextReceiptV1, PlanEntry, ReceiptOutcome};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub(crate) struct AttributionEntry {
+pub struct AttributionEntry {
     pub provider: String,
     pub tokens_contributed: usize,
     pub tokens_saved: usize,
@@ -13,7 +13,7 @@ pub(crate) struct AttributionEntry {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub(crate) struct AttributionReport {
+pub struct AttributionReport {
     pub plan_id: String,
     pub receipt_id: String,
     pub total_tokens_delivered: usize,
@@ -26,10 +26,7 @@ fn entry_savings(entry: &PlanEntry, compression_ratio: f64) -> usize {
     entry.tokens.saturating_sub(delivered_share)
 }
 
-pub(crate) fn compute_attribution(
-    plan: &ContextPlanV1,
-    receipt: &ContextReceiptV1,
-) -> AttributionReport {
+pub fn compute_attribution(plan: &ContextPlanV1, receipt: &ContextReceiptV1) -> AttributionReport {
     let compression_ratio = if plan.budget.total_tokens == 0 {
         0.0
     } else {
@@ -70,7 +67,7 @@ pub(crate) fn compute_attribution(
     }
 }
 
-pub(crate) fn format_attribution_summary(report: &AttributionReport) -> String {
+pub fn format_attribution_summary(report: &AttributionReport) -> String {
     let top_provider = report
         .entries
         .first()
@@ -85,7 +82,7 @@ pub(crate) fn format_attribution_summary(report: &AttributionReport) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use std::collections::HashMap;
 
     use super::{compute_attribution, format_attribution_summary};

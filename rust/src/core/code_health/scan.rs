@@ -17,7 +17,7 @@ const HEALTH_SOURCE_EXTS: &[&str] = &[
 
 /// Per-file health detail (only files with findings are retained in a report).
 #[derive(Debug, Clone)]
-pub(crate) struct FileReport {
+pub struct FileReport {
     pub file: String,
     pub total_functions: usize,
     pub over_threshold: usize,
@@ -30,7 +30,7 @@ pub(crate) struct FileReport {
 
 /// Aggregated project health.
 #[derive(Debug, Clone)]
-pub(crate) struct ProjectHealth {
+pub struct ProjectHealth {
     pub score: NavigabilityScore,
     /// Files with at least one hotspot or naming finding, worst first.
     pub files: Vec<FileReport>,
@@ -39,14 +39,14 @@ pub(crate) struct ProjectHealth {
 
 impl ProjectHealth {
     /// Letter grade for the project score.
-    pub(crate) fn grade(&self) -> char {
+    pub fn grade(&self) -> char {
         grade(self.score.score)
     }
 }
 
 /// Scan `root` for code-health, pricing the quality tax with `model` (or the
 /// blended fallback when `None`). `top_n` bounds the hotspot list in the score.
-pub(crate) fn scan_project(
+pub fn scan_project(
     root: &Path,
     threshold: u32,
     model: Option<&str>,
@@ -184,7 +184,7 @@ fn walk_sources(root: &Path) -> Vec<(String, String, String)> {
 }
 
 #[cfg(all(test, feature = "tree-sitter"))]
-mod tests {
+pub mod tests {
     use super::*;
 
     fn write(dir: &Path, name: &str, body: &str) {

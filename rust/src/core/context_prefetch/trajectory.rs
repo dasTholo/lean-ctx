@@ -104,7 +104,7 @@ impl FileTrajectory {
 ///
 /// Delegates to [`FileTrajectory::predict`] and returns up to
 /// `max_predictions` `(path, probability)` pairs.
-pub(crate) fn predict_next_files(
+pub fn predict_next_files(
     trajectory: &FileTrajectory,
     max_predictions: usize,
 ) -> Vec<(String, f64)> {
@@ -112,7 +112,7 @@ pub(crate) fn predict_next_files(
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]

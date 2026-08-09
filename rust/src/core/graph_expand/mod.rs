@@ -3,11 +3,11 @@
 //! Extracts local neighborhoods from the symbol graph, providing just enough
 //! context to understand call chains without loading the entire graph.
 
-mod hops;
-mod partial;
+pub mod hops;
+pub mod partial;
 
 #[cfg(test)]
-pub(crate) use hops::expand_neighborhood;
+pub use hops::expand_neighborhood;
 #[cfg(test)]
-pub(crate) use partial::EdgeKind;
+pub use partial::EdgeKind;
 pub use partial::PartialGraph;

@@ -38,7 +38,7 @@ impl Bm25CacheEntry {
 }
 
 /// `(mtime, size)` fingerprint of the persisted BM25 index file for `root`.
-pub(crate) fn index_fingerprint(root: &Path) -> IndexFingerprint {
+pub fn index_fingerprint(root: &Path) -> IndexFingerprint {
     match std::fs::metadata(BM25Index::index_file_path(root)) {
         Ok(m) => IndexFingerprint {
             mtime: m.modified().ok(),
@@ -55,11 +55,11 @@ fn ttl_secs() -> u64 {
         .unwrap_or(DEFAULT_TTL_SECS)
 }
 
-pub(crate) type SharedBm25Cache = std::sync::Arc<std::sync::Mutex<Option<Bm25CacheEntry>>>;
+pub type SharedBm25Cache = std::sync::Arc<std::sync::Mutex<Option<Bm25CacheEntry>>>;
 
 /// Get the BM25 index from cache if available and fresh, otherwise load/build,
 /// cache it, and return. Uses Arc to avoid cloning the entire index.
-pub(crate) fn get_or_load(cache: &SharedBm25Cache, root: &Path) -> Arc<BM25Index> {
+pub fn get_or_load(cache: &SharedBm25Cache, root: &Path) -> Arc<BM25Index> {
     {
         let guard = cache
             .lock()
@@ -89,7 +89,7 @@ pub(crate) fn get_or_load(cache: &SharedBm25Cache, root: &Path) -> Arc<BM25Index
 
 /// Get index from cache (fresh or stale), triggering background rebuild if stale.
 /// Returns None only if no cache entry exists at all.
-pub(crate) fn get_or_background(cache: &SharedBm25Cache, root: &Path) -> Option<Arc<BM25Index>> {
+pub fn get_or_background(cache: &SharedBm25Cache, root: &Path) -> Option<Arc<BM25Index>> {
     let guard = cache
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -136,7 +136,7 @@ pub(crate) fn get_or_background(cache: &SharedBm25Cache, root: &Path) -> Option<
 
 /// Drops the cached BM25 index, freeing its heap memory.
 /// The index will be rebuilt from disk on the next search.
-pub(crate) fn unload(cache: &SharedBm25Cache) {
+pub fn unload(cache: &SharedBm25Cache) {
     let mut guard = cache
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -147,7 +147,7 @@ pub(crate) fn unload(cache: &SharedBm25Cache) {
 }
 
 /// Returns the approximate heap memory used by the cached BM25 index, or 0.
-pub(crate) fn memory_usage(cache: &SharedBm25Cache) -> usize {
+pub fn memory_usage(cache: &SharedBm25Cache) -> usize {
     let guard = cache
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -168,7 +168,7 @@ pub(crate) fn memory_usage(cache: &SharedBm25Cache) -> usize {
 /// has not yet dropped its clone, or a background refresh is in flight. The next
 /// search call retries against the then-sole-owner cache entry. Returns the bytes
 /// reclaimed (0 if skipped).
-pub(crate) fn shrink_resident_to_snippet(
+pub fn shrink_resident_to_snippet(
     cache: &SharedBm25Cache,
     root: &Path,
     keep_lines: usize,
@@ -196,7 +196,7 @@ pub(crate) fn shrink_resident_to_snippet(
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use std::sync::Arc;
 

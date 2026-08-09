@@ -77,7 +77,7 @@ fn compressed_tokens_for(mode: &str, content: &str, path: &str) -> usize {
 }
 
 /// Pick read mode minimizing MDL proxy `compressed_tokens + model_cost` among modes whose compressed size fits `budget_tokens`.
-pub(crate) fn select_mode(content: &str, budget_tokens: usize) -> &'static str {
+pub fn select_mode(content: &str, budget_tokens: usize) -> &'static str {
     if content.is_empty() {
         return "full";
     }
@@ -117,7 +117,7 @@ pub(crate) fn select_mode(content: &str, budget_tokens: usize) -> &'static str {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]

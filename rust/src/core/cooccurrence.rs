@@ -40,7 +40,7 @@ const MAX_RECORD_FILES: usize = 24;
 
 /// Persistent, decaying co-access graph for one project.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub(crate) struct CoAccessGraph {
+pub struct CoAccessGraph {
     /// `file → (neighbour → weight)`. Symmetric by construction.
     edges: HashMap<String, HashMap<String, f64>>,
 }
@@ -49,7 +49,7 @@ impl CoAccessGraph {
     /// Reinforce the mutual association of every pair in `files` (LTP) after
     /// decaying the whole graph one step (global forgetting). Self-pairs and
     /// duplicates are ignored. Bounded work: at most `MAX_RECORD_FILES²` pairs.
-    pub(crate) fn record(&mut self, files: &[String]) {
+    pub fn record(&mut self, files: &[String]) {
         // Distinct, capped input.
         let mut uniq: Vec<&String> = Vec::new();
         for f in files {
@@ -83,7 +83,7 @@ impl CoAccessGraph {
     /// the working set (e.g. each `ctx_read`): it associates the newcomer with
     /// the recent set without re-reinforcing the already-known pairs among
     /// `others` (which [`CoAccessGraph::record`] would, biasing toward early files).
-    pub(crate) fn record_focus(&mut self, focus: &str, others: &[String]) {
+    pub fn record_focus(&mut self, focus: &str, others: &[String]) {
         if focus.is_empty() {
             return;
         }
@@ -109,7 +109,7 @@ impl CoAccessGraph {
     }
 
     /// Files most strongly associated with `file`, strongest first.
-    pub(crate) fn related(&self, file: &str, top_k: usize) -> Vec<(String, f64)> {
+    pub fn related(&self, file: &str, top_k: usize) -> Vec<(String, f64)> {
         let Some(neighbours) = self.edges.get(file) else {
             return Vec::new();
         };
@@ -124,11 +124,7 @@ impl CoAccessGraph {
     /// `max_edges`. The graph is symmetric by construction, but asymmetric
     /// pruning can leave the two directions with slightly different weights, so
     /// the stronger direction wins. Deterministic order (weight desc, then path).
-    pub(crate) fn canonical_edges(
-        &self,
-        min_weight: f64,
-        max_edges: usize,
-    ) -> Vec<(String, String, f64)> {
+    pub fn canonical_edges(&self, min_weight: f64, max_edges: usize) -> Vec<(String, String, f64)> {
         let mut best: HashMap<(String, String), f64> = HashMap::new();
         for (from, neighbours) in &self.edges {
             for (to, &w) in neighbours {
@@ -210,7 +206,7 @@ fn store_path(project_root: &str) -> Option<PathBuf> {
 }
 
 /// Load the co-access graph for `project_root` (empty if none / unreadable).
-pub(crate) fn load(project_root: &str) -> CoAccessGraph {
+pub fn load(project_root: &str) -> CoAccessGraph {
     let Some(path) = store_path(project_root) else {
         return CoAccessGraph::default();
     };
@@ -234,7 +230,7 @@ fn save(project_root: &str, graph: &CoAccessGraph) {
 
 /// Record that `files` were accessed together for one task, persisting the
 /// reinforced graph. No-op for fewer than two distinct files.
-pub(crate) fn record_access(project_root: &str, files: &[String]) {
+pub fn record_access(project_root: &str, files: &[String]) {
     if files.len() < 2 {
         return;
     }
@@ -244,7 +240,7 @@ pub(crate) fn record_access(project_root: &str, files: &[String]) {
 }
 
 /// Files historically co-accessed with `file`, strongest association first.
-pub(crate) fn related(project_root: &str, file: &str, top_k: usize) -> Vec<(String, f64)> {
+pub fn related(project_root: &str, file: &str, top_k: usize) -> Vec<(String, f64)> {
     load(project_root).related(file, top_k)
 }
 
@@ -255,7 +251,7 @@ pub(crate) fn related(project_root: &str, file: &str, top_k: usize) -> Vec<(Stri
 // form the code graph uses, so learned edges line up with static edges (#289).
 
 /// Whether traversal (co-access) edges are enabled (`[graph] traversal_edges`).
-pub(crate) fn traversal_enabled() -> bool {
+pub fn traversal_enabled() -> bool {
     crate::core::config::Config::load().graph.traversal_edges
 }
 
@@ -277,7 +273,7 @@ fn to_repo_rel(path: &str, project_root: &str) -> String {
 /// recent working set `others` (star association). Paths are normalized to
 /// repo-relative. No-op when traversal edges are disabled or there is nothing
 /// to associate. Persisted.
-pub(crate) fn record_focus_access(project_root: &str, focus: &str, others: &[String]) {
+pub fn record_focus_access(project_root: &str, focus: &str, others: &[String]) {
     if !traversal_enabled() {
         return;
     }
@@ -300,7 +296,7 @@ pub(crate) fn record_focus_access(project_root: &str, focus: &str, others: &[Str
 
 /// Record that a *set* of files was surfaced together (e.g. search results)
 /// after normalizing to repo-relative. No-op when disabled or <2 distinct files.
-pub(crate) fn record_set_access(project_root: &str, files: &[String]) {
+pub fn record_set_access(project_root: &str, files: &[String]) {
     if !traversal_enabled() {
         return;
     }
@@ -314,7 +310,7 @@ pub(crate) fn record_set_access(project_root: &str, files: &[String]) {
 
 /// Canonical undirected co-access edges for `project_root` (strongest first),
 /// for dashboard overlay and graph folding. Empty when traversal edges are off.
-pub(crate) fn export_edges(
+pub fn export_edges(
     project_root: &str,
     min_weight: f64,
     max_edges: usize,
@@ -326,7 +322,7 @@ pub(crate) fn export_edges(
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]

@@ -23,7 +23,7 @@ const GAMMA: f64 = 1.0;
 /// Complexity is bounded (see `MAX_ITERATIONS` / `MAX_LOCAL_PASSES`) and the
 /// algorithm converges early, so it scales to large graphs without an explicit
 /// node cap; callers that need a hard node limit should pre-filter the graph.
-pub(super) fn partition(graph: &AdjGraph) -> Vec<usize> {
+pub fn partition(graph: &AdjGraph) -> Vec<usize> {
     let n = graph.node_count();
     let mut assignment: Vec<usize> = (0..n).collect();
     if n == 0 {
@@ -140,7 +140,7 @@ fn refine_communities(graph: &AdjGraph, assignment: &mut [usize], m2: f64) {
 }
 
 /// Connected components within `members`, returned in ascending start-node order.
-pub(super) fn find_connected_components(graph: &AdjGraph, members: &[usize]) -> Vec<Vec<usize>> {
+pub fn find_connected_components(graph: &AdjGraph, members: &[usize]) -> Vec<Vec<usize>> {
     let member_set: std::collections::HashSet<usize> = members.iter().copied().collect();
     let mut visited = std::collections::HashSet::new();
     let mut components = Vec::new();
@@ -228,7 +228,7 @@ fn merge_singleton_communities(graph: &AdjGraph, assignment: &mut [usize], m2: f
 }
 
 /// Newman modularity of an assignment (`-0.5..=1.0`).
-pub(super) fn compute_modularity(graph: &AdjGraph, community: &[usize]) -> f64 {
+pub fn compute_modularity(graph: &AdjGraph, community: &[usize]) -> f64 {
     let m2 = graph.total_weight.max(1.0) * 2.0;
     let mut q = 0.0;
     for (i, neighbors) in graph.adj.iter().enumerate() {

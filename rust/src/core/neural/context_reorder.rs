@@ -1,7 +1,7 @@
 use super::attention_learned::LearnedAttention;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum LineCategory {
+pub enum LineCategory {
     ErrorHandling,
     Import,
     TypeDefinition,
@@ -11,13 +11,13 @@ pub(crate) enum LineCategory {
     Empty,
 }
 
-pub(crate) struct CategorizedLine<'a> {
+pub struct CategorizedLine<'a> {
     pub line: &'a str,
     pub category: LineCategory,
     pub original_index: usize,
 }
 
-pub(crate) fn categorize_line(line: &str) -> LineCategory {
+pub fn categorize_line(line: &str) -> LineCategory {
     let trimmed = line.trim();
     if trimmed.is_empty() {
         return LineCategory::Empty;
@@ -46,7 +46,7 @@ pub(crate) fn categorize_line(line: &str) -> LineCategory {
     LineCategory::Logic
 }
 
-pub(crate) fn reorder_for_lcurve(content: &str, task_keywords: &[String]) -> String {
+pub fn reorder_for_lcurve(content: &str, task_keywords: &[String]) -> String {
     let lines: Vec<&str> = content.lines().collect();
     if lines.len() <= 5 {
         return content.to_string();
@@ -177,8 +177,8 @@ fn is_fn_signature(line: &str) -> bool {
         "def ",
         "async def ",
         "func ",
-        "pub(crate) fn ",
-        "pub(super) fn ",
+        "pub fn ",
+        "pub fn ",
     ];
     starters.iter().any(|s| line.starts_with(s))
 }
@@ -188,7 +188,7 @@ fn is_closing(line: &str) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]

@@ -1,7 +1,7 @@
 use crate::core::session::SessionState;
 use crate::core::stats;
 
-pub(crate) struct WrappedReport {
+pub struct WrappedReport {
     pub period: String,
     pub tokens_saved: u64,
     pub tokens_input: u64,
@@ -26,7 +26,7 @@ pub(crate) struct WrappedReport {
 }
 
 impl WrappedReport {
-    pub(crate) fn generate(period: &str) -> Self {
+    pub fn generate(period: &str) -> Self {
         let store = stats::load_for_display();
         let sessions = SessionState::list_sessions();
 
@@ -137,7 +137,7 @@ impl WrappedReport {
     /// One-line, conservative explanation of how the headline numbers were derived.
     /// Reused by the ASCII footer, the compact summary, and the SVG share card so the
     /// figure is always explainable and never over-claimed.
-    pub(crate) fn methodology_line(&self) -> String {
+    pub fn methodology_line(&self) -> String {
         let price = if self.pricing_estimated {
             format!(
                 "{} blended fallback price (set LEAN_CTX_MODEL for exact)",
@@ -161,7 +161,7 @@ impl WrappedReport {
     /// stdout is a TTY (see `theme::no_color`), so piping to a file or social post
     /// yields clean copy-pasteable ASCII.
     #[allow(clippy::many_single_char_names)] // ANSI formatting helpers: t/r/b/d
-    pub(crate) fn format_ascii(&self) -> String {
+    pub fn format_ascii(&self) -> String {
         use crate::core::theme;
 
         let cfg = crate::core::config::Config::load();
@@ -285,7 +285,7 @@ impl WrappedReport {
         out.join("\n")
     }
 
-    pub(crate) fn format_compact(&self) -> String {
+    pub fn format_compact(&self) -> String {
         let saved_str = format_tokens(self.tokens_saved);
         let cost_str = format!("${:.2}", self.cost_avoided_usd);
         let top_str = self
@@ -333,7 +333,7 @@ fn count_recent_sessions(sessions: &[crate::core::session::SessionSummary], days
     sessions.iter().filter(|s| s.updated_at > cutoff).count()
 }
 
-pub(crate) fn format_tokens(tokens: u64) -> String {
+pub fn format_tokens(tokens: u64) -> String {
     if tokens >= 1_000_000_000_000 {
         format!("{:.2}T", tokens as f64 / 1_000_000_000_000.0)
     } else if tokens >= 1_000_000_000 {
@@ -349,7 +349,7 @@ pub(crate) fn format_tokens(tokens: u64) -> String {
 
 /// Domain-separated proof signed when recovering control of an existing card.
 /// Both client and cloud server must use these exact bytes.
-pub(crate) fn edit_token_recovery_message(card_id: &str, nonce: &str) -> String {
+pub fn edit_token_recovery_message(card_id: &str, nonce: &str) -> String {
     format!("lean-ctx:wrapped-edit-token-recovery:v1\ncard_id:{card_id}\nnonce:{nonce}")
 }
 
@@ -387,7 +387,7 @@ fn estimate_percentile(tokens_saved: u64) -> Option<u8> {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     fn sample() -> WrappedReport {

@@ -17,7 +17,7 @@ const MCP_SESSION_ID: &str = "mcp-session";
 
 /// Information about the MCP client, extracted from the initialize handshake.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct McpClientInfo {
+pub struct McpClientInfo {
     /// Client application name (e.g. "cursor", "vscode", "zed").
     pub client_name: String,
     /// Whether the client declared roots capability.
@@ -30,7 +30,7 @@ pub(crate) struct McpClientInfo {
 
 /// Data for a single MCP tool call, used to record ETPAO metrics.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct McpCallData {
+pub struct McpCallData {
     /// Name of the tool called.
     pub tool_name: String,
     /// Estimated input tokens (tool arguments and context).
@@ -45,7 +45,7 @@ pub(crate) struct McpCallData {
 
 /// Result of kernel processing for an MCP client session.
 #[derive(Debug, Clone)]
-pub(crate) struct McpKernelResult {
+pub struct McpKernelResult {
     /// Integration coverage detected for the client.
     pub coverage: CoverageClass,
     /// Stable machine-readable label for the coverage class.
@@ -60,7 +60,7 @@ pub(crate) struct McpKernelResult {
 
 /// Aggregate MCP metrics summary.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct McpSummary {
+pub struct McpSummary {
     /// Number of recorded MCP tool calls.
     pub total_calls: usize,
     /// Estimated input tokens across all calls.
@@ -77,7 +77,7 @@ pub(crate) struct McpSummary {
 
 /// Processes an MCP initialize handshake into kernel policy and budget data.
 #[must_use]
-pub(crate) fn process_mcp_context(info: &McpClientInfo) -> McpKernelResult {
+pub fn process_mcp_context(info: &McpClientInfo) -> McpKernelResult {
     let coverage = super::mcp_coverage::detect_mcp_coverage(
         &info.client_name,
         info.supports_roots,
@@ -95,7 +95,7 @@ pub(crate) fn process_mcp_context(info: &McpClientInfo) -> McpKernelResult {
 }
 
 /// Records token usage, inferred outcome, and session identity for an MCP call.
-pub(crate) fn record_mcp_call(data: &McpCallData) {
+pub fn record_mcp_call(data: &McpCallData) {
     let call_number = if data.is_retry {
         data.call_number.max(2)
     } else {
@@ -131,7 +131,7 @@ pub(crate) fn record_mcp_call(data: &McpCallData) {
 
 /// Generate a ContextReceiptV1 from completed MCP tool call data.
 #[must_use]
-pub(crate) fn generate_mcp_receipt(
+pub fn generate_mcp_receipt(
     plan_id: &str,
     tool_name: &str,
     _input_tokens: usize,
@@ -156,13 +156,13 @@ pub(crate) fn generate_mcp_receipt(
 
 /// Returns the current MCP effective-tokens-per-accepted-outcome value.
 #[must_use]
-pub(crate) fn mcp_etpao() -> f64 {
+pub fn mcp_etpao() -> f64 {
     lock_etpao().current_etpao()
 }
 
 /// Returns aggregate metrics for all MCP calls recorded in this process.
 #[must_use]
-pub(crate) fn mcp_summary() -> McpSummary {
+pub fn mcp_summary() -> McpSummary {
     let etpao = lock_etpao();
     let etpao_summary = etpao.summary();
     let total_calls = etpao.request_count();
@@ -180,7 +180,7 @@ pub(crate) fn mcp_summary() -> McpSummary {
 }
 
 /// Clears process-wide MCP metrics and identity state.
-pub(crate) fn reset_mcp_state() {
+pub fn reset_mcp_state() {
     *lock_etpao() = EtpaoLive::new();
     *lock_identity() = IdentityLedger::new();
 }
@@ -226,7 +226,7 @@ fn lock_identity() -> MutexGuard<'static, IdentityLedger> {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use std::sync::{Mutex, MutexGuard};
 
     use super::{

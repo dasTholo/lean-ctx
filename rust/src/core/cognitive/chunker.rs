@@ -53,7 +53,7 @@ struct Boundary {
 }
 
 /// Detect semantic chunks in source code using tree-sitter signature boundaries.
-pub(crate) fn detect_chunks(content: &str, file_ext: &str) -> Vec<SemanticChunk> {
+pub fn detect_chunks(content: &str, file_ext: &str) -> Vec<SemanticChunk> {
     if content.trim().is_empty() {
         return Vec::new();
     }
@@ -277,7 +277,7 @@ fn chunk_complexity(content: &str) -> f64 {
 }
 
 /// Select top-K chunks within the cognitive budget (default 7, max 9).
-pub(crate) fn budget_select(chunks: &[SemanticChunk], max_chunks: Option<usize>) -> Vec<usize> {
+pub fn budget_select(chunks: &[SemanticChunk], max_chunks: Option<usize>) -> Vec<usize> {
     let limit = max_chunks.unwrap_or(DEFAULT_CHUNKS).min(MAX_CHUNKS);
     let mut ranked: Vec<usize> = (0..chunks.len()).collect();
     ranked.sort_by(|left, right| {
@@ -304,7 +304,7 @@ fn kind_priority(kind: ChunkKind) -> u8 {
 }
 
 /// Render selected chunks as output text with inter-chunk markers.
-pub(crate) fn render_budget_output(
+pub fn render_budget_output(
     chunks: &[SemanticChunk],
     selected: &[usize],
     file_path: &str,
@@ -383,7 +383,7 @@ fn chunk_name(chunk: &SemanticChunk) -> &str {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::{ChunkKind, SemanticChunk, budget_select, detect_chunks, render_budget_output};
 
     fn chunk(kind: ChunkKind, line: usize, complexity: f64) -> SemanticChunk {

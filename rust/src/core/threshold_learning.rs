@@ -29,7 +29,7 @@ const DAILY_DECAY: f64 = 0.98;
 const FLUSH_SECS: u64 = 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum QualitySignal {
+pub enum QualitySignal {
     /// Compressed read was followed by a full re-read within the bounce window.
     Bounce,
     /// An edit failed after the file was last read in a compressed mode.

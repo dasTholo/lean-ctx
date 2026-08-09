@@ -57,7 +57,7 @@ impl BounceCost {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     fn opus_cost() -> ModelCost {

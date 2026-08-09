@@ -3,8 +3,8 @@
 //! Generates minimum-length structural fingerprints of source files using the
 //! Minimum Description Length principle.
 
-mod bounds;
-mod structural;
+pub mod bounds;
+pub mod structural;
 
 pub use structural::StructuralDescription;
-pub(crate) use structural::generate_structural_description;
+pub use structural::generate_structural_description;

@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 /// A child agent's result with its confidence and quality metadata.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub(crate) struct ChildResult {
+pub struct ChildResult {
     pub agent_id: String,
     pub receipt_ref: String,
     pub evidence: Vec<String>,
@@ -15,7 +15,7 @@ pub(crate) struct ChildResult {
 
 /// How to merge multiple child results.
 #[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
-pub(crate) enum FusionStrategy {
+pub enum FusionStrategy {
     /// Take the result with highest confidence.
     #[default]
     BestConfidence,
@@ -27,7 +27,7 @@ pub(crate) enum FusionStrategy {
 
 /// Result of fusing child results.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub(crate) struct FusionReport {
+pub struct FusionReport {
     pub winning_agent: String,
     pub merged_evidence: Vec<String>,
     pub conflicts: Vec<Conflict>,
@@ -37,7 +37,7 @@ pub(crate) struct FusionReport {
 
 /// An explicit contradiction between two child agents.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub(crate) struct Conflict {
+pub struct Conflict {
     pub agent_a: String,
     pub agent_b: String,
     pub reason: String,
@@ -45,14 +45,14 @@ pub(crate) struct Conflict {
 
 /// A child's normalized contribution to a fusion report.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub(crate) struct ChildAttribution {
+pub struct ChildAttribution {
     pub agent_id: String,
     pub weight: f64,
     pub evidence_contributed: usize,
 }
 
 /// Fuse child results according to the selected strategy.
-pub(crate) fn fuse_results(results: &[ChildResult], strategy: FusionStrategy) -> FusionReport {
+pub fn fuse_results(results: &[ChildResult], strategy: FusionStrategy) -> FusionReport {
     if results.is_empty() {
         return FusionReport::default();
     }
@@ -88,7 +88,7 @@ pub(crate) fn fuse_results(results: &[ChildResult], strategy: FusionStrategy) ->
 }
 
 /// Extract and deduplicate all explicit contradiction pairs.
-pub(crate) fn detect_contradictions(results: &[ChildResult]) -> Vec<Conflict> {
+pub fn detect_contradictions(results: &[ChildResult]) -> Vec<Conflict> {
     let mut seen = HashSet::new();
     let mut conflicts = Vec::new();
     for result in results {
@@ -222,7 +222,7 @@ fn confidence_sum(results: &[ChildResult], indices: &[usize]) -> f64 {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::{ChildResult, FusionStrategy, detect_contradictions, fuse_results};
 
     fn result(id: &str, evidence: &[&str], confidence: f64, quality: f64) -> ChildResult {

@@ -11,7 +11,7 @@ use super::*;
 // TypeScript / JavaScript
 // ---------------------------------------------------------------------------
 
-pub(super) fn resolve_ts(
+pub fn resolve_ts(
     imp: &ImportInfo,
     file_path: &str,
     ctx: &ResolverContext,
@@ -104,7 +104,7 @@ fn resolve_tsconfig_path(source: &str, ctx: &ResolverContext) -> Option<String> 
 // Rust
 // ---------------------------------------------------------------------------
 
-pub(super) fn resolve_rust(
+pub fn resolve_rust(
     imp: &ImportInfo,
     file_path: &str,
     ctx: &ResolverContext,
@@ -197,7 +197,7 @@ fn try_rust_paths(base: &str, ctx: &ResolverContext) -> Option<String> {
 // Python
 // ---------------------------------------------------------------------------
 
-pub(super) fn resolve_python(
+pub fn resolve_python(
     imp: &ImportInfo,
     file_path: &str,
     ctx: &ResolverContext,
@@ -329,7 +329,7 @@ fn is_python_stdlib(module: &str) -> bool {
 // Go
 // ---------------------------------------------------------------------------
 
-pub(super) fn resolve_go(imp: &ImportInfo, ctx: &ResolverContext) -> (Option<String>, bool) {
+pub fn resolve_go(imp: &ImportInfo, ctx: &ResolverContext) -> (Option<String>, bool) {
     let source = &imp.source;
 
     if let Some(ref go_mod) = ctx.go_module
@@ -372,7 +372,7 @@ fn try_go_package(pkg_path: &str, ctx: &ResolverContext) -> Option<String> {
 // Java
 // ---------------------------------------------------------------------------
 
-pub(super) fn resolve_java(imp: &ImportInfo, ctx: &ResolverContext) -> (Option<String>, bool) {
+pub fn resolve_java(imp: &ImportInfo, ctx: &ResolverContext) -> (Option<String>, bool) {
     let source = &imp.source;
 
     if source.starts_with("java.") || source.starts_with("javax.") || source.starts_with("sun.") {
@@ -406,7 +406,7 @@ pub(super) fn resolve_java(imp: &ImportInfo, ctx: &ResolverContext) -> (Option<S
 // Kotlin
 // ---------------------------------------------------------------------------
 
-pub(super) fn resolve_kotlin(imp: &ImportInfo, ctx: &ResolverContext) -> (Option<String>, bool) {
+pub fn resolve_kotlin(imp: &ImportInfo, ctx: &ResolverContext) -> (Option<String>, bool) {
     let source = &imp.source;
 
     if source.starts_with("java.")
@@ -458,7 +458,7 @@ pub(super) fn resolve_kotlin(imp: &ImportInfo, ctx: &ResolverContext) -> (Option
 // C / C++
 // ---------------------------------------------------------------------------
 
-pub(super) fn resolve_c_like(
+pub fn resolve_c_like(
     imp: &ImportInfo,
     file_path: &str,
     ctx: &ResolverContext,
@@ -515,7 +515,7 @@ pub(super) fn resolve_c_like(
 // Ruby
 // ---------------------------------------------------------------------------
 
-pub(super) fn resolve_ruby(
+pub fn resolve_ruby(
     imp: &ImportInfo,
     file_path: &str,
     ctx: &ResolverContext,
@@ -568,7 +568,7 @@ pub(super) fn resolve_ruby(
 // PHP
 // ---------------------------------------------------------------------------
 
-pub(super) fn resolve_php(
+pub fn resolve_php(
     imp: &ImportInfo,
     file_path: &str,
     ctx: &ResolverContext,
@@ -624,7 +624,7 @@ pub(super) fn resolve_php(
 // Bash
 // ---------------------------------------------------------------------------
 
-pub(super) fn resolve_bash(
+pub fn resolve_bash(
     imp: &ImportInfo,
     file_path: &str,
     ctx: &ResolverContext,
@@ -677,7 +677,7 @@ pub(super) fn resolve_bash(
 // Dart
 // ---------------------------------------------------------------------------
 
-pub(super) fn resolve_dart(
+pub fn resolve_dart(
     imp: &ImportInfo,
     file_path: &str,
     ctx: &ResolverContext,
@@ -749,7 +749,7 @@ pub(super) fn resolve_dart(
 /// Resolves GDScript `extends "res://…"` and `preload`/`load` resource paths.
 /// `res://` is anchored at the project root; `user://` is a runtime data path
 /// (never a source file); other paths are resolved relative to the importer.
-pub(super) fn resolve_gd(
+pub fn resolve_gd(
     imp: &ImportInfo,
     file_path: &str,
     ctx: &ResolverContext,
@@ -824,7 +824,7 @@ pub(super) fn resolve_gd(
 /// file. Dotted specifiers map `.` -> `/`; pathy specifiers are used verbatim.
 /// Candidates: `<rel>.lua`, `<rel>/init.lua` (and `.luau`), probed relative to
 /// the importer first, then the project root and common source roots.
-pub(super) fn resolve_lua(
+pub fn resolve_lua(
     imp: &ImportInfo,
     file_path: &str,
     ctx: &ResolverContext,
@@ -901,7 +901,7 @@ pub(super) fn resolve_lua(
 // Zig
 // ---------------------------------------------------------------------------
 
-pub(super) fn resolve_zig(
+pub fn resolve_zig(
     imp: &ImportInfo,
     file_path: &str,
     ctx: &ResolverContext,
@@ -962,7 +962,7 @@ pub(super) fn resolve_zig(
 // C#
 // ---------------------------------------------------------------------------
 
-pub(super) fn resolve_csharp(imp: &ImportInfo, ctx: &ResolverContext) -> (Option<String>, bool) {
+pub fn resolve_csharp(imp: &ImportInfo, ctx: &ResolverContext) -> (Option<String>, bool) {
     let ns = imp.source.trim();
     if ns.is_empty() {
         return (None, true);
@@ -1045,7 +1045,7 @@ fn is_csharp_external_namespace(ns: &str) -> bool {
 // Swift
 // ---------------------------------------------------------------------------
 
-pub(super) fn resolve_swift(
+pub fn resolve_swift(
     imp: &ImportInfo,
     file_path: &str,
     ctx: &ResolverContext,
@@ -1079,7 +1079,7 @@ pub(super) fn resolve_swift(
 // Scala
 // ---------------------------------------------------------------------------
 
-pub(super) fn resolve_scala(imp: &ImportInfo, ctx: &ResolverContext) -> (Option<String>, bool) {
+pub fn resolve_scala(imp: &ImportInfo, ctx: &ResolverContext) -> (Option<String>, bool) {
     let source = &imp.source;
 
     if source.starts_with("scala.") || source.starts_with("java.") {
@@ -1107,7 +1107,7 @@ pub(super) fn resolve_scala(imp: &ImportInfo, ctx: &ResolverContext) -> (Option<
 // Elixir
 // ---------------------------------------------------------------------------
 
-pub(super) fn resolve_elixir(
+pub fn resolve_elixir(
     imp: &ImportInfo,
     file_path: &str,
     ctx: &ResolverContext,

@@ -11,18 +11,18 @@ static CACHE_MISSES: AtomicU64 = AtomicU64::new(0);
 static CACHE_READ_TOKENS: AtomicU64 = AtomicU64::new(0);
 
 /// Record a cache hit from provider response headers.
-pub(crate) fn record_hit(read_tokens: u64) {
+pub fn record_hit(read_tokens: u64) {
     CACHE_HITS.fetch_add(1, Ordering::Relaxed);
     CACHE_READ_TOKENS.fetch_add(read_tokens, Ordering::Relaxed);
 }
 
 /// Record a cache miss.
-pub(crate) fn record_miss() {
+pub fn record_miss() {
     CACHE_MISSES.fetch_add(1, Ordering::Relaxed);
 }
 
 /// Current cache hit rate (0.0–1.0), or None if no samples yet.
-pub(crate) fn hit_rate() -> Option<f64> {
+pub fn hit_rate() -> Option<f64> {
     let hits = CACHE_HITS.load(Ordering::Relaxed);
     let misses = CACHE_MISSES.load(Ordering::Relaxed);
     let total = hits + misses;
@@ -34,7 +34,7 @@ pub(crate) fn hit_rate() -> Option<f64> {
 
 /// Cache diagnostic snapshot.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct CacheDiagnostics {
+pub struct CacheDiagnostics {
     pub hits: u64,
     pub misses: u64,
     pub hit_rate: Option<f64>,
@@ -44,7 +44,7 @@ pub(crate) struct CacheDiagnostics {
 
 impl CacheDiagnostics {
     /// Take a snapshot of current cache diagnostics.
-    pub(crate) fn snapshot() -> Self {
+    pub fn snapshot() -> Self {
         let hits = CACHE_HITS.load(Ordering::Relaxed);
         let misses = CACHE_MISSES.load(Ordering::Relaxed);
         let read_tokens = CACHE_READ_TOKENS.load(Ordering::Relaxed);
@@ -69,7 +69,7 @@ impl CacheDiagnostics {
     }
 
     /// Check if hit rate is below the alert threshold.
-    pub(crate) fn needs_alert(&self, threshold: f64) -> bool {
+    pub fn needs_alert(&self, threshold: f64) -> bool {
         self.hit_rate.is_some_and(|rate| {
             let total = self.hits + self.misses;
             total >= 10 && rate < threshold
@@ -79,13 +79,13 @@ impl CacheDiagnostics {
 
 /// Alert severity for cache regressions.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum CacheAlertSeverity {
+pub enum CacheAlertSeverity {
     Warning,
     Critical,
 }
 
 /// Generate a cache alert if hit rate is below thresholds.
-pub(crate) fn check_alert() -> Option<(CacheAlertSeverity, String)> {
+pub fn check_alert() -> Option<(CacheAlertSeverity, String)> {
     let diag = CacheDiagnostics::snapshot();
     if let Some(rate) = diag.hit_rate {
         let total = diag.hits + diag.misses;
@@ -119,14 +119,14 @@ pub(crate) fn check_alert() -> Option<(CacheAlertSeverity, String)> {
 }
 
 /// Reset counters (for testing).
-pub(crate) fn reset() {
+pub fn reset() {
     CACHE_HITS.store(0, Ordering::Relaxed);
     CACHE_MISSES.store(0, Ordering::Relaxed);
     CACHE_READ_TOKENS.store(0, Ordering::Relaxed);
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     fn setup() {

@@ -114,7 +114,7 @@ fn exp_weights(n: usize) -> Vec<f64> {
 }
 
 /// `segments[0]` is oldest, `segments[last]` newest. Budget follows exponential weights toward recent slices.
-pub(crate) fn compress_progressive(segments: &[String], budget_tokens: usize) -> Vec<String> {
+pub fn compress_progressive(segments: &[String], budget_tokens: usize) -> Vec<String> {
     let n = segments.len();
     if n == 0 {
         return Vec::new();
@@ -155,7 +155,7 @@ pub(crate) fn compress_progressive(segments: &[String], budget_tokens: usize) ->
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]

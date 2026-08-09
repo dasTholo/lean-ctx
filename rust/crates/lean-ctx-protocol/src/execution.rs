@@ -123,6 +123,8 @@ pub struct ExecutionReceiptV1 {
     pub etpao_milli: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub knowledge_refs: Vec<String>,
     pub decision_refs: Vec<String>,
     pub evidence_refs: Vec<EvidenceRefV1>,
     pub signature: String,
@@ -215,6 +217,7 @@ mod tests {
             avoided_cost_micros: 1_000,
             etpao_milli: 1_250,
             outcome_ref: Some("outcome:1".to_owned()),
+            knowledge_refs: vec!["knowledge:1".to_owned()],
             decision_refs: vec!["decision:1".to_owned()],
             evidence_refs: vec![],
             signature: "signature".to_owned(),

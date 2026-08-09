@@ -11,13 +11,13 @@ use std::sync::{Mutex, PoisonError};
 static GLOBAL: Mutex<Option<NegativeKnowledge>> = Mutex::new(None);
 
 /// Access the global negative-knowledge tracker.
-pub(crate) fn global() -> std::sync::MutexGuard<'static, Option<NegativeKnowledge>> {
+pub fn global() -> std::sync::MutexGuard<'static, Option<NegativeKnowledge>> {
     GLOBAL.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// Session-scoped negative knowledge store.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct NegativeKnowledge {
+pub struct NegativeKnowledge {
     /// Files confirmed irrelevant to the current task.
     irrelevant_files: HashSet<String>,
     /// Search queries that returned no useful results.
@@ -27,32 +27,32 @@ pub(crate) struct NegativeKnowledge {
 }
 
 impl NegativeKnowledge {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self::default()
     }
 
     /// Mark a file as irrelevant to the current task.
-    pub(crate) fn mark_irrelevant(&mut self, path: &str) {
+    pub fn mark_irrelevant(&mut self, path: &str) {
         self.irrelevant_files.insert(path.to_string());
     }
 
     /// Check if a file has been marked as irrelevant.
-    pub(crate) fn is_irrelevant(&self, path: &str) -> bool {
+    pub fn is_irrelevant(&self, path: &str) -> bool {
         self.irrelevant_files.contains(path)
     }
 
     /// Record a dead-end search query.
-    pub(crate) fn record_dead_end_query(&mut self, query: &str) {
+    pub fn record_dead_end_query(&mut self, query: &str) {
         self.dead_end_queries.insert(query.to_lowercase());
     }
 
     /// Check if a similar query was already a dead end.
-    pub(crate) fn is_dead_end_query(&self, query: &str) -> bool {
+    pub fn is_dead_end_query(&self, query: &str) -> bool {
         self.dead_end_queries.contains(&query.to_lowercase())
     }
 
     /// Record that a specific feature/symbol is absent from a file.
-    pub(crate) fn record_absent(&mut self, path: &str, feature: &str) {
+    pub fn record_absent(&mut self, path: &str, feature: &str) {
         self.absent_features
             .entry(path.to_string())
             .or_default()
@@ -60,20 +60,20 @@ impl NegativeKnowledge {
     }
 
     /// Check if a feature was already confirmed absent from a file.
-    pub(crate) fn is_absent(&self, path: &str, feature: &str) -> bool {
+    pub fn is_absent(&self, path: &str, feature: &str) -> bool {
         self.absent_features
             .get(path)
             .is_some_and(|features| features.contains(feature))
     }
 
     /// Invalidate negative knowledge for a file (e.g., after edit).
-    pub(crate) fn invalidate(&mut self, path: &str) {
+    pub fn invalidate(&mut self, path: &str) {
         self.irrelevant_files.remove(path);
         self.absent_features.remove(path);
     }
 
     /// Summary for diagnostics.
-    pub(crate) fn stats(&self) -> (usize, usize, usize) {
+    pub fn stats(&self) -> (usize, usize, usize) {
         (
             self.irrelevant_files.len(),
             self.dead_end_queries.len(),
@@ -81,7 +81,7 @@ impl NegativeKnowledge {
         )
     }
 
-    pub(crate) fn reset(&mut self) {
+    pub fn reset(&mut self) {
         self.irrelevant_files.clear();
         self.dead_end_queries.clear();
         self.absent_features.clear();
@@ -89,7 +89,7 @@ impl NegativeKnowledge {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]

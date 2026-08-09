@@ -3,12 +3,12 @@
 //! Agents leave pheromone-like signals on files and symbols, enabling
 //! implicit coordination between multiple agents in the same codebase.
 
-mod pressure;
-mod signal;
+pub mod pressure;
+pub mod signal;
 
 #[cfg(test)]
-pub(crate) use pressure::PressureMap;
+pub use pressure::PressureMap;
 pub use signal::PheromoneSignal;
-pub(crate) use signal::{SignalKind, deposit_signal};
+pub use signal::{SignalKind, deposit_signal};
 #[cfg(test)]
-pub(crate) use signal::{read_signals, reset_signals};
+pub use signal::{read_signals, reset_signals};

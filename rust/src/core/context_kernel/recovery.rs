@@ -8,7 +8,7 @@ const SNAPSHOT_VERSION: u32 = 1;
 
 /// Durable state needed to resume kernel operation after a restart.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub(crate) struct KernelSnapshot {
+pub struct KernelSnapshot {
     pub version: u32,
     pub timestamp_epoch: u64,
     pub provider_weights: HashMap<String, f64>,
@@ -20,7 +20,7 @@ pub(crate) struct KernelSnapshot {
 
 impl KernelSnapshot {
     /// Capture the current recoverable kernel state.
-    pub(crate) fn capture(
+    pub fn capture(
         provider_weights: &HashMap<String, f64>,
         recent_plans: &[String],
         recent_receipts: &[String],
@@ -45,7 +45,7 @@ impl KernelSnapshot {
 
 /// Errors encountered while persisting or recovering a kernel snapshot.
 #[derive(Debug)]
-pub(crate) enum SnapshotError {
+pub enum SnapshotError {
     Io(std::io::Error),
     Serialize(String),
     Deserialize(String),
@@ -78,7 +78,7 @@ impl From<std::io::Error> for SnapshotError {
 }
 
 /// Persist a snapshot using a temporary sibling file and atomic rename.
-pub(crate) fn save_snapshot(snapshot: &KernelSnapshot, path: &Path) -> Result<(), SnapshotError> {
+pub fn save_snapshot(snapshot: &KernelSnapshot, path: &Path) -> Result<(), SnapshotError> {
     let serialized = serde_json::to_vec_pretty(snapshot)
         .map_err(|error| SnapshotError::Serialize(error.to_string()))?;
     let temporary_path = temporary_path(path);
@@ -97,7 +97,7 @@ pub(crate) fn save_snapshot(snapshot: &KernelSnapshot, path: &Path) -> Result<()
 }
 
 /// Load and validate a persisted kernel snapshot.
-pub(crate) fn load_snapshot(path: &Path) -> Result<KernelSnapshot, SnapshotError> {
+pub fn load_snapshot(path: &Path) -> Result<KernelSnapshot, SnapshotError> {
     let serialized = std::fs::read(path)?;
     let snapshot: KernelSnapshot = serde_json::from_slice(&serialized)
         .map_err(|error| SnapshotError::Deserialize(error.to_string()))?;
@@ -110,7 +110,7 @@ pub(crate) fn load_snapshot(path: &Path) -> Result<KernelSnapshot, SnapshotError
 }
 
 /// Return the standard per-user location for kernel recovery state.
-pub(crate) fn default_snapshot_path() -> PathBuf {
+pub fn default_snapshot_path() -> PathBuf {
     dirs::cache_dir()
         .unwrap_or_else(|| PathBuf::from("/tmp"))
         .join("lean-ctx")
@@ -125,7 +125,7 @@ fn temporary_path(path: &Path) -> PathBuf {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use std::collections::HashMap;
     use std::path::Path;
 

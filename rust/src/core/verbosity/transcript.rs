@@ -37,7 +37,7 @@ pub struct TranscriptAnalysis {
 }
 
 /// Analyze the last `window` transcript entries for behavioral patterns.
-pub(crate) fn analyze_transcript(entries: &[TranscriptEntry], window: usize) -> TranscriptAnalysis {
+pub fn analyze_transcript(entries: &[TranscriptEntry], window: usize) -> TranscriptAnalysis {
     let window = if window == 0 { entries.len() } else { window };
     let window_entries = if entries.len() > window {
         &entries[entries.len() - window..]
@@ -92,7 +92,7 @@ pub(crate) fn analyze_transcript(entries: &[TranscriptEntry], window: usize) -> 
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use chrono::TimeZone;
 

@@ -15,7 +15,7 @@ use super::graph::{AdjGraph, cohesion_of};
 use crate::core::graph_index::ProjectIndex;
 
 /// Relabel an assignment into a deterministic `0..k` ordering.
-pub(super) fn canonicalize(graph: &AdjGraph, assignment: &[usize]) -> Vec<usize> {
+pub fn canonicalize(graph: &AdjGraph, assignment: &[usize]) -> Vec<usize> {
     let mut groups: HashMap<usize, Vec<usize>> = HashMap::new();
     for (i, &c) in assignment.iter().enumerate() {
         groups.entry(c).or_default().push(i);
@@ -53,7 +53,7 @@ pub(super) fn canonicalize(graph: &AdjGraph, assignment: &[usize]) -> Vec<usize>
 /// most members with (one previous id can be claimed once). Communities with no
 /// overlap — or whose best previous id was already claimed — get fresh ids above
 /// the previous maximum, so a reused id and a fresh id can never collide.
-pub(super) fn remap_to_previous(
+pub fn remap_to_previous(
     graph: &AdjGraph,
     assignment: &[usize],
     prev: &HashMap<String, usize>,
@@ -132,14 +132,14 @@ fn sidecar_path(project_root: &str) -> Option<PathBuf> {
 }
 
 /// Load the previously persisted `file_path → community_id` assignment, if any.
-pub(super) fn load_previous(project_root: &str) -> Option<HashMap<String, usize>> {
+pub fn load_previous(project_root: &str) -> Option<HashMap<String, usize>> {
     let path = sidecar_path(project_root)?;
     let content = std::fs::read_to_string(&path).ok()?;
     serde_json::from_str(&content).ok()
 }
 
 /// Persist `file_path → community_id` next to the graph index (atomic rename).
-pub(super) fn save_assignment(project_root: &str, node_ids: &[String], assignment: &[usize]) {
+pub fn save_assignment(project_root: &str, node_ids: &[String], assignment: &[usize]) {
     let Some(path) = sidecar_path(project_root) else {
         return;
     };

@@ -106,6 +106,7 @@ mod tests {
             allowed_providers: vec!["provider-a".to_owned()],
             required_task_class: Some("coding".to_owned()),
             quality_floor: 0.99,
+            scheduler_gate: None,
         }
     }
 

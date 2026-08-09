@@ -91,7 +91,7 @@ impl SymbolHandle {
 /// Emit a handle string from parts without constructing a [`SymbolHandle`].
 /// The hot path for renderers that already hold `(path, name, line)`.
 #[must_use]
-pub(crate) fn emit(path: &str, name: &str, line: usize) -> String {
+pub fn emit(path: &str, name: &str, line: usize) -> String {
     SymbolHandle::new(path, name, line).emit()
 }
 
@@ -101,19 +101,19 @@ pub(crate) fn emit(path: &str, name: &str, line: usize) -> String {
 /// carry this single hint telling the agent that each `name @Lstart` is
 /// addressable as a stable handle. Matches the codebase's `↳ …` hint style and
 /// is a constant, so it stays deterministic (#498).
-pub(crate) const USAGE_HINT: &str =
+pub const USAGE_HINT: &str =
     "↳ re-target any symbol: ctx_search(action=\"symbol\", handle=\"path#name@Lstart\")";
 
 /// Whether `s` looks like a handle (carries a non-empty `path#name` core). Lets
 /// a tool accept either a bare symbol name or a handle in the same argument.
 #[must_use]
-pub(crate) fn looks_like_handle(s: &str) -> bool {
+pub fn looks_like_handle(s: &str) -> bool {
     s.split_once('#')
         .is_some_and(|(path, rest)| !path.is_empty() && !rest.is_empty())
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]

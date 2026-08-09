@@ -4,7 +4,7 @@ use serde::Serialize;
 
 /// Activity status and human-readable detail for one kernel subsystem.
 #[derive(Debug, Clone, Serialize)]
-pub(crate) struct SubsystemStatus {
+pub struct SubsystemStatus {
     /// Display name of the subsystem.
     pub name: String,
     /// Whether the subsystem has recorded activity.
@@ -15,7 +15,7 @@ pub(crate) struct SubsystemStatus {
 
 /// Token and evidence savings summarized across kernel subsystems.
 #[derive(Debug, Clone, Default, Serialize)]
-pub(crate) struct TokenSavingsSummary {
+pub struct TokenSavingsSummary {
     /// Number of content-deduplication cache hits.
     pub dedup_hits: usize,
     /// Estimated tokens saved by schema optimization.
@@ -28,7 +28,7 @@ pub(crate) struct TokenSavingsSummary {
 
 /// Aggregated report for the Context Kernel dashboard.
 #[derive(Debug, Clone, Serialize)]
-pub(crate) struct DashboardReport {
+pub struct DashboardReport {
     /// Version of lean-ctx that generated the report.
     pub version: &'static str,
     /// Whether the Context Kernel master switch is enabled.
@@ -45,7 +45,7 @@ pub(crate) struct DashboardReport {
 
 /// Generates a point-in-time report from all dashboard subsystems.
 #[must_use]
-pub(crate) fn generate_report() -> DashboardReport {
+pub fn generate_report() -> DashboardReport {
     let kernel_enabled = super::kernel_config::is_enabled();
     let dedup = super::ctx_read_dedup::dedup_summary();
     let schema = super::schema_wiring::schema_savings();
@@ -134,7 +134,7 @@ fn status(name: &str, active: bool, detail: String) -> SubsystemStatus {
 
 /// Formats a dashboard report for terminal display.
 #[must_use]
-pub(crate) fn format_report(report: &DashboardReport) -> String {
+pub fn format_report(report: &DashboardReport) -> String {
     let kernel = if report.kernel_enabled { "ON" } else { "OFF" };
     let subsystems = report
         .subsystems
@@ -161,13 +161,13 @@ pub(crate) fn format_report(report: &DashboardReport) -> String {
 
 /// Serializes a dashboard report as pretty-printed JSON.
 #[must_use]
-pub(crate) fn report_json(report: &DashboardReport) -> String {
+pub fn report_json(report: &DashboardReport) -> String {
     serde_json::to_string_pretty(report)
         .unwrap_or_else(|_| r#"{"error":"dashboard serialization failed"}"#.to_owned())
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::{format_report, generate_report, report_json};
 
     #[test]

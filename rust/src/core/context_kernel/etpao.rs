@@ -8,7 +8,7 @@ use super::types::{ContextReceiptV1, ReceiptOutcome};
 
 /// Aggregated token efficiency metrics for a single scope (project/agent/model).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub(crate) struct EtpaoMetrics {
+pub struct EtpaoMetrics {
     pub scope: String,
     pub tokens_input: u64,
     pub tokens_output: u64,
@@ -26,7 +26,7 @@ pub(crate) struct EtpaoMetrics {
 
 impl EtpaoMetrics {
     /// Returns total accounted tokens per accepted outcome.
-    pub(crate) fn etpao(&self) -> f64 {
+    pub fn etpao(&self) -> f64 {
         if self.accepted_outcomes == 0 {
             return f64::INFINITY;
         }
@@ -43,12 +43,12 @@ impl EtpaoMetrics {
     }
 
     /// Returns the fraction of requests accepted on the first pass.
-    pub(crate) fn first_pass_success_rate(&self) -> f64 {
+    pub fn first_pass_success_rate(&self) -> f64 {
         ratio(self.first_pass_successes, self.total_requests)
     }
 
     /// Returns cache hits as a fraction of total requests.
-    pub(crate) fn cache_hit_rate(&self) -> f64 {
+    pub fn cache_hit_rate(&self) -> f64 {
         ratio(
             self.cache_hits,
             self.cache_hits.saturating_add(self.cache_misses),
@@ -56,7 +56,7 @@ impl EtpaoMetrics {
     }
 
     /// Adds another scope's counters to this metric set.
-    pub(crate) fn merge(&mut self, other: &EtpaoMetrics) {
+    pub fn merge(&mut self, other: &EtpaoMetrics) {
         self.tokens_input = self.tokens_input.saturating_add(other.tokens_input);
         self.tokens_output = self.tokens_output.saturating_add(other.tokens_output);
         self.tokens_reasoning = self.tokens_reasoning.saturating_add(other.tokens_reasoning);
@@ -80,13 +80,13 @@ impl EtpaoMetrics {
 
 /// Tracks ETPAO metrics per scope, updated from context receipt outcomes.
 #[derive(Debug, Default)]
-pub(crate) struct EtpaoTracker {
+pub struct EtpaoTracker {
     scopes: HashMap<String, EtpaoMetrics>,
 }
 
 impl EtpaoTracker {
     /// Records one delivered receipt and its evaluated outcome for a scope.
-    pub(crate) fn record_receipt(
+    pub fn record_receipt(
         &mut self,
         scope: &str,
         receipt: &ContextReceiptV1,
@@ -119,12 +119,12 @@ impl EtpaoTracker {
     }
 
     /// Returns metrics for a tracked scope.
-    pub(crate) fn get(&self, scope: &str) -> Option<&EtpaoMetrics> {
+    pub fn get(&self, scope: &str) -> Option<&EtpaoMetrics> {
         self.scopes.get(scope)
     }
 
     /// Combines every tracked scope into a single aggregate.
-    pub(crate) fn aggregate(&self) -> EtpaoMetrics {
+    pub fn aggregate(&self) -> EtpaoMetrics {
         let mut aggregate = EtpaoMetrics {
             scope: "aggregate".to_owned(),
             ..EtpaoMetrics::default()
@@ -136,14 +136,14 @@ impl EtpaoTracker {
     }
 
     /// Lists tracked scope names in stable lexical order.
-    pub(crate) fn all_scopes(&self) -> Vec<&str> {
+    pub fn all_scopes(&self) -> Vec<&str> {
         let mut scopes: Vec<_> = self.scopes.keys().map(String::as_str).collect();
         scopes.sort_unstable();
         scopes
     }
 
     /// Returns serializable scope metrics in stable lexical order.
-    pub(crate) fn to_wire(&self) -> Vec<EtpaoMetrics> {
+    pub fn to_wire(&self) -> Vec<EtpaoMetrics> {
         let mut metrics: Vec<_> = self.scopes.values().cloned().collect();
         metrics.sort_unstable_by_key(|item| item.scope.clone());
         metrics
@@ -151,7 +151,7 @@ impl EtpaoTracker {
 }
 
 /// Formats a privacy-safe numeric ETPAO summary.
-pub(crate) fn format_etpao_summary(metrics: &EtpaoMetrics) -> String {
+pub fn format_etpao_summary(metrics: &EtpaoMetrics) -> String {
     format!(
         "ETPAO: {:.2}, first-pass rate: {:.2}%, requests: {}",
         metrics.etpao(),
@@ -169,7 +169,7 @@ fn ratio(numerator: u64, denominator: u64) -> f64 {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::{EtpaoMetrics, EtpaoTracker, format_etpao_summary};
     use crate::core::context_kernel::types::{ContextReceiptV1, ReceiptOutcome};
     use std::collections::HashMap;

@@ -15,7 +15,7 @@ use crate::core::graph_provider::GraphProvider;
 /// structural `defines`/`exports` edges are weak ties. Accepts both the
 /// PropertyGraph kind spelling (`imports`, `calls`) and the graph-index spelling
 /// (`import`, `call`) so either backend yields identical weights.
-pub(super) fn edge_weight(kind: &str) -> f64 {
+pub fn edge_weight(kind: &str) -> f64 {
     match kind {
         "imports" | "import" => 1.0,
         "calls" | "call" => 1.5,
@@ -25,25 +25,25 @@ pub(super) fn edge_weight(kind: &str) -> f64 {
     }
 }
 
-pub(super) struct AdjGraph {
-    pub(super) node_ids: Vec<String>,
+pub struct AdjGraph {
+    pub node_ids: Vec<String>,
     #[cfg_attr(not(test), allow(dead_code))] // read by community integration tests
-    pub(super) node_to_idx: HashMap<String, usize>,
+    pub node_to_idx: HashMap<String, usize>,
     /// Symmetric adjacency: every undirected edge `{i,j}` appears as `(i→j)` in
     /// `adj[i]` and `(j→i)` in `adj[j]`. Neighbor lists are sorted by index.
-    pub(super) adj: Vec<Vec<(usize, f64)>>,
-    pub(super) degree: Vec<f64>,
+    pub adj: Vec<Vec<(usize, f64)>>,
+    pub degree: Vec<f64>,
     /// Sum of unique undirected edge weights (each edge counted once).
-    pub(super) total_weight: f64,
+    pub total_weight: f64,
 }
 
 impl AdjGraph {
-    pub(super) fn node_count(&self) -> usize {
+    pub fn node_count(&self) -> usize {
         self.node_ids.len()
     }
 
     /// Number of unique undirected edges.
-    pub(super) fn edge_count(&self) -> usize {
+    pub fn edge_count(&self) -> usize {
         self.adj.iter().map(Vec::len).sum::<usize>() / 2
     }
 
@@ -92,7 +92,7 @@ impl AdjGraph {
         }
     }
 
-    pub(super) fn from_property_graph(conn: &Connection) -> Self {
+    pub fn from_property_graph(conn: &Connection) -> Self {
         let files = query_files(conn);
         let idx: HashMap<&str, usize> = files
             .iter()
@@ -106,7 +106,7 @@ impl AdjGraph {
         Self::from_pairs(files, &pairs)
     }
 
-    pub(super) fn from_provider(gp: &GraphProvider) -> Self {
+    pub fn from_provider(gp: &GraphProvider) -> Self {
         let mut files = gp.file_paths();
         files.sort();
         files.dedup();
@@ -129,7 +129,7 @@ impl AdjGraph {
 
     /// Induced subgraph over `members` (global node indices). Returns the
     /// subgraph plus a `local → global` index map for translating results back.
-    pub(super) fn induced_subgraph(&self, members: &[usize]) -> (AdjGraph, Vec<usize>) {
+    pub fn induced_subgraph(&self, members: &[usize]) -> (AdjGraph, Vec<usize>) {
         let mut local_of: HashMap<usize, usize> = HashMap::with_capacity(members.len());
         let mut node_ids = Vec::with_capacity(members.len());
         let mut local_to_global = Vec::with_capacity(members.len());
@@ -153,7 +153,7 @@ impl AdjGraph {
     }
 
     #[cfg(test)]
-    pub(super) fn from_test_edges(node_ids: Vec<String>, edges: &[(usize, usize, &str)]) -> Self {
+    pub fn from_test_edges(node_ids: Vec<String>, edges: &[(usize, usize, &str)]) -> Self {
         let pairs: Vec<(usize, usize, f64)> = edges
             .iter()
             .map(|&(a, b, kind)| (a, b, edge_weight(kind)))
@@ -165,7 +165,7 @@ impl AdjGraph {
 /// Internal vs. external edge endpoints for a community (symmetric adjacency, so
 /// each internal undirected edge contributes twice — the cohesion ratio is
 /// unaffected).
-pub(super) fn edge_counts(graph: &AdjGraph, members: &[usize]) -> (usize, usize) {
+pub fn edge_counts(graph: &AdjGraph, members: &[usize]) -> (usize, usize) {
     let member_set: std::collections::HashSet<usize> = members.iter().copied().collect();
     let mut internal = 0usize;
     let mut external = 0usize;
@@ -182,7 +182,7 @@ pub(super) fn edge_counts(graph: &AdjGraph, members: &[usize]) -> (usize, usize)
 }
 
 /// Fraction of a community's incident edges that stay inside it (`0.0..=1.0`).
-pub(super) fn cohesion_of(graph: &AdjGraph, members: &[usize]) -> f64 {
+pub fn cohesion_of(graph: &AdjGraph, members: &[usize]) -> f64 {
     let (internal, external) = edge_counts(graph, members);
     let total = (internal + external).max(1) as f64;
     internal as f64 / total

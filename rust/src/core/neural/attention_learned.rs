@@ -8,7 +8,7 @@
 
 use std::path::Path;
 
-pub(crate) struct LearnedAttention {
+pub struct LearnedAttention {
     breakpoints: Vec<(f64, f64)>,
 }
 
@@ -41,7 +41,7 @@ const DEFAULT_BREAKPOINTS: &[(f64, f64)] = &[
 ];
 
 impl LearnedAttention {
-    pub(crate) fn load_or_default(model_dir: &Path) -> Self {
+    pub fn load_or_default(model_dir: &Path) -> Self {
         let config_path = model_dir.join("attention_weights.json");
         if config_path.exists() {
             match Self::load_from_file(&config_path) {
@@ -62,7 +62,7 @@ impl LearnedAttention {
         Self::with_defaults()
     }
 
-    pub(crate) fn with_defaults() -> Self {
+    pub fn with_defaults() -> Self {
         Self {
             breakpoints: DEFAULT_BREAKPOINTS.to_vec(),
         }
@@ -79,7 +79,7 @@ impl LearnedAttention {
 
     /// Compute attention weight for a normalized position [0.0, 1.0].
     /// Uses piecewise-linear interpolation between breakpoints.
-    pub(crate) fn weight(&self, position: f64) -> f64 {
+    pub fn weight(&self, position: f64) -> f64 {
         let pos = position.clamp(0.0, 1.0);
 
         if self.breakpoints.is_empty() {
@@ -108,17 +108,17 @@ impl LearnedAttention {
     }
 
     /// Replace breakpoints with new empirically measured values.
-    pub(crate) fn update_from_experiment(&mut self, new_breakpoints: Vec<(f64, f64)>) {
+    pub fn update_from_experiment(&mut self, new_breakpoints: Vec<(f64, f64)>) {
         self.breakpoints = new_breakpoints;
     }
 
-    pub(crate) fn breakpoint_count(&self) -> usize {
+    pub fn breakpoint_count(&self) -> usize {
         self.breakpoints.len()
     }
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]

@@ -11,7 +11,7 @@ fn global_stats() -> &'static VerificationStats {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
-pub(crate) struct VerificationConfig {
+pub struct VerificationConfig {
     pub enabled: Option<bool>,
     /// Optional explicit verification mode.
     /// - "off": disable verifier entirely

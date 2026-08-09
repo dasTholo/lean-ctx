@@ -10,7 +10,7 @@ use serde::Serialize;
 
 /// A function whose name is judged cryptic, with a human-readable reason.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub(crate) struct NamingFinding {
+pub struct NamingFinding {
     pub name: String,
     /// 1-based start line of the function.
     pub line: usize,
@@ -19,7 +19,7 @@ pub(crate) struct NamingFinding {
 
 /// Report cryptic function names in `source` of the given file `extension`.
 /// Returns `None` when tree-sitter is disabled or the extension is unsupported.
-pub(crate) fn naming_findings(source: &str, extension: &str) -> Option<Vec<NamingFinding>> {
+pub fn naming_findings(source: &str, extension: &str) -> Option<Vec<NamingFinding>> {
     #[cfg(feature = "tree-sitter")]
     {
         let mut out: Vec<NamingFinding> = Vec::new();
@@ -46,7 +46,7 @@ pub(crate) fn naming_findings(source: &str, extension: &str) -> Option<Vec<Namin
 
 /// Returns a reason string if `name` is cryptic, else `None`. Pure and
 /// unit-tested; this is the single source of truth for the heuristic.
-pub(crate) fn cryptic_reason(name: &str) -> Option<String> {
+pub fn cryptic_reason(name: &str) -> Option<String> {
     let core = name.trim_start_matches('_');
     if core.is_empty() || core == "<anonymous>" {
         return None;
@@ -116,7 +116,7 @@ fn has_vowel(s: &str) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]

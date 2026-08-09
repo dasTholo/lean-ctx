@@ -57,7 +57,7 @@ pub struct BundleFileEntry {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum BundleError {
+pub enum BundleError {
     #[error(
         "no index artifacts found in {0} — run a search once (or `lean-ctx index`) to build the local index first"
     )]
@@ -94,14 +94,14 @@ fn sha256_hex(data: &[u8]) -> String {
 /// cheap pre-check the background auto-push (GL #392) uses to skip silently
 /// instead of erroring through [`pack`].
 #[must_use]
-pub(crate) fn local_index_present(project_root: &Path) -> bool {
+pub fn local_index_present(project_root: &Path) -> bool {
     let dir = crate::core::index_namespace::vectors_dir(project_root);
     BUNDLE_FILES.iter().any(|name| dir.join(name).is_file())
 }
 
 /// Pack the project's index artifacts into a plaintext `LCIB1` container.
 /// Returns the container bytes and its manifest.
-pub(crate) fn pack(project_root: &Path) -> Result<(Vec<u8>, BundleManifest), BundleError> {
+pub fn pack(project_root: &Path) -> Result<(Vec<u8>, BundleManifest), BundleError> {
     let dir = crate::core::index_namespace::vectors_dir(project_root);
     let mut files = Vec::new();
     let mut payload = Vec::new();
@@ -152,7 +152,7 @@ pub(crate) fn pack(project_root: &Path) -> Result<(Vec<u8>, BundleManifest), Bun
 }
 
 /// Parse a plaintext container without writing anything (manifest preview).
-pub(crate) fn read_manifest(container: &[u8]) -> Result<BundleManifest, BundleError> {
+pub fn read_manifest(container: &[u8]) -> Result<BundleManifest, BundleError> {
     let (manifest, _payload) = split_container(container)?;
     Ok(manifest)
 }
@@ -195,7 +195,7 @@ fn split_container(container: &[u8]) -> Result<(BundleManifest, Vec<u8>), Bundle
 /// Unpack a plaintext container into the project's vector namespace. Every
 /// file's SHA-256 is verified before anything is written; writes are atomic
 /// (tmp + rename) so a torn pull can never corrupt a working local index.
-pub(crate) fn unpack(project_root: &Path, container: &[u8]) -> Result<BundleManifest, BundleError> {
+pub fn unpack(project_root: &Path, container: &[u8]) -> Result<BundleManifest, BundleError> {
     let (manifest, payload) = split_container(container)?;
 
     let dir = crate::core::index_namespace::vectors_dir(project_root);
@@ -245,7 +245,7 @@ pub(crate) fn unpack(project_root: &Path, container: &[u8]) -> Result<BundleMani
 /// Derive the per-account bundle key from the API key. The server only ever
 /// stores `sha256(api_key)`, so this key is unknowable server-side.
 #[must_use]
-pub(crate) fn derive_key(api_key: &str) -> [u8; 32] {
+pub fn derive_key(api_key: &str) -> [u8; 32] {
     let hk = hkdf::Hkdf::<Sha256>::new(Some(b"leanctx"), api_key.as_bytes());
     let mut okm = [0u8; 32];
     hk.expand(b"index-bundle-v1", &mut okm)
@@ -254,7 +254,7 @@ pub(crate) fn derive_key(api_key: &str) -> [u8; 32] {
 }
 
 /// Encrypt a plaintext container. Output: `nonce (24B) || ciphertext`.
-pub(crate) fn encrypt(container: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, BundleError> {
+pub fn encrypt(container: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, BundleError> {
     use chacha20poly1305::aead::{Aead, KeyInit};
     use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 
@@ -273,7 +273,7 @@ pub(crate) fn encrypt(container: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, Bundl
 }
 
 /// Decrypt `nonce || ciphertext` back into the plaintext container.
-pub(crate) fn decrypt(blob: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, BundleError> {
+pub fn decrypt(blob: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, BundleError> {
     use chacha20poly1305::aead::{Aead, KeyInit};
     use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 
@@ -288,7 +288,7 @@ pub(crate) fn decrypt(blob: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, BundleErro
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     /// Build a fake project with index artifacts and return (dir, root).

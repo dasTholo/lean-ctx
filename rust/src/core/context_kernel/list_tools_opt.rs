@@ -21,14 +21,14 @@ pub struct SchemaOptSummary {
 
 /// Returns whether list-tools schemas may be optimized for this client.
 #[must_use]
-pub(crate) fn should_optimize_for_client(client_name: &str) -> bool {
+pub fn should_optimize_for_client(client_name: &str) -> bool {
     kernel_config::is_feature_enabled("schema_optimization")
         && schema_wiring::should_optimize(client_name)
 }
 
 /// Optimizes tool descriptions for an addressable client when the kernel permits it.
 #[must_use]
-pub(crate) fn optimize_descriptions(
+pub fn optimize_descriptions(
     tools: Vec<(String, String, usize)>,
     client_name: &str,
 ) -> Vec<(String, String, usize)> {
@@ -48,7 +48,7 @@ pub(crate) fn optimize_descriptions(
 
 /// Returns cumulative list-tools optimization statistics.
 #[must_use]
-pub(crate) fn schema_opt_summary() -> SchemaOptSummary {
+pub fn schema_opt_summary() -> SchemaOptSummary {
     let optimizations_applied = OPTIMIZATIONS_APPLIED.load(Ordering::Relaxed);
     let total_tokens_before = TOTAL_TOKENS_BEFORE.load(Ordering::Relaxed);
     let total_tokens_saved = TOTAL_TOKENS_SAVED.load(Ordering::Relaxed);
@@ -66,14 +66,14 @@ pub(crate) fn schema_opt_summary() -> SchemaOptSummary {
 }
 
 /// Clears cumulative bridge statistics.
-pub(crate) fn reset() {
+pub fn reset() {
     OPTIMIZATIONS_APPLIED.store(0, Ordering::Relaxed);
     TOTAL_TOKENS_BEFORE.store(0, Ordering::Relaxed);
     TOTAL_TOKENS_SAVED.store(0, Ordering::Relaxed);
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use std::sync::MutexGuard;
 
     use super::{optimize_descriptions, reset, schema_opt_summary};

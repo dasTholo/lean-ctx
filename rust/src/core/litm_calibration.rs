@@ -19,7 +19,7 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 
 /// Default share of items placed at the begin position (today's layout).
-pub(crate) const DEFAULT_BEGIN_SHARE: f64 = 0.7;
+pub const DEFAULT_BEGIN_SHARE: f64 = 0.7;
 /// Calibration only activates after this many total observations per profile.
 const MIN_OBSERVATIONS: u32 = 20;
 /// Calibrated share is clamped to this range — both positions always get data.
@@ -27,20 +27,20 @@ const SHARE_CLAMP: (f64, f64) = (0.4, 0.9);
 const FLUSH_SECS: u64 = 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Position {
+pub enum Position {
     Begin,
     End,
 }
 
 impl Position {
-    pub(crate) fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Position::Begin => "begin",
             Position::End => "end",
         }
     }
 
-    pub(crate) fn parse(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "begin" => Some(Position::Begin),
             "end" => Some(Position::End),
@@ -50,7 +50,7 @@ impl Position {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub(crate) struct PlacementStats {
+pub struct PlacementStats {
     pub begin_hits: u32,
     pub begin_misses: u32,
     pub end_hits: u32,
@@ -73,7 +73,7 @@ impl PlacementStats {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub(crate) struct LitmCalibration {
+pub struct LitmCalibration {
     /// Keyed by LITM profile name ("claude" | "gpt" | "gemini").
     pub per_profile: HashMap<String, PlacementStats>,
     pub schema_version: u32,
@@ -113,7 +113,7 @@ impl LitmCalibration {
     /// Team-merge (#550): element-wise maximum per counter. Cumulative
     /// counters only ever grow, so `max` is idempotent on re-import and never
     /// double-counts; divergent machines converge to the strongest evidence.
-    pub(crate) fn merge_from(&mut self, other: &Self) {
+    pub fn merge_from(&mut self, other: &Self) {
         for (profile, theirs) in &other.per_profile {
             let ours = self.per_profile.entry(profile.clone()).or_default();
             ours.begin_hits = ours.begin_hits.max(theirs.begin_hits);
@@ -123,7 +123,7 @@ impl LitmCalibration {
         }
     }
 
-    pub(crate) fn record(&mut self, profile: &str, pos: Position, hit: bool) {
+    pub fn record(&mut self, profile: &str, pos: Position, hit: bool) {
         let stats = self.per_profile.entry(profile.to_string()).or_default();
         match (pos, hit) {
             (Position::Begin, true) => stats.begin_hits += 1,
@@ -136,7 +136,7 @@ impl LitmCalibration {
     /// Calibrated begin-share for a profile. Returns the default until enough
     /// observations exist; afterwards shifts budget toward the position that
     /// empirically holds information for this client.
-    pub(crate) fn begin_share(&self, profile: &str) -> f64 {
+    pub fn begin_share(&self, profile: &str) -> f64 {
         let Some(stats) = self.per_profile.get(profile) else {
             return DEFAULT_BEGIN_SHARE;
         };
@@ -153,7 +153,7 @@ impl LitmCalibration {
 
     /// Aggregate raw counters across profiles (#549 efficacy snapshots):
     /// `(begin_hits, begin_misses, end_hits, end_misses)`.
-    pub(crate) fn totals(&self) -> (u32, u32, u32, u32) {
+    pub fn totals(&self) -> (u32, u32, u32, u32) {
         self.per_profile.values().fold((0, 0, 0, 0), |acc, s| {
             (
                 acc.0 + s.begin_hits,
@@ -164,7 +164,7 @@ impl LitmCalibration {
         })
     }
 
-    pub(crate) fn report_lines(&self) -> Vec<String> {
+    pub fn report_lines(&self) -> Vec<String> {
         let mut profiles: Vec<_> = self.per_profile.iter().collect();
         profiles.sort_by(|a, b| a.0.cmp(b.0));
         profiles
@@ -200,7 +200,7 @@ fn with_buffer<R>(f: impl FnOnce(&mut LitmCalibration) -> R) -> R {
 }
 
 /// Process-global: record a placement outcome.
-pub(crate) fn record_outcome(profile: &str, pos: Position, hit: bool) {
+pub fn record_outcome(profile: &str, pos: Position, hit: bool) {
     if profile.is_empty() {
         return;
     }
@@ -208,12 +208,12 @@ pub(crate) fn record_outcome(profile: &str, pos: Position, hit: bool) {
 }
 
 /// Process-global: calibrated begin-share for a profile.
-pub(crate) fn begin_share(profile: &str) -> f64 {
+pub fn begin_share(profile: &str) -> f64 {
     with_buffer(|c| c.begin_share(profile))
 }
 
 /// Process-global: flush to disk (shutdown paths).
-pub(crate) fn flush() {
+pub fn flush() {
     let guard = BUFFER
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -223,18 +223,18 @@ pub(crate) fn flush() {
 }
 
 /// Process-global: report lines for ctx_metrics.
-pub(crate) fn report() -> Vec<String> {
+pub fn report() -> Vec<String> {
     with_buffer(|c| c.report_lines())
 }
 
 /// Process-global aggregate counters (#549).
-pub(crate) fn totals() -> (u32, u32, u32, u32) {
+pub fn totals() -> (u32, u32, u32, u32) {
     with_buffer(|c| c.totals())
 }
 
 /// Process-global: machine-readable snapshot for the dashboard (#548):
 /// `(profile, stats, calibrated begin_share)`, sorted by profile.
-pub(crate) fn snapshot() -> Vec<(String, PlacementStats, f64)> {
+pub fn snapshot() -> Vec<(String, PlacementStats, f64)> {
     with_buffer(|c| {
         let mut v: Vec<_> = c
             .per_profile
@@ -247,19 +247,19 @@ pub(crate) fn snapshot() -> Vec<(String, PlacementStats, f64)> {
 }
 
 /// Process-global: clone of the full calibration state for export (#550).
-pub(crate) fn export_state() -> LitmCalibration {
+pub fn export_state() -> LitmCalibration {
     with_buffer(|c| c.clone())
 }
 
 /// Process-global: merge a foreign calibration in and persist (#550).
-pub(crate) fn merge_state(other: &LitmCalibration) {
+pub fn merge_state(other: &LitmCalibration) {
     with_buffer(|c| c.merge_from(other));
     flush();
 }
 
 /// Loose match between a recall query and a manifest key: lowercase
 /// containment either way, or token-Jaccard >= 0.5.
-pub(crate) fn key_matches(manifest_key: &str, query: &str) -> bool {
+pub fn key_matches(manifest_key: &str, query: &str) -> bool {
     let k = manifest_key.to_lowercase();
     let q = query.to_lowercase();
     if k.len() >= 6 && q.len() >= 6 && (k.contains(&q) || q.contains(&k)) {
@@ -276,7 +276,7 @@ pub(crate) fn key_matches(manifest_key: &str, query: &str) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]

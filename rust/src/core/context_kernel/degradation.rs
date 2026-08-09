@@ -17,7 +17,7 @@ use super::types::{ContextPlanV1, ExcludedEntry, PlanBudget, PlanEntry};
     serde::Serialize,
     serde::Deserialize,
 )]
-pub(crate) enum DegradationLevel {
+pub enum DegradationLevel {
     /// All configured providers are available.
     #[default]
     Full,
@@ -31,7 +31,7 @@ pub(crate) enum DegradationLevel {
 
 /// Current availability information for one provider.
 #[derive(Debug, Clone)]
-pub(crate) struct ProviderStatus {
+pub struct ProviderStatus {
     pub provider_id: String,
     pub available: bool,
     pub last_error: Option<String>,
@@ -39,18 +39,18 @@ pub(crate) struct ProviderStatus {
 
 /// Aggregate provider health used to select a degradation level.
 #[derive(Debug, Clone)]
-pub(crate) struct KernelHealth {
+pub struct KernelHealth {
     providers: Vec<ProviderStatus>,
 }
 
 impl KernelHealth {
     /// Creates a health snapshot from the configured provider statuses.
-    pub(crate) fn new(providers: Vec<ProviderStatus>) -> Self {
+    pub fn new(providers: Vec<ProviderStatus>) -> Self {
         Self { providers }
     }
 
     /// Returns the capability level supported by the available providers.
-    pub(crate) fn degradation_level(&self) -> DegradationLevel {
+    pub fn degradation_level(&self) -> DegradationLevel {
         let total = self.providers.len();
         let available = self
             .providers
@@ -70,7 +70,7 @@ impl KernelHealth {
     }
 
     /// Lists provider identifiers currently available for planning.
-    pub(crate) fn available_providers(&self) -> Vec<&str> {
+    pub fn available_providers(&self) -> Vec<&str> {
         self.providers
             .iter()
             .filter(|provider| provider.available)
@@ -79,7 +79,7 @@ impl KernelHealth {
     }
 
     /// Lists provider identifiers currently unavailable for planning.
-    pub(crate) fn unavailable_providers(&self) -> Vec<&str> {
+    pub fn unavailable_providers(&self) -> Vec<&str> {
         self.providers
             .iter()
             .filter(|provider| !provider.available)
@@ -88,7 +88,7 @@ impl KernelHealth {
     }
 
     /// Summarizes provider availability and the resulting capability level.
-    pub(crate) fn summary(&self) -> String {
+    pub fn summary(&self) -> String {
         format!(
             "{}/{} providers available ({:?})",
             self.available_providers().len(),
@@ -105,7 +105,7 @@ impl KernelHealth {
 }
 
 /// Removes selections whose providers are unavailable and updates accounting.
-pub(crate) fn degrade_plan(plan: &ContextPlanV1, health: &KernelHealth) -> ContextPlanV1 {
+pub fn degrade_plan(plan: &ContextPlanV1, health: &KernelHealth) -> ContextPlanV1 {
     let mut selected: Vec<PlanEntry> = Vec::new();
     let mut excluded = plan.excluded.clone();
 
@@ -139,7 +139,7 @@ pub(crate) fn degrade_plan(plan: &ContextPlanV1, health: &KernelHealth) -> Conte
 }
 
 /// Creates an empty pass-through plan for bypass mode.
-pub(crate) fn fallback_plan(intent: &str, budget_tokens: usize) -> ContextPlanV1 {
+pub fn fallback_plan(intent: &str, budget_tokens: usize) -> ContextPlanV1 {
     ContextPlanV1 {
         plan_id: format!("plan:{intent}-fallback"),
         intent: intent.to_owned(),
@@ -156,7 +156,7 @@ pub(crate) fn fallback_plan(intent: &str, budget_tokens: usize) -> ContextPlanV1
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     fn status(provider_id: &str, available: bool) -> ProviderStatus {

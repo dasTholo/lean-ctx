@@ -9,7 +9,7 @@ use super::identity_resolver;
 
 /// Client and caller metadata resolved for one request.
 #[derive(Debug, Clone)]
-pub(crate) struct RequestContext {
+pub struct RequestContext {
     /// Identity used for attribution and cost-center accounting.
     pub identity: CallerIdentity,
     /// Client capabilities detected from transport headers.
@@ -22,7 +22,7 @@ pub(crate) struct RequestContext {
 
 /// Amount of context optimization available for a request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum OptimizationLevel {
+pub enum OptimizationLevel {
     /// Compress, route, cache, and measure inline traffic.
     Full,
     /// Compress and cache context delivered through MCP.
@@ -36,7 +36,7 @@ pub(crate) enum OptimizationLevel {
 
 /// Resolves request identity, coverage, profile, and broker token allocations.
 #[must_use]
-pub(crate) fn build_request_context(
+pub fn build_request_context(
     headers: &[(String, String)],
     has_proxy: bool,
     has_mcp: bool,
@@ -58,13 +58,13 @@ pub(crate) fn build_request_context(
 
 /// Returns whether lean-ctx can modify context for the request.
 #[must_use]
-pub(crate) fn should_optimize(ctx: &RequestContext) -> bool {
+pub fn should_optimize(ctx: &RequestContext) -> bool {
     coverage_class::is_addressable(ctx.coverage)
 }
 
 /// Maps request coverage to the supported optimization level.
 #[must_use]
-pub(crate) fn optimization_level(ctx: &RequestContext) -> OptimizationLevel {
+pub fn optimization_level(ctx: &RequestContext) -> OptimizationLevel {
     match ctx.coverage {
         CoverageClass::FullInline => OptimizationLevel::Full,
         CoverageClass::ContextControlled => OptimizationLevel::Partial,
@@ -74,7 +74,7 @@ pub(crate) fn optimization_level(ctx: &RequestContext) -> OptimizationLevel {
 }
 
 /// Records request token usage with detected client and coverage metadata.
-pub(crate) fn record_request_etpao(
+pub fn record_request_etpao(
     etpao: &mut EtpaoLive,
     ctx: &RequestContext,
     input_tokens: usize,
@@ -93,7 +93,7 @@ pub(crate) fn record_request_etpao(
 }
 
 /// Records an evaluated outcome with detected client attribution.
-pub(crate) fn record_outcome_etpao(
+pub fn record_outcome_etpao(
     etpao: &mut EtpaoLive,
     ctx: &RequestContext,
     accepted: bool,
@@ -109,7 +109,7 @@ pub(crate) fn record_outcome_etpao(
 
 /// Formats a compact request summary for diagnostics.
 #[must_use]
-pub(crate) fn format_request_summary(ctx: &RequestContext) -> String {
+pub fn format_request_summary(ctx: &RequestContext) -> String {
     format!(
         "[{}] user={} team={} budget={}",
         coverage_class::coverage_label(ctx.coverage),
@@ -120,7 +120,7 @@ pub(crate) fn format_request_summary(ctx: &RequestContext) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::{
         OptimizationLevel, build_request_context, format_request_summary, optimization_level,
         record_outcome_etpao, record_request_etpao, should_optimize,

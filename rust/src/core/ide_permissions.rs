@@ -26,7 +26,7 @@ use crate::core::jsonc::parse_jsonc;
 
 /// An IDE permission decision for a single action.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PermAction {
+pub enum PermAction {
     Allow,
     Ask,
     Deny,
@@ -55,7 +55,7 @@ impl PermAction {
 
 /// A resolved decision together with the human-readable rule that produced it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PermDecision {
+pub struct PermDecision {
     pub action: PermAction,
     /// e.g. `bash`, `bash:rm *`, `read:*`, `*`.
     pub rule: String,
@@ -90,7 +90,7 @@ const BLANKET_SPEC: i64 = 0;
 /// Normalized IDE permission policy: the merged `permission` object from the IDE
 /// config (project entries override global ones per top-level key).
 #[derive(Debug, Clone, Default)]
-pub(crate) struct IdePermissionPolicy {
+pub struct IdePermissionPolicy {
     rules: Map<String, Value>,
 }
 
@@ -102,19 +102,19 @@ struct Candidate {
 
 impl IdePermissionPolicy {
     #[must_use]
-    pub(crate) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.rules.is_empty()
     }
 
     /// Number of top-level permission rules in the merged policy.
     #[must_use]
-    pub(crate) fn rule_count(&self) -> usize {
+    pub fn rule_count(&self) -> usize {
         self.rules.len()
     }
 
     /// Construct directly from a raw `permission` object (test/utility hook).
     #[must_use]
-    pub(crate) fn from_rules(rules: Map<String, Value>) -> Self {
+    pub fn from_rules(rules: Map<String, Value>) -> Self {
         Self { rules }
     }
 
@@ -130,7 +130,7 @@ impl IdePermissionPolicy {
     /// pattern by non-wildcard character count; a named tool beats the global
     /// `*`), ties broken by the **most restrictive** action.
     #[must_use]
-    pub(crate) fn resolve(&self, tool_key: &str, input: Option<&str>) -> Option<PermDecision> {
+    pub fn resolve(&self, tool_key: &str, input: Option<&str>) -> Option<PermDecision> {
         let mut best: Option<Candidate> = None;
 
         if let Some(value) = self.rules.get(tool_key) {
@@ -228,7 +228,7 @@ fn specificity(pattern: &str) -> i64 {
 /// the simple command/path globs OpenCode permission rules use (`git *`,
 /// `rm *`, `src/*`). Matching is case-sensitive.
 #[must_use]
-pub(crate) fn wildcard_match(pattern: &str, text: &str) -> bool {
+pub fn wildcard_match(pattern: &str, text: &str) -> bool {
     let pat: Vec<char> = pattern.chars().collect();
     let txt: Vec<char> = text.chars().collect();
     let (mut p, mut t) = (0usize, 0usize);
@@ -264,7 +264,7 @@ pub(crate) fn wildcard_match(pattern: &str, text: &str) -> bool {
 /// the project config (project keys override global). Missing/invalid files are
 /// skipped silently — inheritance must never break a tool call by erroring.
 #[must_use]
-pub(crate) fn load_opencode(home: &Path, project_root: Option<&Path>) -> IdePermissionPolicy {
+pub fn load_opencode(home: &Path, project_root: Option<&Path>) -> IdePermissionPolicy {
     let mut rules = Map::new();
     let opencode = home.join(".config").join("opencode");
     merge_permission_file(&opencode.join("opencode.json"), &mut rules);
@@ -291,7 +291,7 @@ fn merge_permission_file(path: &Path, rules: &mut Map<String, Value>) {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use serde_json::json;
 

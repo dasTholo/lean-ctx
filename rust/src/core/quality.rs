@@ -14,7 +14,7 @@ const QUALITY_THRESHOLD: f64 = 0.95;
 const MIN_DENSITY: f64 = 0.15;
 
 #[derive(Debug, Clone)]
-pub(crate) struct QualityScore {
+pub struct QualityScore {
     pub ast_score: f64,
     pub identifier_score: f64,
     pub line_score: f64,
@@ -24,7 +24,7 @@ pub(crate) struct QualityScore {
 }
 
 impl QualityScore {
-    pub(crate) fn format_compact(&self) -> String {
+    pub fn format_compact(&self) -> String {
         if self.passed {
             format!(
                 "Q:{:.0}% (ast:{:.0} id:{:.0} ln:{:.0} ρ:{:.0}) ✓",
@@ -47,7 +47,7 @@ impl QualityScore {
     }
 }
 
-pub(crate) fn score(original: &str, compressed: &str, ext: &str) -> QualityScore {
+pub fn score(original: &str, compressed: &str, ext: &str) -> QualityScore {
     let pres = preservation::measure(original, compressed, ext);
     let ast_score = pres.overall();
 
@@ -73,7 +73,7 @@ pub(crate) fn score(original: &str, compressed: &str, ext: &str) -> QualityScore
 
 /// Information density: ratio of semantic tokens to total output tokens.
 /// Measures how much "meaning" per output token is preserved.
-pub(crate) fn information_density(original: &str, compressed: &str, ext: &str) -> f64 {
+pub fn information_density(original: &str, compressed: &str, ext: &str) -> f64 {
     let output_tokens = count_tokens(compressed);
     if output_tokens == 0 {
         return 1.0;
@@ -90,7 +90,7 @@ pub(crate) fn information_density(original: &str, compressed: &str, ext: &str) -
 }
 
 /// Guard: returns compressed if quality passes, original otherwise
-pub(crate) fn guard(original: &str, compressed: &str, ext: &str) -> (String, QualityScore) {
+pub fn guard(original: &str, compressed: &str, ext: &str) -> (String, QualityScore) {
     let q = score(original, compressed, ext);
     if q.passed {
         (compressed.to_string(), q)
@@ -105,7 +105,7 @@ pub(crate) fn guard(original: &str, compressed: &str, ext: &str) -> (String, Qua
 /// adaptive threshold rises as `line_score` drops — so a density target of
 /// 0.4 (which *intentionally* discards ~60% of lines) always fails by
 /// construction. Density mode needs a structure-only gate: AST + identifiers.
-pub(crate) fn guard_density(
+pub fn guard_density(
     original: &str,
     compressed: &str,
     ext: &str,
@@ -178,7 +178,7 @@ fn measure_line_preservation(original: &str, compressed: &str) -> f64 {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]

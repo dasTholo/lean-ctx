@@ -42,7 +42,7 @@ pub enum BehaviorSignal {
 }
 
 /// Extract behavioral signals from a transcript.
-pub(crate) fn extract_signals(entries: &[TranscriptEntry]) -> Vec<BehaviorSignal> {
+pub fn extract_signals(entries: &[TranscriptEntry]) -> Vec<BehaviorSignal> {
     let Some(newest) = entries.iter().map(|entry| entry.timestamp).max() else {
         return Vec::new();
     };
@@ -101,7 +101,7 @@ pub(crate) fn extract_signals(entries: &[TranscriptEntry]) -> Vec<BehaviorSignal
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use chrono::{TimeZone, Utc};
 

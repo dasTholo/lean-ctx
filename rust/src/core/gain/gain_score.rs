@@ -5,14 +5,14 @@ use crate::core::gain::model_pricing::ModelPricing;
 use crate::core::stats::StatsStore;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) enum Trend {
+pub enum Trend {
     Rising,
     Stable,
     Declining,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct GainScore {
+pub struct GainScore {
     pub total: u32,
     pub compression: u32,
     pub cost_efficiency: u32,
@@ -33,7 +33,7 @@ impl GainScore {
     /// `None` when unavailable. When present it contributes 15% of `total`
     /// (sharper code-quality signal); when absent the historical four-component
     /// weighting is used unchanged (no degradation, #1086).
-    pub(crate) fn compute(
+    pub fn compute(
         stats: &StatsStore,
         costs: &CostStore,
         pricing: &ModelPricing,
@@ -194,14 +194,14 @@ fn consistency_and_trend(stats: &StatsStore) -> (u32, Trend) {
 
 /// Level system — maps gain score to a title and level number.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct GainLevel {
+pub struct GainLevel {
     pub level: u8,
     pub title: &'static str,
     pub min_score: u32,
 }
 
 impl GainScore {
-    pub(crate) fn level(&self) -> GainLevel {
+    pub fn level(&self) -> GainLevel {
         match self.total {
             81..=100 => GainLevel {
                 level: 5,
@@ -232,7 +232,7 @@ impl GainScore {
     }
 
     /// Progress within the current level (0.0 to 1.0).
-    pub(crate) fn level_progress(&self) -> f64 {
+    pub fn level_progress(&self) -> f64 {
         let lvl = self.level();
         let range_start = lvl.min_score;
         let range_end = match lvl.level {
@@ -251,7 +251,7 @@ impl GainScore {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]

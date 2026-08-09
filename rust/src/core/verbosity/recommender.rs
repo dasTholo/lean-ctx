@@ -21,7 +21,7 @@ pub struct VerbosityProfile {
 ///
 /// Uses the deterministic posterior mean of Thompson-sampling beta priors so
 /// identical signal histories always produce identical recommendations.
-pub(crate) fn recommend_level(signals: &[BehaviorSignal]) -> VerbosityProfile {
+pub fn recommend_level(signals: &[BehaviorSignal]) -> VerbosityProfile {
     let mut priors: [(f64, f64); 5] = [(1.0, 1.0), (3.0, 1.0), (2.0, 1.0), (1.5, 1.0), (1.0, 1.5)];
 
     for signal in signals {
@@ -99,7 +99,7 @@ fn level_index(level: &str) -> Option<usize> {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]

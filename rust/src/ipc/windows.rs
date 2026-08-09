@@ -104,10 +104,9 @@ mod tests {
         );
     }
 
-    // TODO: connect_retries_pipe_busy — needs reliable ERROR_PIPE_BUSY reproduction.
-    // PIPE_BUSY occurs when a pipe instance exists but all instances are busy (real
-    // mid-rotation race). Constructing this in a unit test is fragile; verify on
-    // Windows manually or via integration test with concurrent clients.
+    // NOTE: ERROR_PIPE_BUSY requires every server instance to be occupied, which
+    // cannot be reproduced deterministically in this unit-test process. Verify the
+    // retry path in a Windows integration test that controls concurrent clients.
 
     /// connect() retries when an invalid pipe path produces NotFound on Windows.
     /// A bare filename (without \\.\pipe\ prefix) triggers ERROR_FILE_NOT_FOUND

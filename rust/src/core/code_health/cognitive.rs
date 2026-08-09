@@ -26,7 +26,7 @@ use serde::Serialize;
 
 /// Cognitive complexity of a single function-like definition.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub(crate) struct FunctionCognitive {
+pub struct FunctionCognitive {
     pub name: String,
     /// 1-based start line of the function.
     pub line: usize,
@@ -37,7 +37,7 @@ pub(crate) struct FunctionCognitive {
 
 impl FunctionCognitive {
     /// Number of source lines the function spans (at least 1).
-    pub(crate) fn line_span(&self) -> usize {
+    pub fn line_span(&self) -> usize {
         self.end_line.saturating_sub(self.line).saturating_add(1)
     }
 }
@@ -45,10 +45,7 @@ impl FunctionCognitive {
 /// Compute cognitive complexity per function for `source` of the given file
 /// `extension`. Returns `None` when tree-sitter is disabled, the extension is
 /// unsupported, or the file has no functions.
-pub(crate) fn cognitive_per_function(
-    source: &str,
-    extension: &str,
-) -> Option<Vec<FunctionCognitive>> {
+pub fn cognitive_per_function(source: &str, extension: &str) -> Option<Vec<FunctionCognitive>> {
     #[cfg(feature = "tree-sitter")]
     {
         cognitive_impl(source, extension)
@@ -255,7 +252,7 @@ fn is_flow_break(node: tree_sitter::Node<'_>, source: &[u8]) -> bool {
 }
 
 #[cfg(all(test, feature = "tree-sitter"))]
-mod tests {
+pub mod tests {
     use super::*;
 
     fn score(src: &str, ext: &str, name: &str) -> u32 {

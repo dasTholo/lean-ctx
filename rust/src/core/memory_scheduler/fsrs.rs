@@ -37,7 +37,7 @@ pub struct MemoryState {
 ///
 /// Based on FSRS-5: `R(t) = (1 + t / (9 · S))^(-1)` where `t` is elapsed
 /// days since [`MemoryState::last_review`] and `S` is [`MemoryState::stability`].
-pub(crate) fn retrievability(state: &MemoryState, now: DateTime<Utc>) -> f64 {
+pub fn retrievability(state: &MemoryState, now: DateTime<Utc>) -> f64 {
     let elapsed_days = (now - state.last_review).num_seconds() as f64 / 86_400.0;
     if elapsed_days <= 0.0 || state.stability <= 0.0 {
         return 1.0;
@@ -46,7 +46,7 @@ pub(crate) fn retrievability(state: &MemoryState, now: DateTime<Utc>) -> f64 {
 }
 
 /// Update a memory state after a review using a rating in the range 1 through 4.
-pub(crate) fn update_stability(state: &mut MemoryState, rating: u8) {
+pub fn update_stability(state: &mut MemoryState, rating: u8) {
     update_stability_at(state, rating, Utc::now());
 }
 
@@ -88,7 +88,7 @@ fn update_stability_at(state: &mut MemoryState, rating: u8, now: DateTime<Utc>) 
 ///
 /// Inverts the FSRS-5 retrievability curve:
 /// `t = 9 · S · (1 / R_target - 1)` for `R_target` in `(0, 1)`.
-pub(crate) fn optimal_interval(state: &MemoryState, target_retention: f64) -> f64 {
+pub fn optimal_interval(state: &MemoryState, target_retention: f64) -> f64 {
     if target_retention <= 0.0 || target_retention >= 1.0 || state.stability <= 0.0 {
         return 0.0;
     }
@@ -96,7 +96,7 @@ pub(crate) fn optimal_interval(state: &MemoryState, target_retention: f64) -> f6
 }
 
 /// Create an initial memory state from a fact key and first-review rating.
-pub(crate) fn initial_state(fact_key: String, rating: u8) -> MemoryState {
+pub fn initial_state(fact_key: String, rating: u8) -> MemoryState {
     let rating = rating.clamp(1, 4);
     let rating_index = usize::from(rating - 1);
     MemoryState {
@@ -110,7 +110,7 @@ pub(crate) fn initial_state(fact_key: String, rating: u8) -> MemoryState {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use chrono::{Duration, Utc};
 
     use crate::core::memory_scheduler::fsrs::{

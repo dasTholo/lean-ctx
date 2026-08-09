@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 const MAX_CONCURRENT: usize = 4;
 
-pub(crate) struct ProcessGuard {
+pub struct ProcessGuard {
     _file: File,
     path: PathBuf,
 }
@@ -30,7 +30,7 @@ fn lock_dir() -> Option<PathBuf> {
 
 /// Try to acquire one of N concurrent process slots.
 /// Returns `None` if all slots are occupied (= too many lean-ctx already running).
-pub(crate) fn acquire() -> Option<ProcessGuard> {
+pub fn acquire() -> Option<ProcessGuard> {
     let dir = lock_dir()?;
 
     for slot in 0..MAX_CONCURRENT {
@@ -57,7 +57,7 @@ pub(crate) fn acquire() -> Option<ProcessGuard> {
 }
 
 /// Checks how many slots are currently held (best-effort).
-pub(crate) fn active_count() -> usize {
+pub fn active_count() -> usize {
     let Some(dir) = lock_dir() else { return 0 };
     let mut count = 0;
     for slot in 0..MAX_CONCURRENT {
@@ -88,7 +88,7 @@ fn try_flock(_file: &File) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     /// Restores `LEAN_CTX_DATA_DIR` to its previous value on drop (panic-safe).
