@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://leanctx.com/schemas/lean-ctx-protocol/v1/task-envelope.json",
+  "title": "LeanCTX TaskEnvelopeV1",
+  "description": "Version-one task envelope with bounded opaque identifiers and trace lineage.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "task_id",
+    "trace_id",
+    "project_id",
+    "session_id",
+    "agent_id",
+    "complexity",
+    "created_at"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "task_id": { "$ref": "#/$defs/identifier" },
+    "trace_id": { "$ref": "#/$defs/identifier" },
+    "project_id": { "$ref": "#/$defs/identifier" },
+    "session_id": { "$ref": "#/$defs/identifier" },
+    "agent_id": { "$ref": "#/$defs/identifier" },
+    "complexity": {
+      "type": "string",
+      "enum": ["low", "medium", "high", "critical"]
+    },
+    "created_at": { "type": "string", "format": "date-time", "minLength": 1 },
+    "parent_task_id": { "anyOf": [{ "$ref": "#/$defs/identifier" }, { "type": "null" }] },
+    "tenant_id": { "anyOf": [{ "$ref": "#/$defs/identifier" }, { "type": "null" }] },
+    "intent": { "type": ["string", "null"] },
+    "task_class": { "type": ["string", "null"] },
+    "risk_class": {
+      "type": ["string", "null"],
+      "enum": ["low", "medium", "high", "critical", null]
+    },
+    "quality_requirement_milli": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "maximum": 1000
+    },
+    "cost_budget_micros": { "type": ["integer", "null"], "minimum": 0 },
+    "latency_budget_ms": { "type": ["integer", "null"], "minimum": 0 },
+    "data_classification": {
+      "type": ["string", "null"],
+      "enum": ["Public", "Internal", "Confidential", "Restricted", null]
+    },
+    "region_policy_ref": { "type": ["string", "null"] },
+    "model_policy_ref": { "type": ["string", "null"] },
+    "context_state_ref": { "type": ["string", "null"] },
+    "outcome_contract_ref": { "type": ["string", "null"] }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[^\\u0000-\\u001F\\u007F]+$"
+    }
+  }
+}

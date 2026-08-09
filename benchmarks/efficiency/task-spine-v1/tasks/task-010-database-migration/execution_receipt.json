@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "receipt_id": "receipt-spine-v1-010",
+  "task_id": "task-spine-v1-010",
+  "plan_id": "plan-spine-v1-010",
+  "context_balance": {
+    "original_tokens": 8800,
+    "materialized_tokens": 6700,
+    "delivered_tokens": 6000,
+    "provider_billed_tokens": 5800
+  },
+  "fresh_input_tokens": 4300,
+  "cached_input_tokens": 2300,
+  "output_tokens": 1100,
+  "reasoning_tokens": 900,
+  "requested_model": "claude-sonnet-4",
+  "selected_model": "claude-sonnet-4",
+  "provider": "anthropic",
+  "model_calls": 2,
+  "retries": 0,
+  "latency_ms": 3000,
+  "actual_cost_micros": 6400,
+  "baseline_cost_micros": 13800,
+  "avoided_cost_micros": 7400,
+  "etpao_milli": 8600000,
+  "outcome_ref": "outcome-spine-v1-010",
+  "decision_refs": ["decision:task-spine-v1-010"],
+  "evidence_refs": [
+    {
+      "kind": "ProviderReceipt",
+      "uri": "urn:task-spine-v1:receipt:010",
+      "digest": "sha256:task-spine-v1-010-receipt",
+      "signature_status": "Verified"
+    }
+  ],
+  "signature": "9afba67d666991782d528074fad9c9fe945935b01a23d8fd589c73627cf71a02f0367cfb42e6be67c0da7a4f2e90ab5d8ba78bcbd3935bec685363dc7e5b5609"
+}

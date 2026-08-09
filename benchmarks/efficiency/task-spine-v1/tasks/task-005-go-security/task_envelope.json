@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "task_id": "task-spine-v1-005",
+  "trace_id": "trace-spine-v1-005",
+  "project_id": "fixture-go-critical",
+  "session_id": "session-spine-v1-005",
+  "agent_id": "agent-task-spine",
+  "complexity": "critical",
+  "created_at": "2026-08-01T13:00:00Z",
+  "parent_task_id": null,
+  "tenant_id": null,
+  "intent": "Reject algorithm-confusion tokens in the JWT verifier",
+  "task_class": "security_fix",
+  "risk_class": "critical",
+  "quality_requirement_milli": 980,
+  "cost_budget_micros": 4000000,
+  "latency_budget_ms": 180000,
+  "data_classification": "Public",
+  "region_policy_ref": "policy:fixture-public",
+  "model_policy_ref": "policy:security-review",
+  "context_state_ref": "context:task-spine-v1-005",
+  "outcome_contract_ref": "contract:accepted-outcome-v1"
+}

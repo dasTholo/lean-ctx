@@ -24,7 +24,7 @@ pub mod context_prefetch;
 pub(crate) mod datadog_push;
 pub mod entropy;
 #[allow(dead_code)]
-pub(crate) mod etpao;
+pub mod etpao;
 pub mod eval_ab;
 pub mod eval_harness;
 pub(crate) mod extractive;
@@ -147,7 +147,7 @@ pub mod context_field;
 #[allow(dead_code)]
 pub(crate) mod context_handles;
 pub mod context_ir;
-pub(crate) mod context_kernel;
+pub mod context_kernel;
 pub mod context_ledger;
 pub(crate) mod context_lint;
 pub mod context_os;
@@ -171,6 +171,7 @@ pub mod cross_source_hints;
 pub(crate) mod claim_extractor;
 pub(crate) mod cognition_loop;
 pub(crate) mod cognition_scheduler;
+pub mod execution_ledger;
 pub mod knowledge;
 pub(crate) mod knowledge_bootstrap;
 #[allow(dead_code)]
@@ -178,6 +179,8 @@ pub(crate) mod knowledge_bridge;
 pub mod knowledge_embedding;
 pub mod knowledge_provider_extract;
 pub mod knowledge_relations;
+pub mod outcome;
+pub mod trust;
 
 // ---------------------------------------------------------------------------
 // Domain: Search & Retrieval

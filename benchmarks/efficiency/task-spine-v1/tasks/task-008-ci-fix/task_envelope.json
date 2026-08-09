@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "task_id": "task-spine-v1-008",
+  "trace_id": "trace-spine-v1-008",
+  "project_id": "fixture-ci-yaml-shell",
+  "session_id": "session-spine-v1-008",
+  "agent_id": "agent-task-spine",
+  "complexity": "medium",
+  "created_at": "2026-08-01T17:00:00Z",
+  "parent_task_id": null,
+  "tenant_id": null,
+  "intent": "Fix the release workflow cache key and shell quoting",
+  "task_class": "ci_fix",
+  "risk_class": "medium",
+  "quality_requirement_milli": 850,
+  "cost_budget_micros": 800000,
+  "latency_budget_ms": 60000,
+  "data_classification": "Public",
+  "region_policy_ref": "policy:fixture-public",
+  "model_policy_ref": "policy:benchmark-default",
+  "context_state_ref": "context:task-spine-v1-008",
+  "outcome_contract_ref": "contract:accepted-outcome-v1"
+}

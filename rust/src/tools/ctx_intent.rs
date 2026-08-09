@@ -48,6 +48,8 @@ fn classify_read_mode(
             content_ref: format!("query:{}", crate::core::hasher::hash_str(query)),
             tenant_id: None,
             trace_id: "tr-unit".into(),
+            task_id: None,
+            parent_task_id: None,
         },
         candidate_intents,
     };

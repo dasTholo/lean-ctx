@@ -239,6 +239,8 @@ fn wire_context_carries_managed_lineage_without_forwarding_control_headers() {
         content_ref: "blake3:abc".into(),
         tenant_id: None,
         trace_id: "tr-unit".into(),
+        task_id: None,
+        parent_task_id: None,
     };
     let wire = wire_context(
         &parts,

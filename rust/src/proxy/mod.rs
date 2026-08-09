@@ -18,6 +18,7 @@
 pub mod anthropic;
 #[cfg(test)]
 mod auth_tests;
+pub mod auto_routing;
 pub mod bedrock;
 pub mod break_even;
 pub mod cache_aligner;
@@ -31,6 +32,7 @@ mod ccr_robustness_tests;
 pub mod chatgpt;
 pub mod chatgpt_cookies;
 pub mod chatgpt_ws;
+pub mod circuit_breaker;
 mod codec;
 pub mod cold_prefix;
 pub mod compress;
@@ -44,6 +46,7 @@ pub mod counterfactual;
 pub mod dedup;
 pub mod effort;
 pub mod effort_routing;
+pub mod eligibility;
 pub mod forward;
 #[cfg(feature = "enterprise")]
 pub mod gateway_identity;
@@ -75,6 +78,7 @@ pub mod quality_lab_api;
 pub mod response_optimizer;
 #[allow(dead_code)]
 pub(crate) mod response_shaper;
+pub mod rollout;
 pub mod routing;
 pub mod routing_feedback;
 #[cfg(feature = "shape-xlat")]

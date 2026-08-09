@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "receipt_id": "receipt_01J5XK9R4D7G0K3M6P9S2V5X8Z",
+  "task_id": "task_01J5XK7Q2A6M8N4P0R3S5T7V9W",
+  "plan_id": "plan_01J5XK8H3C6F9J2L5N8Q1S4V7Y",
+  "context_balance": {
+    "original_tokens": 12000,
+    "materialized_tokens": 7000,
+    "delivered_tokens": 5800,
+    "provider_billed_tokens": 6200
+  },
+  "fresh_input_tokens": 4500,
+  "cached_input_tokens": 2500,
+  "output_tokens": 1200,
+  "reasoning_tokens": 600,
+  "requested_model": "model-a",
+  "selected_model": "model-b",
+  "provider": "eu-provider-2",
+  "model_calls": 1,
+  "retries": 0,
+  "latency_ms": 18200,
+  "actual_cost_micros": 150000,
+  "baseline_cost_micros": 230000,
+  "avoided_cost_micros": 80000,
+  "etpao_milli": 340500,
+  "decision_refs": [],
+  "evidence_refs": [],
+  "signature": "sig_01J5XK9R4D7G0K3M6P9S2V5X8Z"
+}

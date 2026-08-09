@@ -68,7 +68,7 @@ pub(crate) mod health_api;
 #[allow(dead_code)]
 pub(crate) mod hotpath_wiring;
 #[allow(dead_code)]
-pub(crate) mod identity;
+pub mod identity;
 pub(crate) mod identity_resolver;
 pub(crate) mod integration_e2e;
 #[allow(dead_code)]

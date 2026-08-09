@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "task_id": "task-spine-v1-009",
+  "synthetic": true,
+  "data_classification": "Public",
+  "strategy": "balanced",
+  "budget_tokens": 7000,
+  "planned_context_tokens": 5200,
+  "planned_sources": ["app/api/audit.py", "app/schemas/audit.py", "tests/api/test_audit.py", "app/main.py"],
+  "planned_views": [
+    {"path": "app/api/audit.py", "mode": "full", "reason": "Follow route conventions"},
+    {"path": "app/schemas/audit.py", "mode": "signatures", "reason": "Reuse response models"},
+    {"path": "tests/api/test_audit.py", "mode": "task", "reason": "Add endpoint contract tests"},
+    {"path": "app/main.py", "mode": "map", "reason": "Confirm router registration"}
+  ],
+  "expected_tool_calls": 7,
+  "rationale": "Limit context to the route, schemas, tests, and application router needed for a coherent endpoint."
+}

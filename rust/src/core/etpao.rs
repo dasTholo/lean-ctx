@@ -6,6 +6,13 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Current version of the ETPAO calculation formula.
+/// Increment when formula logic changes to maintain reproducibility.
+pub const ETPAO_FORMULA_VERSION: &str = "1.0.0";
+
+/// Scalar ETPAO value stored in execution-ledger projections.
+pub type EtpaoResult = f64;
+
 /// Provider pricing rates (per million tokens).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct TokenPricing {

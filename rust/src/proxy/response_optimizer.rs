@@ -721,6 +721,8 @@ mod tests {
                 content_ref: "response:test".into(),
                 tenant_id: None,
                 trace_id: "tr-unit".into(),
+                task_id: None,
+                parent_task_id: None,
             },
             response_ref: "blake3:response-optimizer-test".into(),
             original_tokens: 1_000,

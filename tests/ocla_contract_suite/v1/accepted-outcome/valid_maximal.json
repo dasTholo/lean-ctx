@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "outcome_id": "outcome_01J5XKA5E8H1L4N7Q0T3W6Z9B",
+  "task_id": "task_01J5XK7Q2A6M8N4P0R3S5T7V9W",
+  "accepted": "accepted",
+  "quality_score_milli": 970,
+  "signals": {
+    "build": "passed",
+    "tests": "passed",
+    "lint": "passed",
+    "typecheck": "passed",
+    "completion": "passed",
+    "pr": "not_run",
+    "correction": "not_run",
+    "rollback": "not_run",
+    "retry": "failed"
+  },
+  "contract_ref": "outcome://software-change/v1",
+  "evidence_refs": [
+    {
+      "kind": "RuntimeLog",
+      "uri": "evidence://outcome/01J5XKA5/build",
+      "digest": "sha256:build-01J5XKA5",
+      "signature_status": "NotSigned"
+    },
+    {
+      "kind": "QualityMeasurement",
+      "uri": "evidence://outcome/01J5XKA5/tests",
+      "digest": "sha256:tests-01J5XKA5",
+      "signature_status": "Verified"
+    }
+  ],
+  "observed_at": "2026-08-09T10:34:12Z"
+}

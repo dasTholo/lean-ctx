@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://leanctx.com/schemas/lean-ctx-protocol/v1/accepted-outcome.json",
+  "title": "LeanCTX AcceptedOutcomeV1",
+  "description": "Version-one tri-state outcome observation and verification signals.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "outcome_id",
+    "task_id",
+    "accepted",
+    "signals",
+    "evidence_refs",
+    "observed_at"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "outcome_id": { "$ref": "#/$defs/identifier" },
+    "task_id": { "$ref": "#/$defs/identifier" },
+    "accepted": {
+      "type": "string",
+      "enum": ["accepted", "rejected", "unknown"]
+    },
+    "quality_score_milli": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "maximum": 1000
+    },
+    "signals": { "$ref": "#/$defs/signals" },
+    "contract_ref": { "type": ["string", "null"] },
+    "evidence_refs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/evidenceRef" }
+    },
+    "observed_at": { "type": "string", "format": "date-time", "minLength": 1 }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[^\\u0000-\\u001F\\u007F]+$"
+    },
+    "signals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "build",
+        "tests",
+        "lint",
+        "typecheck",
+        "completion",
+        "pr",
+        "correction",
+        "rollback",
+        "retry"
+      ],
+      "properties": {
+        "build": { "$ref": "#/$defs/signal" },
+        "tests": { "$ref": "#/$defs/signal" },
+        "lint": { "$ref": "#/$defs/signal" },
+        "typecheck": { "$ref": "#/$defs/signal" },
+        "completion": { "$ref": "#/$defs/signal" },
+        "pr": { "$ref": "#/$defs/signal" },
+        "correction": { "$ref": "#/$defs/signal" },
+        "rollback": { "$ref": "#/$defs/signal" },
+        "retry": { "$ref": "#/$defs/signal" }
+      }
+    },
+    "signal": {
+      "type": ["string", "null"],
+      "enum": ["passed", "failed", "unknown", "not_run", null]
+    },
+    "evidenceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "uri", "digest", "signature_status"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "ProviderReceipt",
+            "RuntimeLog",
+            "SignedBatch",
+            "QualityMeasurement",
+            "ExperimentOutcome"
+          ]
+        },
+        "uri": { "type": "string", "minLength": 1 },
+        "digest": { "type": "string", "minLength": 1 },
+        "signature_status": {
+          "type": "string",
+          "enum": ["Verified", "Unverified", "NotSigned"]
+        }
+      }
+    }
+  }
+}

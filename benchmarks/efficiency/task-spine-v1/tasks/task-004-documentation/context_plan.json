@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "task_id": "task-spine-v1-004",
+  "synthetic": true,
+  "data_classification": "Public",
+  "strategy": "minimal",
+  "budget_tokens": 2200,
+  "planned_context_tokens": 1500,
+  "planned_sources": ["docs/deploy.md", "docs/operations.md"],
+  "planned_views": [
+    {"path": "docs/deploy.md", "mode": "full", "reason": "Edit the deployment procedure"},
+    {"path": "docs/operations.md", "mode": "task", "reason": "Cross-check rollback terminology"}
+  ],
+  "expected_tool_calls": 2,
+  "rationale": "Use only the two adjacent public Markdown guides needed for a focused documentation update."
+}

@@ -125,6 +125,8 @@ pub fn route_request(
                 content_ref,
                 tenant_id: None,
                 trace_id: "tr-unit".into(),
+                task_id: None,
+                parent_task_id: None,
             },
             candidate_models: vec![requested.clone()],
             maximum_cost_micros: None,

@@ -866,6 +866,8 @@ mod tests {
                     content_ref: "blake3:content".into(),
                     tenant_id: None,
                     trace_id: "tr-unit".into(),
+                    task_id: None,
+                    parent_task_id: None,
                 }),
                 ..Default::default()
             })),

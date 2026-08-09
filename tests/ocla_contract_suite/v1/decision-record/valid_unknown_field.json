@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "decision_id": "decision_01J5XKB6F9J2M5P8S1V4Y7B0D",
+  "task_id": "task_01J5XK7Q2A6M8N4P0R3S5T7V9W",
+  "plan_id": "plan_01J5XK8H3C6F9J2L5N8Q1S4V7Y",
+  "decision_kind": "scheduling",
+  "input_refs": [],
+  "constraint_refs": [],
+  "selected_result": {
+    "model": "model-b"
+  },
+  "rationale_code": "within_quality_and_cost_constraints",
+  "decision_system_name": "leanctx-reference-scheduler",
+  "decision_system_version": "1.0.0",
+  "evidence_refs": [],
+  "observed_at": "2026-08-09T10:16:02Z",
+  "signature": "sig_01J5XKB6F9J2M5P8S1V4Y7B0D",
+  "future_explanation_ref": "explanation://decision/01J5XKB6"
+}

@@ -151,6 +151,16 @@ pub fn google_key(doc: &Value) -> String {
     format!("{system}{FIELD_SEP}{first_user}")
 }
 
+/// Deterministic holdout assignment based on task_id.
+/// Returns true if the task should be held out (assigned to baseline/control group).
+pub fn assign_holdout_by_task(task_id: &str, holdout_rate: f64) -> bool {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    task_id.hash(&mut hasher);
+    let hash = hasher.finish();
+    let normalized = (hash % 10000) as f64 / 10000.0;
+    normalized < holdout_rate
+}
 #[cfg(test)]
 mod tests {
     use super::*;

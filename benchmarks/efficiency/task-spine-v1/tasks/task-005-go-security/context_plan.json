@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "task_id": "task-spine-v1-005",
+  "synthetic": true,
+  "data_classification": "Public",
+  "strategy": "comprehensive",
+  "budget_tokens": 12000,
+  "planned_context_tokens": 9000,
+  "planned_sources": ["internal/auth/jwt.go", "internal/auth/jwt_test.go", "docs/security.md", "go.mod"],
+  "planned_views": [
+    {"path": "internal/auth/jwt.go", "mode": "full", "reason": "Inspect verification boundary"},
+    {"path": "internal/auth/jwt_test.go", "mode": "task", "reason": "Find negative security cases"},
+    {"path": "docs/security.md", "mode": "task", "reason": "Align threat-model language"},
+    {"path": "go.mod", "mode": "map", "reason": "Check crypto dependency version"}
+  ],
+  "expected_tool_calls": 10,
+  "rationale": "Security changes require implementation, negative tests, dependency context, and the public threat model."
+}

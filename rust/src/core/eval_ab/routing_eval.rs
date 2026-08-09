@@ -326,6 +326,8 @@ mod tests {
                 content_ref: "ref:test".into(),
                 tenant_id: None,
                 trace_id: "tr-unit".into(),
+                task_id: None,
+                parent_task_id: None,
             },
             experiment_ref: suite.to_string_lossy().into_owned(),
             cohort_ref: "cohort:treatment".into(),

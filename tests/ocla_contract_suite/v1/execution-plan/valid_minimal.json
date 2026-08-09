@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "plan_id": "plan_01J5XK8H3C6F9J2L5N8Q1S4V7Y",
+  "task_id": "task_01J5XK7Q2A6M8N4P0R3S5T7V9W",
+  "context_budget_tokens": 18000,
+  "context_strategy": "balanced",
+  "knowledge_refs": [],
+  "capability_ids": [
+    "capability://leanctx/tool-output-optimizer"
+  ],
+  "model": "model-b",
+  "provider": "eu-provider-2",
+  "reasoning_allocation_milli": 800,
+  "max_retries": 1,
+  "fallback_refs": [],
+  "stop_condition": "on_acceptance",
+  "expected_cost_micros": 240000,
+  "expected_quality_milli": 970,
+  "expected_latency_ms": 20000
+}

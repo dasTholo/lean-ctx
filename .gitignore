@@ -88,3 +88,9 @@ ts-sdk/node_modules/
 .worktrees/
 bench/lifecycle/.cache/
 bench/lifecycle/runs/
+
+# Internal strategy docs (confidential)
+docs/internal/
+
+# Compiled binaries
+packages/lean-ctx-bin/bin/

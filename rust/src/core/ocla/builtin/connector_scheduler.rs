@@ -82,6 +82,8 @@ mod tests {
                 content_ref: "ref:test".into(),
                 tenant_id: None,
                 trace_id: "tr-unit".into(),
+                task_id: None,
+                parent_task_id: None,
             },
             connector_id: connector.into(),
             payload_ref: "payload:abc".into(),

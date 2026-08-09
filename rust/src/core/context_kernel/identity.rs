@@ -3,6 +3,8 @@
 use std::cmp::Reverse;
 use std::collections::HashSet;
 
+use serde::{Deserialize, Serialize};
+
 /// Identity metadata attached to a context-kernel caller.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub(crate) struct CallerIdentity {
@@ -294,5 +296,41 @@ mod tests {
         let decoded = serde_json::from_str(&json).expect("identity must deserialize");
 
         assert_eq!(original, decoded);
+    }
+}
+
+/// Canonical task context carrying identifiers for the task lifecycle.
+/// Propagated through all runtime surfaces (envelope, MCP, proxy, hooks, events).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TaskContext {
+    pub task_id: String,
+    pub trace_id: String,
+    pub parent_task_id: Option<String>,
+    pub session_id: Option<String>,
+    pub agent_id: Option<String>,
+    pub project_id: Option<String>,
+}
+
+impl TaskContext {
+    pub fn new_root() -> Self {
+        Self {
+            task_id: uuid::Uuid::new_v4().to_string(),
+            trace_id: uuid::Uuid::new_v4().to_string(),
+            parent_task_id: None,
+            session_id: None,
+            agent_id: None,
+            project_id: None,
+        }
+    }
+
+    pub fn new(task_id: impl Into<String>, trace_id: impl Into<String>) -> Self {
+        Self {
+            task_id: task_id.into(),
+            trace_id: trace_id.into(),
+            parent_task_id: None,
+            session_id: None,
+            agent_id: None,
+            project_id: None,
+        }
     }
 }

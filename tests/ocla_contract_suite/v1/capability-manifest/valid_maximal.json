@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "capability_id": "capability://leanctx/tool-output-optimizer",
+  "provider": "leanctx",
+  "kind": "tool",
+  "version": "1.0.0",
+  "surfaces": [
+    "mcp",
+    "shell",
+    "agent"
+  ],
+  "support_matrix": {
+    "mcp": {
+      "supported": true,
+      "input_schema_ref": "schema://leanctx/tool-output/v1/input",
+      "output_schema_ref": "schema://leanctx/tool-output/v1/output"
+    },
+    "shell": {
+      "supported": true,
+      "input_schema_ref": null,
+      "output_schema_ref": null
+    }
+  },
+  "local": true,
+  "remote": false,
+  "reversibility": "conditional",
+  "determinism": "deterministic",
+  "data_movement": "local_only",
+  "supported_classifications": [
+    "Public",
+    "Internal",
+    "Confidential"
+  ],
+  "measurement_support": {
+    "latency": true,
+    "tokens": true,
+    "quality": true
+  },
+  "input_schema_ref": "schema://leanctx/tool-output/v1/input",
+  "output_schema_ref": "schema://leanctx/tool-output/v1/output",
+  "conformance_version": 1,
+  "future_conformance_profile": "leanctx.ocla-capability/v1"
+}

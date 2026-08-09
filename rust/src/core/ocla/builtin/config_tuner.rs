@@ -87,6 +87,8 @@ mod tests {
                 content_ref: "ref:test".into(),
                 tenant_id: None,
                 trace_id: "tr-unit".into(),
+                task_id: None,
+                parent_task_id: None,
             },
             config_ref: config.into(),
             objective_ref: "minimize_tokens".into(),

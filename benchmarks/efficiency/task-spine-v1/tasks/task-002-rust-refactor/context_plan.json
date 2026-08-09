@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "task_id": "task-spine-v1-002",
+  "synthetic": true,
+  "data_classification": "Public",
+  "strategy": "comprehensive",
+  "budget_tokens": 10500,
+  "planned_context_tokens": 8200,
+  "planned_sources": ["src/index/mod.rs", "src/index/providers.rs", "src/index/tests.rs", "Cargo.toml"],
+  "planned_views": [
+    {"path": "src/index/mod.rs", "mode": "map", "reason": "Map module ownership"},
+    {"path": "src/index/providers.rs", "mode": "full", "reason": "Trace provider contracts"},
+    {"path": "src/index/tests.rs", "mode": "task", "reason": "Preserve regression coverage"},
+    {"path": "Cargo.toml", "mode": "signatures", "reason": "Check feature boundaries"}
+  ],
+  "expected_tool_calls": 9,
+  "rationale": "Combine structural maps with targeted implementation and test reads across the large Rust repository."
+}

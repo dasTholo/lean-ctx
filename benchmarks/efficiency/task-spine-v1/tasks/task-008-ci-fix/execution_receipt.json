@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "receipt_id": "receipt-spine-v1-008",
+  "task_id": "task-spine-v1-008",
+  "plan_id": "plan-spine-v1-008",
+  "context_balance": {
+    "original_tokens": 3400,
+    "materialized_tokens": 2500,
+    "delivered_tokens": 2200,
+    "provider_billed_tokens": 2100
+  },
+  "fresh_input_tokens": 1700,
+  "cached_input_tokens": 850,
+  "output_tokens": 500,
+  "reasoning_tokens": 280,
+  "requested_model": "gpt-5-mini",
+  "selected_model": "gpt-5-mini",
+  "provider": "openai",
+  "model_calls": 1,
+  "retries": 0,
+  "latency_ms": 900,
+  "actual_cost_micros": 1800,
+  "baseline_cost_micros": 4800,
+  "avoided_cost_micros": 3000,
+  "etpao_milli": 3330000,
+  "outcome_ref": "outcome-spine-v1-008",
+  "decision_refs": ["decision:task-spine-v1-008"],
+  "evidence_refs": [
+    {
+      "kind": "ProviderReceipt",
+      "uri": "urn:task-spine-v1:receipt:008",
+      "digest": "sha256:task-spine-v1-008-receipt",
+      "signature_status": "Verified"
+    }
+  ],
+  "signature": "4528661303e07e01ab4c002bad3758c436f05a78822b702f6e660d57c7d96c2ef792aec6c282c5eb755329315022bce61aa5f9deb02ccbc161ae731f7ca6180e"
+}

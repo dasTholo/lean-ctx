@@ -15,8 +15,18 @@
 //! portable exports use.
 
 use crate::core::knowledge_relations::{KnowledgeEdge, KnowledgeRelationGraph};
+use lean_ctx_protocol::KnowledgeObjectV1;
+use serde::{Deserialize, Serialize};
 
 use super::types::{ConsolidatedInsight, KnowledgeFact, ProjectKnowledge, ProjectPattern};
+
+/// Receipt-safe reference to a selected portable knowledge object.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KnowledgeRef {
+    pub object_id: String,
+    pub evidence_digest: String,
+    pub policy_ref: String,
+}
 
 /// A consistent read of a project's knowledge (facts + patterns + insights) and
 /// its relation graph, taken at one point in time. The single source of truth
@@ -32,6 +42,14 @@ pub struct KnowledgeSnapshot {
     pub insights: Vec<ConsolidatedInsight>,
     /// Typed relations between facts (`relations.json`).
     pub relations: Vec<KnowledgeEdge>,
+    /// Task identity for portable retrieval snapshots.
+    pub task_id: Option<String>,
+    /// Retrieval-policy version used to select portable objects.
+    pub policy_version: Option<String>,
+    /// Stable references to portable objects selected for the task.
+    pub knowledge_refs: Vec<KnowledgeRef>,
+    /// Deterministic digest of the task, policy, and selected references.
+    pub snapshot_hash: Option<String>,
 }
 
 impl KnowledgeSnapshot {
@@ -57,6 +75,49 @@ impl KnowledgeSnapshot {
             patterns: knowledge.patterns.clone(),
             insights: knowledge.history.clone(),
             relations,
+            task_id: None,
+            policy_version: None,
+            knowledge_refs: Vec::new(),
+            snapshot_hash: None,
+        }
+    }
+
+    /// Build a deterministic task-local snapshot from portable knowledge objects.
+    pub fn from_items(task_id: &str, policy_version: &str, items: &[KnowledgeObjectV1]) -> Self {
+        let knowledge_refs = items
+            .iter()
+            .map(|item| KnowledgeRef {
+                object_id: item.object_id().to_owned(),
+                evidence_digest: item.evidence_digest.clone(),
+                policy_ref: item.policy_ref.clone(),
+            })
+            .collect::<Vec<_>>();
+        let mut hasher = blake3::Hasher::new();
+        for part in std::iter::once(task_id)
+            .chain(std::iter::once(policy_version))
+            .chain(knowledge_refs.iter().flat_map(|reference| {
+                [
+                    reference.object_id.as_str(),
+                    reference.evidence_digest.as_str(),
+                    reference.policy_ref.as_str(),
+                ]
+            }))
+        {
+            hasher.update(&(part.len() as u64).to_le_bytes());
+            hasher.update(part.as_bytes());
+        }
+        let snapshot_hash = hasher.finalize().to_hex().to_string();
+        Self {
+            project_root: String::new(),
+            project_hash: snapshot_hash.clone(),
+            facts: Vec::new(),
+            patterns: Vec::new(),
+            insights: Vec::new(),
+            relations: Vec::new(),
+            task_id: Some(task_id.to_owned()),
+            policy_version: Some(policy_version.to_owned()),
+            knowledge_refs,
+            snapshot_hash: Some(snapshot_hash),
         }
     }
 
@@ -64,7 +125,10 @@ impl KnowledgeSnapshot {
     /// insights). Relations alone never make a bundle — they are edges between
     /// facts that, without endpoints, carry no standalone meaning.
     pub fn is_empty(&self) -> bool {
-        self.facts.is_empty() && self.patterns.is_empty() && self.insights.is_empty()
+        self.facts.is_empty()
+            && self.patterns.is_empty()
+            && self.insights.is_empty()
+            && self.knowledge_refs.is_empty()
     }
 
     /// The current (non-superseded, temporally valid) facts — the human-facing

@@ -1,0 +1,48 @@
+{
+  "kind": "invocation",
+  "manifest": {
+    "schema_version": 1,
+    "capability_id": "capability://leanctx/tool-output-optimizer",
+    "provider": "leanctx",
+    "kind": "tool",
+    "version": "1.0.0",
+    "surfaces": ["mcp"],
+    "support_matrix": {"mcp": {"supported": true}},
+    "local": true,
+    "remote": false,
+    "reversibility": "conditional",
+    "determinism": "deterministic",
+    "data_movement": "local_only",
+    "supported_classifications": ["Public", "Internal"],
+    "measurement_support": {"latency": true, "tokens": false, "quality": false},
+    "conformance_version": 1,
+    "failure_taxonomy": ["timeout", "policy_rejected", "invalid_input"],
+    "latency_bounds_ms": {"min_ms": 0, "max_ms": 250}
+  },
+  "result": {
+    "success": false,
+    "output_tokens": 0,
+    "latency_ms": 5,
+    "observation": {
+      "schema_version": 1,
+      "task_id": "task-policy",
+      "capability_id": "capability://leanctx/tool-output-optimizer",
+      "capability_version": "1.0.0",
+      "success": false,
+      "input_tokens": 24,
+      "output_tokens": 0,
+      "latency_ms": 5,
+      "failure_mode": "rejected_by_policy",
+      "output_ref": null,
+      "metrics": {}
+    },
+    "evidence_ref": null
+  },
+  "expected": {
+    "capability_id": "capability://leanctx/tool-output-optimizer",
+    "version": "1.0.0",
+    "checks_passed": 10,
+    "checks_failed": 0,
+    "failures": []
+  }
+}

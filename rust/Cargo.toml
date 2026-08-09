@@ -319,6 +319,7 @@ crossterm = "0.29"
 rpassword = "7.5"
 ed25519-dalek = { version = "2.2", features = ["rand_core"] }
 getrandom = "0.4"
+uuid = { version = "1", features = ["v4"] }
 tempfile = "3.27"
 reqwest = { version = "0.13", default-features = false, features = [
   "rustls",

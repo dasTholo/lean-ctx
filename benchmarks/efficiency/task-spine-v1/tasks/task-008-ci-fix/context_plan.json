@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "task_id": "task-spine-v1-008",
+  "synthetic": true,
+  "data_classification": "Public",
+  "strategy": "minimal",
+  "budget_tokens": 3400,
+  "planned_context_tokens": 2500,
+  "planned_sources": [".github/workflows/release.yml", "scripts/package.sh", ".github/workflows/test.yml"],
+  "planned_views": [
+    {"path": ".github/workflows/release.yml", "mode": "full", "reason": "Fix cache key and job order"},
+    {"path": "scripts/package.sh", "mode": "task", "reason": "Check shell quoting"},
+    {"path": ".github/workflows/test.yml", "mode": "signatures", "reason": "Match runner setup"}
+  ],
+  "expected_tool_calls": 4,
+  "rationale": "Read the failing workflow and the invoked shell script with one neighboring workflow for conventions."
+}
