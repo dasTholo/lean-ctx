@@ -12,8 +12,6 @@ const FIRST_LINE_MAX: usize = 120;
 pub struct ToolResultCache {
     entries: DashMap<u64, CacheEntry>,
     current_turn: AtomicU64,
-    // TODO(#1354): remove dead code or implement
-    created_at: Instant,
 }
 
 struct CacheEntry {
@@ -37,7 +35,6 @@ impl ToolResultCache {
         Self {
             entries: DashMap::new(),
             current_turn: AtomicU64::new(0),
-            created_at: Instant::now(),
         }
     }
 

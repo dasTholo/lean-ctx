@@ -109,8 +109,8 @@ fn local_snapshot(cfg: &Config) -> serde_json::Value {
     let saved_usd_30d: f64 = ledger
         .by_day
         .iter()
-        .filter(|(day, _, _)| day.as_str() >= cutoff.as_str())
-        .map(|(_, _, usd)| usd)
+        .filter(|(day, _, _, _)| day.as_str() >= cutoff.as_str())
+        .map(|(_, _, usd, _)| usd)
         .sum();
 
     let cost_usd: f64 = spend.iter().map(|m| m.cost_usd).sum();

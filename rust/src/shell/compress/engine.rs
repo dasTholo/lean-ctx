@@ -184,22 +184,6 @@ fn tabular_delim_crush<T>(output: &str, crush: impl Fn(&str, char) -> Option<T>)
 /// the columnar crusher — fully reconstructible, so no CCR handle is needed.
 /// Returns a footer'd reshape only when `enabled` and the crush both pays (at
 /// least halves the bytes) and clears the token floor; otherwise `None`.
-// TODO(#1354): remove dead code or implement
-pub(crate) fn verbatim_tabular_crush(
-    output: &str,
-    original_tokens: usize,
-    min_output_tokens: usize,
-    enabled: bool,
-) -> Option<String> {
-    verbatim_tabular_crush_for(
-        output,
-        original_tokens,
-        min_output_tokens,
-        enabled,
-        COUNTING_FAMILY,
-    )
-}
-
 pub(crate) fn verbatim_tabular_crush_for(
     output: &str,
     original_tokens: usize,
@@ -218,28 +202,12 @@ pub(crate) fn verbatim_tabular_crush_for(
 }
 
 /// Opt-in (#982) **lossy** escalation for a verbatim command's CSV/TSV output,
-/// used only after [`verbatim_tabular_crush`] (lossless) did not pay. Drops
+/// used only after [`verbatim_tabular_crush_for`] (lossless) did not pay. Drops
 /// near-unique high-entropy columns and — because data is then lost — persists
 /// the verbatim original to the shared CCR store, appending a `ctx_expand` handle
 /// so a dropped datum is always recoverable out-of-band (never from the text).
 /// The embedded handle is content-addressed, so the output stays byte-stable
 /// across turns (#448/#498).
-// TODO(#1354): remove dead code or implement
-pub(crate) fn verbatim_tabular_crush_lossy(
-    output: &str,
-    original_tokens: usize,
-    min_output_tokens: usize,
-    enabled: bool,
-) -> Option<String> {
-    verbatim_tabular_crush_lossy_for(
-        output,
-        original_tokens,
-        min_output_tokens,
-        enabled,
-        COUNTING_FAMILY,
-    )
-}
-
 pub(crate) fn verbatim_tabular_crush_lossy_for(
     output: &str,
     original_tokens: usize,
@@ -273,22 +241,6 @@ pub(crate) fn verbatim_tabular_crush_lossy_for(
 /// text is a genuinely structured, redundant document). Returns a footer'd
 /// reshape only when `enabled` and the crush clears both the reduction gate and
 /// the token floor; otherwise `None`.
-// TODO(#1354): remove dead code or implement
-pub(crate) fn verbatim_yaml_crush(
-    output: &str,
-    original_tokens: usize,
-    min_output_tokens: usize,
-    enabled: bool,
-) -> Option<String> {
-    verbatim_yaml_crush_for(
-        output,
-        original_tokens,
-        min_output_tokens,
-        enabled,
-        COUNTING_FAMILY,
-    )
-}
-
 pub(crate) fn verbatim_yaml_crush_for(
     output: &str,
     original_tokens: usize,
@@ -306,28 +258,12 @@ pub(crate) fn verbatim_yaml_crush_for(
 }
 
 /// Opt-in (#985) **lossy** escalation for a verbatim command's YAML output, used
-/// only after [`verbatim_yaml_crush`] (lossless) did not pay. Drops near-unique
+/// only after [`verbatim_yaml_crush_for`] (lossless) did not pay. Drops near-unique
 /// high-entropy columns and — because data is then lost — persists the verbatim
 /// original to the shared CCR store, appending a `ctx_expand` handle so a dropped
 /// datum is always recoverable out-of-band (never from the text). The embedded
 /// handle is content-addressed, so the output stays byte-stable across turns
 /// (#448/#498).
-// TODO(#1354): remove dead code or implement
-pub(crate) fn verbatim_yaml_crush_lossy(
-    output: &str,
-    original_tokens: usize,
-    min_output_tokens: usize,
-    enabled: bool,
-) -> Option<String> {
-    verbatim_yaml_crush_lossy_for(
-        output,
-        original_tokens,
-        min_output_tokens,
-        enabled,
-        COUNTING_FAMILY,
-    )
-}
-
 pub(crate) fn verbatim_yaml_crush_lossy_for(
     output: &str,
     original_tokens: usize,
@@ -355,22 +291,6 @@ pub(crate) fn verbatim_yaml_crush_lossy_for(
 /// pages and converts to clean markdown. Triggered for HTML content in the
 /// verbatim crusher ladder (curl, wget, fetch outputs). The full HTML is
 /// persisted to CCR under the `html_` prefix for recovery via `ctx_expand`.
-// TODO(#1354): remove dead code or implement
-pub(crate) fn verbatim_html_crush(
-    output: &str,
-    original_tokens: usize,
-    min_output_tokens: usize,
-    enabled: bool,
-) -> Option<String> {
-    verbatim_html_crush_for(
-        output,
-        original_tokens,
-        min_output_tokens,
-        enabled,
-        COUNTING_FAMILY,
-    )
-}
-
 pub(crate) fn verbatim_html_crush_for(
     output: &str,
     original_tokens: usize,
@@ -889,35 +809,6 @@ fn is_build_tool(command: &str) -> bool {
         || cmd.starts_with("slither ")
 }
 
-#[allow(dead_code)]
-// TODO: remove after downstream callers migrate to `classify_build_output`.
-fn is_error_output_from_build_tool(command: &str, output: &str) -> bool {
-    let command = strip_env_prefix(command);
-    if !is_build_tool(command) {
-        return false;
-    }
-
-    // Check if the output actually contains error indicators
-    output.contains("error[")
-        || output.contains("error:")
-        || output.contains("Error:")
-        || output.contains("ERROR:")
-        || output.contains(" error ")
-        || output.contains("warning[")
-        || output.contains("warning:")
-        || output.contains("failed")
-        || output.contains("FAILED")
-        || output.contains("panicked at")
-        || output.contains("cannot find")
-        || output.contains("not found")
-        || output.contains("undefined")
-        || output.contains("unresolved")
-        || output.contains("expected ")
-        || output.contains("mismatched types")
-        || output.contains("aborting due to")
-        || output.contains("could not compile")
-}
-
 /// Strips leading `VAR=value` environment assignments from a command segment so
 /// `RUST_BACKTRACE=1 cargo test` / `CI=true pytest` are still recognized as the
 /// underlying test runner.
@@ -1247,11 +1138,6 @@ pub(crate) fn compress_if_beneficial_pub_for(
 /// build/test output but supplied no recognizable command — the engine's
 /// command-gated verbatim guards cannot fire, yet compiler errors, panics and
 /// test summaries must still reach the model intact for a bug-fix task.
-// TODO(#1354): remove dead code or implement
-pub(crate) fn preserve_verbatim_pub(output: &str) -> String {
-    preserve_verbatim_pub_for(output, COUNTING_FAMILY)
-}
-
 pub(crate) fn preserve_verbatim_pub_for(output: &str, family: TokenizerFamily) -> String {
     truncate_verbatim(output, count_tokens_for(output, family), family)
 }

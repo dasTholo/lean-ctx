@@ -94,28 +94,6 @@ pub(super) fn compress_value(
     }
 }
 
-// TODO(#1354): remove dead code or implement
-pub(super) fn compress_value_for(
-    value: &mut Value,
-    tool_name: Option<&str>,
-    kind: ToolResultKind,
-    family: TokenizerFamily,
-) -> bool {
-    match value {
-        Value::String(text) => compress_text_for(text, tool_name, kind, family),
-        Value::Array(parts) => {
-            let mut changed = false;
-            for part in parts.iter_mut() {
-                if let Some(Value::String(text)) = part.get_mut("text") {
-                    changed |= compress_text_for(text, tool_name, kind, family);
-                }
-            }
-            changed
-        }
-        _ => false,
-    }
-}
-
 pub(super) fn prune_text(text: &mut String, kind: ToolResultKind) -> bool {
     match rewrite_json_payload_text(text, kind, |inner| {
         super::history_prune::prune_output_text(inner, kind)

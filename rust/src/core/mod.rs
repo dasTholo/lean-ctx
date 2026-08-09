@@ -19,8 +19,6 @@ pub mod cognitive;
 pub(crate) mod compress_preview;
 pub(crate) mod compression_safety;
 pub mod compressor;
-#[cfg(feature = "experimental")]
-pub(crate) mod context_budget;
 #[allow(dead_code, unreachable_pub)]
 pub mod context_prefetch;
 pub(crate) mod datadog_push;
@@ -64,8 +62,6 @@ pub mod rule_artifacts;
 pub(crate) mod rule_discovery;
 #[allow(dead_code)]
 pub(crate) mod rule_scorer;
-#[cfg(feature = "experimental")]
-pub(crate) mod rule_staleness;
 pub mod rules_canonical;
 #[allow(dead_code)]
 pub(crate) mod rules_channel;
