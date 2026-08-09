@@ -316,9 +316,9 @@ class CockpitOverview extends HTMLElement {
       '</div>' +
 
       '<div class="hc">' +
-      '<span class="hl">Compression rate' + tip('compression_rate') + '</span>' +
+      '<span class="hl">Net savings rate' + tip('compression_rate') + '</span>' +
       '<div class="hv">' + esc(String(compRate)) + '%</div>' +
-      '<p class="hs">tokens removed before sending</p>' +
+      '<p class="hs">verified savings / all tool-call tokens</p>' +
       '</div>' +
 
       '<div class="hc">' +

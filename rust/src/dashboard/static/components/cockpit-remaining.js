@@ -123,7 +123,8 @@ class CockpitLearning extends HTMLElement {
       '<div class="row r3">' +
       '<div class="card"><div class="card-header"><h3>Savings Growth' + tip('savings_growth') + '</h3></div>' +
       '<canvas id="ckle-savings" height="200"></canvas></div>' +
-      '<div class="card"><div class="card-header"><h3>Token Savings (verified)' + tip('compression_trend') + '</h3></div>' +
+      '<div class="card"><div class="card-header"><h3>Net savings rate' + tip('compression_trend') + '</h3>' +
+      '<p class="hs" style="margin:2px 0 0;font-size:12px;opacity:.6">verified savings ÷ all input tokens (incl. non-compressible)</p></div>' +
       '<canvas id="ckle-compression" height="200"></canvas></div>' +
       '<div class="card"><div class="card-header"><h3>Command Volume' + tip('command_volume') + '</h3></div>' +
       '<canvas id="ckle-volume" height="200"></canvas></div>' +
