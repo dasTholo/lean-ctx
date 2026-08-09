@@ -11,10 +11,9 @@ mod ext_methods;
 mod imports;
 mod type_defs;
 mod type_uses;
-#[allow(dead_code)]
-mod types;
+pub mod types;
 
-pub(crate) use types::*;
+pub use types::*;
 
 #[cfg(feature = "tree-sitter")]
 use tree_sitter::{Language, Node, Parser};

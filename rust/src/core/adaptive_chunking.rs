@@ -3,7 +3,7 @@ use crate::core::tokens::count_tokens;
 
 /// One slice of source text chosen for inclusion.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ChunkResult {
+pub struct ChunkResult {
     pub content: String,
     pub start_line: usize,
     pub end_line: usize,
@@ -21,7 +21,7 @@ fn is_fn_line(line: &str) -> bool {
         || t.starts_with("pub async fn ")
         || t.starts_with("unsafe fn ")
         || t.starts_with("pub unsafe fn ")
-        || t.starts_with("pub(crate) fn ")
+        || t.starts_with("pub fn ")
 }
 
 fn chunk_ranges(lines: &[&str]) -> Vec<(usize, usize)> {
@@ -127,11 +127,7 @@ fn proportional_body(lines: &[&str], start: usize, end: usize, target_tokens: us
 }
 
 /// Split `content` into prioritized chunks sized to `budget_tokens` spread across `total_items` sibling slices.
-pub(crate) fn adaptive_chunk(
-    content: &str,
-    budget_tokens: usize,
-    total_items: usize,
-) -> Vec<ChunkResult> {
+pub fn adaptive_chunk(content: &str, budget_tokens: usize, total_items: usize) -> Vec<ChunkResult> {
     let lines: Vec<&str> = content.lines().collect();
     let total_lines = lines.len().max(1);
     let ranges = chunk_ranges(&lines);
@@ -212,7 +208,7 @@ pub(crate) fn adaptive_chunk(
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     const SAMPLE: &str = r#"use std::io;

@@ -12,7 +12,7 @@ use tree_sitter::Node;
 /// Function-like node kinds across the supported grammars. A node of one of
 /// these kinds is its own complexity scope (nested ones are scored separately).
 #[cfg(feature = "tree-sitter")]
-pub(crate) fn is_fn_like(kind: &str) -> bool {
+pub fn is_fn_like(kind: &str) -> bool {
     matches!(
         kind,
         "function_item"
@@ -30,7 +30,7 @@ pub(crate) fn is_fn_like(kind: &str) -> bool {
 
 /// Best-effort identifier name for a function-like node.
 #[cfg(feature = "tree-sitter")]
-pub(crate) fn fn_name(node: Node, source: &[u8]) -> Option<String> {
+pub fn fn_name(node: Node, source: &[u8]) -> Option<String> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         match child.kind() {
@@ -48,7 +48,7 @@ pub(crate) fn fn_name(node: Node, source: &[u8]) -> Option<String> {
 /// The logical body subtree of a function-like node (its `body`/`value` field,
 /// falling back to the node itself for grammars without an explicit body field).
 #[cfg(feature = "tree-sitter")]
-pub(crate) fn logical_body_root(fn_like: Node<'_>) -> Node<'_> {
+pub fn logical_body_root(fn_like: Node<'_>) -> Node<'_> {
     fn_like
         .child_by_field_name("body")
         .or_else(|| fn_like.child_by_field_name("value"))
@@ -62,7 +62,7 @@ pub(crate) fn logical_body_root(fn_like: Node<'_>) -> Node<'_> {
 /// chunks (deduplicated by start byte). Returns `None` when `ext` is
 /// unsupported or parsing fails.
 #[cfg(feature = "tree-sitter")]
-pub(crate) fn for_each_function(
+pub fn for_each_function(
     content: &str,
     ext: &str,
     mut visit: impl FnMut(Node, &str, &[u8]),

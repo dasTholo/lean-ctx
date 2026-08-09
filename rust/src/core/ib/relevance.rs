@@ -21,7 +21,7 @@ pub struct RelevanceScore {
 
 /// Generate query terms for IB compression based on task intent.
 /// Each intent has domain-specific terms that maximize mutual information.
-pub(crate) fn intent_query_terms(intent: &TaskIntent) -> Vec<&'static str> {
+pub fn intent_query_terms(intent: &TaskIntent) -> Vec<&'static str> {
     match intent {
         TaskIntent::Debug => vec![
             "error", "panic", "unwrap", "stack", "trace", "fail", "crash", "assert", "expect",
@@ -67,7 +67,7 @@ pub(crate) fn intent_query_terms(intent: &TaskIntent) -> Vec<&'static str> {
 
 /// Score chunks by relevance to the current task intent.
 /// Uses BM25-style IDF-weighted term overlap as a lightweight mutual information proxy.
-pub(crate) fn compute_relevance(
+pub fn compute_relevance(
     chunks: &[&str],
     intent: &TaskIntent,
     explicit_query: Option<&str>,
@@ -187,7 +187,7 @@ fn normalize(scores: &mut [RelevanceScore]) {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::{TaskIntent, compute_relevance};
 
     #[test]

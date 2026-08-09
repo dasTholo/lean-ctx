@@ -1,14 +1,14 @@
 use crate::core::profiles::LayoutConfig;
 
 #[derive(Debug, Clone)]
-pub(crate) struct LayoutApplyResultV1 {
+pub struct LayoutApplyResultV1 {
     pub output: String,
     pub changed: bool,
     pub skipped: bool,
     pub reason_code: String,
 }
 
-pub(crate) fn maybe_reorder_for_attention(
+pub fn maybe_reorder_for_attention(
     content: &str,
     task_keywords: &[String],
     cfg: &LayoutConfig,
@@ -51,7 +51,7 @@ pub(crate) fn maybe_reorder_for_attention(
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]

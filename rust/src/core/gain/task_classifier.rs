@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub(crate) enum TaskCategory {
+pub enum TaskCategory {
     Coding,
     Debugging,
     Refactoring,
@@ -18,7 +18,7 @@ pub(crate) enum TaskCategory {
 }
 
 impl TaskCategory {
-    pub(crate) fn label(&self) -> &'static str {
+    pub fn label(&self) -> &'static str {
         match self {
             TaskCategory::Coding => "Coding",
             TaskCategory::Debugging => "Debugging",
@@ -37,10 +37,10 @@ impl TaskCategory {
     }
 }
 
-pub(crate) struct TaskClassifier;
+pub struct TaskClassifier;
 
 impl TaskClassifier {
-    pub(crate) fn classify_tool(tool_name: &str) -> TaskCategory {
+    pub fn classify_tool(tool_name: &str) -> TaskCategory {
         let t = normalize(tool_name);
         match t.as_str() {
             "ctx_edit" | "ctx_fill" => TaskCategory::Refactoring,
@@ -60,7 +60,7 @@ impl TaskClassifier {
         }
     }
 
-    pub(crate) fn classify_command_key(cmd_key: &str) -> TaskCategory {
+    pub fn classify_command_key(cmd_key: &str) -> TaskCategory {
         let k = normalize(cmd_key);
         if k.is_empty() {
             return TaskCategory::General;
@@ -137,7 +137,7 @@ fn normalize(s: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]

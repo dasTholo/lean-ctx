@@ -67,6 +67,26 @@ impl AutoRoutingConfig {
     }
 }
 
+/// Evidence thresholds that a shadow scheduler must satisfy before auto-routing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SchedulerGate {
+    pub min_evaluated_tasks: u64,
+    pub max_outcome_degradation_pct: f64,
+    pub min_cost_improvement_pct: f64,
+    pub require_holdout_evidence: bool,
+}
+
+/// Observed shadow-scheduler performance used to evaluate [`SchedulerGate`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AutoRoutingEvidence {
+    pub evaluated_tasks: u64,
+    pub outcome_degradation_pct: f64,
+    pub cost_improvement_pct: f64,
+    pub has_holdout_evidence: bool,
+}
+
 /// Request envelope sent to an auto-routing boundary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

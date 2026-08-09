@@ -61,7 +61,7 @@ const ERROR_KEYWORDS: &[&str] = &["error", "panic", "crash", "failed", "failure"
 ///
 /// Task metadata has priority over findings; error-bearing findings supply a
 /// debug signal when the task itself does not identify an intent.
-pub(crate) fn classify_intent(session: &SessionState) -> TaskIntent {
+pub fn classify_intent(session: &SessionState) -> TaskIntent {
     if let Some(task) = &session.task {
         if let Some(intent) = classify_text(task.intent.as_deref().unwrap_or_default()) {
             return intent;
@@ -114,7 +114,7 @@ impl fmt::Display for TaskIntent {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use crate::core::session::{SessionState, TaskInfo};
 
     use super::{TaskIntent, classify_intent};

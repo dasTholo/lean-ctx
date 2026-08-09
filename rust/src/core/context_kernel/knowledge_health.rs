@@ -3,7 +3,7 @@
 /// Privacy-safe health assessment of project knowledge stores.
 /// Contains only counts and ratios — never content or file paths.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub(crate) struct KnowledgeHealthReport {
+pub struct KnowledgeHealthReport {
     /// Total number of assessed facts.
     pub total_facts: usize,
     /// Number of facts marked fresh.
@@ -28,7 +28,7 @@ pub(crate) struct KnowledgeHealthReport {
 
 /// Aggregated efficiency metrics for org-wide dashboards.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub(crate) struct EfficiencyView {
+pub struct EfficiencyView {
     /// Fraction of original tokens avoided before sending context.
     pub compression_ratio: f64,
     /// Fraction of reads served from cache.
@@ -61,7 +61,7 @@ fn ratio_u64(numerator: u64, denominator: u64) -> f64 {
 
 /// Assesses aggregate freshness, contradiction, coverage, and store counts.
 #[must_use]
-pub(crate) fn assess_health(
+pub fn assess_health(
     facts: &[(bool, bool)],
     episodes: usize,
     procedures: usize,
@@ -93,7 +93,7 @@ pub(crate) fn assess_health(
 /// Builds aggregate compression, cache, acceptance, and latency metrics.
 #[allow(clippy::too_many_arguments)]
 #[must_use]
-pub(crate) fn build_efficiency_view(
+pub fn build_efficiency_view(
     original_tokens: u64,
     sent_tokens: u64,
     cache_hits: u64,
@@ -118,10 +118,7 @@ pub(crate) fn build_efficiency_view(
 
 /// Formats a multi-line summary containing only aggregate counts and metrics.
 #[must_use]
-pub(crate) fn format_org_summary(
-    health: &KnowledgeHealthReport,
-    efficiency: &EfficiencyView,
-) -> String {
+pub fn format_org_summary(health: &KnowledgeHealthReport, efficiency: &EfficiencyView) -> String {
     format!(
         "Knowledge health\n\
          Facts: {} total, {} fresh, {} stale, {} contradicted\n\
@@ -158,7 +155,7 @@ pub(crate) fn format_org_summary(
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::{assess_health, build_efficiency_view, format_org_summary};
 
     #[test]

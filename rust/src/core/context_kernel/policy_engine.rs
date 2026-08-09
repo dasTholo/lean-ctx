@@ -7,7 +7,7 @@ use super::types::SensitivityLevel;
 /// The 6-level policy hierarchy — higher levels take precedence for deny rules.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum PolicyLevel {
+pub enum PolicyLevel {
     Request,
     Workload,
     Project,
@@ -18,7 +18,7 @@ pub(crate) enum PolicyLevel {
 
 /// A single policy rule.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct PolicyRule {
+pub struct PolicyRule {
     pub id: String,
     pub level: PolicyLevel,
     pub effect: PolicyEffect,
@@ -29,7 +29,7 @@ pub(crate) struct PolicyRule {
 /// The action a matching policy rule takes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum PolicyEffect {
+pub enum PolicyEffect {
     Allow,
     Deny,
 }
@@ -37,7 +37,7 @@ pub(crate) enum PolicyEffect {
 /// Condition types for policy matching.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub(crate) enum PolicyCondition {
+pub enum PolicyCondition {
     MaxTokens { limit: usize },
     MaxSensitivity { level: SensitivityLevel },
     SourcePattern { pattern: String },
@@ -47,7 +47,7 @@ pub(crate) enum PolicyCondition {
 
 /// Outcome of evaluating a request against the policy set.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct PolicyDecision {
+pub struct PolicyDecision {
     pub effect: PolicyEffect,
     pub matched_rules: Vec<String>,
     pub denied_reasons: Vec<String>,
@@ -56,7 +56,7 @@ pub(crate) struct PolicyDecision {
 
 /// Request attributes used by the policy decision point.
 #[derive(Debug, Clone)]
-pub(crate) struct PolicyEvalRequest {
+pub struct PolicyEvalRequest {
     pub source: String,
     pub model: Option<String>,
     pub tokens: usize,
@@ -65,7 +65,7 @@ pub(crate) struct PolicyEvalRequest {
 }
 
 /// Policy Decision Point — evaluates requests against a rule set.
-pub(crate) struct PolicyDecisionPoint {
+pub struct PolicyDecisionPoint {
     rules: Vec<PolicyRule>,
 }
 
@@ -77,14 +77,14 @@ struct PolicyRulesConfig {
 
 impl PolicyDecisionPoint {
     /// Creates a decision point backed by the supplied rules.
-    pub(crate) fn new(rules: Vec<PolicyRule>) -> Self {
+    pub fn new(rules: Vec<PolicyRule>) -> Self {
         Self { rules }
     }
 
     /// Loads policy rules from the lean-ctx configuration directory.
     ///
     /// Missing or invalid configuration produces an empty, permissive rule set.
-    pub(crate) fn from_config() -> Self {
+    pub fn from_config() -> Self {
         let rules = crate::core::paths::config_dir()
             .ok()
             .map(|directory| directory.join("policy-rules.toml"))
@@ -97,7 +97,7 @@ impl PolicyDecisionPoint {
     }
 
     /// Evaluates matching rules at the highest governing hierarchy level.
-    pub(crate) fn evaluate(&self, request: &PolicyEvalRequest) -> PolicyDecision {
+    pub fn evaluate(&self, request: &PolicyEvalRequest) -> PolicyDecision {
         let matching: Vec<&PolicyRule> = self
             .rules
             .iter()
@@ -136,12 +136,12 @@ impl PolicyDecisionPoint {
     }
 
     /// Adds a rule to the decision point.
-    pub(crate) fn add_rule(&mut self, rule: PolicyRule) {
+    pub fn add_rule(&mut self, rule: PolicyRule) {
         self.rules.push(rule);
     }
 
     /// Returns rules defined at one hierarchy level.
-    pub(crate) fn rules_at_level(&self, level: PolicyLevel) -> Vec<&PolicyRule> {
+    pub fn rules_at_level(&self, level: PolicyLevel) -> Vec<&PolicyRule> {
         self.rules
             .iter()
             .filter(|rule| rule.level == level)
@@ -213,7 +213,7 @@ fn wildcard_matches(pattern: &str, value: &str) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::{
         PolicyCondition, PolicyDecisionPoint, PolicyEffect, PolicyEvalRequest, PolicyLevel,
         PolicyRule,

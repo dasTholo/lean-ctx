@@ -224,6 +224,7 @@ pub fn receipt_for_task_from_store(
         avoided_cost_micros: 0,
         etpao_milli: 0,
         outcome_ref,
+        knowledge_refs: Vec::new(),
         decision_refs,
         evidence_refs,
         signature,

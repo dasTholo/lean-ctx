@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-pub(crate) struct TokenOptimizer {
+pub struct TokenOptimizer {
     replacements: Vec<(String, String)>,
 }
 
@@ -63,13 +63,13 @@ const BPE_ALIGNED_RULES: &[(&str, &str)] = &[
     (" -> ", "->"),
     (" => ", "=>"),
     ("\n\n\n", "\n\n"),
-    ("pub(crate) ", "pub "),
-    ("pub(super) ", "pub "),
+    ("pub ", "pub "),
+    ("pub ", "pub "),
     ("export default ", "export "),
 ];
 
 impl TokenOptimizer {
-    pub(crate) fn load_or_default(model_dir: &Path) -> Self {
+    pub fn load_or_default(model_dir: &Path) -> Self {
         let config_path = model_dir.join("token_optimizer.json");
         if config_path.exists() {
             match Self::load_from_file(&config_path) {
@@ -90,7 +90,7 @@ impl TokenOptimizer {
         Self::with_defaults()
     }
 
-    pub(crate) fn with_defaults() -> Self {
+    pub fn with_defaults() -> Self {
         let mut rules: Vec<(String, String)> = DEFAULT_OPTIMIZATIONS
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -114,7 +114,7 @@ impl TokenOptimizer {
         })
     }
 
-    pub(crate) fn optimize_line(&self, line: &str) -> String {
+    pub fn optimize_line(&self, line: &str) -> String {
         let mut result = line.to_string();
         for (from, to) in &self.replacements {
             result = result.replace(from.as_str(), to.as_str());
@@ -123,7 +123,7 @@ impl TokenOptimizer {
         result
     }
 
-    pub(crate) fn optimize_block(&self, content: &str) -> String {
+    pub fn optimize_block(&self, content: &str) -> String {
         let optimized: Vec<String> = content
             .lines()
             .map(|line| self.optimize_line(line))
@@ -132,18 +132,18 @@ impl TokenOptimizer {
         collapsed.join("\n")
     }
 
-    pub(crate) fn replacement_count(&self) -> usize {
+    pub fn replacement_count(&self) -> usize {
         self.replacements.len()
     }
 
     /// BPE cost oracle: measure the actual token cost of a string representation.
     /// Used to pick the cheapest encoding when multiple are semantically equivalent.
-    pub(crate) fn token_cost(text: &str) -> usize {
+    pub fn token_cost(text: &str) -> usize {
         crate::core::tokens::count_tokens(text)
     }
 
     /// Choose the cheaper representation between two semantically equivalent strings.
-    pub(crate) fn cheaper_repr<'a>(a: &'a str, b: &'a str) -> &'a str {
+    pub fn cheaper_repr<'a>(a: &'a str, b: &'a str) -> &'a str {
         if Self::token_cost(a) <= Self::token_cost(b) {
             a
         } else {
@@ -203,7 +203,7 @@ fn collapse_closing_braces(lines: &[String]) -> Vec<String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]

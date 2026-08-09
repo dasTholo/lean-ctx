@@ -9,14 +9,14 @@ use super::structural::StructuralDescription;
 ///
 /// `DL(desc) = model_cost + data_cost`, where model cost captures structural
 /// overhead and data cost approximates token encoding against an LLM vocabulary.
-pub(crate) fn description_length(desc: &StructuralDescription) -> f64 {
+pub fn description_length(desc: &StructuralDescription) -> f64 {
     let model_cost = ((desc.types.len() + desc.functions.len() + 1) as f64).log2();
     let vocab_size: f64 = 50_000.0;
     let data_cost = desc.description_tokens as f64 * vocab_size.log2();
     model_cost + data_cost
 }
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::description_length;
     use crate::core::mdl_mode::structural::generate_structural_description;
 

@@ -5,15 +5,15 @@
 //! Falls back gracefully to heuristic mode when no model is available.
 
 #[allow(dead_code)]
-pub(crate) mod attention_learned;
+pub mod attention_learned;
 #[allow(dead_code)]
-pub(crate) mod cache_alignment;
+pub mod cache_alignment;
 #[allow(dead_code)]
-pub(crate) mod context_reorder;
+pub mod context_reorder;
 #[allow(dead_code)]
-pub(crate) mod line_scorer;
+pub mod line_scorer;
 #[allow(dead_code)]
-pub(crate) mod token_optimizer;
+pub mod token_optimizer;
 
 use std::path::PathBuf;
 
@@ -21,14 +21,14 @@ use attention_learned::LearnedAttention;
 use line_scorer::NeuralLineScorer;
 use token_optimizer::TokenOptimizer;
 
-pub(crate) struct NeuralEngine {
+pub struct NeuralEngine {
     line_scorer: Option<NeuralLineScorer>,
     token_optimizer: TokenOptimizer,
     attention: LearnedAttention,
 }
 
 impl NeuralEngine {
-    pub(crate) fn load() -> Self {
+    pub fn load() -> Self {
         let model_dir = Self::model_directory();
 
         let line_scorer = if model_dir.join("line_importance.onnx").exists() {
@@ -59,7 +59,7 @@ impl NeuralEngine {
         }
     }
 
-    pub(crate) fn score_line(&self, line: &str, position: f64, task_keywords: &[String]) -> f64 {
+    pub fn score_line(&self, line: &str, position: f64, task_keywords: &[String]) -> f64 {
         if let Some(ref scorer) = self.line_scorer {
             scorer.score_line(line, position, task_keywords)
         } else {
@@ -67,15 +67,15 @@ impl NeuralEngine {
         }
     }
 
-    pub(crate) fn optimize_line(&self, line: &str) -> String {
+    pub fn optimize_line(&self, line: &str) -> String {
         self.token_optimizer.optimize_line(line)
     }
 
-    pub(crate) fn attention_weight(&self, position: f64) -> f64 {
+    pub fn attention_weight(&self, position: f64) -> f64 {
         self.attention.weight(position)
     }
 
-    pub(crate) fn has_neural_model(&self) -> bool {
+    pub fn has_neural_model(&self) -> bool {
         self.line_scorer.is_some()
     }
 

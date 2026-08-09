@@ -3,7 +3,7 @@
 //! The policy is an inspectable schema. Production calibration, candidate
 //! ranking, and policy authoring remain in `lean-ctx-enterprise` (Class D).
 
-use crate::{RiskClass, common::ValidationError};
+use crate::{RiskClass, auto_routing::SchedulerGate, common::ValidationError};
 use serde::{Deserialize, Serialize};
 
 /// Static conditions that a task must satisfy before a control plane may use
@@ -21,6 +21,8 @@ pub struct EligibilityPolicy {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub required_task_class: Option<String>,
     pub quality_floor: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scheduler_gate: Option<SchedulerGate>,
 }
 
 impl Default for EligibilityPolicy {
@@ -33,6 +35,7 @@ impl Default for EligibilityPolicy {
             allowed_providers: Vec::new(),
             required_task_class: None,
             quality_floor: 0.99,
+            scheduler_gate: None,
         }
     }
 }
@@ -142,6 +145,7 @@ mod tests {
             allowed_providers: vec!["provider-a".to_owned()],
             required_task_class: Some("coding".to_owned()),
             quality_floor: 0.99,
+            scheduler_gate: None,
         };
         let context = EligibilityContext {
             evaluated_tasks: 250,
@@ -169,5 +173,19 @@ mod tests {
             serde_json::from_str::<EligibilityResult>(&result_json).unwrap(),
             result
         );
+    }
+
+    #[test]
+    fn policy_without_scheduler_gate_remains_compatible() {
+        let json = r#"{
+            "min_evaluated_tasks": 200,
+            "min_confidence": 0.8,
+            "max_risk_class": "medium",
+            "quality_floor": 0.99
+        }"#;
+
+        let policy: EligibilityPolicy = serde_json::from_str(json).expect("legacy policy parses");
+
+        assert!(policy.scheduler_gate.is_none());
     }
 }

@@ -25,7 +25,7 @@ const MAX_RESPLIT_DEPTH: usize = 3;
 
 /// Partition with hub-exclusion. Falls back to a plain partition when the graph
 /// is too small or has no clear hubs.
-pub(super) fn partition_with_hub_exclusion(graph: &AdjGraph) -> Vec<usize> {
+pub fn partition_with_hub_exclusion(graph: &AdjGraph) -> Vec<usize> {
     let n = graph.node_count();
     if n == 0 {
         return Vec::new();
@@ -159,7 +159,7 @@ fn best_neighbor_community(graph: &AdjGraph, assignment: &[usize], node: usize) 
 /// Recursively re-partition communities that are oversized (more than
 /// `MAX_COMMUNITY_FRACTION` of all nodes) or have cohesion below
 /// `RESPLIT_MIN_COHESION`, up to `MAX_RESPLIT_DEPTH` levels.
-pub(super) fn split_oversized_and_incohesive(graph: &AdjGraph, assignment: &mut [usize]) {
+pub fn split_oversized_and_incohesive(graph: &AdjGraph, assignment: &mut [usize]) {
     resplit_pass(graph, assignment, 0);
 }
 

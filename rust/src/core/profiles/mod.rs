@@ -11,11 +11,10 @@
 
 mod builtins;
 mod loading;
-#[allow(dead_code)]
-mod types;
+pub mod types;
 
 pub(crate) use loading::*;
-pub(crate) use types::*;
+pub use types::*;
 
 #[cfg(test)]
 mod tests;

@@ -5,7 +5,7 @@ use crate::core::{events, pathjail, roles, secret_detection};
 /// Reads a file without following symlinks (TOCTOU protection).
 /// Falls back to regular read on non-Unix platforms.
 #[cfg(unix)]
-pub(crate) fn read_file_nofollow(path: &str) -> Result<String, std::io::Error> {
+pub fn read_file_nofollow(path: &str) -> Result<String, std::io::Error> {
     use std::os::unix::fs::OpenOptionsExt;
     let file = std::fs::OpenOptions::new()
         .read(true)
@@ -42,7 +42,7 @@ pub fn read_file_nofollow(path: &str) -> Result<String, std::io::Error> {
 
 /// Reads a file as lossy UTF-8, rejecting binary files.
 /// Uses O_NOFOLLOW on Unix to prevent TOCTOU symlink attacks.
-pub(crate) fn read_file_lossy(path: &str) -> Result<String, std::io::Error> {
+pub fn read_file_lossy(path: &str) -> Result<String, std::io::Error> {
     if crate::core::binary_detect::is_binary_file(path) {
         let msg = crate::core::binary_detect::binary_file_message(path);
         return Err(std::io::Error::other(msg));
@@ -53,7 +53,7 @@ pub(crate) fn read_file_lossy(path: &str) -> Result<String, std::io::Error> {
 /// A UTF-8 BOM is an encoding artifact, not content — leaking it corrupts the
 /// first line of every downstream view (limitations doc #11). Shared by both
 /// file readers (this module's and `tools::ctx_read::read_file_lossy`).
-pub(crate) fn strip_utf8_bom(s: String) -> String {
+pub fn strip_utf8_bom(s: String) -> String {
     match s.strip_prefix('\u{feff}') {
         Some(rest) => rest.to_owned(),
         None => s,
@@ -61,7 +61,7 @@ pub(crate) fn strip_utf8_bom(s: String) -> String {
 }
 
 /// Result of a file read with secret scanning applied.
-pub(crate) struct ScannedRead {
+pub struct ScannedRead {
     pub content: String,
     pub secret_matches: Vec<secret_detection::SecretMatch>,
     pub was_redacted: bool,
@@ -77,7 +77,7 @@ fn redact_for_role(config_redact: bool, role_name: &str) -> bool {
 /// - `enabled=true, redact=true`: returns redacted content + `was_redacted=true`
 /// - `role=regulated`: redacts detected secrets even when `redact=false`
 /// - `enabled=false`: returns original content, no scanning
-pub(crate) fn read_file_scanned(path: &str) -> Result<ScannedRead, std::io::Error> {
+pub fn read_file_scanned(path: &str) -> Result<ScannedRead, std::io::Error> {
     let raw = read_file_lossy(path)?;
     let cfg = crate::core::config::Config::load();
     let sd = &cfg.secret_detection;
@@ -119,7 +119,7 @@ pub(crate) fn read_file_scanned(path: &str) -> Result<ScannedRead, std::io::Erro
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum BoundaryMode {
+pub enum BoundaryMode {
     Warn,
     Enforce,
 }
@@ -133,7 +133,7 @@ impl BoundaryMode {
     }
 }
 
-pub(crate) fn boundary_mode_effective(role: &roles::Role) -> BoundaryMode {
+pub fn boundary_mode_effective(role: &roles::Role) -> BoundaryMode {
     if let Ok(v) = std::env::var("LEAN_CTX_IO_BOUNDARY_MODE")
         && !v.trim().is_empty()
     {
@@ -142,7 +142,7 @@ pub(crate) fn boundary_mode_effective(role: &roles::Role) -> BoundaryMode {
     BoundaryMode::parse(&role.io.boundary_mode)
 }
 
-pub(crate) fn is_secret_like(path: &Path) -> Option<&'static str> {
+pub fn is_secret_like(path: &Path) -> Option<&'static str> {
     let file = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
     let lower = file.to_lowercase();
 
@@ -222,10 +222,7 @@ pub(crate) fn is_secret_like(path: &Path) -> Option<&'static str> {
     None
 }
 
-pub(crate) fn check_secret_path_for_tool(
-    tool: &str,
-    path: &Path,
-) -> Result<Option<String>, String> {
+pub fn check_secret_path_for_tool(tool: &str, path: &Path) -> Result<Option<String>, String> {
     let role_name = roles::active_role_name();
     let role = roles::active_role();
     let mode = boundary_mode_effective(&role);
@@ -257,7 +254,7 @@ Role: {role_name}. To allow: switch role to 'admin' or set io.allow_secret_paths
     }
 }
 
-pub(crate) fn jail_and_check_path(
+pub fn jail_and_check_path(
     tool: &str,
     candidate: &Path,
     jail_root: &Path,
@@ -280,7 +277,7 @@ pub(crate) fn jail_and_check_path(
     Ok((jailed, warning))
 }
 
-pub(crate) fn ensure_ignore_gitignore_allowed(tool: &str) -> Result<(), String> {
+pub fn ensure_ignore_gitignore_allowed(tool: &str) -> Result<(), String> {
     let role_name = roles::active_role_name();
     let role = roles::active_role();
     if role.io.allow_ignore_gitignore {
@@ -299,7 +296,7 @@ Docs: https://leanctx.com/docs/security/#ignore-gitignore"
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]

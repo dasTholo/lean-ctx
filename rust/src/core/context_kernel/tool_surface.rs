@@ -6,7 +6,7 @@ use super::client_profile::ClientEfficiencyProfile;
 
 /// Schema metadata for one client-visible tool.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub(crate) struct ToolSchema {
+pub struct ToolSchema {
     /// Tool name exposed to the client.
     pub name: String,
     /// Human-readable explanation of the tool.
@@ -23,7 +23,7 @@ pub(crate) struct ToolSchema {
 
 /// Stability tier for a client-visible tool.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
-pub(crate) enum ToolCategory {
+pub enum ToolCategory {
     /// Tool belongs to the essential supported surface.
     #[default]
     Core,
@@ -37,7 +37,7 @@ pub(crate) enum ToolCategory {
 
 /// Metrics and tool names produced by surface optimization.
 #[derive(Debug, Clone)]
-pub(crate) struct SurfaceReduction {
+pub struct SurfaceReduction {
     /// Number of schemas before optimization.
     pub original_count: usize,
     /// Number of selected schemas.
@@ -57,7 +57,7 @@ pub(crate) struct SurfaceReduction {
 }
 
 /// Applies count, token, and lifecycle limits to a tool surface.
-pub(crate) struct ToolSurfaceOptimizer {
+pub struct ToolSurfaceOptimizer {
     max_tools: usize,
     max_schema_tokens: usize,
     exclude_deprecated: bool,
@@ -66,7 +66,7 @@ pub(crate) struct ToolSurfaceOptimizer {
 impl ToolSurfaceOptimizer {
     /// Creates an optimizer that excludes deprecated tools by default.
     #[must_use]
-    pub(crate) const fn new(max_tools: usize, max_schema_tokens: usize) -> Self {
+    pub const fn new(max_tools: usize, max_schema_tokens: usize) -> Self {
         Self {
             max_tools,
             max_schema_tokens,
@@ -76,7 +76,7 @@ impl ToolSurfaceOptimizer {
 
     /// Creates an optimizer using the tool budget advertised by a client profile.
     #[must_use]
-    pub(crate) fn from_profile(profile: &ClientEfficiencyProfile) -> Self {
+    pub fn from_profile(profile: &ClientEfficiencyProfile) -> Self {
         Self::new(
             profile.tool_budget.max_tools,
             profile.tool_budget.max_schema_tokens,
@@ -85,14 +85,14 @@ impl ToolSurfaceOptimizer {
 
     /// Configures whether deprecated tools are removed before selection.
     #[must_use]
-    pub(crate) const fn exclude_deprecated(mut self, exclude: bool) -> Self {
+    pub const fn exclude_deprecated(mut self, exclude: bool) -> Self {
         self.exclude_deprecated = exclude;
         self
     }
 
     /// Selects the highest-priority schemas that fit both configured budgets.
     #[must_use]
-    pub(crate) fn optimize(&self, schemas: &[ToolSchema]) -> SurfaceReduction {
+    pub fn optimize(&self, schemas: &[ToolSchema]) -> SurfaceReduction {
         let original_tokens: usize = schemas.iter().map(|schema| schema.token_count).sum();
         let mut ranked = schemas
             .iter()
@@ -145,7 +145,7 @@ impl ToolSurfaceOptimizer {
 
 /// Returns a compact copy of a tool schema and recalculates its token estimate.
 #[must_use]
-pub(crate) fn compress_schema(schema: &ToolSchema) -> ToolSchema {
+pub fn compress_schema(schema: &ToolSchema) -> ToolSchema {
     let description = schema.description.chars().take(100).collect::<String>();
     let parameters_json = strip_json_whitespace(&schema.parameters_json);
     let token_count = (schema.name.len() + description.len() + parameters_json.len()).div_ceil(4);
@@ -161,7 +161,7 @@ pub(crate) fn compress_schema(schema: &ToolSchema) -> ToolSchema {
 
 /// Formats headline surface-reduction metrics for logs and diagnostics.
 #[must_use]
-pub(crate) fn format_reduction_summary(reduction: &SurfaceReduction) -> String {
+pub fn format_reduction_summary(reduction: &SurfaceReduction) -> String {
     format!(
         "Reduced {}→{} tools, saved {} tokens ({:.1}%)",
         reduction.original_count,
@@ -200,7 +200,7 @@ fn strip_json_whitespace(json: &str) -> String {
 /// Called by the MCP server to reduce tool schema tokens based on
 /// the client's efficiency profile and broker decisions.
 #[must_use]
-pub(crate) fn optimize_for_request(
+pub fn optimize_for_request(
     headers: &[(String, String)],
     schemas: &[ToolSchema],
 ) -> SurfaceReduction {
@@ -211,19 +211,19 @@ pub(crate) fn optimize_for_request(
 
 /// Returns the token savings from tool surface optimization.
 #[must_use]
-pub(crate) const fn tool_savings_tokens(reduction: &SurfaceReduction) -> usize {
+pub const fn tool_savings_tokens(reduction: &SurfaceReduction) -> usize {
     reduction.tokens_saved
 }
 
 /// Returns true if tool surface optimization would save significant tokens.
 #[must_use]
-pub(crate) fn should_optimize_tools(headers: &[(String, String)], tool_count: usize) -> bool {
+pub fn should_optimize_tools(headers: &[(String, String)], tool_count: usize) -> bool {
     let profile = super::client_profile::detect_from_headers(headers);
     tool_count > profile.tool_budget.max_tools
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use crate::core::context_kernel::client_profile::{ProfileBuilder, ToolBudget};
 

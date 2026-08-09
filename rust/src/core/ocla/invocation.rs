@@ -209,13 +209,11 @@ pub trait CapabilityAdapter: Send + Sync {
 
 /// Create a stable content-addressed evidence reference without exposing data.
 #[must_use]
-#[allow(dead_code)]
 pub(crate) fn evidence_ref(content: &str) -> String {
     format!("blake3:{}", blake3::hash(content.as_bytes()).to_hex())
 }
 
 /// Enforce the invocation timeout after a synchronous adapter operation.
-#[allow(dead_code)]
 pub(crate) fn check_timeout(start: std::time::Instant, timeout_ms: u64) -> OclaResult<u64> {
     let elapsed_ms = start.elapsed().as_millis() as u64;
     if timeout_ms != 0 && elapsed_ms > timeout_ms {

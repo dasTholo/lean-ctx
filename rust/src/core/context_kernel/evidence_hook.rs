@@ -2,7 +2,7 @@
 
 /// Unified evidence totals across tool and proxy calls.
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
-pub(crate) struct EvidenceReport {
+pub struct EvidenceReport {
     /// Number of recorded MCP tool calls.
     pub tool_calls: usize,
     /// Number of recorded proxy calls.
@@ -18,7 +18,7 @@ pub(crate) struct EvidenceReport {
 }
 
 /// Records evidence for one MCP tool call when the kernel is enabled.
-pub(crate) fn record_tool_call(tool_name: &str, input_tokens: usize, output_tokens: usize) {
+pub fn record_tool_call(tool_name: &str, input_tokens: usize, output_tokens: usize) {
     if !super::kernel_config::is_enabled() {
         return;
     }
@@ -34,7 +34,7 @@ pub(crate) fn record_tool_call(tool_name: &str, input_tokens: usize, output_toke
 }
 
 /// Records evidence for one proxy-forwarded request when the kernel is enabled.
-pub(crate) fn record_proxy_call(
+pub fn record_proxy_call(
     input_tokens: usize,
     output_tokens: usize,
     tokens_saved: usize,
@@ -59,7 +59,7 @@ pub(crate) fn record_proxy_call(
 
 /// Returns unified evidence totals for the current process.
 #[must_use]
-pub(crate) fn evidence_report() -> EvidenceReport {
+pub fn evidence_report() -> EvidenceReport {
     let evidence = super::envelope_wiring::evidence_summary();
     let mcp = super::mcp_bridge::mcp_summary();
     let proxy = super::proxy_bridge::identity_summary();
@@ -86,14 +86,14 @@ pub(crate) fn evidence_report() -> EvidenceReport {
 }
 
 /// Clears all tool, proxy, and evidence-pipeline state.
-pub(crate) fn reset() {
+pub fn reset() {
     super::envelope_wiring::reset_evidence();
     super::proxy_bridge::reset_state();
     super::mcp_bridge::reset_mcp_state();
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::{EvidenceReport, evidence_report, record_proxy_call, record_tool_call, reset};
 
     fn isolated() -> std::sync::MutexGuard<'static, ()> {

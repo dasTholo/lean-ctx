@@ -17,7 +17,7 @@ pub struct ReadDedupSummary {
 
 /// Returns whether content deduplication should run for a ctx_read mode.
 #[must_use]
-pub(crate) fn should_dedup(mode: &str) -> bool {
+pub fn should_dedup(mode: &str) -> bool {
     super::kernel_config::is_enabled()
         && super::kernel_config::is_feature_enabled("content_dedup")
         && mode != "raw"
@@ -29,7 +29,7 @@ pub(crate) fn should_dedup(mode: &str) -> bool {
 /// disabled, when the `content_dedup` feature is off, or when the content
 /// has not been seen before.
 #[must_use]
-pub(crate) fn try_dedup(path: &str, content: &str, fresh: bool) -> Option<String> {
+pub fn try_dedup(path: &str, content: &str, fresh: bool) -> Option<String> {
     if fresh {
         // When fresh=true, invalidate the dedup fingerprint so the re-read is delivered.
         on_file_write(path);
@@ -44,14 +44,14 @@ pub(crate) fn try_dedup(path: &str, content: &str, fresh: bool) -> Option<String
     }
 }
 /// Invalidates deduplication state after a file write.
-pub(crate) fn on_file_write(path: &str) {
+pub fn on_file_write(path: &str) {
     // Wired from ctx_edit + ctx_patch post-write paths.
     dedup_wiring::invalidate(path);
 }
 
 /// Returns read-specific cumulative content-deduplication statistics.
 #[must_use]
-pub(crate) fn dedup_summary() -> ReadDedupSummary {
+pub fn dedup_summary() -> ReadDedupSummary {
     let stats = dedup_wiring::dedup_stats();
     ReadDedupSummary {
         total_reads: stats.total_checks,
@@ -62,12 +62,12 @@ pub(crate) fn dedup_summary() -> ReadDedupSummary {
 }
 
 /// Clears content-deduplication state and statistics.
-pub(crate) fn reset() {
+pub fn reset() {
     dedup_wiring::reset_dedup();
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use std::sync::MutexGuard;
 
     use super::{dedup_summary, on_file_write, reset, should_dedup, try_dedup};

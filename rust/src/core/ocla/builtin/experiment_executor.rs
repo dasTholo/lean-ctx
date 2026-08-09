@@ -9,55 +9,10 @@ use crate::core::ocla::types::{
     ExperimentOutcome, ExperimentRequest, ExperimentResult, ExperimentStopConditions,
     OclaCapability, OclaCapabilityKind, OclaResult,
 };
-use serde::{Deserialize, Serialize};
-
-// TODO(r19): replace with lean_ctx_protocol::*
-pub type CurrencyCode = String;
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MoneyV1 {
-    pub currency: CurrencyCode,
-    pub coefficient: i128,
-    pub scale: u8,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ExperimentArm {
-    Control,
-    Optimized,
-    Shadow,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum DataClassification {
-    Public,
-    Internal,
-    Confidential,
-    Restricted,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SideEffectPolicy {
-    NoSideEffects,
-    ReadOnly,
-    AllowWrites,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ExperimentAssignmentV1 {
-    pub experiment_id: String,
-    pub subject_id: String,
-    pub arm: ExperimentArm,
-    pub configuration_ref: String,
-    pub expires_at: String,
-    pub max_incremental_cost: MoneyV1,
-    pub allowed_providers: Vec<String>,
-    pub allowed_models: Vec<String>,
-    pub data_classification: DataClassification,
-    pub side_effect_policy: SideEffectPolicy,
-    pub kill_switch_ref: String,
-    pub signature: String,
-}
+pub use lean_ctx_protocol::{
+    CurrencyCode, DataClassification, ExperimentArm, ExperimentAssignmentV1, MoneyV1,
+    SideEffectPolicy,
+};
 
 /// Executes a deterministic bucketing rule from a signed assignment.
 /// The runtime does NOT decide experiments — it executes assignments.

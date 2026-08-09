@@ -10,7 +10,7 @@ const DEFAULT_LATENCY_BUDGET_MS: u64 = 30_000;
 
 /// MCP capabilities advertised by a client.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub(crate) struct McpFeatures {
+pub struct McpFeatures {
     /// Maximum number of tools the client can expose; zero means unspecified.
     pub tool_limit: usize,
     /// Whether the client supports MCP elicitation.
@@ -21,7 +21,7 @@ pub(crate) struct McpFeatures {
 
 /// Limits applied to the tool catalog sent to a client.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub(crate) struct ToolBudget {
+pub struct ToolBudget {
     /// Maximum number of tools to expose.
     pub max_tools: usize,
     /// Maximum combined size of tool schemas, in tokens.
@@ -31,7 +31,7 @@ pub(crate) struct ToolBudget {
 impl ToolBudget {
     /// Returns a practical tool budget for clients with no explicit limits.
     #[must_use]
-    pub(crate) const fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             max_tools: DEFAULT_MAX_TOOLS,
             max_schema_tokens: DEFAULT_MAX_SCHEMA_TOKENS,
@@ -41,7 +41,7 @@ impl ToolBudget {
 
 /// Client properties used to adapt context and tool delivery.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub(crate) struct ClientEfficiencyProfile {
+pub struct ClientEfficiencyProfile {
     /// Stable client identifier.
     pub client_id: String,
     /// Degree of control available over the client's context.
@@ -64,13 +64,13 @@ pub(crate) struct ClientEfficiencyProfile {
 
 /// Fluent builder for [`ClientEfficiencyProfile`].
 #[derive(Debug, Clone)]
-pub(crate) struct ProfileBuilder {
+pub struct ProfileBuilder {
     profile: ClientEfficiencyProfile,
 }
 
 impl ProfileBuilder {
     /// Creates a builder with conservative, production-ready defaults.
-    pub(crate) fn new(client_id: impl Into<String>) -> Self {
+    pub fn new(client_id: impl Into<String>) -> Self {
         Self {
             profile: ClientEfficiencyProfile {
                 client_id: client_id.into(),
@@ -88,70 +88,70 @@ impl ProfileBuilder {
 
     /// Sets the client's coverage class.
     #[must_use]
-    pub(crate) fn coverage(mut self, coverage: CoverageClass) -> Self {
+    pub fn coverage(mut self, coverage: CoverageClass) -> Self {
         self.profile.coverage = coverage;
         self
     }
 
     /// Sets the model family reported by the client.
     #[must_use]
-    pub(crate) fn model_family(mut self, model_family: impl Into<String>) -> Self {
+    pub fn model_family(mut self, model_family: impl Into<String>) -> Self {
         self.profile.model_family = Some(model_family.into());
         self
     }
 
     /// Sets the model context window in tokens.
     #[must_use]
-    pub(crate) fn context_window(mut self, context_window: usize) -> Self {
+    pub fn context_window(mut self, context_window: usize) -> Self {
         self.profile.context_window = context_window;
         self
     }
 
     /// Sets the tool catalog budget.
     #[must_use]
-    pub(crate) fn tool_budget(mut self, tool_budget: ToolBudget) -> Self {
+    pub fn tool_budget(mut self, tool_budget: ToolBudget) -> Self {
         self.profile.tool_budget = tool_budget;
         self
     }
 
     /// Sets supported MCP features.
     #[must_use]
-    pub(crate) fn mcp_features(mut self, mcp_features: McpFeatures) -> Self {
+    pub fn mcp_features(mut self, mcp_features: McpFeatures) -> Self {
         self.profile.mcp_features = mcp_features;
         self
     }
 
     /// Sets whether response streaming is supported.
     #[must_use]
-    pub(crate) fn streaming(mut self, supports_streaming: bool) -> Self {
+    pub fn streaming(mut self, supports_streaming: bool) -> Self {
         self.profile.supports_streaming = supports_streaming;
         self
     }
 
     /// Sets whether reusable context caching is supported.
     #[must_use]
-    pub(crate) fn caching(mut self, supports_caching: bool) -> Self {
+    pub fn caching(mut self, supports_caching: bool) -> Self {
         self.profile.supports_caching = supports_caching;
         self
     }
 
     /// Sets the target end-to-end latency budget in milliseconds.
     #[must_use]
-    pub(crate) fn latency_ms(mut self, latency_budget_ms: u64) -> Self {
+    pub fn latency_ms(mut self, latency_budget_ms: u64) -> Self {
         self.profile.latency_budget_ms = latency_budget_ms;
         self
     }
 
     /// Builds the client profile.
     #[must_use]
-    pub(crate) fn build(self) -> ClientEfficiencyProfile {
+    pub fn build(self) -> ClientEfficiencyProfile {
         self.profile
     }
 }
 
 /// Detects a client profile from case-insensitive transport headers.
 #[must_use]
-pub(crate) fn detect_from_headers(headers: &[(String, String)]) -> ClientEfficiencyProfile {
+pub fn detect_from_headers(headers: &[(String, String)]) -> ClientEfficiencyProfile {
     let mut builder = ProfileBuilder::new(DEFAULT_CLIENT_ID);
     for (name, value) in headers {
         if name.eq_ignore_ascii_case("x-client-id") {
@@ -169,7 +169,7 @@ pub(crate) fn detect_from_headers(headers: &[(String, String)]) -> ClientEfficie
 
 /// Merges non-default override fields into a base profile.
 #[must_use]
-pub(crate) fn merge_profiles(
+pub fn merge_profiles(
     base: &ClientEfficiencyProfile,
     override_: &ClientEfficiencyProfile,
 ) -> ClientEfficiencyProfile {
@@ -214,7 +214,7 @@ pub(crate) fn merge_profiles(
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     #[test]
     fn builder_defaults() {

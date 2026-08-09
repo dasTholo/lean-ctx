@@ -59,7 +59,7 @@ fn session_events() -> std::sync::MutexGuard<'static, Vec<TimestampedEvent>> {
 }
 
 /// Record an interruption event (either occurred or was prevented).
-pub(crate) fn record_interruption(event: InterruptionEvent, prevented: bool) {
+pub fn record_interruption(event: InterruptionEvent, prevented: bool) {
     let mut events = session_events();
     if events.len() >= MAX_SESSION_EVENTS {
         let remove_count = MAX_SESSION_EVENTS / 10;
@@ -73,7 +73,7 @@ pub(crate) fn record_interruption(event: InterruptionEvent, prevented: bool) {
 }
 
 /// Get all recorded interruption events for the current session.
-pub(crate) fn session_interruptions() -> Vec<(InterruptionEvent, bool)> {
+pub fn session_interruptions() -> Vec<(InterruptionEvent, bool)> {
     session_events()
         .iter()
         .map(|event| (event.event.clone(), event.prevented))
@@ -81,12 +81,12 @@ pub(crate) fn session_interruptions() -> Vec<(InterruptionEvent, bool)> {
 }
 
 /// Reset session tracking (called at session start).
-pub(crate) fn reset_session() {
+pub fn reset_session() {
     session_events().clear();
 }
 
 /// Count prevented interruptions by type.
-pub(crate) fn prevented_counts() -> PreventedCounts {
+pub fn prevented_counts() -> PreventedCounts {
     let events = session_events();
     let mut counts = PreventedCounts::default();
     for event in events.iter().filter(|event| event.prevented) {
@@ -108,7 +108,7 @@ pub(crate) fn prevented_counts() -> PreventedCounts {
 
 /// Prevented interruption totals, with token-based totals for token-bearing events.
 #[derive(Debug, Default)]
-pub(crate) struct PreventedCounts {
+pub struct PreventedCounts {
     /// Echo tokens prevented from being repeated.
     pub echo_prevented: u64,
     /// Redundant file reads prevented.
@@ -123,10 +123,10 @@ pub(crate) struct PreventedCounts {
 
 #[cfg(test)]
 /// Serializes tests that mutate the global session event store.
-pub(crate) static TEST_LOCK: Mutex<()> = Mutex::new(());
+pub static TEST_LOCK: Mutex<()> = Mutex::new(());
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use std::thread;
 
     use super::{

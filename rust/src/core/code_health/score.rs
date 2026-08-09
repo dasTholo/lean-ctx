@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 /// A single complexity hotspot surfaced to the agent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct Hotspot {
+pub struct Hotspot {
     pub file: String,
     pub symbol: String,
     /// 1-based start line.
@@ -21,7 +21,7 @@ pub(crate) struct Hotspot {
 
 /// Project-level navigability summary.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) struct NavigabilityScore {
+pub struct NavigabilityScore {
     /// 0–100, higher is healthier.
     pub score: u32,
     pub total_functions: usize,
@@ -39,7 +39,7 @@ pub(crate) struct NavigabilityScore {
 /// are `Copy`, including the borrowed hotspot slice) so it passes by value
 /// cheaply.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct NavigabilityInputs<'a> {
+pub struct NavigabilityInputs<'a> {
     pub functions_total: usize,
     pub over_threshold: usize,
     pub worst_cognitive: u32,
@@ -51,7 +51,7 @@ pub(crate) struct NavigabilityInputs<'a> {
 }
 
 /// Compute the navigability score from aggregated inputs. Deterministic.
-pub(crate) fn navigability(inputs: NavigabilityInputs) -> NavigabilityScore {
+pub fn navigability(inputs: NavigabilityInputs) -> NavigabilityScore {
     let density = if inputs.functions_total == 0 {
         0.0
     } else {
@@ -92,7 +92,7 @@ pub(crate) fn navigability(inputs: NavigabilityInputs) -> NavigabilityScore {
 }
 
 /// Letter grade for a navigability score, for compact display.
-pub(crate) fn grade(score: u32) -> char {
+pub fn grade(score: u32) -> char {
     match score {
         90..=100 => 'A',
         75..=89 => 'B',
@@ -103,7 +103,7 @@ pub(crate) fn grade(score: u32) -> char {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     fn inputs<'a>(total: usize, over: usize, worst: u32, cycles: usize) -> NavigabilityInputs<'a> {

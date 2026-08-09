@@ -15,7 +15,7 @@
 use std::collections::HashSet;
 
 #[derive(Debug, Clone)]
-pub(crate) struct SemanticChunk {
+pub struct SemanticChunk {
     pub lines: Vec<String>,
     pub kind: ChunkKind,
     pub relevance: f64,
@@ -24,7 +24,7 @@ pub(crate) struct SemanticChunk {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ChunkKind {
+pub enum ChunkKind {
     Imports,
     TypeDefinition,
     FunctionDef,
@@ -33,7 +33,7 @@ pub(crate) enum ChunkKind {
 }
 
 /// Detect semantic boundaries in content and group lines into chunks.
-pub(crate) fn detect_chunks(content: &str) -> Vec<SemanticChunk> {
+pub fn detect_chunks(content: &str) -> Vec<SemanticChunk> {
     let lines: Vec<&str> = content.lines().collect();
     if lines.is_empty() {
         return Vec::new();
@@ -129,7 +129,7 @@ pub(crate) fn detect_chunks(content: &str) -> Vec<SemanticChunk> {
 }
 
 /// Score chunks by task relevance and reorder for optimal attention flow.
-pub(crate) fn order_for_attention(
+pub fn order_for_attention(
     mut chunks: Vec<SemanticChunk>,
     task_keywords: &[String],
 ) -> Vec<SemanticChunk> {
@@ -216,7 +216,7 @@ pub(crate) fn order_for_attention(
 }
 
 /// Render chunks back to text with attention bridges.
-pub(crate) fn render_with_bridges(chunks: &[SemanticChunk]) -> String {
+pub fn render_with_bridges(chunks: &[SemanticChunk]) -> String {
     if chunks.is_empty() {
         return String::new();
     }
@@ -275,8 +275,8 @@ fn is_fn_start(line: &str) -> bool {
         "def ",
         "async def ",
         "func ",
-        "pub(crate) fn ",
-        "pub(super) fn ",
+        "pub fn ",
+        "pub fn ",
     ];
     starters.iter().any(|s| line.starts_with(s))
 }
@@ -339,7 +339,7 @@ fn extract_identifier(line: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]

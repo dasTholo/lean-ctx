@@ -91,7 +91,7 @@ impl std::str::FromStr for LayerKind {
 
 /// Content and metadata passed into a pipeline layer for processing.
 #[derive(Debug, Clone)]
-pub(crate) struct LayerInput {
+pub struct LayerInput {
     pub content: String,
     pub tokens: usize,
     pub metadata: HashMap<String, String>,
@@ -99,7 +99,7 @@ pub(crate) struct LayerInput {
 
 /// Result produced by a pipeline layer after processing.
 #[derive(Debug, Clone)]
-pub(crate) struct LayerOutput {
+pub struct LayerOutput {
     pub content: String,
     pub tokens: usize,
     pub metadata: HashMap<String, String>,
@@ -138,16 +138,13 @@ impl LayerMetrics {
 }
 
 /// A single processing stage in the compression pipeline.
-pub(crate) trait Layer {
+pub trait Layer {
     fn kind(&self) -> LayerKind;
     fn process(&self, input: LayerInput) -> LayerOutput;
 }
 
 /// Returns whether a given layer is enabled according to a profile's pipeline config.
-pub(crate) fn is_layer_enabled(
-    kind: LayerKind,
-    cfg: &crate::core::profiles::PipelineConfig,
-) -> bool {
+pub fn is_layer_enabled(kind: LayerKind, cfg: &crate::core::profiles::PipelineConfig) -> bool {
     match kind {
         LayerKind::Input | LayerKind::Autonomy | LayerKind::Delivery => true,
         LayerKind::Intent => cfg.intent_effective(),
@@ -158,24 +155,24 @@ pub(crate) fn is_layer_enabled(
 }
 
 /// A chain of processing layers that content flows through sequentially.
-pub(crate) struct Pipeline {
+pub struct Pipeline {
     layers: Vec<Box<dyn Layer>>,
 }
 
 impl Pipeline {
     /// Creates an empty pipeline with no layers.
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self { layers: Vec::new() }
     }
 
     /// Appends a processing layer to the pipeline (builder pattern).
-    pub(crate) fn add_layer(mut self, layer: Box<dyn Layer>) -> Self {
+    pub fn add_layer(mut self, layer: Box<dyn Layer>) -> Self {
         self.layers.push(layer);
         self
     }
 
     /// Appends a layer only if the profile's pipeline config allows it.
-    pub(crate) fn add_layer_if_enabled(
+    pub fn add_layer_if_enabled(
         self,
         layer: Box<dyn Layer>,
         cfg: &crate::core::profiles::PipelineConfig,
@@ -188,7 +185,7 @@ impl Pipeline {
     }
 
     /// Runs all layers in sequence, collecting per-layer metrics.
-    pub(crate) fn execute(&self, input: LayerInput) -> (LayerOutput, Vec<LayerMetrics>) {
+    pub fn execute(&self, input: LayerInput) -> (LayerOutput, Vec<LayerMetrics>) {
         let mut current = input;
         let mut metrics = Vec::new();
 
@@ -222,7 +219,7 @@ impl Pipeline {
     }
 
     /// Formats pipeline metrics as a human-readable summary with per-layer and total stats.
-    pub(crate) fn format_metrics(metrics: &[LayerMetrics]) -> String {
+    pub fn format_metrics(metrics: &[LayerMetrics]) -> String {
         let mut out = String::from("Pipeline Metrics:\n");
         let mut total_saved = 0usize;
         for m in metrics {
@@ -380,7 +377,7 @@ impl Default for Pipeline {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     /// GH #408 (XDG-3): `pipeline_stats.json` is runtime STATE and must persist

@@ -14,13 +14,13 @@ use std::{
 use crate::core::memory_policy::EpisodicPolicy;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct EpisodicStore {
+pub struct EpisodicStore {
     pub project_hash: String,
     pub episodes: Vec<Episode>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct Episode {
+pub struct Episode {
     pub id: String,
     pub session_id: String,
     pub timestamp: DateTime<Utc>,
@@ -36,7 +36,7 @@ pub(crate) struct Episode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct Action {
+pub struct Action {
     pub tool: String,
     pub description: String,
     pub timestamp: DateTime<Utc>,
@@ -45,7 +45,7 @@ pub(crate) struct Action {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub(crate) enum Outcome {
+pub enum Outcome {
     Success { tests_passed: bool },
     Failure { error: String },
     Partial { details: String },
@@ -53,7 +53,7 @@ pub(crate) enum Outcome {
 }
 
 impl Outcome {
-    pub(crate) fn label(&self) -> &'static str {
+    pub fn label(&self) -> &'static str {
         match self {
             Outcome::Success { .. } => "success",
             Outcome::Failure { .. } => "failure",
@@ -93,14 +93,14 @@ fn acquire_file_lock(path: &Path) -> Option<std::fs::File> {
 }
 
 impl EpisodicStore {
-    pub(crate) fn new(project_hash: &str) -> Self {
+    pub fn new(project_hash: &str) -> Self {
         Self {
             project_hash: project_hash.to_string(),
             episodes: Vec::new(),
         }
     }
 
-    pub(crate) fn record_episode(&mut self, mut episode: Episode, policy: &EpisodicPolicy) {
+    pub fn record_episode(&mut self, mut episode: Episode, policy: &EpisodicPolicy) {
         episode.actions.truncate(policy.max_actions_per_episode);
 
         if episode.summary.is_empty() {
@@ -115,7 +115,7 @@ impl EpisodicStore {
         }
     }
 
-    pub(crate) fn search(&self, query: &str) -> Vec<&Episode> {
+    pub fn search(&self, query: &str) -> Vec<&Episode> {
         let q = query.to_lowercase();
         let terms: Vec<&str> = q.split_whitespace().collect();
 
@@ -143,25 +143,25 @@ impl EpisodicStore {
         scored.into_iter().map(|(ep, _)| ep).collect()
     }
 
-    pub(crate) fn recent(&self, n: usize) -> Vec<&Episode> {
+    pub fn recent(&self, n: usize) -> Vec<&Episode> {
         self.episodes.iter().rev().take(n).collect()
     }
 
-    pub(crate) fn by_outcome(&self, outcome_label: &str) -> Vec<&Episode> {
+    pub fn by_outcome(&self, outcome_label: &str) -> Vec<&Episode> {
         self.episodes
             .iter()
             .filter(|ep| ep.outcome.label() == outcome_label)
             .collect()
     }
 
-    pub(crate) fn by_file(&self, file_path: &str) -> Vec<&Episode> {
+    pub fn by_file(&self, file_path: &str) -> Vec<&Episode> {
         self.episodes
             .iter()
             .filter(|ep| ep.affected_files.iter().any(|f| f.contains(file_path)))
             .collect()
     }
 
-    pub(crate) fn stats(&self) -> EpisodicStats {
+    pub fn stats(&self) -> EpisodicStats {
         let total = self.episodes.len();
         let successes = self
             .episodes
@@ -196,7 +196,7 @@ impl EpisodicStore {
         Some(dir.join(format!("{project_hash}.json")))
     }
 
-    pub(crate) fn load(project_hash: &str) -> Option<Self> {
+    pub fn load(project_hash: &str) -> Option<Self> {
         let path = Self::store_path(project_hash)?;
         let data = std::fs::read_to_string(path).ok()?;
         let mut store: Self = serde_json::from_str(&data).ok()?;
@@ -272,11 +272,11 @@ impl EpisodicStore {
         true
     }
 
-    pub(crate) fn load_or_create(project_hash: &str) -> Self {
+    pub fn load_or_create(project_hash: &str) -> Self {
         Self::load(project_hash).unwrap_or_else(|| Self::new(project_hash))
     }
 
-    pub(crate) fn mutate_locked<T>(
+    pub fn mutate_locked<T>(
         project_hash: &str,
         mutate: impl FnOnce(&mut Self) -> T,
     ) -> Result<(Self, T), String> {
@@ -298,7 +298,7 @@ impl EpisodicStore {
         Ok((store, result))
     }
 
-    pub(crate) fn save(&self) -> Result<(), String> {
+    pub fn save(&self) -> Result<(), String> {
         let path = Self::store_path(&self.project_hash)
             .ok_or_else(|| "Cannot determine data directory".to_string())?;
         if let Some(dir) = path.parent() {
@@ -310,7 +310,7 @@ impl EpisodicStore {
 }
 
 #[derive(Debug)]
-pub(crate) struct EpisodicStats {
+pub struct EpisodicStats {
     pub total_episodes: usize,
     pub successes: usize,
     pub failures: usize,
@@ -318,7 +318,7 @@ pub(crate) struct EpisodicStats {
     pub total_tokens: u64,
 }
 
-pub(crate) fn create_episode_from_session(
+pub fn create_episode_from_session(
     session: &super::session::SessionState,
     tool_calls: &[(String, u64)],
 ) -> Episode {
@@ -385,7 +385,7 @@ pub(crate) fn create_episode_from_session(
     }
 }
 
-pub(crate) fn record_session_episode(
+pub fn record_session_episode(
     project_hash: &str,
     session: &super::session::SessionState,
     tool_calls: &[(String, u64)],
@@ -429,7 +429,7 @@ pub(crate) fn record_session_episode(
 /// total), and `duration_secs` becomes the wall-clock span this task was the
 /// active one (since the previous episode, or since session start for the
 /// first).
-pub(crate) fn finalize_episode_metrics(
+pub fn finalize_episode_metrics(
     episode: &mut Episode,
     store: &EpisodicStore,
     session_started_at: DateTime<Utc>,
@@ -501,7 +501,7 @@ fn count_tools(actions: &[Action]) -> Vec<(String, usize)> {
     sorted
 }
 
-pub(crate) fn format_episode_compact(episode: &Episode) -> String {
+pub fn format_episode_compact(episode: &Episode) -> String {
     format!(
         "[{}] {} — {} ({} actions, {} files)",
         episode.outcome.label(),
@@ -513,7 +513,7 @@ pub(crate) fn format_episode_compact(episode: &Episode) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     fn make_episode(task: &str, outcome: Outcome) -> Episode {

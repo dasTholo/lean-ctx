@@ -7,7 +7,7 @@ use super::tracker::{prevented_counts, session_interruptions};
 
 /// Cognitive impact report for the current session.
 #[derive(Debug, Clone)]
-pub(crate) struct CognitiveImpactReport {
+pub struct CognitiveImpactReport {
     /// Total interruption events prevented.
     pub interruptions_prevented: u64,
     /// Context switches prevented (each saves ~23 min recovery time).
@@ -23,7 +23,7 @@ pub(crate) struct CognitiveImpactReport {
 }
 
 /// Compute cognitive impact report from session events.
-pub(crate) fn compute_impact() -> CognitiveImpactReport {
+pub fn compute_impact() -> CognitiveImpactReport {
     let counts = prevented_counts();
     let events = session_interruptions();
     let total_events = events.len() as u64;
@@ -54,7 +54,7 @@ pub(crate) fn compute_impact() -> CognitiveImpactReport {
 }
 
 /// Render the impact report as a compact text summary.
-fn render_impact_summary(report: &CognitiveImpactReport) -> String {
+pub fn render_impact_summary(report: &CognitiveImpactReport) -> String {
     format!(
         "Anti-Interruption Score: {:.0}%\n\
          Interruptions prevented: {}\n\
@@ -70,7 +70,7 @@ fn render_impact_summary(report: &CognitiveImpactReport) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::{compute_impact, render_impact_summary};
     use crate::core::anti_interrupt::tracker::{
         InterruptionEvent, TEST_LOCK, record_interruption, reset_session,

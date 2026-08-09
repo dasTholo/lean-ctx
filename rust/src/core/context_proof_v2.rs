@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum ClaimKind {
+pub enum ClaimKind {
     PathValidity,
     ApiInvariant,
     SecretPolicy,
@@ -31,7 +31,7 @@ pub(crate) enum ClaimKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum VerifierKind {
+pub enum VerifierKind {
     Deterministic,
     Ast,
     PathPolicy,
@@ -45,7 +45,7 @@ pub(crate) enum VerifierKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum ClaimStatus {
+pub enum ClaimStatus {
     Proved,
     Passed,
     Failed,
@@ -54,7 +54,7 @@ pub(crate) enum ClaimStatus {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub(crate) enum QualityLevel {
+pub enum QualityLevel {
     #[serde(rename = "0_provenance")]
     Provenance = 0,
     #[serde(rename = "1_deterministic")]
@@ -68,7 +68,7 @@ pub(crate) enum QualityLevel {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct Claim {
+pub struct Claim {
     pub id: String,
     pub text: String,
     pub kind: ClaimKind,
@@ -83,7 +83,7 @@ pub(crate) struct Claim {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct ContextProofV2 {
+pub struct ContextProofV2 {
     pub proof_version: String,
     pub run_id: String,
     pub created_at: String,
@@ -96,7 +96,7 @@ pub(crate) struct ContextProofV2 {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct ProofSummary {
+pub struct ProofSummary {
     pub total_claims: usize,
     pub proved: usize,
     pub passed: usize,
@@ -106,7 +106,7 @@ pub(crate) struct ProofSummary {
 }
 
 impl ContextProofV2 {
-    pub(crate) fn new(run_id: String, session_id: Option<String>) -> Self {
+    pub fn new(run_id: String, session_id: Option<String>) -> Self {
         Self {
             proof_version: "ContextProofV2".to_string(),
             run_id,
@@ -119,12 +119,12 @@ impl ContextProofV2 {
         }
     }
 
-    pub(crate) fn add_claim(&mut self, claim: Claim) {
+    pub fn add_claim(&mut self, claim: Claim) {
         self.claims.push(claim);
         self.recompute();
     }
 
-    pub(crate) fn recompute(&mut self) {
+    pub fn recompute(&mut self) {
         let mut proved = 0;
         let mut passed = 0;
         let mut failed = 0;
@@ -180,7 +180,7 @@ impl ContextProofV2 {
 }
 
 impl ProofSummary {
-    pub(crate) fn empty() -> Self {
+    pub fn empty() -> Self {
         Self {
             total_claims: 0,
             proved: 0,
@@ -192,7 +192,7 @@ impl ProofSummary {
     }
 }
 
-pub(crate) fn deterministic_claim(id: &str, text: &str, passed: bool) -> Claim {
+pub fn deterministic_claim(id: &str, text: &str, passed: bool) -> Claim {
     Claim {
         id: id.to_string(),
         text: text.to_string(),
@@ -209,7 +209,7 @@ pub(crate) fn deterministic_claim(id: &str, text: &str, passed: bool) -> Claim {
     }
 }
 
-pub(crate) fn policy_claim(id: &str, text: &str, kind: ClaimKind, passed: bool) -> Claim {
+pub fn policy_claim(id: &str, text: &str, kind: ClaimKind, passed: bool) -> Claim {
     Claim {
         id: id.to_string(),
         text: text.to_string(),
@@ -226,7 +226,7 @@ pub(crate) fn policy_claim(id: &str, text: &str, kind: ClaimKind, passed: bool) 
     }
 }
 
-pub(crate) fn lean_proved_claim(id: &str, text: &str, kind: ClaimKind, theorem: &str) -> Claim {
+pub fn lean_proved_claim(id: &str, text: &str, kind: ClaimKind, theorem: &str) -> Claim {
     Claim {
         id: id.to_string(),
         text: text.to_string(),
@@ -244,7 +244,7 @@ pub(crate) fn lean_proved_claim(id: &str, text: &str, kind: ClaimKind, theorem: 
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]

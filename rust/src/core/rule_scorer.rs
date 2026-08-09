@@ -13,7 +13,7 @@ const DEFAULT_THRESHOLD: f64 = 0.15;
 
 /// A parsed agent rule with metadata.
 #[derive(Debug, Clone)]
-pub(crate) struct AgentRule {
+pub struct AgentRule {
     pub id: String,
     pub source_path: String,
     pub content: String,
@@ -24,7 +24,7 @@ pub(crate) struct AgentRule {
 
 /// Scoring result for a rule.
 #[derive(Debug, Clone)]
-pub(crate) struct ScoredRule {
+pub struct ScoredRule {
     pub rule: AgentRule,
     pub score: f64,
     pub injected: bool,
@@ -32,7 +32,7 @@ pub(crate) struct ScoredRule {
 
 /// Context signals from the current agent session.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct SessionContext {
+pub struct SessionContext {
     pub open_files: Vec<String>,
     pub recent_tool_calls: Vec<String>,
     pub working_directory: String,
@@ -41,7 +41,7 @@ pub(crate) struct SessionContext {
 
 /// Result of rule scoring and budget allocation.
 #[derive(Debug)]
-pub(crate) struct BudgetAllocation {
+pub struct BudgetAllocation {
     pub injected: Vec<ScoredRule>,
     pub dormant: Vec<ScoredRule>,
     pub total_tokens_injected: usize,
@@ -50,7 +50,7 @@ pub(crate) struct BudgetAllocation {
 }
 
 /// Score and allocate rules against a token budget.
-pub(crate) fn allocate_rules(
+pub fn allocate_rules(
     rules: &[AgentRule],
     context: &SessionContext,
     budget_tokens: usize,
@@ -206,7 +206,7 @@ fn path_matches_glob(path: &str, glob: &str) -> bool {
 }
 
 /// Parse an agent rule from raw content and source path.
-pub(crate) fn parse_rule(id: &str, source_path: &str, content: &str) -> AgentRule {
+pub fn parse_rule(id: &str, source_path: &str, content: &str) -> AgentRule {
     let path_globs = extract_path_globs(content);
     let keywords = extract_rule_keywords(content);
     let tokens = content.len() / CHARS_PER_TOKEN;
@@ -251,7 +251,7 @@ fn extract_path_globs(content: &str) -> Vec<String> {
 }
 
 /// Extract meaningful keywords from rule content.
-pub(crate) fn extract_rule_keywords(content: &str) -> Vec<String> {
+pub fn extract_rule_keywords(content: &str) -> Vec<String> {
     let mut tf: BTreeMap<String, usize> = BTreeMap::new();
 
     for word in content.split(|c: char| !c.is_alphanumeric() && c != '_' && c != '-') {
@@ -279,7 +279,7 @@ fn is_common_word(word: &str) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     fn make_rule(id: &str, content: &str, globs: &[&str]) -> AgentRule {

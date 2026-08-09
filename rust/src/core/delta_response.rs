@@ -6,7 +6,7 @@
 
 /// A minimal unified-diff-style delta between two versions.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct DeltaResponse {
+pub struct DeltaResponse {
     pub path: String,
     pub hunks: Vec<Hunk>,
     pub lines_changed: usize,
@@ -15,7 +15,7 @@ pub(crate) struct DeltaResponse {
 
 /// A single change hunk.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Hunk {
+pub struct Hunk {
     pub old_start: usize,
     pub new_start: usize,
     pub context_before: Vec<String>,
@@ -26,7 +26,7 @@ pub(crate) struct Hunk {
 
 impl DeltaResponse {
     /// Format as a compact delta for the agent.
-    pub(crate) fn format(&self) -> String {
+    pub fn format(&self) -> String {
         if self.hunks.is_empty() {
             return format!("[unchanged: {} — no edits detected]", self.path);
         }
@@ -61,7 +61,7 @@ impl DeltaResponse {
     }
 
     /// Token savings from delivering delta instead of full content.
-    pub(crate) fn savings_ratio(&self) -> f64 {
+    pub fn savings_ratio(&self) -> f64 {
         let total = self.lines_changed + self.lines_unchanged;
         if total == 0 {
             return 0.0;
@@ -95,7 +95,7 @@ fn find_sync_point(old: &[&str], new: &[&str], max_look: usize) -> Option<(usize
 ///
 /// Uses a simple line-diff algorithm: identifies changed regions
 /// with minimal context lines around each change.
-pub(crate) fn compute_delta(
+pub fn compute_delta(
     path: &str,
     old_content: &str,
     new_content: &str,
@@ -180,7 +180,7 @@ pub(crate) fn compute_delta(
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]

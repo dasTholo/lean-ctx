@@ -8,14 +8,14 @@ use crate::core::git_util::{git_dirty, git_out};
 use crate::core::graph_provider::{self, GraphProvider};
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ExportOptions {
+pub struct ExportOptions {
     pub include_deps_graph: bool,
     pub max_nodes: usize,
     pub max_edges: usize,
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct ContextArtifacts {
+pub struct ContextArtifacts {
     pub generated_at_ms: u64,
     pub project_root: String,
     pub git: GitInfo,
@@ -25,21 +25,21 @@ pub(crate) struct ContextArtifacts {
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct GitInfo {
+pub struct GitInfo {
     pub head: Option<String>,
     pub branch: Option<String>,
     pub dirty: bool,
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct IndexSummary {
+pub struct IndexSummary {
     pub graph_index: GraphIndexSummary,
     pub bm25_index: Bm25IndexSummary,
     pub property_graph: PropertyGraphSummary,
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct GraphIndexSummary {
+pub struct GraphIndexSummary {
     pub files: usize,
     pub symbols: usize,
     pub edges: usize,
@@ -48,14 +48,14 @@ pub(crate) struct GraphIndexSummary {
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct Bm25IndexSummary {
+pub struct Bm25IndexSummary {
     pub files: usize,
     pub chunks: usize,
     pub index_file: String,
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct PropertyGraphSummary {
+pub struct PropertyGraphSummary {
     pub exists: bool,
     pub db_path: String,
     pub nodes: Option<usize>,
@@ -63,25 +63,25 @@ pub(crate) struct PropertyGraphSummary {
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct DepsGraph {
+pub struct DepsGraph {
     pub nodes: Vec<String>,
     pub edges: Vec<DepsEdge>,
     pub truncated: bool,
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct DepsEdge {
+pub struct DepsEdge {
     pub from: String,
     pub to: String,
     pub kind: String,
 }
 
-pub(crate) fn export_json(project_root: &Path, opts: &ExportOptions) -> Result<String, String> {
+pub fn export_json(project_root: &Path, opts: &ExportOptions) -> Result<String, String> {
     let artifacts = build(project_root, opts)?;
     serde_json::to_string_pretty(&artifacts).map_err(|e| e.to_string())
 }
 
-pub(crate) fn build(project_root: &Path, opts: &ExportOptions) -> Result<ContextArtifacts, String> {
+pub fn build(project_root: &Path, opts: &ExportOptions) -> Result<ContextArtifacts, String> {
     let root_s = project_root.to_string_lossy().to_string();
 
     let git = git_info(project_root);

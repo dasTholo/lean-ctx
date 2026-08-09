@@ -12,7 +12,7 @@
 
 use std::collections::VecDeque;
 
-pub(crate) const KEEP_DATA_DIVISOR: usize = 2;
+pub const KEEP_DATA_DIVISOR: usize = 2;
 const MIN_HTML_BYTES: usize = 5000;
 const MAX_EXTRACTED_TOKENS: usize = 8000;
 const CHARS_PER_TOKEN_ESTIMATE: usize = 4;
@@ -20,7 +20,7 @@ const TRACKING_QUERY_KEYS: &[&str] = &["fbclid", "gclid", "mc_cid", "mc_eid", "_
 
 /// A code block extracted from the selected article body.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CodeBlock {
+pub struct CodeBlock {
     /// Language hint from `class="language-*"`/`class="lang-*"`, or empty.
     pub language: String,
     /// Verbatim text inside the `<pre>`/`<code>` element.
@@ -29,7 +29,7 @@ pub(crate) struct CodeBlock {
 
 /// Article metadata found in document `<meta>`, `<link>`, and `<time>` nodes.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct ArticleMeta {
+pub struct ArticleMeta {
     pub author: Option<String>,
     pub date: Option<String>,
     pub url: Option<String>,
@@ -37,7 +37,7 @@ pub(crate) struct ArticleMeta {
 
 /// Deterministic article extraction result.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ExtractionResult {
+pub struct ExtractionResult {
     pub title: Option<String>,
     pub content: String,
     pub code_blocks: Vec<CodeBlock>,
@@ -49,7 +49,7 @@ pub(crate) struct ExtractionResult {
 impl ExtractionResult {
     /// Render the compact one-line source marker used by shell/proxy callers.
     #[must_use]
-    pub(crate) fn metadata_line(&self) -> Option<String> {
+    pub fn metadata_line(&self) -> Option<String> {
         let mut fields = Vec::new();
         if let Some(url) = self.metadata.url.as_deref() {
             fields.push(url);
@@ -65,14 +65,14 @@ impl ExtractionResult {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct CrushResult {
+pub struct CrushResult {
     pub text: String,
     pub lossless: bool,
     pub original_bytes: usize,
     pub extracted_tokens: usize,
 }
 
-pub(crate) fn is_html_content(content: &str) -> bool {
+pub fn is_html_content(content: &str) -> bool {
     let trimmed = content.trim_start().to_ascii_lowercase();
     trimmed.starts_with("<!doctype")
         || trimmed.starts_with("<html")
@@ -80,7 +80,7 @@ pub(crate) fn is_html_content(content: &str) -> bool {
         || (trimmed.contains("<head") && trimmed.contains("<body"))
 }
 
-pub(crate) fn crush_if_beneficial(html: &str) -> Option<CrushResult> {
+pub fn crush_if_beneficial(html: &str) -> Option<CrushResult> {
     if html.len() < MIN_HTML_BYTES {
         return None;
     }
@@ -130,12 +130,12 @@ pub(crate) fn crush_if_beneficial(html: &str) -> Option<CrushResult> {
     })
 }
 
-pub(crate) fn extract_article(html: &str) -> String {
+pub fn extract_article(html: &str) -> String {
     extract_article_content(html).content
 }
 
 /// Extract selected article content, metadata, and sacred code blocks.
-pub(crate) fn extract_article_content(html: &str) -> ExtractionResult {
+pub fn extract_article_content(html: &str) -> ExtractionResult {
     let tokens = tokenize(html);
     let nodes = build_tree(&tokens);
     let article = select_main_content(&nodes);
@@ -1143,7 +1143,7 @@ fn collapse_whitespace(text: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]
@@ -1255,7 +1255,7 @@ mod tests {
 }
 
 #[cfg(test)]
-mod edge_tests {
+pub mod edge_tests {
     use super::*;
 
     #[test]

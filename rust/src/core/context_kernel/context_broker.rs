@@ -9,7 +9,7 @@ use super::coverage_class::CoverageClass;
 
 /// Detail level used when supplying source context to a client.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub(crate) enum ContextMode {
+pub enum ContextMode {
     /// Supply only a manifest of available context.
     ManifestOnly,
     /// Supply symbol signatures and a structural map.
@@ -23,7 +23,7 @@ pub(crate) enum ContextMode {
 
 /// Representation used for broker output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub(crate) enum OutputFormat {
+pub enum OutputFormat {
     /// Return a compact typed result.
     TypedResult,
     /// Return a natural-language summary.
@@ -35,7 +35,7 @@ pub(crate) enum OutputFormat {
 
 /// Tool metadata used for budget-aware selection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct ToolDescriptor {
+pub struct ToolDescriptor {
     /// Tool name exposed to the client.
     pub name: String,
     /// Tokens consumed by the tool schema.
@@ -46,7 +46,7 @@ pub(crate) struct ToolDescriptor {
 
 /// Token allocation computed for a client context window.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct BrokerBudget {
+pub struct BrokerBudget {
     /// Tokens allocated to request context.
     pub context_tokens: usize,
     /// Tokens allocated to kernel instructions.
@@ -56,18 +56,18 @@ pub(crate) struct BrokerBudget {
 }
 
 /// Selects context resources according to client efficiency constraints.
-pub(crate) struct ContextBroker {
+pub struct ContextBroker {
     profile: ClientEfficiencyProfile,
 }
 
 impl ContextBroker {
     /// Creates a broker for a client efficiency profile.
-    pub(crate) fn new(profile: ClientEfficiencyProfile) -> Self {
+    pub fn new(profile: ClientEfficiencyProfile) -> Self {
         Self { profile }
     }
 
     /// Selects highest-priority tools within count and schema-token limits.
-    pub(crate) fn select_tools(&self, available: &[ToolDescriptor]) -> Vec<ToolDescriptor> {
+    pub fn select_tools(&self, available: &[ToolDescriptor]) -> Vec<ToolDescriptor> {
         let mut ranked = available.to_vec();
         ranked.sort_unstable_by_key(|tool| Reverse(tool.priority));
 
@@ -87,7 +87,7 @@ impl ContextBroker {
     }
 
     /// Selects context detail from the client's context-window size.
-    pub(crate) fn select_context_mode(&self) -> ContextMode {
+    pub fn select_context_mode(&self) -> ContextMode {
         match self.profile.context_window {
             128_000.. => ContextMode::FullText,
             64_000.. => ContextMode::RelevantLines,
@@ -97,7 +97,7 @@ impl ContextBroker {
     }
 
     /// Splits the context window 70/10/20 between context, kernel, and schemas.
-    pub(crate) fn compute_budget(&self) -> BrokerBudget {
+    pub fn compute_budget(&self) -> BrokerBudget {
         let window = self.profile.context_window;
         BrokerBudget {
             context_tokens: window.saturating_mul(70) / 100,
@@ -107,12 +107,12 @@ impl ContextBroker {
     }
 
     /// Returns whether a small context window should use indirect handles.
-    pub(crate) fn should_use_handles(&self) -> bool {
+    pub fn should_use_handles(&self) -> bool {
         self.profile.context_window < 32_000
     }
 
     /// Selects the output representation supported by the coverage class.
-    pub(crate) fn select_output_format(&self) -> OutputFormat {
+    pub fn select_output_format(&self) -> OutputFormat {
         match self.profile.coverage {
             CoverageClass::FullInline => OutputFormat::TypedResult,
             CoverageClass::ContextControlled => OutputFormat::Summary,
@@ -122,7 +122,7 @@ impl ContextBroker {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::{ContextBroker, ContextMode, OutputFormat, ToolDescriptor};
     use crate::core::context_kernel::client_profile::{ProfileBuilder, ToolBudget};
     use crate::core::context_kernel::coverage_class::CoverageClass;

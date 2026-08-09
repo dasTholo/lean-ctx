@@ -9,25 +9,25 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum IndexComponent {
+pub enum IndexComponent {
     Graph,
     Bm25,
     Semantic,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) struct ProgressSnapshot {
+pub struct ProgressSnapshot {
     pub done: u64,
     pub total: u64,
 }
 
 impl ProgressSnapshot {
     /// `true` when a known total exists (determinate bar).
-    pub(crate) fn is_determinate(&self) -> bool {
+    pub fn is_determinate(&self) -> bool {
         self.total > 0
     }
 
-    pub(crate) fn percent(&self) -> Option<u8> {
+    pub fn percent(&self) -> Option<u8> {
         if self.total == 0 {
             return None;
         }
@@ -37,14 +37,14 @@ impl ProgressSnapshot {
 }
 
 /// Clears the component counter when dropped (including panic unwind).
-pub(crate) struct ProgressGuard {
+pub struct ProgressGuard {
     root: String,
     component: IndexComponent,
     cleared: bool,
 }
 
 impl ProgressGuard {
-    pub(crate) fn new(root: impl Into<String>, component: IndexComponent) -> Self {
+    pub fn new(root: impl Into<String>, component: IndexComponent) -> Self {
         Self {
             root: root.into(),
             component,
@@ -52,12 +52,12 @@ impl ProgressGuard {
         }
     }
 
-    pub(crate) fn report(&self, done: u64, total: u64) {
+    pub fn report(&self, done: u64, total: u64) {
         report(&self.root, self.component, done, total);
     }
 
     /// Disable auto-clear (rarely needed).
-    pub(crate) fn disarm(mut self) {
+    pub fn disarm(mut self) {
         self.cleared = true;
     }
 }
@@ -79,7 +79,7 @@ fn map() -> &'static Mutex<ProgressMap> {
 
 /// Report progress for a project root + component.
 /// `total == 0` means indeterminate (spinner / bouncing arrow).
-pub(crate) fn report(root: &str, component: IndexComponent, done: u64, total: u64) {
+pub fn report(root: &str, component: IndexComponent, done: u64, total: u64) {
     let mut g = map()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -89,7 +89,7 @@ pub(crate) fn report(root: &str, component: IndexComponent, done: u64, total: u6
     );
 }
 
-pub(crate) fn get(root: &str, component: IndexComponent) -> ProgressSnapshot {
+pub fn get(root: &str, component: IndexComponent) -> ProgressSnapshot {
     let g = map()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -98,14 +98,14 @@ pub(crate) fn get(root: &str, component: IndexComponent) -> ProgressSnapshot {
         .unwrap_or_default()
 }
 
-pub(crate) fn clear(root: &str, component: IndexComponent) {
+pub fn clear(root: &str, component: IndexComponent) {
     let mut g = map()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     g.remove(&(root.to_string(), component));
 }
 
-pub(crate) fn clear_root(root: &str) {
+pub fn clear_root(root: &str) {
     let mut g = map()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -113,12 +113,12 @@ pub(crate) fn clear_root(root: &str) {
 }
 
 /// Convenience for BM25 file-count progress (avoids repeating the component).
-pub(crate) fn report_bm25(root: &str, done: u64, total: u64) {
+pub fn report_bm25(root: &str, done: u64, total: u64) {
     report(root, IndexComponent::Bm25, done, total);
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]

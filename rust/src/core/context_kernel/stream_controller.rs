@@ -8,14 +8,14 @@ const PREFIX_LINES: usize = 10;
 
 /// Identifies a tracked append stream.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct StreamRef {
+pub struct StreamRef {
     pub source_id: String,
     pub stream_type: StreamType,
 }
 
 /// Classifies an append stream by its source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum StreamType {
+pub enum StreamType {
     Terminal,
     BuildLog,
     FileWatch,
@@ -24,7 +24,7 @@ pub(crate) enum StreamType {
 
 /// Tracks cursors and identity data for one stream generation.
 #[derive(Debug, Clone)]
-pub(crate) struct StreamState {
+pub struct StreamState {
     pub generation: u64,
     pub line_cursor: usize,
     pub byte_cursor: usize,
@@ -35,7 +35,7 @@ pub(crate) struct StreamState {
 
 /// Minimal update needed to synchronize a stream consumer.
 #[derive(Debug, Clone)]
-pub(crate) enum StreamDelta {
+pub enum StreamDelta {
     /// Content unchanged since last check — deliver nothing.
     Unchanged,
     /// New lines appended — deliver only the new portion.
@@ -53,7 +53,7 @@ pub(crate) enum StreamDelta {
 }
 
 /// Tracks append streams and computes minimal synchronization deltas.
-pub(crate) struct StreamController {
+pub struct StreamController {
     streams: HashMap<StreamRef, StreamState>,
     max_tracked: usize,
     expiry: Duration,
@@ -61,7 +61,7 @@ pub(crate) struct StreamController {
 
 impl StreamController {
     /// Creates a controller with bounded tracking and expiry in seconds.
-    pub(crate) fn new(max_tracked: usize, expiry_secs: u64) -> Self {
+    pub fn new(max_tracked: usize, expiry_secs: u64) -> Self {
         Self {
             streams: HashMap::new(),
             max_tracked,
@@ -70,7 +70,7 @@ impl StreamController {
     }
 
     /// Compares current content with tracked state and returns its minimal delta.
-    pub(crate) fn compute_delta(
+    pub fn compute_delta(
         &mut self,
         stream_ref: &StreamRef,
         current_content: &[String],
@@ -121,7 +121,7 @@ impl StreamController {
     }
 
     /// Removes expired streams and returns the number removed.
-    pub(crate) fn gc(&mut self) -> usize {
+    pub fn gc(&mut self) -> usize {
         let before = self.streams.len();
         let expiry = self.expiry;
         self.streams
@@ -130,7 +130,7 @@ impl StreamController {
     }
 
     /// Returns the number of actively tracked streams.
-    pub(crate) fn tracked_count(&self) -> usize {
+    pub fn tracked_count(&self) -> usize {
         self.streams.len()
     }
 
@@ -191,7 +191,7 @@ fn rotation(content: &[String], reason: &str) -> StreamDelta {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     fn stream_ref() -> StreamRef {

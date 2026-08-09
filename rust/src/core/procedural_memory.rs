@@ -13,13 +13,13 @@ use super::episodic_memory::{Episode, Outcome};
 use crate::core::memory_policy::ProceduralPolicy;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct ProceduralStore {
+pub struct ProceduralStore {
     pub project_hash: String,
     pub procedures: Vec<Procedure>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct Procedure {
+pub struct Procedure {
     pub id: String,
     pub name: String,
     pub description: String,
@@ -34,7 +34,7 @@ pub(crate) struct Procedure {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub(crate) struct ProcedureStep {
+pub struct ProcedureStep {
     pub tool: String,
     pub description: String,
     pub optional: bool,
@@ -44,7 +44,7 @@ pub(crate) struct ProcedureStep {
 /// success-rate and usage component. The single ranking used by both the
 /// per-write reclaim ([`ProceduralStore::add_procedure`]) and the consolidation
 /// capacity pass, so procedure eviction is consistent everywhere (#995).
-pub(crate) fn retention_score(p: &Procedure) -> f32 {
+pub fn retention_score(p: &Procedure) -> f32 {
     let use_score = (p.times_used.min(20) as f32) / 20.0;
     p.confidence * 0.5 + p.success_rate() * 0.3 + use_score * 0.2
 }
@@ -52,7 +52,7 @@ pub(crate) fn retention_score(p: &Procedure) -> f32 {
 /// Order procedures best-kept first (descending retention), deterministically.
 /// Pass to [`crate::core::memory_capacity::reclaim_store`], which archives the
 /// lowest-ranked tail.
-pub(crate) fn retention_cmp(a: &Procedure, b: &Procedure) -> std::cmp::Ordering {
+pub fn retention_cmp(a: &Procedure, b: &Procedure) -> std::cmp::Ordering {
     retention_score(b)
         .total_cmp(&retention_score(a))
         .then_with(|| b.last_used.cmp(&a.last_used))
@@ -62,14 +62,14 @@ pub(crate) fn retention_cmp(a: &Procedure, b: &Procedure) -> std::cmp::Ordering 
 }
 
 impl Procedure {
-    pub(crate) fn success_rate(&self) -> f32 {
+    pub fn success_rate(&self) -> f32 {
         if self.times_used == 0 {
             return 0.0;
         }
         self.times_succeeded as f32 / self.times_used as f32
     }
 
-    pub(crate) fn matches_context(&self, task: &str) -> bool {
+    pub fn matches_context(&self, task: &str) -> bool {
         let task_lower = task.to_lowercase();
         self.activation_keywords
             .iter()
@@ -78,14 +78,14 @@ impl Procedure {
 }
 
 impl ProceduralStore {
-    pub(crate) fn new(project_hash: &str) -> Self {
+    pub fn new(project_hash: &str) -> Self {
         Self {
             project_hash: project_hash.to_string(),
             procedures: Vec::new(),
         }
     }
 
-    pub(crate) fn suggest(&self, task: &str) -> Vec<&Procedure> {
+    pub fn suggest(&self, task: &str) -> Vec<&Procedure> {
         let mut matches: Vec<(&Procedure, f32)> = self
             .procedures
             .iter()
@@ -100,7 +100,7 @@ impl ProceduralStore {
         matches.into_iter().map(|(p, _)| p).collect()
     }
 
-    pub(crate) fn record_usage(&mut self, procedure_id: &str, success: bool) {
+    pub fn record_usage(&mut self, procedure_id: &str, success: bool) {
         if let Some(proc) = self.procedures.iter_mut().find(|p| p.id == procedure_id) {
             proc.times_used += 1;
             if success {
@@ -112,7 +112,7 @@ impl ProceduralStore {
         }
     }
 
-    pub(crate) fn add_procedure(&mut self, procedure: Procedure, policy: &ProceduralPolicy) {
+    pub fn add_procedure(&mut self, procedure: Procedure, policy: &ProceduralPolicy) {
         if let Some(existing) = self
             .procedures
             .iter_mut()
@@ -144,7 +144,7 @@ impl ProceduralStore {
         }
     }
 
-    pub(crate) fn detect_patterns(&mut self, episodes: &[Episode], policy: &ProceduralPolicy) {
+    pub fn detect_patterns(&mut self, episodes: &[Episode], policy: &ProceduralPolicy) {
         let sequences = extract_tool_sequences(episodes);
         let patterns = find_repeated_sequences(&sequences, policy);
 
@@ -192,17 +192,17 @@ impl ProceduralStore {
         Some(dir.join(format!("{project_hash}.json")))
     }
 
-    pub(crate) fn load(project_hash: &str) -> Option<Self> {
+    pub fn load(project_hash: &str) -> Option<Self> {
         let path = Self::store_path(project_hash)?;
         let data = std::fs::read_to_string(path).ok()?;
         serde_json::from_str(&data).ok()
     }
 
-    pub(crate) fn load_or_create(project_hash: &str) -> Self {
+    pub fn load_or_create(project_hash: &str) -> Self {
         Self::load(project_hash).unwrap_or_else(|| Self::new(project_hash))
     }
 
-    pub(crate) fn save(&self) -> Result<(), String> {
+    pub fn save(&self) -> Result<(), String> {
         let path = Self::store_path(&self.project_hash)
             .ok_or_else(|| "Cannot determine data directory".to_string())?;
         if let Some(dir) = path.parent() {
@@ -220,10 +220,7 @@ impl ProceduralStore {
 /// the number of stored procedures, or `None` when there is nothing to learn
 /// from yet. Detection is cheap (n-grams over <= `max_episodes` sequences),
 /// so no throttling is needed.
-pub(crate) fn auto_detect_from_episodes(
-    project_hash: &str,
-    policy: &ProceduralPolicy,
-) -> Option<usize> {
+pub fn auto_detect_from_episodes(project_hash: &str, policy: &ProceduralPolicy) -> Option<usize> {
     let episodes = super::episodic_memory::EpisodicStore::load(project_hash)?;
     if episodes.episodes.is_empty() {
         return None;
@@ -325,7 +322,7 @@ fn usage_recency(proc: &Procedure) -> f32 {
     (1.0 - days_old / 30.0).max(0.0)
 }
 
-pub(crate) fn format_suggestion(proc: &Procedure) -> String {
+pub fn format_suggestion(proc: &Procedure) -> String {
     let mut output = format!(
         "Suggested workflow: {} (confidence: {:.0}%, used {}x, success rate: {:.0}%)\n",
         proc.name,
@@ -341,7 +338,7 @@ pub(crate) fn format_suggestion(proc: &Procedure) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use crate::core::episodic_memory::{Action, Episode, Outcome};
 

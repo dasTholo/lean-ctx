@@ -10,7 +10,7 @@ static SEEN_PATHS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static STATS: OnceLock<Mutex<DedupStats>> = OnceLock::new();
 /// Action to take based on a content deduplication check.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum DedupAction {
+pub enum DedupAction {
     /// Content is new and should be delivered in full.
     DeliverFull,
     /// Content is unchanged and can be replaced by a compact reference.
@@ -24,7 +24,7 @@ pub(crate) enum DedupAction {
 
 /// Cumulative content deduplication statistics for this process.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub(crate) struct DedupStats {
+pub struct DedupStats {
     /// Number of enabled deduplication checks.
     pub total_checks: usize,
     /// Number of checks that found unchanged content.
@@ -39,7 +39,7 @@ pub(crate) struct DedupStats {
 
 /// Checks whether `content` changed since its last delivery at `path`.
 #[must_use]
-pub(crate) fn check_content(path: &str, content: &str, fresh: bool) -> DedupAction {
+pub fn check_content(path: &str, content: &str, fresh: bool) -> DedupAction {
     if fresh {
         invalidate(path);
         return DedupAction::DeliverFull;
@@ -53,7 +53,7 @@ pub(crate) fn check_content(path: &str, content: &str, fresh: bool) -> DedupActi
 
 /// Returns a snapshot of cumulative content deduplication statistics.
 #[must_use]
-pub(crate) fn dedup_stats() -> DedupStats {
+pub fn dedup_stats() -> DedupStats {
     let mut snapshot = *lock(stats());
     snapshot.hit_rate = if snapshot.total_checks == 0 {
         0.0
@@ -65,7 +65,7 @@ pub(crate) fn dedup_stats() -> DedupStats {
 
 /// Applies content deduplication, returning either full content or a stub.
 #[must_use]
-pub(crate) fn apply_dedup(path: &str, content: &str) -> String {
+pub fn apply_dedup(path: &str, content: &str) -> String {
     apply_dedup_enabled(
         super::kernel_config::features().content_dedup,
         path,
@@ -81,13 +81,13 @@ fn apply_dedup_enabled(enabled: bool, path: &str, content: &str) -> String {
 }
 
 /// Invalidates cached content for `path` after a write or external change.
-pub(crate) fn invalidate(path: &str) {
+pub fn invalidate(path: &str) {
     lock(dedup()).invalidate(path);
     lock(seen_paths()).remove(path);
 }
 
 /// Clears cached content and all cumulative deduplication statistics.
-pub(crate) fn reset_dedup() {
+pub fn reset_dedup() {
     lock(dedup()).clear();
     lock(seen_paths()).clear();
     *lock(stats()) = DedupStats::default();
@@ -151,7 +151,7 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use std::sync::{Mutex, MutexGuard};
 
     use super::{

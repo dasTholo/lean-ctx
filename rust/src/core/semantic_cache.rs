@@ -11,7 +11,7 @@ const IDF_REBUILD_BATCH: u32 = 100;
 const MAX_SEMANTIC_ENTRIES: usize = 200;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct SemanticCacheEntry {
+pub struct SemanticCacheEntry {
     pub path: String,
     pub tfidf_vector: Vec<(String, f64)>,
     pub token_count: usize,
@@ -20,7 +20,7 @@ pub(crate) struct SemanticCacheEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub(crate) struct SemanticCacheIndex {
+pub struct SemanticCacheIndex {
     pub entries: Vec<SemanticCacheEntry>,
     pub idf: HashMap<String, f64>,
     pub total_docs: usize,
@@ -34,7 +34,7 @@ pub(crate) struct SemanticCacheIndex {
 }
 
 impl SemanticCacheIndex {
-    pub(crate) fn add_file(&mut self, path: &str, content: &str, session_id: &str) {
+    pub fn add_file(&mut self, path: &str, content: &str, session_id: &str) {
         let tf = compute_tf(content);
         let token_count = content.split_whitespace().count();
 
@@ -120,7 +120,7 @@ impl SemanticCacheIndex {
         }
     }
 
-    pub(crate) fn find_similar(&mut self, content: &str, threshold: f64) -> Vec<(String, f64)> {
+    pub fn find_similar(&mut self, content: &str, threshold: f64) -> Vec<(String, f64)> {
         if self.entries.len() > MAX_SEMANTIC_ENTRIES {
             return Vec::new();
         }
@@ -148,7 +148,7 @@ impl SemanticCacheIndex {
         results
     }
 
-    pub(crate) fn suggest_warmup(&self, top_n: usize) -> Vec<String> {
+    pub fn suggest_warmup(&self, top_n: usize) -> Vec<String> {
         let mut ranked: Vec<(&SemanticCacheEntry, f64)> = self
             .entries
             .iter()
@@ -186,7 +186,7 @@ impl SemanticCacheIndex {
             .collect()
     }
 
-    pub(crate) fn save(&self, project_root: &str) -> Result<(), String> {
+    pub fn save(&self, project_root: &str) -> Result<(), String> {
         let path = index_path(project_root);
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
@@ -195,7 +195,7 @@ impl SemanticCacheIndex {
         std::fs::write(&path, json).map_err(|e| e.to_string())
     }
 
-    pub(crate) fn load(project_root: &str) -> Option<Self> {
+    pub fn load(project_root: &str) -> Option<Self> {
         let path = index_path(project_root);
         let content = std::fs::read_to_string(&path)
             .or_else(|_| {
@@ -216,7 +216,7 @@ impl SemanticCacheIndex {
         Some(index)
     }
 
-    pub(crate) fn load_or_create(project_root: &str) -> Self {
+    pub fn load_or_create(project_root: &str) -> Self {
         Self::load(project_root).unwrap_or_default()
     }
 }
@@ -304,7 +304,7 @@ fn legacy_index_path(project_root: &str) -> PathBuf {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]

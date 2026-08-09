@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// A complete context profile definition.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct Profile {
+pub struct Profile {
     #[serde(default)]
     pub profile: ProfileMeta,
     #[serde(default)]
@@ -33,7 +33,7 @@ pub(crate) struct Profile {
 
 /// Profile identity and inheritance.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub(crate) struct ProfileMeta {
+pub struct ProfileMeta {
     #[serde(default)]
     pub name: String,
     pub inherits: Option<String>,
@@ -47,20 +47,20 @@ pub(crate) struct ProfileMeta {
 /// Use `_effective()` methods to get the resolved value with defaults.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
-pub(crate) struct ReadConfig {
+pub struct ReadConfig {
     pub default_mode: Option<String>,
     pub max_tokens_per_file: Option<usize>,
     pub prefer_cache: Option<bool>,
 }
 
 impl ReadConfig {
-    pub(crate) fn default_mode_effective(&self) -> &str {
+    pub fn default_mode_effective(&self) -> &str {
         self.default_mode.as_deref().unwrap_or("auto")
     }
-    pub(crate) fn max_tokens_per_file_effective(&self) -> usize {
+    pub fn max_tokens_per_file_effective(&self) -> usize {
         self.max_tokens_per_file.unwrap_or(50_000)
     }
-    pub(crate) fn prefer_cache_effective(&self) -> bool {
+    pub fn prefer_cache_effective(&self) -> bool {
         self.prefer_cache.unwrap_or(false)
     }
 }
@@ -68,7 +68,7 @@ impl ReadConfig {
 /// Compression strategy configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
-pub(crate) struct CompressionConfig {
+pub struct CompressionConfig {
     /// Enable adaptive compression depth (#1195). When true, compression
     /// aggressiveness is reduced dynamically based on bounce rate and session
     /// length. Default: true.
@@ -80,19 +80,19 @@ pub(crate) struct CompressionConfig {
 }
 
 impl CompressionConfig {
-    pub(crate) fn crp_mode_effective(&self) -> &str {
+    pub fn crp_mode_effective(&self) -> &str {
         self.crp_mode.as_deref().unwrap_or("tdd")
     }
-    pub(crate) fn output_density_effective(&self) -> &str {
+    pub fn output_density_effective(&self) -> &str {
         self.output_density.as_deref().unwrap_or("normal")
     }
-    pub(crate) fn entropy_threshold_effective(&self) -> f64 {
+    pub fn entropy_threshold_effective(&self) -> f64 {
         self.entropy_threshold.unwrap_or(0.3)
     }
-    pub(crate) fn terse_mode_effective(&self) -> bool {
+    pub fn terse_mode_effective(&self) -> bool {
         self.terse_mode.unwrap_or(false)
     }
-    pub(crate) fn adaptive_effective(&self) -> bool {
+    pub fn adaptive_effective(&self) -> bool {
         self.adaptive.unwrap_or(true)
     }
 }
@@ -100,7 +100,7 @@ impl CompressionConfig {
 /// Translation (tokenizer-aware) configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
-pub(crate) struct TranslationConfig {
+pub struct TranslationConfig {
     /// If false, preserve legacy CRP/TDD formats without post-translation.
     pub enabled: Option<bool>,
     /// legacy|ascii|auto
@@ -108,10 +108,10 @@ pub(crate) struct TranslationConfig {
 }
 
 impl TranslationConfig {
-    pub(crate) fn enabled_effective(&self) -> bool {
+    pub fn enabled_effective(&self) -> bool {
         self.enabled.unwrap_or(false)
     }
-    pub(crate) fn ruleset_effective(&self) -> &str {
+    pub fn ruleset_effective(&self) -> &str {
         self.ruleset.as_deref().unwrap_or("legacy")
     }
 }
@@ -119,7 +119,7 @@ impl TranslationConfig {
 /// Layout (attention-aware reorder) configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
-pub(crate) struct LayoutConfig {
+pub struct LayoutConfig {
     /// If false, preserve original order.
     pub enabled: Option<bool>,
     /// Minimum line count for enabling reorder.
@@ -127,17 +127,17 @@ pub(crate) struct LayoutConfig {
 }
 
 impl LayoutConfig {
-    pub(crate) fn enabled_effective(&self) -> bool {
+    pub fn enabled_effective(&self) -> bool {
         self.enabled.unwrap_or(false)
     }
-    pub(crate) fn min_lines_effective(&self) -> usize {
+    pub fn min_lines_effective(&self) -> usize {
         self.min_lines.unwrap_or(15)
     }
 }
 
 /// Routing policy overrides (intent → model tier → read mode/budgets).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub(crate) struct RoutingConfig {
+pub struct RoutingConfig {
     /// Hard cap for recommended model tier: fast|standard|premium.
     #[serde(default)]
     pub max_model_tier: Option<String>,
@@ -147,18 +147,18 @@ pub(crate) struct RoutingConfig {
 }
 
 impl RoutingConfig {
-    pub(crate) fn max_model_tier_effective(&self) -> &str {
+    pub fn max_model_tier_effective(&self) -> &str {
         self.max_model_tier.as_deref().unwrap_or("premium")
     }
 
-    pub(crate) fn degrade_under_pressure_effective(&self) -> bool {
+    pub fn degrade_under_pressure_effective(&self) -> bool {
         self.degrade_under_pressure.unwrap_or(true)
     }
 }
 
 /// Budget/SLO degradation policy configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub(crate) struct DegradationConfig {
+pub struct DegradationConfig {
     /// If true, enforce throttling/blocking decisions. Default is warn-only.
     #[serde(default)]
     pub enforce: Option<bool>,
@@ -168,11 +168,11 @@ pub(crate) struct DegradationConfig {
 }
 
 impl DegradationConfig {
-    pub(crate) fn enforce_effective(&self) -> bool {
+    pub fn enforce_effective(&self) -> bool {
         self.enforce.unwrap_or(false)
     }
 
-    pub(crate) fn throttle_ms_effective(&self) -> u64 {
+    pub fn throttle_ms_effective(&self) -> u64 {
         self.throttle_ms.unwrap_or(250)
     }
 }
@@ -181,7 +181,7 @@ impl DegradationConfig {
 /// All default to `false` for minimal output overhead.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
-pub(crate) struct OutputHints {
+pub struct OutputHints {
     pub compressed_hint: Option<bool>,
     pub archive_hint: Option<bool>,
     pub verify_footer: Option<bool>,
@@ -201,37 +201,37 @@ pub(crate) struct OutputHints {
 }
 
 impl OutputHints {
-    pub(crate) fn compressed_hint(&self) -> bool {
+    pub fn compressed_hint(&self) -> bool {
         self.compressed_hint.unwrap_or(false)
     }
-    pub(crate) fn archive_hint(&self) -> bool {
+    pub fn archive_hint(&self) -> bool {
         self.archive_hint.unwrap_or(false)
     }
-    pub(crate) fn verify_footer(&self) -> bool {
+    pub fn verify_footer(&self) -> bool {
         self.verify_footer.unwrap_or(false)
     }
-    pub(crate) fn related_hint(&self) -> bool {
+    pub fn related_hint(&self) -> bool {
         self.related_hint.unwrap_or(false)
     }
-    pub(crate) fn semantic_hint(&self) -> bool {
+    pub fn semantic_hint(&self) -> bool {
         self.semantic_hint.unwrap_or(false)
     }
-    pub(crate) fn elicitation_hint(&self) -> bool {
+    pub fn elicitation_hint(&self) -> bool {
         self.elicitation_hint.unwrap_or(false)
     }
-    pub(crate) fn checkpoint_in_output(&self) -> bool {
+    pub fn checkpoint_in_output(&self) -> bool {
         self.checkpoint_in_output.unwrap_or(false)
     }
-    pub(crate) fn graph_context_block(&self) -> bool {
+    pub fn graph_context_block(&self) -> bool {
         self.graph_context_block.unwrap_or(false)
     }
-    pub(crate) fn efficiency_hint(&self) -> bool {
+    pub fn efficiency_hint(&self) -> bool {
         self.efficiency_hint.unwrap_or(false)
     }
-    pub(crate) fn cross_source_hint(&self) -> bool {
+    pub fn cross_source_hint(&self) -> bool {
         self.cross_source_hint.unwrap_or(false)
     }
-    pub(crate) fn proactive_context(&self) -> bool {
+    pub fn proactive_context(&self) -> bool {
         self.proactive_context.unwrap_or(false)
     }
 }
@@ -239,20 +239,20 @@ impl OutputHints {
 /// Token and cost budget limits.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
-pub(crate) struct BudgetConfig {
+pub struct BudgetConfig {
     pub max_context_tokens: Option<usize>,
     pub max_shell_invocations: Option<usize>,
     pub max_cost_usd: Option<f64>,
 }
 
 impl BudgetConfig {
-    pub(crate) fn max_context_tokens_effective(&self) -> usize {
+    pub fn max_context_tokens_effective(&self) -> usize {
         self.max_context_tokens.unwrap_or(200_000)
     }
-    pub(crate) fn max_shell_invocations_effective(&self) -> usize {
+    pub fn max_shell_invocations_effective(&self) -> usize {
         self.max_shell_invocations.unwrap_or(100)
     }
-    pub(crate) fn max_cost_usd_effective(&self) -> f64 {
+    pub fn max_cost_usd_effective(&self) -> f64 {
         self.max_cost_usd.unwrap_or(5.0)
     }
 }
@@ -260,7 +260,7 @@ impl BudgetConfig {
 /// Pipeline layer activation per profile.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
-pub(crate) struct PipelineConfig {
+pub struct PipelineConfig {
     pub intent: Option<bool>,
     pub relevance: Option<bool>,
     pub compression: Option<bool>,
@@ -268,16 +268,16 @@ pub(crate) struct PipelineConfig {
 }
 
 impl PipelineConfig {
-    pub(crate) fn intent_effective(&self) -> bool {
+    pub fn intent_effective(&self) -> bool {
         self.intent.unwrap_or(true)
     }
-    pub(crate) fn relevance_effective(&self) -> bool {
+    pub fn relevance_effective(&self) -> bool {
         self.relevance.unwrap_or(true)
     }
-    pub(crate) fn compression_effective(&self) -> bool {
+    pub fn compression_effective(&self) -> bool {
         self.compression.unwrap_or(true)
     }
-    pub(crate) fn translation_effective(&self) -> bool {
+    pub fn translation_effective(&self) -> bool {
         self.translation.unwrap_or(true)
     }
 }
@@ -285,7 +285,7 @@ impl PipelineConfig {
 /// Autonomy overrides per profile.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
-pub(crate) struct ProfileAutonomy {
+pub struct ProfileAutonomy {
     pub enabled: Option<bool>,
     pub auto_preload: Option<bool>,
     pub auto_dedup: Option<bool>,
@@ -303,40 +303,40 @@ pub(crate) struct ProfileAutonomy {
 }
 
 impl ProfileAutonomy {
-    pub(crate) fn enabled_effective(&self) -> bool {
+    pub fn enabled_effective(&self) -> bool {
         self.enabled.unwrap_or(true)
     }
-    pub(crate) fn auto_preload_effective(&self) -> bool {
+    pub fn auto_preload_effective(&self) -> bool {
         self.auto_preload.unwrap_or(true)
     }
-    pub(crate) fn auto_dedup_effective(&self) -> bool {
+    pub fn auto_dedup_effective(&self) -> bool {
         self.auto_dedup.unwrap_or(true)
     }
-    pub(crate) fn auto_related_effective(&self) -> bool {
+    pub fn auto_related_effective(&self) -> bool {
         self.auto_related.unwrap_or(true)
     }
-    pub(crate) fn silent_preload_effective(&self) -> bool {
+    pub fn silent_preload_effective(&self) -> bool {
         self.silent_preload.unwrap_or(true)
     }
-    pub(crate) fn auto_prefetch_effective(&self) -> bool {
+    pub fn auto_prefetch_effective(&self) -> bool {
         self.auto_prefetch.unwrap_or(false)
     }
-    pub(crate) fn auto_response_effective(&self) -> bool {
+    pub fn auto_response_effective(&self) -> bool {
         self.auto_response.unwrap_or(false)
     }
-    pub(crate) fn dedup_threshold_effective(&self) -> usize {
+    pub fn dedup_threshold_effective(&self) -> usize {
         self.dedup_threshold.unwrap_or(8)
     }
-    pub(crate) fn prefetch_max_files_effective(&self) -> usize {
+    pub fn prefetch_max_files_effective(&self) -> usize {
         self.prefetch_max_files.unwrap_or(3)
     }
-    pub(crate) fn prefetch_budget_tokens_effective(&self) -> usize {
+    pub fn prefetch_budget_tokens_effective(&self) -> usize {
         self.prefetch_budget_tokens.unwrap_or(4000)
     }
-    pub(crate) fn response_min_tokens_effective(&self) -> usize {
+    pub fn response_min_tokens_effective(&self) -> usize {
         self.response_min_tokens.unwrap_or(600)
     }
-    pub(crate) fn checkpoint_interval_effective(&self) -> u32 {
+    pub fn checkpoint_interval_effective(&self) -> u32 {
         self.checkpoint_interval.unwrap_or(15)
     }
 }

@@ -123,7 +123,7 @@ fn is_symbol_flood(line: &str) -> bool {
 /// NOT applied to protected read tools (`firewall::is_protected_read`; see
 /// `sanitized_tool_text` in `server::dispatch`): their contract is
 /// byte-fidelity — file content is never a model artifact (#709).
-pub(crate) fn sanitize(output: &str) -> String {
+pub fn sanitize(output: &str) -> String {
     if output.is_empty() {
         return output.to_string();
     }
@@ -158,7 +158,7 @@ pub(crate) fn sanitize(output: &str) -> String {
 /// Returns a list of detected patterns (empty = clean). This is a conservative,
 /// low-false-positive heuristic; it deliberately avoids flagging common phrases
 /// like "please ignore" in comments or documentation.
-pub(crate) fn detect_injection(content: &str) -> Vec<InjectionSignal> {
+pub fn detect_injection(content: &str) -> Vec<InjectionSignal> {
     let mut signals = Vec::new();
     let lower = content.to_lowercase();
     for (i, line) in lower.lines().enumerate() {
@@ -185,7 +185,7 @@ pub(crate) fn detect_injection(content: &str) -> Vec<InjectionSignal> {
 
 /// A detected injection signal with its location and classification.
 #[derive(Debug, Clone)]
-pub(crate) struct InjectionSignal {
+pub struct InjectionSignal {
     pub line: usize,
     pub kind: String,
     pub snippet: String,
@@ -214,7 +214,7 @@ const INJECTION_PATTERNS: &[(&str, &str)] = &[
 ];
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]

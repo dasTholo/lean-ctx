@@ -7,7 +7,7 @@ use crate::core::hnsw::FlatEmbeddings;
 use crate::core::hybrid_search::{DenseSearchResult, HybridConfig, HybridResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DenseBackendKind {
+pub enum DenseBackendKind {
     Local,
     #[cfg(feature = "qdrant")]
     Qdrant,
@@ -16,7 +16,7 @@ pub(crate) enum DenseBackendKind {
 }
 
 impl DenseBackendKind {
-    pub(crate) fn try_from_env() -> Result<Self, String> {
+    pub fn try_from_env() -> Result<Self, String> {
         let explicit = std::env::var("LEANCTX_DENSE_BACKEND")
             .ok()
             .map(|v| v.trim().to_ascii_lowercase())
@@ -59,7 +59,7 @@ impl DenseBackendKind {
         }
     }
 
-    pub(crate) fn label(&self) -> &'static str {
+    pub fn label(&self) -> &'static str {
         match self {
             Self::Local => "local",
             #[cfg(feature = "qdrant")]
@@ -72,7 +72,7 @@ impl DenseBackendKind {
 
 #[cfg(feature = "embeddings")]
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn dense_results_as_hybrid(
+pub fn dense_results_as_hybrid(
     backend: DenseBackendKind,
     root: &Path,
     index: &BM25Index,
@@ -115,7 +115,7 @@ pub(crate) fn dense_results_as_hybrid(
 
 #[cfg(feature = "embeddings")]
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn hybrid_results(
+pub fn hybrid_results(
     backend: DenseBackendKind,
     root: &Path,
     index: &BM25Index,
@@ -507,7 +507,7 @@ fn snippet_from_disk(
 }
 
 #[cfg(any(feature = "qdrant", feature = "pgvector"))]
-pub(crate) fn kind_to_str(kind: &ChunkKind) -> &'static str {
+pub fn kind_to_str(kind: &ChunkKind) -> &'static str {
     match kind {
         ChunkKind::Function => "Function",
         ChunkKind::Struct => "Struct",
@@ -527,7 +527,7 @@ pub(crate) fn kind_to_str(kind: &ChunkKind) -> &'static str {
 }
 
 #[cfg(any(feature = "qdrant", feature = "pgvector"))]
-pub(crate) fn kind_from_str(s: &str) -> ChunkKind {
+pub fn kind_from_str(s: &str) -> ChunkKind {
     match s {
         "Function" => ChunkKind::Function,
         "Struct" => ChunkKind::Struct,
@@ -547,7 +547,7 @@ pub(crate) fn kind_from_str(s: &str) -> ChunkKind {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     fn set_env(key: &str, value: Option<&str>) -> Option<String> {
         let old = std::env::var(key).ok();

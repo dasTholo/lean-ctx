@@ -48,13 +48,13 @@ pub enum SignalKind {
 static SIGNALS: Mutex<Vec<PheromoneSignal>> = Mutex::new(Vec::new());
 
 /// Deposit a new pheromone signal (alias: emit a signal into the store).
-pub(crate) fn deposit_signal(mut signal: PheromoneSignal) {
+pub fn deposit_signal(mut signal: PheromoneSignal) {
     signal.strength = bounded(signal.strength);
     signals().push(signal);
 }
 
 /// Read all signals for a given path, optionally filtered by kind.
-pub(crate) fn read_signals(path: &str, kind: Option<SignalKind>) -> Vec<PheromoneSignal> {
+pub fn read_signals(path: &str, kind: Option<SignalKind>) -> Vec<PheromoneSignal> {
     signals()
         .iter()
         .filter(|signal| signal.path == path && kind.is_none_or(|kind| signal.kind == kind))
@@ -64,7 +64,7 @@ pub(crate) fn read_signals(path: &str, kind: Option<SignalKind>) -> Vec<Pheromon
 
 /// Evaporate signals: reduce strength by decay_rate, remove signals below threshold.
 /// Called periodically to prevent stale signals from accumulating.
-pub(crate) fn evaporate(decay_rate: f64, threshold: f64) {
+pub fn evaporate(decay_rate: f64, threshold: f64) {
     let decay_rate = bounded(decay_rate);
     let threshold = bounded(threshold);
     let mut signals = signals();
@@ -76,7 +76,7 @@ pub(crate) fn evaporate(decay_rate: f64, threshold: f64) {
 }
 
 /// Reset in-memory signals (called at session start).
-pub(crate) fn reset_signals() {
+pub fn reset_signals() {
     signals().clear();
 }
 
@@ -95,7 +95,7 @@ fn bounded(value: f64) -> f64 {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     static TEST_LOCK: Mutex<()> = Mutex::new(());

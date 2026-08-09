@@ -9,38 +9,38 @@
 //! fidelity) and from [`crate::core::gain`]'s usage-quality component; this
 //! module scores the *source code's* navigability.
 
-pub(crate) mod annotate;
+pub mod annotate;
 #[cfg(feature = "tree-sitter")]
-pub(crate) mod astutil;
+pub mod astutil;
 #[allow(dead_code)]
-pub(crate) mod cognitive;
+pub mod cognitive;
 #[allow(dead_code)]
-pub(crate) mod coupling;
-pub(crate) mod delta;
-pub(crate) mod fabric;
-pub(crate) mod gate;
-pub(crate) mod naming;
-pub(crate) mod persist;
-pub(crate) mod report;
-pub(crate) mod scan;
-pub(crate) mod score;
+pub mod coupling;
+pub mod delta;
+pub mod fabric;
+pub mod gate;
+pub mod naming;
+pub mod persist;
+pub mod report;
+pub mod scan;
+pub mod score;
 
-pub(crate) use cognitive::{FunctionCognitive, cognitive_per_function};
-pub(crate) use delta::{cognitive_delta, format_gate_notice, worst_regression};
-pub(crate) use naming::{NamingFinding, naming_findings};
-pub(crate) use scan::{ProjectHealth, scan_project};
-pub(crate) use score::{Hotspot, NavigabilityInputs, NavigabilityScore, grade, navigability};
+pub use cognitive::{FunctionCognitive, cognitive_per_function};
+pub use delta::{cognitive_delta, format_gate_notice, worst_regression};
+pub use naming::{NamingFinding, naming_findings};
+pub use scan::{ProjectHealth, scan_project};
+pub use score::{Hotspot, NavigabilityInputs, NavigabilityScore, grade, navigability};
 
 use serde::Serialize;
 
 /// Default cognitive-complexity threshold (SonarQube S3776 "HIGH" default).
 /// A function at or below this is considered navigable. Mirrored by
 /// `CodeHealthConfig::default().cognitive_threshold`.
-pub(crate) const DEFAULT_COGNITIVE_THRESHOLD: u32 = 15;
+pub const DEFAULT_COGNITIVE_THRESHOLD: u32 = 15;
 
 /// Edit-gate behavior when an edit increases cognitive complexity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum GateMode {
+pub enum GateMode {
     /// Never emit a code-health gate notice.
     Off,
     /// Append an advisory `[CODE HEALTH]` notice (default).
@@ -52,7 +52,7 @@ pub(crate) enum GateMode {
 
 impl GateMode {
     /// Parse a config string; unknown values fall back to [`GateMode::Warn`].
-    pub(crate) fn parse(value: &str) -> Self {
+    pub fn parse(value: &str) -> Self {
         match value.trim().to_ascii_lowercase().as_str() {
             "off" | "false" | "none" | "disabled" => GateMode::Off,
             "block" | "hard" | "error" => GateMode::Block,
@@ -65,24 +65,21 @@ impl GateMode {
 /// single entry point used by the edit-gate, read annotations, and the
 /// `ctx_quality` tool.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
-pub(crate) struct FileHealth {
+pub struct FileHealth {
     pub functions: Vec<FunctionCognitive>,
     pub naming: Vec<NamingFinding>,
 }
 
 impl FileHealth {
     /// Functions whose cognitive complexity exceeds `threshold`.
-    pub(crate) fn over_threshold(
-        &self,
-        threshold: u32,
-    ) -> impl Iterator<Item = &FunctionCognitive> {
+    pub fn over_threshold(&self, threshold: u32) -> impl Iterator<Item = &FunctionCognitive> {
         self.functions
             .iter()
             .filter(move |f| f.cognitive > threshold)
     }
 
     /// The single worst cognitive complexity in the file (0 if none).
-    pub(crate) fn worst_cognitive(&self) -> u32 {
+    pub fn worst_cognitive(&self) -> u32 {
         self.functions
             .iter()
             .map(|f| f.cognitive)
@@ -96,14 +93,14 @@ impl FileHealth {
 /// Returns `None` only when tree-sitter is disabled or the extension is
 /// unsupported (i.e. no functions could be parsed). Naming findings default to
 /// empty when the language has no analyzable identifiers.
-pub(crate) fn analyze_file(source: &str, extension: &str) -> Option<FileHealth> {
+pub fn analyze_file(source: &str, extension: &str) -> Option<FileHealth> {
     let functions = cognitive_per_function(source, extension)?;
     let naming = naming_findings(source, extension).unwrap_or_default();
     Some(FileHealth { functions, naming })
 }
 
 #[cfg(all(test, feature = "tree-sitter"))]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]

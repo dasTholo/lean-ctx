@@ -7,7 +7,7 @@ use super::ProjectHealth;
 use serde_json::{Value, json};
 
 /// Human-readable project report.
-pub(crate) fn text(health: &ProjectHealth, root: &str, threshold: u32, model: &str) -> String {
+pub fn text(health: &ProjectHealth, root: &str, threshold: u32, model: &str) -> String {
     let s = &health.score;
     let mut out = String::new();
     out.push_str(&format!("Code Health — {root}\n"));
@@ -41,7 +41,7 @@ pub(crate) fn text(health: &ProjectHealth, root: &str, threshold: u32, model: &s
 }
 
 /// Machine-readable project report.
-pub(crate) fn json(health: &ProjectHealth, root: &str) -> Value {
+pub fn json(health: &ProjectHealth, root: &str) -> Value {
     let s = &health.score;
     let hotspots: Vec<Value> = s
         .hotspots
@@ -69,7 +69,7 @@ pub(crate) fn json(health: &ProjectHealth, root: &str) -> Value {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use crate::core::code_health::scan::ProjectHealth;
     use crate::core::code_health::{Hotspot, NavigabilityScore};

@@ -26,13 +26,13 @@ static TRACKER: std::sync::LazyLock<Mutex<RelevanceTracker>> =
     std::sync::LazyLock::new(|| Mutex::new(RelevanceTracker::new()));
 
 /// Access the global relevance tracker.
-pub(crate) fn global() -> &'static Mutex<RelevanceTracker> {
+pub fn global() -> &'static Mutex<RelevanceTracker> {
     &TRACKER
 }
 
 /// Entry representing one piece of compressed content.
 #[derive(Debug, Clone)]
-pub(crate) struct CompressedContentEntry {
+pub struct CompressedContentEntry {
     pub handle: String,
     pub keywords: Vec<String>,
     pub source_tool: &'static str,
@@ -44,14 +44,14 @@ pub(crate) struct CompressedContentEntry {
 
 /// Match result for proactive expansion.
 #[derive(Debug, Clone)]
-pub(crate) struct ExpansionMatch {
+pub struct ExpansionMatch {
     pub handle: String,
     pub score: f64,
     pub estimated_tokens: usize,
 }
 
 /// The relevance tracker maintains a keyword index of all compressed content.
-pub(crate) struct RelevanceTracker {
+pub struct RelevanceTracker {
     entries: Vec<CompressedContentEntry>,
     seq_counter: u64,
     budget_tokens: usize,
@@ -67,7 +67,7 @@ impl Default for RelevanceTracker {
 }
 
 impl RelevanceTracker {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             entries: Vec::new(),
             seq_counter: 0,
@@ -78,15 +78,11 @@ impl RelevanceTracker {
         }
     }
 
-    pub(crate) fn with_config(budget_tokens: usize, threshold: f64) -> Self {
+    pub fn with_config(budget_tokens: usize, threshold: f64) -> Self {
         Self::with_config_and_age(budget_tokens, threshold, DEFAULT_MAX_AGE_SECS)
     }
 
-    pub(crate) fn with_config_and_age(
-        budget_tokens: usize,
-        threshold: f64,
-        max_age_secs: u64,
-    ) -> Self {
+    pub fn with_config_and_age(budget_tokens: usize, threshold: f64, max_age_secs: u64) -> Self {
         Self {
             entries: Vec::new(),
             seq_counter: 0,
@@ -102,7 +98,7 @@ impl RelevanceTracker {
     }
 
     /// Update runtime settings without discarding already indexed entries.
-    pub(crate) fn configure(&mut self, budget_tokens: usize, threshold: f64, max_age_secs: u64) {
+    pub fn configure(&mut self, budget_tokens: usize, threshold: f64, max_age_secs: u64) {
         self.budget_tokens = budget_tokens;
         self.threshold = if threshold.is_finite() {
             threshold.clamp(0.0, 1.0)
@@ -113,7 +109,7 @@ impl RelevanceTracker {
     }
 
     /// Register a new compressed content entry with extracted keywords.
-    pub(crate) fn register(
+    pub fn register(
         &mut self,
         handle: String,
         original_content: &str,
@@ -133,7 +129,7 @@ impl RelevanceTracker {
 
     /// Register content with an explicit timestamp for deterministic tests and
     /// replayed session state.
-    pub(crate) fn register_at(
+    pub fn register_at(
         &mut self,
         handle: String,
         original_content: &str,
@@ -177,13 +173,13 @@ impl RelevanceTracker {
     }
 
     /// Stop proactive expansion for one archive after a caller reports a bounce.
-    pub(crate) fn disable_handle(&mut self, handle: &str) {
+    pub fn disable_handle(&mut self, handle: &str) {
         self.disabled_handles.insert(handle.to_string());
     }
 
     /// Find entries matching the current query context. Returns matches
     /// sorted by score (highest first), within the token budget.
-    pub(crate) fn find_matches(&self, query_context: &str) -> Vec<ExpansionMatch> {
+    pub fn find_matches(&self, query_context: &str) -> Vec<ExpansionMatch> {
         if self.entries.is_empty() {
             return Vec::new();
         }
@@ -247,7 +243,7 @@ impl RelevanceTracker {
 
     /// Check if proactive expansion should trigger for a given context.
     /// Returns the formatted expansion block if matches found.
-    pub(crate) fn expand_if_relevant(&self, query_context: &str) -> Option<String> {
+    pub fn expand_if_relevant(&self, query_context: &str) -> Option<String> {
         let matches = self.find_matches(query_context);
         if matches.is_empty() {
             return None;
@@ -280,7 +276,7 @@ impl RelevanceTracker {
 
     /// Reset the tracker (for testing).
     #[cfg(test)]
-    pub(crate) fn reset(&mut self) {
+    pub fn reset(&mut self) {
         self.entries.clear();
         self.seq_counter = 0;
         self.disabled_handles.clear();
@@ -294,7 +290,7 @@ fn now_secs() -> u64 {
 }
 
 /// Register a CCR artifact for later proactive expansion.
-pub(crate) fn register_compressed(
+pub fn register_compressed(
     handle: String,
     original_content: &str,
     source_tool: &'static str,
@@ -314,7 +310,7 @@ pub(crate) fn register_compressed(
 
 /// Return a response suffix when the current request matches archived content.
 /// Configuration is read here so a running process observes config changes.
-pub(crate) fn proactive_context(query_context: &str) -> Option<String> {
+pub fn proactive_context(query_context: &str) -> Option<String> {
     let cfg = crate::core::config::Config::load();
     if !cfg.proactive_expansion_effective() {
         return None;
@@ -335,7 +331,7 @@ pub(crate) fn proactive_context(query_context: &str) -> Option<String> {
 
 /// Bounce-aware query path used by file reads. A path already pinned to full
 /// delivery must not receive additional proactive context.
-pub(crate) fn proactive_context_for_path(query_context: &str, path: &str) -> Option<String> {
+pub fn proactive_context_for_path(query_context: &str, path: &str) -> Option<String> {
     if crate::core::bounce_tracker::global()
         .lock()
         .ok()
@@ -449,7 +445,7 @@ fn truncate_to_budget(content: &str, max_tokens: usize) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]
@@ -565,7 +561,7 @@ mod tests {
 }
 
 #[cfg(test)]
-mod edge_tests {
+pub mod edge_tests {
     use super::*;
 
     #[test]

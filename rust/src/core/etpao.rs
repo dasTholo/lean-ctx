@@ -15,7 +15,7 @@ pub type EtpaoResult = f64;
 
 /// Provider pricing rates (per million tokens).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct TokenPricing {
+pub struct TokenPricing {
     pub fresh_input: f64,
     pub cached_input: f64,
     pub output: f64,
@@ -35,7 +35,7 @@ impl Default for TokenPricing {
 
 /// Token usage record for a single session/task.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub(crate) struct TokenUsage {
+pub struct TokenUsage {
     pub fresh_input: u64,
     pub cached_input: u64,
     pub output: u64,
@@ -44,7 +44,7 @@ pub(crate) struct TokenUsage {
 
 impl TokenUsage {
     /// Cost-weighted token count using provider pricing.
-    pub(crate) fn weighted_tokens(&self, pricing: &TokenPricing) -> f64 {
+    pub fn weighted_tokens(&self, pricing: &TokenPricing) -> f64 {
         let normalize = pricing.fresh_input;
         if normalize == 0.0 {
             return 0.0;
@@ -56,12 +56,12 @@ impl TokenUsage {
     }
 
     /// Total raw token count (unweighted).
-    pub(crate) fn total_raw(&self) -> u64 {
+    pub fn total_raw(&self) -> u64 {
         self.fresh_input + self.cached_input + self.output + self.reasoning
     }
 
     /// Estimated cost in USD.
-    pub(crate) fn cost_usd(&self, pricing: &TokenPricing) -> f64 {
+    pub fn cost_usd(&self, pricing: &TokenPricing) -> f64 {
         (self.fresh_input as f64 * pricing.fresh_input
             + self.cached_input as f64 * pricing.cached_input
             + self.output as f64 * pricing.output
@@ -72,7 +72,7 @@ impl TokenUsage {
 
 /// ETPAO comparison between lean-ctx and baseline.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct EtpaoReport {
+pub struct EtpaoReport {
     pub leanctx_usage: TokenUsage,
     pub baseline_usage: TokenUsage,
     pub leanctx_weighted: f64,
@@ -85,11 +85,7 @@ pub(crate) struct EtpaoReport {
 
 impl EtpaoReport {
     /// Compute ETPAO comparison.
-    pub(crate) fn compute(
-        leanctx: TokenUsage,
-        baseline: TokenUsage,
-        pricing: &TokenPricing,
-    ) -> Self {
+    pub fn compute(leanctx: TokenUsage, baseline: TokenUsage, pricing: &TokenPricing) -> Self {
         let lw = leanctx.weighted_tokens(pricing);
         let bw = baseline.weighted_tokens(pricing);
         let delta_pct = if bw > 0.0 {
@@ -119,13 +115,13 @@ impl EtpaoReport {
     }
 
     /// True if lean-ctx is cheaper than baseline.
-    pub(crate) fn is_cost_efficient(&self) -> bool {
+    pub fn is_cost_efficient(&self) -> bool {
         self.cost_delta_pct < 0.0
     }
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]

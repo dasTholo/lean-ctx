@@ -113,7 +113,7 @@ fn dominant_kind(strengths: &[f64; 6]) -> Option<SignalKind> {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use chrono::Utc;
 
     use super::*;

@@ -15,16 +15,16 @@ const MAX_WARM_FILE_BYTES: usize = 50 * 1024;
 static WARMED_COUNT: AtomicUsize = AtomicUsize::new(0);
 static SKIPPED_COUNT: AtomicUsize = AtomicUsize::new(0);
 
-pub(crate) fn warmed_count() -> usize {
+pub fn warmed_count() -> usize {
     WARMED_COUNT.load(Ordering::Relaxed)
 }
 
-pub(crate) fn skipped_count() -> usize {
+pub fn skipped_count() -> usize {
     SKIPPED_COUNT.load(Ordering::Relaxed)
 }
 
 /// Spawn background threads to warm up to three predicted files.
-pub(crate) fn warm_predictions(predictions: &[String], cache: Option<&Arc<RwLock<SessionCache>>>) {
+pub fn warm_predictions(predictions: &[String], cache: Option<&Arc<RwLock<SessionCache>>>) {
     if !full_science_enabled() {
         return;
     }
@@ -79,7 +79,7 @@ fn warm_single_file(path: &str, cache: Option<&Arc<RwLock<SessionCache>>>) {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use std::sync::Arc;
 

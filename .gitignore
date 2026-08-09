@@ -65,7 +65,9 @@ rust/lean-ctx-report.html
 **/.claude/rules/
 
 # ── Generated / worktrees (local) ──
+website/
 website/generated/
+website/design/
 worktrees/website/generated/
 AGENTS.md.lean-ctx.*.bak
 docs/gpt/

@@ -7,7 +7,7 @@ use super::types::{ContextReceiptV1, ReceiptOutcome};
 
 /// The signal that determined the outcome classification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub(crate) enum OutcomeSignal {
+pub enum OutcomeSignal {
     /// LLM used the context on first try.
     FirstPass,
     /// LLM retried after receiving this context (indicates rejection).
@@ -20,7 +20,7 @@ pub(crate) enum OutcomeSignal {
 
 /// An outcome inferred from LLM behavior heuristics.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub(crate) struct InferredOutcome {
+pub struct InferredOutcome {
     /// Accept/reject classification inferred from the observed behavior.
     pub outcome: ReceiptOutcome,
     /// Confidence in the inferred classification, from zero to one.
@@ -30,7 +30,7 @@ pub(crate) struct InferredOutcome {
 }
 
 /// Infers a context outcome from request and response behavior.
-pub(crate) fn infer_outcome(
+pub fn infer_outcome(
     request_count: usize,
     was_retry: bool,
     response_tokens: usize,
@@ -65,11 +65,7 @@ pub(crate) fn infer_outcome(
 /// Records an inferred outcome and feeds it into provider learning.
 ///
 /// Feedback failures are contained so outcome tracking cannot disrupt delivery.
-pub(crate) fn record_and_learn(
-    outcome: &InferredOutcome,
-    receipt: &ContextReceiptV1,
-    project_root: &str,
-) {
+pub fn record_and_learn(outcome: &InferredOutcome, receipt: &ContextReceiptV1, project_root: &str) {
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let recorded = record_real_outcome(receipt, outcome.outcome == ReceiptOutcome::Accepted);
         connect_feedback(&recorded, project_root);
@@ -78,13 +74,13 @@ pub(crate) fn record_and_learn(
 
 /// Tracks recent inferred outcomes for aggregate quality monitoring.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct OutcomeTracker {
+pub struct OutcomeTracker {
     outcomes: Vec<(OutcomeSignal, f64)>,
 }
 
 impl OutcomeTracker {
     /// Appends an inferred outcome with its observation timestamp.
-    pub(crate) fn record(&mut self, outcome: &InferredOutcome) {
+    pub fn record(&mut self, outcome: &InferredOutcome) {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0.0, |duration| duration.as_secs_f64());
@@ -92,7 +88,7 @@ impl OutcomeTracker {
     }
 
     /// Returns the fraction of tracked outcomes classified as accepted.
-    pub(crate) fn acceptance_rate(&self) -> f64 {
+    pub fn acceptance_rate(&self) -> f64 {
         if self.outcomes.is_empty() {
             return 0.0;
         }
@@ -106,7 +102,7 @@ impl OutcomeTracker {
     }
 
     /// Returns whether a complete recent window has below 50% acceptance.
-    pub(crate) fn is_degrading(&self, window: usize) -> bool {
+    pub fn is_degrading(&self, window: usize) -> bool {
         if window == 0 || self.outcomes.len() < window {
             return false;
         }
@@ -122,12 +118,12 @@ impl OutcomeTracker {
     }
 
     /// Returns the number of tracked outcomes.
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.outcomes.len()
     }
 
     /// Returns whether the tracker contains no outcomes.
-    pub(crate) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.outcomes.is_empty()
     }
 }
@@ -137,7 +133,7 @@ fn is_accepted(signal: OutcomeSignal) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use std::collections::HashMap;
 
     use super::{InferredOutcome, OutcomeSignal, OutcomeTracker, infer_outcome, record_and_learn};

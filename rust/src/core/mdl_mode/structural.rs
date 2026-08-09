@@ -60,7 +60,7 @@ pub struct FunctionFingerprint {
 }
 
 /// Generate a structural description from source code.
-pub(crate) fn generate_structural_description(
+pub fn generate_structural_description(
     content: &str,
     path: &str,
     file_ext: &str,
@@ -306,7 +306,7 @@ fn render_function(fingerprint: &FunctionFingerprint) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::generate_structural_description;
 
     const RUST_SOURCE: &str = r"//! User model and lookup helpers.

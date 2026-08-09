@@ -3,20 +3,20 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::core::task_relevance::RelevanceScore;
 
 #[derive(Debug, Clone)]
-pub(crate) struct PopDecision {
+pub struct PopDecision {
     pub included_modules: Vec<String>,
     pub excluded_modules: Vec<ExcludedModule>,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ExcludedModule {
+pub struct ExcludedModule {
     pub module: String,
     pub candidate_files: usize,
     pub max_relevance: f64,
     pub reason: String,
 }
 
-pub(crate) fn decide_for_candidates(
+pub fn decide_for_candidates(
     task: &str,
     project_root: &str,
     candidates: &[&RelevanceScore],
@@ -73,7 +73,7 @@ pub(crate) fn decide_for_candidates(
     }
 }
 
-pub(crate) fn filter_candidates_by_pop<'a>(
+pub fn filter_candidates_by_pop<'a>(
     project_root: &str,
     candidates: &'a [&RelevanceScore],
     pop: &PopDecision,
@@ -96,7 +96,7 @@ pub(crate) fn filter_candidates_by_pop<'a>(
         .collect()
 }
 
-pub(crate) fn module_for_path(path: &str, project_root: &str) -> String {
+pub fn module_for_path(path: &str, project_root: &str) -> String {
     let rel = path
         .strip_prefix(project_root)
         .unwrap_or(path)
@@ -141,7 +141,7 @@ fn module_explicitly_mentioned(task_l: &str, module: &str) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]

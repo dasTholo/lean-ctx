@@ -22,19 +22,19 @@ const RECOMMEND_INTERVAL: usize = 10;
 const MAX_TRANSCRIPT_ENTRIES: usize = 200;
 
 /// Whether verbosity auto-apply stored a more aggressive level this session.
-pub(crate) fn auto_apply_happened() -> bool {
+pub fn auto_apply_happened() -> bool {
     AUTO_APPLIED.load(Ordering::Relaxed)
 }
 
 /// Latest verbosity-learned compression level awaiting application.
-pub(crate) fn recommended_compression() -> Option<CompressionLevel> {
+pub fn recommended_compression() -> Option<CompressionLevel> {
     *RECOMMENDED_LEVEL
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
 }
 
 /// Record a tool call in the session transcript buffer for verbosity learning.
-pub(crate) fn record_tool_call(
+pub fn record_tool_call(
     tool: &str,
     action: Option<&str>,
     args: &serde_json::Map<String, serde_json::Value>,
@@ -126,7 +126,7 @@ fn compression_level_label(level: CompressionLevel) -> &'static str {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use crate::core::config::CompressionLevel;
     use crate::core::verbosity::BehaviorSignal;

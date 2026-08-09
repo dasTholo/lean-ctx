@@ -103,6 +103,7 @@ pub struct ReceiptBuilder {
     context_balance: Option<ContextBalanceV1>,
     provider_usage: Option<NormalizedUsage>,
     model_invocations: Vec<ModelInvocation>,
+    knowledge_refs: Vec<String>,
     decision_refs: Vec<String>,
     evidence_refs: Vec<EvidenceRefV1>,
 }
@@ -117,6 +118,7 @@ impl ReceiptBuilder {
             context_balance: None,
             provider_usage: None,
             model_invocations: Vec::new(),
+            knowledge_refs: Vec::new(),
             decision_refs: Vec::new(),
             evidence_refs: Vec::new(),
         }
@@ -151,6 +153,13 @@ impl ReceiptBuilder {
     #[must_use]
     pub fn add_model_invocation(mut self, invocation: ModelInvocation) -> Self {
         self.model_invocations.push(invocation);
+        self
+    }
+
+    /// Records the authoritative knowledge objects consulted for this task.
+    #[must_use]
+    pub fn with_knowledge_refs(mut self, refs: Vec<String>) -> Self {
+        self.knowledge_refs = refs;
         self
     }
 
@@ -248,6 +257,11 @@ impl ReceiptBuilder {
         decision_refs.sort_unstable();
         decision_refs.dedup();
 
+        let mut knowledge_refs = self.knowledge_refs;
+        knowledge_refs.retain(|reference| !reference.trim().is_empty());
+        knowledge_refs.sort_unstable();
+        knowledge_refs.dedup();
+
         let mut receipt = ExecutionReceiptV1 {
             schema_version: 1,
             receipt_id: ReceiptId::try_from("pending".to_owned())
@@ -270,6 +284,7 @@ impl ReceiptBuilder {
             avoided_cost_micros: avoided_cost.unwrap_or(0),
             etpao_milli: 0,
             outcome_ref: None,
+            knowledge_refs,
             decision_refs,
             evidence_refs,
             signature: String::new(),
@@ -433,6 +448,11 @@ mod tests {
             .add_context_balance(balance())
             .add_provider_usage(usage)
             .add_model_invocation(invocation)
+            .with_knowledge_refs(vec![
+                "knowledge:b".to_owned(),
+                "knowledge:a".to_owned(),
+                "knowledge:a".to_owned(),
+            ])
             .add_decision_ref("decision:b".to_owned())
             .add_decision_ref("decision:a".to_owned())
             .add_decision_ref("decision:a".to_owned())
@@ -452,6 +472,7 @@ mod tests {
         assert_eq!(receipt.actual_cost_micros, 12);
         assert_eq!(receipt.baseline_cost_micros, 20);
         assert_eq!(receipt.avoided_cost_micros, 8);
+        assert_eq!(receipt.knowledge_refs, ["knowledge:a", "knowledge:b"]);
         assert_eq!(receipt.decision_refs, ["decision:a", "decision:b"]);
         assert_eq!(receipt.evidence_refs.len(), 1);
     }

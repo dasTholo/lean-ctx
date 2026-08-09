@@ -12,7 +12,7 @@ const KERNEL_ENV_VARS: &[&str] = &[
 
 /// Origin of the effective Context Kernel configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
-pub(crate) enum ConfigSource {
+pub enum ConfigSource {
     /// Built-in defaults.
     Default,
     /// One or more `LEAN_CTX_KERNEL_*` environment variables.
@@ -25,7 +25,7 @@ pub(crate) enum ConfigSource {
 
 /// Effective Context Kernel configuration and its source details.
 #[derive(Debug, Clone, serde::Serialize)]
-pub(crate) struct ConfigReport {
+pub struct ConfigReport {
     /// Effective feature values.
     pub features: KernelFeatures,
     /// Highest-precedence source that supplied the values.
@@ -39,19 +39,19 @@ pub(crate) struct ConfigReport {
 /// The main [`Config`] currently has no kernel section, so environment-backed
 /// features are returned until typed config fields are introduced.
 #[must_use]
-pub(crate) fn from_config(cfg: &Config) -> KernelFeatures {
+pub fn from_config(cfg: &Config) -> KernelFeatures {
     let _ = cfg;
     kernel_config::from_env()
 }
 
 /// Loads the main configuration and applies its kernel feature values globally.
-pub(crate) fn apply_config() {
+pub fn apply_config() {
     kernel_config::update_features(from_config(&Config::load()));
 }
 
 /// Returns the effective kernel features and their detected source.
 #[must_use]
-pub(crate) fn effective_config() -> (KernelFeatures, ConfigSource) {
+pub fn effective_config() -> (KernelFeatures, ConfigSource) {
     let configured = from_config(&Config::load());
     let current = kernel_config::features();
 
@@ -73,7 +73,7 @@ pub(crate) fn effective_config() -> (KernelFeatures, ConfigSource) {
 
 /// Returns a serializable report of effective kernel configuration.
 #[must_use]
-pub(crate) fn config_report() -> ConfigReport {
+pub fn config_report() -> ConfigReport {
     let (features, source) = effective_config();
     ConfigReport {
         features,
@@ -83,7 +83,7 @@ pub(crate) fn config_report() -> ConfigReport {
 }
 
 /// Restores kernel configuration state for tests and runtime reinitialization.
-pub(crate) fn reset() {
+pub fn reset() {
     kernel_config::reset_features();
 }
 
@@ -123,7 +123,7 @@ fn features_match(left: &KernelFeatures, right: &KernelFeatures) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     struct EnvGuard(Vec<(&'static str, Option<std::ffi::OsString>)>);

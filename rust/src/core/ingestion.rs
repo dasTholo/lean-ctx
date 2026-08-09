@@ -12,7 +12,7 @@ use std::path::Path;
 
 /// What kind of content a path holds, for intake decisions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum IngestKind {
+pub enum IngestKind {
     /// Source code — eligible for AST/symbol-aware processing downstream.
     Code,
     /// Prose / human documents (markdown, txt, html, email, …).
@@ -31,13 +31,13 @@ pub(crate) enum IngestKind {
 impl IngestKind {
     /// Whether content of this kind should be fed to the index.
     #[must_use]
-    pub(crate) fn is_ingestible(self) -> bool {
+    pub fn is_ingestible(self) -> bool {
         !matches!(self, IngestKind::Binary | IngestKind::Generated)
     }
 
     /// Stable lowercase label (for capabilities / diagnostics).
     #[must_use]
-    pub(crate) fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             IngestKind::Code => "code",
             IngestKind::Document => "document",
@@ -135,7 +135,7 @@ fn is_generated_lockfile(path: &Path) -> bool {
 /// Fast path is extension-based; files with an unknown extension are sniffed
 /// (bounded read) so textual content is still picked up and binaries rejected.
 #[must_use]
-pub(crate) fn classify_path(path: &Path) -> IngestKind {
+pub fn classify_path(path: &Path) -> IngestKind {
     // Auto-generated lockfiles are excluded before any extension routing — their
     // .json/.yaml variants would otherwise pass as ingestible data (#585).
     if is_generated_lockfile(path) {
@@ -177,7 +177,7 @@ pub(crate) fn classify_path(path: &Path) -> IngestKind {
 /// Whether a path should be fed to the index. Single front-door replacing the
 /// old `is_code_file` gate.
 #[must_use]
-pub(crate) fn is_ingestible(path: &Path) -> bool {
+pub fn is_ingestible(path: &Path) -> bool {
     classify_path(path).is_ingestible()
 }
 
@@ -211,7 +211,7 @@ fn looks_textual(path: &Path) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use std::io::Write;
     use std::path::PathBuf;

@@ -2,19 +2,19 @@
 //!
 //! Learns optimal compression levels from agent behavioral signals.
 
-mod recommender;
-mod runtime;
-mod signals;
-mod transcript;
+pub mod recommender;
+pub mod runtime;
+pub mod signals;
+pub mod transcript;
 
 pub use recommender::VerbosityProfile;
-pub(crate) use recommender::recommend_level;
-pub(crate) use runtime::auto_apply_happened;
-pub(crate) use runtime::recommended_compression;
-pub(crate) use runtime::record_tool_call;
+pub use recommender::recommend_level;
+pub use runtime::auto_apply_happened;
+pub use runtime::recommended_compression;
+pub use runtime::record_tool_call;
 #[cfg(test)]
-pub(crate) use signals::BehaviorSignal;
-pub(crate) use signals::extract_signals;
-pub(crate) use transcript::TranscriptEntry;
+pub use signals::BehaviorSignal;
+pub use signals::extract_signals;
+pub use transcript::TranscriptEntry;
 #[cfg(test)]
-pub(crate) use transcript::analyze_transcript;
+pub use transcript::analyze_transcript;

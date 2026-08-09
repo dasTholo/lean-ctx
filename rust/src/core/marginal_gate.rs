@@ -9,7 +9,7 @@ use std::collections::HashSet;
 
 /// MIG decision.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum GateDecision {
+pub enum GateDecision {
     /// Content provides enough new information — deliver it.
     Pass,
     /// Content is mostly redundant — suppress and return a stub.
@@ -21,7 +21,7 @@ pub(crate) enum GateDecision {
 
 /// Configuration for the marginal information gate.
 #[derive(Debug, Clone)]
-pub(crate) struct GateConfig {
+pub struct GateConfig {
     /// Minimum fraction of novel tokens required to pass. Range 0.0–1.0.
     pub novelty_threshold: f64,
     /// Minimum absolute novel tokens to pass regardless of ratio.
@@ -42,7 +42,7 @@ impl Default for GateConfig {
 ///
 /// Uses line-level deduplication: a response line that appears verbatim
 /// in any previously delivered chunk is considered redundant.
-pub(crate) fn check_information_gain(
+pub fn check_information_gain(
     response: &str,
     already_delivered: &[&str],
     config: &GateConfig,
@@ -87,7 +87,7 @@ pub(crate) fn check_information_gain(
 }
 
 /// Format a suppression stub when the gate blocks delivery.
-pub(crate) fn suppression_stub(path: &str, total_lines: usize, novelty_pct: u8) -> String {
+pub fn suppression_stub(path: &str, total_lines: usize, novelty_pct: u8) -> String {
     format!(
         "[MIG: {path} ({total_lines} lines) — {novelty_pct}% novel, below threshold. \
          Use ctx_read with lines= for specific sections.]"
@@ -95,7 +95,7 @@ pub(crate) fn suppression_stub(path: &str, total_lines: usize, novelty_pct: u8) 
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]

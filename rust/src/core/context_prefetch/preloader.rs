@@ -29,7 +29,7 @@ pub struct PrefetchEntry {
 ///
 /// Predictions at or below `min_confidence` and files already present in the
 /// current context are excluded.
-pub(crate) fn build_prefetch_plan(
+pub fn build_prefetch_plan(
     trajectory: &FileTrajectory,
     loaded_files: &[&str],
     max_files: usize,
@@ -58,7 +58,7 @@ pub(crate) fn build_prefetch_plan(
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]

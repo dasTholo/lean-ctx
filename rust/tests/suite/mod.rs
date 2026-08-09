@@ -44,6 +44,7 @@ mod http_server_streamable;
 mod integration_tests;
 mod io_health_scenarios;
 mod issue_885_anchored_after_patch;
+mod knowledge_task_flow;
 mod legacy_path_firewall;
 mod live_smoke_client_instructions;
 mod lock_contention_hardening;

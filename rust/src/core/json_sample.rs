@@ -27,7 +27,7 @@ use std::collections::BTreeSet;
 
 /// Result of a sampling pass.
 #[derive(Debug, Clone)]
-pub(crate) struct SampleResult {
+pub struct SampleResult {
     /// The sampled array as JSON text.
     pub text: String,
     /// Number of rows in the original.
@@ -40,7 +40,7 @@ pub(crate) struct SampleResult {
 
 /// Configuration for the sampler.
 #[derive(Debug, Clone)]
-pub(crate) struct SampleOpts {
+pub struct SampleOpts {
     /// Minimum array length before sampling kicks in (below this, all rows kept).
     pub min_items: usize,
     /// Maximum fraction of items to retain (0.0-1.0). Actual count is
@@ -79,7 +79,7 @@ impl Default for SampleOpts {
 
 /// Sample a JSON array, returning the representative subset with a summary.
 /// Returns `None` if the array is too small or not an array of objects.
-pub(crate) fn sample_array(value: &Value, opts: &SampleOpts) -> Option<SampleResult> {
+pub fn sample_array(value: &Value, opts: &SampleOpts) -> Option<SampleResult> {
     let arr = value.as_array()?;
     if arr.len() < opts.min_items {
         return None;
@@ -112,7 +112,7 @@ pub(crate) fn sample_array(value: &Value, opts: &SampleOpts) -> Option<SampleRes
 }
 
 /// Parse text as JSON and sample if it's a large array of objects.
-pub(crate) fn sample_text_if_beneficial(text: &str, opts: &SampleOpts) -> Option<SampleResult> {
+pub fn sample_text_if_beneficial(text: &str, opts: &SampleOpts) -> Option<SampleResult> {
     let trimmed = text.trim();
     if !trimmed.starts_with('[') {
         return None;
@@ -515,7 +515,7 @@ fn build_output(summary: &str, sampled: &[&Value], total: usize, retained: usize
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use serde_json::json;
 

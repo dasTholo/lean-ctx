@@ -20,7 +20,7 @@ use crate::core::session::{Finding, SessionState};
 
 /// Promotion budgets for the scheduled (post-dispatch / cognition) pass.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ConsolidationBudgets {
+pub struct ConsolidationBudgets {
     pub max_decisions: usize,
     pub max_findings: usize,
 }
@@ -37,7 +37,7 @@ impl Default for ConsolidationBudgets {
 /// Leaner outcome kept for the scheduled callers (post_dispatch / tool_lifecycle)
 /// that only need the promotion + lifecycle headline, not the full report.
 #[derive(Debug, Clone)]
-pub(crate) struct ConsolidationOutcome {
+pub struct ConsolidationOutcome {
     pub promoted: u32,
     pub promoted_decisions: u32,
     pub promoted_findings: u32,
@@ -49,7 +49,7 @@ pub(crate) struct ConsolidationOutcome {
 /// set per driver — see the constructors. Replaces the four divergent, copy-pasted
 /// import loops (each with subtly different keys, caps and confidences).
 #[derive(Debug, Clone)]
-pub(crate) struct ConsolidateOptions {
+pub struct ConsolidateOptions {
     /// Promote the latest session's findings/decisions into knowledge.
     pub import_session: bool,
     /// Cap promoted decisions (`None` = all).
@@ -78,7 +78,7 @@ pub(crate) struct ConsolidateOptions {
 impl ConsolidateOptions {
     /// Explicit CLI / MCP `consolidate`: import everything, full lifecycle and a
     /// lossless reclaim of every store.
-    pub(crate) fn manual() -> Self {
+    pub fn manual() -> Self {
         Self {
             import_session: true,
             decision_budget: None,
@@ -96,7 +96,7 @@ impl ConsolidateOptions {
 
     /// Scheduled background pass (post-dispatch / cognition): salience-gated,
     /// budgeted, runs the fact lifecycle and emits an event.
-    pub(crate) fn scheduled(b: ConsolidationBudgets) -> Self {
+    pub fn scheduled(b: ConsolidationBudgets) -> Self {
         Self {
             import_session: true,
             decision_budget: Some(b.max_decisions),
@@ -113,7 +113,7 @@ impl ConsolidateOptions {
     }
 
     /// Startup auto-consolidate: incremental (watermark) import only, no lifecycle.
-    pub(crate) fn incremental_auto() -> Self {
+    pub fn incremental_auto() -> Self {
         Self {
             import_session: true,
             decision_budget: None,
@@ -131,7 +131,7 @@ impl ConsolidateOptions {
 
     /// Same plan, but preview-only: no writes to knowledge, archives or session.
     #[must_use]
-    pub(crate) fn into_dry_run(mut self) -> Self {
+    pub fn into_dry_run(mut self) -> Self {
         self.dry_run = true;
         self
     }
@@ -139,13 +139,13 @@ impl ConsolidateOptions {
 
 /// Counts of items promoted by a single `import_session_into` call.
 #[derive(Debug, Default, Clone, Copy)]
-pub(crate) struct ImportCounts {
+pub struct ImportCounts {
     pub decisions: usize,
     pub findings: usize,
 }
 
 impl ImportCounts {
-    pub(crate) fn total(self) -> usize {
+    pub fn total(self) -> usize {
         self.decisions + self.findings
     }
 }
@@ -154,7 +154,7 @@ impl ImportCounts {
 /// `knowledge` (no I/O, no lock), so both the locked orchestrator and the
 /// cognition loop — which holds the knowledge lock across all its steps — share
 /// one implementation. `watermark` (incremental mode) imports only newer items.
-pub(crate) fn import_session_into(
+pub fn import_session_into(
     knowledge: &mut ProjectKnowledge,
     session: &SessionState,
     opts: &ConsolidateOptions,
@@ -223,7 +223,7 @@ pub(crate) fn import_session_into(
 /// Stable knowledge key for a session finding: `file[:line]` when located, else a
 /// content slug. Content-based (never index-based), so re-imports upsert the same
 /// fact and the output stays deterministic across runs (#498).
-pub(crate) fn finding_key(f: &Finding) -> String {
+pub fn finding_key(f: &Finding) -> String {
     match (&f.file, f.line) {
         (Some(file), Some(line)) => format!("{file}:{line}"),
         (Some(file), None) => file.clone(),
@@ -234,7 +234,7 @@ pub(crate) fn finding_key(f: &Finding) -> String {
 /// Scheduled background consolidation. Thin wrapper over the canonical
 /// orchestrator with [`ConsolidateOptions::scheduled`]; kept for the
 /// post-dispatch / tool-lifecycle callers and their `ConsolidationOutcome`.
-pub(crate) fn consolidate_latest(
+pub fn consolidate_latest(
     project_root: &str,
     budgets: ConsolidationBudgets,
 ) -> Result<ConsolidationOutcome, String> {
@@ -252,7 +252,7 @@ pub(crate) fn consolidate_latest(
 
 /// Deterministic, filesystem-safe slug for a fact key: lowercase alphanumerics,
 /// single dashes for separators, trimmed, capped at `max` bytes.
-pub(crate) fn slug_key(s: &str, max: usize) -> String {
+pub fn slug_key(s: &str, max: usize) -> String {
     let mut out = String::new();
     for ch in s.chars() {
         if out.len() >= max {
@@ -271,7 +271,7 @@ pub(crate) fn slug_key(s: &str, max: usize) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]
