@@ -97,12 +97,10 @@ Content for section {i}."
         ),
     )
     .unwrap();
-    // Canonicalize after writing so the path is stable for cache key lookups.
-    // On Windows CI, tempdir short names (8.3) can race with canonicalization.
-    let p = std::fs::canonicalize(&path)
-        .unwrap_or_else(|_| path.clone())
-        .to_string_lossy()
-        .to_string();
+    // Use normalize_tool_path for cache-key consistency (matches the cache's
+    // own normalization). Raw canonicalize is racy on Windows CI due to 8.3
+    // short-name aliasing (#1441-ci).
+    let p = crate::core::pathutil::normalize_tool_path(&path.to_string_lossy());
 
     let mut cache = SessionCache::new();
 
