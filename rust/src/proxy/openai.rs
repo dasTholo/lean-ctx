@@ -364,6 +364,8 @@ mod tests {
     fn effort_control_sets_reasoning_effort_and_off_is_noop() {
         // #834 end-to-end through the Chat Completions request path.
         let _iso = crate::core::data_dir::isolated_data_dir();
+        crate::core::config::Config::update_global(|c| c.proxy.proxy_mode = Some("cache".into()))
+            .unwrap();
         crate::test_env::remove_var("LEAN_CTX_PROXY_EFFORT");
         let body = serde_json::json!({
             "model": "gpt-5.5", "messages": [{"role": "user", "content": "hi"}]

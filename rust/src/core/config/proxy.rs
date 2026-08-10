@@ -189,7 +189,7 @@ pub struct ProxyConfig {
     /// `false`. Env `LEAN_CTX_PROXY_VERBOSITY_STEER`. See
     /// [`ProxyConfig::verbosity_steer_enabled`].
     pub verbosity_steer: Option<bool>,
-    /// Unified proxy operation mode (`[proxy] proxy_mode`). `"cache"` (default)
+    /// Unified proxy operation mode (`[proxy] proxy_mode`). `"token"` (default)
     /// or `"token"`. Sets sensible defaults for all cache-related knobs; explicit
     /// per-knob overrides always win. Env `LEAN_CTX_PROXY_MODE`.
     pub proxy_mode: Option<String>,
@@ -577,7 +577,7 @@ pub enum HistoryMode {
 }
 
 impl ProxyConfig {
-    /// Resolved proxy mode. `LEAN_CTX_PROXY_MODE` env wins, then config, then `Cache`.
+    /// Resolved proxy mode. `LEAN_CTX_PROXY_MODE` env wins, then config, then `Token`.
     #[must_use]
     pub fn resolved_proxy_mode(&self) -> ProxyMode {
         let raw = std::env::var("LEAN_CTX_PROXY_MODE")
@@ -585,7 +585,7 @@ impl ProxyConfig {
             .or_else(|| self.proxy_mode.clone());
         raw.as_deref()
             .and_then(ProxyMode::parse)
-            .unwrap_or(ProxyMode::Cache)
+            .unwrap_or(ProxyMode::Token)
     }
 
     /// Whether a Headroom-compatible stack is configured.

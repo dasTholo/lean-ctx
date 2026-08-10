@@ -358,6 +358,8 @@ mod tests {
     #[test]
     fn short_history_is_passthrough() {
         let _iso = crate::core::data_dir::isolated_data_dir();
+        crate::core::config::Config::update_global(|c| c.proxy.proxy_mode = Some("cache".into()))
+            .unwrap();
         let body = serde_json::json!({
             "contents": [
                 {"role": "user", "parts": [{"functionResponse": {
@@ -492,6 +494,8 @@ mod tests {
         // #840 end-to-end: the model is taken from the URL path, so the handler
         // threads it in. 3.x → thinkingLevel; off / unknown model → byte no-op.
         let _iso = crate::core::data_dir::isolated_data_dir();
+        crate::core::config::Config::update_global(|c| c.proxy.proxy_mode = Some("cache".into()))
+            .unwrap();
         crate::test_env::remove_var("LEAN_CTX_PROXY_EFFORT");
         crate::core::config::Config::update_global(|c| {
             c.proxy.effort = Some("low".into());

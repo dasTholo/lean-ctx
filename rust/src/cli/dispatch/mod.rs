@@ -469,7 +469,7 @@ pub fn run() {
                 return;
             }
             "enterprise" => {
-                super::enterprise::cmd_enterprise(&rest);
+                super::cmd_enterprise(&rest);
                 return;
             }
             "tee" => {

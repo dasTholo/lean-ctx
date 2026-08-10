@@ -17,13 +17,48 @@ struct InitArgs {
 pub(crate) fn cmd_enterprise(args: &[String]) {
     let result = match args.first().map(String::as_str) {
         Some("init") => run_init(&args[1..]),
-        _ => Err("Usage: lean-ctx enterprise init [--url URL] [--token TOKEN] [--force]".into()),
+        Some("status") => run_status(),
+        Some("--help" | "-h") | None => {
+            print_help();
+            return;
+        }
+        _ => Err("unknown command; use `lean-ctx enterprise --help`".into()),
     };
 
     if let Err(error) = result {
         print_error(&error);
         std::process::exit(1);
     }
+}
+
+fn print_help() {
+    println!(
+        "Usage: lean-ctx enterprise <COMMAND>\n\nCommands:\n  init    Configure an Enterprise Suite connection\n  status  Show the current connection status\n\nOptions:\n  -h, --help  Print this help"
+    );
+}
+
+fn run_status() -> Result<(), String> {
+    let config = crate::core::config::Config::load_global();
+    let enterprise = &config.enterprise;
+    if enterprise.disabled {
+        println!("Enterprise: disabled");
+        return Ok(());
+    }
+
+    let Some(gateway_url) = enterprise.effective_gateway_url_owned() else {
+        println!("Enterprise: not configured");
+        return Ok(());
+    };
+    let token_status = if enterprise.effective_token().is_some() {
+        "configured"
+    } else {
+        "missing"
+    };
+    println!("Enterprise: configured");
+    println!("  Gateway URL: {gateway_url}");
+    println!("  Instance ID: {}", enterprise.effective_instance_id());
+    println!("  Instance token: {token_status}");
+    Ok(())
 }
 
 fn run_init(args: &[String]) -> Result<(), String> {

@@ -109,8 +109,8 @@ fn cold_prefix_repack_is_opt_in_and_config_enables() {
     let _lock = crate::core::data_dir::test_env_lock();
     crate::test_env::remove_var("LEAN_CTX_PROXY_COLD_PREFIX_REPACK");
     assert!(
-        !ProxyConfig::default().repacks_cold_prefix(),
-        "cold-prefix repack must be opt-in (off by default)"
+        ProxyConfig::default().repacks_cold_prefix(),
+        "cold-prefix repack is on by default in Token mode"
     );
     let cfg = ProxyConfig {
         cold_prefix_repack: Some(true),
@@ -194,8 +194,8 @@ fn cache_align_relocate_is_opt_in_and_config_enables() {
     let _lock = crate::core::data_dir::test_env_lock();
     crate::test_env::remove_var("LEAN_CTX_PROXY_CACHE_ALIGN_RELOCATE");
     assert!(
-        !ProxyConfig::default().cache_align_relocate_enabled(),
-        "active cache-aligner relocate must be opt-in (off by default)"
+        ProxyConfig::default().cache_align_relocate_enabled(),
+        "active cache-aligner relocate is on by default in Token mode"
     );
     let cfg = ProxyConfig {
         cache_align_relocate: Some(true),
@@ -336,7 +336,7 @@ fn output_holdout_defaults_off_and_clamps() {
 fn verbosity_steer_defaults_off_and_env_overrides() {
     let _lock = crate::core::data_dir::test_env_lock();
     crate::test_env::remove_var("LEAN_CTX_PROXY_VERBOSITY_STEER");
-    assert!(!ProxyConfig::default().verbosity_steer_enabled());
+    assert!(ProxyConfig::default().verbosity_steer_enabled());
     let cfg = ProxyConfig {
         verbosity_steer: Some(true),
         ..Default::default()
@@ -782,7 +782,10 @@ fn role_aggressiveness_defaults_to_off() {
     let _lock = crate::core::data_dir::test_env_lock();
     crate::test_env::remove_var("LEAN_CTX_PROXY_SYSTEM_AGGR");
     crate::test_env::remove_var("LEAN_CTX_PROXY_USER_AGGR");
-    assert_eq!(cfg.resolved_role_aggressiveness(ProseRole::System), None);
+    assert_eq!(
+        cfg.resolved_role_aggressiveness(ProseRole::System),
+        Some(0.5)
+    );
     assert_eq!(cfg.resolved_role_aggressiveness(ProseRole::User), None);
 }
 

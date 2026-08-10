@@ -861,6 +861,7 @@ mod tests {
     #[test]
     fn cold_prefix_repack_rewrites_protected_system_prose_when_enabled() {
         let _iso = crate::core::data_dir::isolated_data_dir();
+        crate::test_env::set_var("LEAN_CTX_PROXY_MODE", "cache");
         crate::test_env::remove_var("LEAN_CTX_PROXY_COLD_PREFIX_REPACK");
         crate::core::config::Config::update_global(|c| {
             c.proxy.role_aggressiveness.system = Some(0.9);
@@ -1125,6 +1126,7 @@ mod tests {
         // Default off → the request must be byte-identical (no system reshape),
         // preserving the meter-only / cache-stable contract.
         let _iso = crate::core::data_dir::isolated_data_dir();
+        crate::test_env::set_var("LEAN_CTX_PROXY_MODE", "cache");
         crate::test_env::remove_var("LEAN_CTX_PROXY_CACHE_BREAKPOINT");
         let body = serde_json::json!({
             "model": "claude-opus-4-8",
@@ -1174,6 +1176,7 @@ mod tests {
         // the request byte-identical (measurement, not a rewrite), even on a
         // volatile-field-rich system prompt.
         let _iso = crate::core::data_dir::isolated_data_dir();
+        crate::test_env::set_var("LEAN_CTX_PROXY_MODE", "cache");
         crate::test_env::remove_var("LEAN_CTX_PROXY_CACHE_ALIGNER");
         crate::test_env::remove_var("LEAN_CTX_PROXY_CACHE_BREAKPOINT");
         let body = serde_json::json!({
@@ -1210,6 +1213,7 @@ mod tests {
         // ephemeral breakpoint.
         let _iso = crate::core::data_dir::isolated_data_dir();
         clear_relocate_env();
+        crate::test_env::set_var("LEAN_CTX_PROXY_MODE", "cache");
         let body = serde_json::json!({
             "model": "claude-opus-4-8",
             "system": cacheable_system_with_date(),
@@ -1251,6 +1255,7 @@ mod tests {
         // Default off → byte-identical request, preserving the cache-stable
         // contract even with a volatile-rich system prompt.
         let _iso = crate::core::data_dir::isolated_data_dir();
+        crate::test_env::set_var("LEAN_CTX_PROXY_MODE", "cache");
         clear_relocate_env();
         let body = serde_json::json!({
             "model": "claude-opus-4-8",
@@ -1329,6 +1334,7 @@ mod tests {
         // breakpoint, on the stable block, with the volatile tail uncached.
         let _iso = crate::core::data_dir::isolated_data_dir();
         clear_relocate_env();
+        crate::test_env::set_var("LEAN_CTX_PROXY_MODE", "cache");
         let body = serde_json::json!({
             "model": "claude-opus-4-8",
             "system": cacheable_system_with_date(),
