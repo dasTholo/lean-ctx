@@ -46,6 +46,15 @@ fn steer_text_block() -> Value {
     Value::Object(m)
 }
 
+/// A `{ "type": "input_text", "text": STEER }` block for OpenAI Responses API
+/// content arrays (which require `input_text`, not `text`).
+fn steer_input_text_block() -> Value {
+    let mut m = Map::new();
+    m.insert("type".to_string(), Value::String("input_text".to_string()));
+    m.insert("text".to_string(), Value::String(STEER.to_string()));
+    Value::Object(m)
+}
+
 /// A `{ "text": STEER }` part for Gemini `parts` arrays.
 fn steer_gemini_part() -> Value {
     let mut m = Map::new();
@@ -144,7 +153,7 @@ pub fn apply_openai_responses(doc: &mut Value) -> bool {
                 return false;
             };
             match items[idx].get_mut("content") {
-                Some(content) => append_to_content(content, steer_text_block),
+                Some(content) => append_to_content(content, steer_input_text_block),
                 None => false,
             }
         }
@@ -288,9 +297,10 @@ mod tests {
         assert!(s["input"].as_str().unwrap().ends_with(STEER));
 
         let mut a =
-            json!({"input": [{"role": "user", "content": [{"type": "text", "text": "q"}]}]});
+            json!({"input": [{"role": "user", "content": [{"type": "input_text", "text": "q"}]}]});
         assert!(apply_openai_responses(&mut a));
         let parts = a["input"][0]["content"].as_array().unwrap();
+        assert_eq!(parts.last().unwrap()["type"], "input_text");
         assert_eq!(parts.last().unwrap()["text"], STEER);
     }
 

@@ -4,21 +4,28 @@ use super::engine::Completion;
 
 /// Generate a zsh completion script that delegates to `lean-ctx __complete`.
 pub(super) fn zsh_script() -> String {
-    r#"#compdef lean-ctx lctx _lc _lc_compress
+    r#"#compdef lean-ctx lctx
 
 _lean-ctx() {
     local -a completions
     local IFS=$'\n'
-    completions=(${(f)"$(lean-ctx __complete zsh -- "${words[@]:1}")" })
+    completions=(${(f)$(lean-ctx __complete zsh -- "${words[@]:1}")})
     if (( ${#completions} )); then
         _describe -t commands 'lean-ctx' completions
     fi
 }
 
+# Wrapper aliases delegate to the original command's native completion.
+_lean_ctx_passthrough() {
+    shift words
+    (( CURRENT-- ))
+    _normal
+}
+
 compdef _lean-ctx lean-ctx 2>/dev/null
 compdef _lean-ctx lctx 2>/dev/null
-compdef _lean-ctx _lc 2>/dev/null
-compdef _lean-ctx _lc_compress 2>/dev/null
+compdef _lean_ctx_passthrough _lc 2>/dev/null
+compdef _lean_ctx_passthrough _lc_compress 2>/dev/null
 "#
     .to_string()
 }
@@ -31,10 +38,20 @@ pub(super) fn bash_script() -> String {
     COMPREPLY=($(lean-ctx __complete bash -- "${COMP_WORDS[@]:1}"))
 }
 
+# Wrapper aliases delegate to the original command's native completion.
+_lean_ctx_passthrough() {
+    local cmd="${COMP_WORDS[0]}"
+    # Resolve the underlying command (strip _lc/_lc_compress wrapper).
+    _completion_loader "$cmd" 2>/dev/null
+    local func
+    func=$(complete -p "$cmd" 2>/dev/null | sed 's/.*-F \([^ ]*\).*/\1/')
+    if [ -n "$func" ] && [ "$func" != "_lean_ctx_passthrough" ]; then
+        "$func"
+    fi
+}
+
 complete -F _lean_ctx_complete lean-ctx
 complete -F _lean_ctx_complete lctx
-complete -F _lean_ctx_complete _lc
-complete -F _lean_ctx_complete _lc_compress
 "#
     .to_string()
 }
@@ -51,8 +68,7 @@ end
 
 complete -c lean-ctx -f -a '(__lean_ctx_complete)'
 complete -c lctx -f -a '(__lean_ctx_complete)'
-complete -c _lc -f -a '(__lean_ctx_complete)'
-complete -c _lc_compress -f -a '(__lean_ctx_complete)'
+# _lc/_lc_compress: no custom completions — fish falls through to native.
 "
     .to_string()
 }
