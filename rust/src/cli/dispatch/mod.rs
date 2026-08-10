@@ -211,6 +211,10 @@ pub fn run() {
                 println!("{}", core::stats::format_cep_report());
                 return;
             }
+            "demo" => {
+                super::cmd_demo(&rest);
+                return;
+            }
             "dashboard" => {
                 cmd_dashboard(&rest);
                 return;
