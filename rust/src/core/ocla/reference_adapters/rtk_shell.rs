@@ -977,7 +977,7 @@ fn kill_process_tree(child: &mut Child) {
 mod tests {
     use std::collections::BTreeMap;
 
-    use super::{CAPABILITY_ID, CapabilityFailure, RtkConfig, RtkShellAdapter, sha256_file};
+    use super::{CAPABILITY_ID, CapabilityFailure, RtkConfig, RtkShellAdapter};
     use crate::core::ocla::invocation::{
         CapabilityAdapter, CapabilityInput, CapabilityInvocation, PolicyConstraints,
     };
@@ -1043,6 +1043,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn timeout_is_evidenced_and_falls_back() {
+        use super::sha256_file;
         use std::os::unix::fs::PermissionsExt;
         use tempfile::tempdir;
 

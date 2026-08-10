@@ -411,7 +411,6 @@ mod tests {
     use crate::core::ocla::invocation::{
         CapabilityInput, CapabilityInvocation, CapabilityObservationV1, PolicyConstraints,
     };
-    use crate::core::ocla::reference_adapters::{RtkConfig, RtkShellAdapter};
 
     fn observation(id: &str, tokens: u64) -> CapabilityObservationV1 {
         CapabilityObservationV1 {
@@ -467,6 +466,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn live_shadow_produces_a_valid_observation_pair_without_mutating_response() {
+        use crate::core::ocla::reference_adapters::{RtkConfig, RtkShellAdapter};
         use std::os::unix::fs::PermissionsExt;
         let directory = tempfile::tempdir().expect("temporary directory");
         let binary = directory.path().join("rtk");
