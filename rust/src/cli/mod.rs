@@ -83,6 +83,7 @@ pub(crate) use debug_log_cmd::cmd_debug_log;
 pub(crate) use demo_cmd::cmd_demo;
 pub use discover_cmd::*;
 pub use dispatch::run;
+pub(crate) use enterprise::cmd_enterprise;
 pub(crate) use index_cmd::cmd_index;
 pub(crate) use init_cmd::quiet_enabled;
 pub use init_cmd::{cmd_init, cmd_init_quiet};

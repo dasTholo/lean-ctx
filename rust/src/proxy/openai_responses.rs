@@ -439,6 +439,8 @@ mod tests {
     #[test]
     fn non_tool_output_items_are_untouched() {
         let _iso = crate::core::data_dir::isolated_data_dir();
+        crate::core::config::Config::update_global(|c| c.proxy.proxy_mode = Some("cache".into()))
+            .unwrap();
         let body = serde_json::json!({
             "input": [
                 {"type": "message", "role": "user", "content": long_git_status()},
@@ -456,6 +458,8 @@ mod tests {
     #[test]
     fn plain_string_input_passthrough() {
         let _iso = crate::core::data_dir::isolated_data_dir();
+        crate::core::config::Config::update_global(|c| c.proxy.proxy_mode = Some("cache".into()))
+            .unwrap();
         let body = serde_json::json!({"model": "gpt-5", "input": "hello world"});
         let bytes = serde_json::to_vec(&body).unwrap();
         let (out, orig, comp) = compress_request_body(body.clone(), bytes.len());
@@ -480,6 +484,7 @@ mod tests {
         let _iso = crate::core::data_dir::isolated_data_dir();
         crate::core::config::Config::update_global(|c| {
             c.proxy.role_aggressiveness.user = Some(0.8);
+            c.proxy.proxy_mode = Some("cache".into());
         })
         .unwrap();
 
@@ -575,6 +580,7 @@ mod tests {
         let _iso = crate::core::data_dir::isolated_data_dir();
         crate::core::config::Config::update_global(|c| {
             c.proxy.role_aggressiveness.user = Some(0.7);
+            c.proxy.proxy_mode = Some("cache".into());
         })
         .unwrap();
 
