@@ -406,7 +406,6 @@ impl CapabilityFailure {
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::PermissionsExt;
 
     use super::{ShadowDecision, ShadowRunner};
     use crate::core::ocla::invocation::{
@@ -468,6 +467,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn live_shadow_produces_a_valid_observation_pair_without_mutating_response() {
+        use std::os::unix::fs::PermissionsExt;
         let directory = tempfile::tempdir().expect("temporary directory");
         let binary = directory.path().join("rtk");
         std::fs::write(
