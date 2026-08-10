@@ -50,7 +50,7 @@ pub fn retention_score(p: &Procedure) -> f32 {
 }
 
 /// Order procedures best-kept first (descending retention), deterministically.
-/// Pass to [`crate::core::memory_capacity::reclaim_store`], which archives the
+/// Pass to `memory_capacity::reclaim_store`, which archives the
 /// lowest-ranked tail.
 pub fn retention_cmp(a: &Procedure, b: &Procedure) -> std::cmp::Ordering {
     retention_score(b)

@@ -67,7 +67,7 @@ pub struct ModePredictor {
     project_root: Option<String>,
 }
 
-/// (De)serializes [`ModePredictor::history`] as a sequence of entries so the
+/// (De)serializes the predictor's `history` field as a sequence of entries so the
 /// struct-keyed map survives `serde_json` (see the field comment, #550).
 pub mod history_serde {
     use super::{FileSignature, ModeOutcome};

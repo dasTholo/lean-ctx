@@ -3,7 +3,7 @@
 //! Every memory store — facts, history, procedures, patterns — archives the
 //! items it evicts here *before* dropping them, so capacity management is never
 //! lossy and anything reclaimed can be restored. This is the single archive
-//! subsystem behind [`crate::core::memory_capacity`] and the recall-miss
+//! subsystem behind the memory-capacity module and the recall-miss
 //! rehydrate path.
 //!
 //! ## On-disk layout

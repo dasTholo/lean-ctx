@@ -1,6 +1,6 @@
 //! Structural diff using tree-sitter chunk identities (named declarations).
 //!
-//! Compares structural chunks from [`super::chunks_ts`] between two sources.
+//! Compares structural chunks from the parent module's `chunks_ts` between two sources.
 
 use serde::Serialize;
 
