@@ -19,7 +19,7 @@
 //!   `alternative` field), so else-if chains stay roughly linear.
 //!
 //! Nested function bodies are scored independently (mirrors
-//! [`crate::core::cyclomatic`]). The traversal uses the heap-stack walk pattern
+//! the cyclomatic module). The traversal uses the heap-stack walk pattern
 //! to stay safe on pathologically deep trees (#378).
 
 use serde::Serialize;

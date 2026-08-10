@@ -1,7 +1,7 @@
 //! Per-language import resolvers.
 //!
 //! Each `resolve_*` maps a language's import specifier to a project file path and
-//! is dispatched from [`super::resolve_one`]. Language-private helpers (path
+//! is dispatched from the parent module's `resolve_one`. Language-private helpers (path
 //! probing, stdlib checks) stay private to this module.
 
 #[allow(clippy::wildcard_imports)]
