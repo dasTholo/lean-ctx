@@ -13,7 +13,7 @@
 //!   Windows. On Unix, pwsh removes these so the native binary runs instead.
 //!
 //! See GH #1442 and follow-up reviews from @tr3lane.
-//! Reference: https://learn.microsoft.com/powershell/scripting/whats-new/unix-support
+//! Reference: <https://learn.microsoft.com/powershell/scripting/whats-new/unix-support>
 
 /// Unconditionally safe verb prefixes — truly read-only / formatting
 /// operations regardless of the noun.
@@ -110,7 +110,7 @@ const SAFE_CMDLET_EXCEPTIONS: &[&str] = &[
 
 /// PowerShell-only aliases that do NOT collide with any native Unix binary.
 /// These must be intercepted on ALL platforms (pwsh keeps them on Linux/macOS).
-/// Source: https://learn.microsoft.com/powershell/scripting/whats-new/unix-support
+/// Source: <https://learn.microsoft.com/powershell/scripting/whats-new/unix-support>
 const PS_ONLY_DANGEROUS_ALIASES: &[(&str, &str)] = &[
     ("iex", "Invoke-Expression"),
     ("ihy", "Invoke-History"),
@@ -133,7 +133,7 @@ const PS_ONLY_DANGEROUS_ALIASES: &[(&str, &str)] = &[
 
 /// Aliases that collide with POSIX binaries — PowerShell removes them on
 /// Linux/macOS so the native binary runs instead. Only gate on Windows.
-/// Source: https://learn.microsoft.com/powershell/scripting/whats-new/unix-support
+/// Source: <https://learn.microsoft.com/powershell/scripting/whats-new/unix-support>
 const POSIX_COLLIDING_DANGEROUS_ALIASES: &[(&str, &str)] = &[
     ("rm", "Remove-Item"),
     ("rmdir", "Remove-Item"),
