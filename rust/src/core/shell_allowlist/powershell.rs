@@ -5,13 +5,17 @@
 //! with noun-level exceptions for verbs that are safe in some contexts but
 //! dangerous in others (e.g. `Out-String` is safe, `Out-File` is not).
 //!
-//! Additionally, it resolves dangerous PowerShell aliases that share names with
-//! POSIX utilities (e.g. `rm` → `Remove-Item`, `iex` → `Invoke-Expression`)
-//! so the verb gate cannot be bypassed through the POSIX allowlist (#1442).
+//! Alias resolution is split into two categories:
+//! - **PS-only aliases** (no native binary collision): checked on ALL platforms
+//!   because pwsh keeps them on Linux/macOS. This prevents `iex` (= Invoke-Expression)
+//!   from bypassing the verb gate.
+//! - **POSIX-colliding aliases** (conflict with native binary): only checked on
+//!   Windows. On Unix, pwsh removes these so the native binary runs instead.
 //!
-//! See GH #1442 and follow-up comments from @tr3lane.
+//! See GH #1442 and follow-up reviews from @tr3lane.
+//! Reference: https://learn.microsoft.com/powershell/scripting/whats-new/unix-support
 
-/// Unconditionally safe verb prefixes — these are truly read-only / formatting
+/// Unconditionally safe verb prefixes — truly read-only / formatting
 /// operations regardless of the noun.
 const SAFE_VERB_PREFIXES: &[&str] = &[
     "Get-",
@@ -40,10 +44,10 @@ const SAFE_VERB_PREFIXES: &[&str] = &[
     "Debug-",
     "Assert-",
     "Confirm-",
-    "Read-",
 ];
 
-/// Explicitly blocked verb prefixes — destructive or execution-capable.
+/// Explicitly blocked verb prefixes — destructive, execution-capable, or
+/// can write to disk depending on the noun.
 const BLOCKED_VERB_PREFIXES: &[&str] = &[
     "Remove-",
     "Clear-",
@@ -69,6 +73,7 @@ const BLOCKED_VERB_PREFIXES: &[&str] = &[
     "Import-",
     "Export-",
     "Out-",
+    "Read-",
 ];
 
 /// Noun-level safe exceptions for otherwise-blocked verb prefixes.
@@ -79,7 +84,9 @@ const SAFE_CMDLET_EXCEPTIONS: &[&str] = &[
     // Pure constructors with no side effects
     "New-Guid",
     "New-TimeSpan",
-    "New-Object",
+    // NOTE: New-Object deliberately excluded — it's an execution primitive:
+    //   (New-Object Net.WebClient).DownloadString(...)
+    //   New-Object -ComObject WScript.Shell  →  .Run(...)
     // Start-Sleep = wait, no mutation (same as the `sleep` alias)
     "Start-Sleep",
     // Clear-Host = cls, display-only (clears terminal, not data)
@@ -92,44 +99,48 @@ const SAFE_CMDLET_EXCEPTIONS: &[&str] = &[
     // Import-Csv / Import-Clixml = reads data from file (doesn't execute code)
     "Import-Csv",
     "Import-Clixml",
-    // Export-Csv / Export-Clixml to stdout (commonly piped, but noun is specific)
-    // NOTE: Export-Csv -Path writes files, but the cmdlet is common enough in
-    // agent pipelines that blocking it entirely is impractical. The file write
-    // is to an explicit -Path arg, not arbitrary execution.
+    // Export-Csv / Export-Clixml — structured data output
     "Export-Csv",
     "Export-Clixml",
     "Export-FormatData",
+    // Read-Host — safe (prompts for input), though it blocks headless agents
+    // on stdin timeout. Not a security issue, an availability one.
+    "Read-Host",
 ];
 
-/// Dangerous PowerShell aliases that resolve to blocked cmdlets.
-/// These MUST be intercepted on Windows (where the shell is PowerShell), because
-/// they share names with POSIX utilities on the standard shell allowlist.
-/// Without this, `iex` (= Invoke-Expression) passes the POSIX allowlist.
-/// On non-Windows, these tokens are real POSIX binaries and should NOT be blocked.
-const DANGEROUS_PS_ALIASES: &[(&str, &str)] = &[
+/// PowerShell-only aliases that do NOT collide with any native Unix binary.
+/// These must be intercepted on ALL platforms (pwsh keeps them on Linux/macOS).
+/// Source: https://learn.microsoft.com/powershell/scripting/whats-new/unix-support
+const PS_ONLY_DANGEROUS_ALIASES: &[(&str, &str)] = &[
     ("iex", "Invoke-Expression"),
     ("ihy", "Invoke-History"),
     ("icm", "Invoke-Command"),
     ("irm", "Invoke-RestMethod"),
     ("iwr", "Invoke-WebRequest"),
-    ("rm", "Remove-Item"),
-    ("rmdir", "Remove-Item"),
     ("del", "Remove-Item"),
     ("ri", "Remove-Item"),
-    ("kill", "Stop-Process"),
-    ("spps", "Stop-Process"),
-    ("saps", "Start-Process"),
-    ("sajb", "Start-Job"),
     ("ni", "New-Item"),
     ("ndr", "New-PSDrive"),
     ("mi", "Move-Item"),
-    ("mv", "Move-Item"),
-    ("cp", "Copy-Item"),
     ("cpi", "Copy-Item"),
     ("si", "Set-Item"),
     ("sp", "Set-ItemProperty"),
     ("sc", "Set-Content"),
-    ("sl", "Set-Location"),
+    ("spps", "Stop-Process"),
+    ("saps", "Start-Process"),
+    ("sajb", "Start-Job"),
+];
+
+/// Aliases that collide with POSIX binaries — PowerShell removes them on
+/// Linux/macOS so the native binary runs instead. Only gate on Windows.
+/// Source: https://learn.microsoft.com/powershell/scripting/whats-new/unix-support
+const POSIX_COLLIDING_DANGEROUS_ALIASES: &[(&str, &str)] = &[
+    ("rm", "Remove-Item"),
+    ("rmdir", "Remove-Item"),
+    ("kill", "Stop-Process"),
+    ("mv", "Move-Item"),
+    ("cp", "Copy-Item"),
+    ("start", "Start-Process"),
 ];
 
 /// Safe PowerShell aliases and builtins that agents use frequently.
@@ -138,27 +149,30 @@ const POWERSHELL_BUILTINS: &[&str] = &[
     // Aliases for Get-* (read-only)
     "gci", "gi", "gp", "gpv", "gc", "gl", "gm", "gps", "gsv", "gwmi",
     // Aliases for formatting/output
-    "fl", "ft", "fw", "oh", "ogv",
-    // Aliases for filtering/selection
-    "sls", // Select-String
-    // Measure-Object
+    "fl", "ft", "fw", "oh",      // Aliases for filtering/selection
+    "sls",     // Measure-Object
     "measure", // ForEach-Object / Where-Object
-    "%", "?", // Clear-Host (display only)
-    "cls", // Get-ChildItem
-    "dir", // Get-Content
-    "type", // pagination
-    "more", // Tee-Object (read pipe, no mutation)
-    "tee", // Compare-Object
-    "diff", // Start-Sleep (wait, no mutation)
+    "%", "?",     // Clear-Host (display only)
+    "cls",   // Get-ChildItem
+    "dir",   // Get-Content
+    "type",  // pagination
+    "more",  // Compare-Object
+    "diff",  // Start-Sleep (wait, no mutation)
     "sleep", // Set-Location (= cd, navigation only)
     "sl", "cd", "chdir", // Write-Output
-    "echo", // Get-History
+    "echo",  // Get-History
     "h", "history", // Get-Location
-    "pwd", // Sort-Object
-    "sort", // Where-Object
-    "where", // ForEach-Object
+    "pwd",     // Sort-Object
+    "sort",    // Where-Object
+    "where",   // ForEach-Object
     "foreach",
 ];
+
+// NOTE on removed builtins vs previous version:
+// - `ogv` removed: Out-GridView is now blocked (writes GUI window / doesn't
+//   exist on Linux/macOS). Alias must agree with canonical form.
+// - `tee` removed: Tee-Object -FilePath writes arbitrary files on Windows.
+//   On Unix `tee` is the native binary (handled by standard allowlist).
 
 /// Check a command token against the PowerShell allowlist.
 ///
@@ -175,11 +189,20 @@ pub(super) fn check_powershell_cmdlet(base: &str) -> Option<bool> {
         return Some(true);
     }
 
-    // Dangerous PS aliases that overlap with POSIX names — resolve to target cmdlet.
-    // Only active on Windows where these tokens ARE PowerShell aliases.
-    // On Unix, `rm`/`kill` are real POSIX binaries handled by the standard allowlist.
+    // PS-only dangerous aliases — checked on ALL platforms (pwsh keeps them on Unix)
+    if let Some(&(_, target)) = PS_ONLY_DANGEROUS_ALIASES
+        .iter()
+        .find(|&&(alias, _)| alias.eq_ignore_ascii_case(base))
+    {
+        if is_safe_exception(target) {
+            return Some(true);
+        }
+        return Some(false);
+    }
+
+    // POSIX-colliding dangerous aliases — only on Windows where pwsh defines them
     if cfg!(windows) {
-        if let Some(&(_, target)) = DANGEROUS_PS_ALIASES
+        if let Some(&(_, target)) = POSIX_COLLIDING_DANGEROUS_ALIASES
             .iter()
             .find(|&&(alias, _)| alias.eq_ignore_ascii_case(base))
         {
@@ -274,7 +297,6 @@ mod tests {
             "Split-Path",
             "Resolve-Path",
             "Find-Module",
-            "Read-Host",
         ] {
             assert_eq!(
                 check_powershell_cmdlet(cmd),
@@ -301,6 +323,8 @@ mod tests {
             "Import-Module",
             "Out-File",
             "Export-ModuleMember",
+            "New-Object",
+            "Read-Eval",
         ] {
             assert_eq!(
                 check_powershell_cmdlet(cmd),
@@ -316,7 +340,6 @@ mod tests {
             "Set-Location",
             "New-Guid",
             "New-TimeSpan",
-            "New-Object",
             "Start-Sleep",
             "Clear-Host",
             "Out-String",
@@ -325,6 +348,7 @@ mod tests {
             "Import-Csv",
             "Import-Clixml",
             "Export-Csv",
+            "Read-Host",
         ] {
             assert_eq!(
                 check_powershell_cmdlet(cmd),
@@ -335,22 +359,43 @@ mod tests {
     }
 
     #[test]
-    #[cfg(windows)]
-    fn dangerous_aliases_blocked_on_windows() {
-        for alias in ["iex", "rm", "rmdir", "kill", "del", "ri", "ni"] {
+    fn new_object_is_blocked() {
+        // New-Object is an execution primitive, not a pure constructor
+        assert_eq!(check_powershell_cmdlet("New-Object"), Some(false));
+        assert_eq!(check_powershell_cmdlet("new-object"), Some(false));
+    }
+
+    #[test]
+    fn ps_only_dangerous_aliases_blocked_on_all_platforms() {
+        // These don't collide with POSIX binaries → blocked everywhere
+        for alias in [
+            "iex", "icm", "irm", "iwr", "del", "ri", "ni", "si", "sp", "sc",
+        ] {
             assert_eq!(
                 check_powershell_cmdlet(alias),
                 Some(false),
-                "{alias} is a dangerous PS alias and must be blocked on Windows"
+                "{alias} is a PS-only dangerous alias, must be blocked on all platforms"
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn posix_colliding_aliases_blocked_on_windows() {
+        for alias in ["rm", "rmdir", "kill", "mv", "cp", "start"] {
+            assert_eq!(
+                check_powershell_cmdlet(alias),
+                Some(false),
+                "{alias} is a POSIX-colliding alias, must be blocked on Windows"
             );
         }
     }
 
     #[test]
     #[cfg(not(windows))]
-    fn dangerous_aliases_fall_through_on_unix() {
-        // On Unix, rm/kill/iex are real POSIX binaries — not PS aliases
-        for alias in ["rm", "kill"] {
+    fn posix_colliding_aliases_fall_through_on_unix() {
+        // On Unix, rm/kill/mv/cp are real POSIX binaries — PS removes these aliases
+        for alias in ["rm", "rmdir", "kill", "mv", "cp"] {
             assert_eq!(
                 check_powershell_cmdlet(alias),
                 None,
@@ -360,8 +405,8 @@ mod tests {
     }
 
     #[test]
-    fn alias_sl_is_safe_builtin() {
-        // sl is in POWERSHELL_BUILTINS directly (Set-Location = cd)
+    fn sl_is_safe_builtin() {
+        // sl is in POWERSHELL_BUILTINS (Set-Location = cd)
         assert_eq!(check_powershell_cmdlet("sl"), Some(true));
     }
 
@@ -387,10 +432,23 @@ mod tests {
     }
 
     #[test]
+    fn ogv_not_a_builtin_anymore() {
+        // ogv (Out-GridView) removed from builtins — canonical form is blocked
+        assert_eq!(check_powershell_cmdlet("ogv"), None);
+        assert_eq!(check_powershell_cmdlet("Out-GridView"), Some(false));
+    }
+
+    #[test]
+    fn tee_not_a_ps_builtin_anymore() {
+        // tee removed from PS builtins — on Unix it's a native binary handled
+        // by the standard allowlist; on Windows Tee-Object -FilePath writes files
+        assert_eq!(check_powershell_cmdlet("tee"), None);
+    }
+
+    #[test]
     fn case_insensitive_cmdlet_matching() {
         assert_eq!(check_powershell_cmdlet("get-date"), Some(true));
         assert_eq!(check_powershell_cmdlet("GET-DATE"), Some(true));
-        assert_eq!(check_powershell_cmdlet("Get-Date"), Some(true));
         assert_eq!(check_powershell_cmdlet("remove-item"), Some(false));
         assert_eq!(check_powershell_cmdlet("INVOKE-Expression"), Some(false));
         assert_eq!(check_powershell_cmdlet("set-location"), Some(true));
@@ -398,10 +456,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg(windows)]
-    fn case_insensitive_alias_matching_on_windows() {
+    fn case_insensitive_ps_only_alias() {
         assert_eq!(check_powershell_cmdlet("IEX"), Some(false));
         assert_eq!(check_powershell_cmdlet("Iex"), Some(false));
+        assert_eq!(check_powershell_cmdlet("DEL"), Some(false));
     }
 
     #[test]
@@ -420,15 +478,14 @@ mod tests {
     }
 
     #[test]
-    fn import_module_is_blocked_but_import_csv_is_safe() {
+    fn import_module_blocked_import_csv_safe() {
         assert_eq!(check_powershell_cmdlet("Import-Module"), Some(false));
         assert_eq!(check_powershell_cmdlet("Import-Csv"), Some(true));
         assert_eq!(check_powershell_cmdlet("Import-Clixml"), Some(true));
-        assert_eq!(check_powershell_cmdlet("Import-PSSession"), Some(false));
     }
 
     #[test]
-    fn out_file_blocked_but_out_string_safe() {
+    fn out_file_blocked_out_string_safe() {
         assert_eq!(check_powershell_cmdlet("Out-File"), Some(false));
         assert_eq!(check_powershell_cmdlet("Out-String"), Some(true));
         assert_eq!(check_powershell_cmdlet("Out-Null"), Some(true));
@@ -437,25 +494,21 @@ mod tests {
     }
 
     #[test]
-    fn start_sleep_safe_but_start_process_blocked() {
+    fn start_sleep_safe_start_process_blocked() {
         assert_eq!(check_powershell_cmdlet("Start-Sleep"), Some(true));
         assert_eq!(check_powershell_cmdlet("Start-Process"), Some(false));
         assert_eq!(check_powershell_cmdlet("Start-Job"), Some(false));
     }
 
     #[test]
-    #[cfg(windows)]
-    fn mv_and_cp_are_dangerous_aliases_on_windows() {
-        // On PowerShell, mv → Move-Item, cp → Copy-Item
-        assert_eq!(check_powershell_cmdlet("mv"), Some(false));
-        assert_eq!(check_powershell_cmdlet("cp"), Some(false));
+    fn read_host_is_safe_exception() {
+        assert_eq!(check_powershell_cmdlet("Read-Host"), Some(true));
     }
 
     #[test]
-    #[cfg(not(windows))]
-    fn mv_and_cp_are_posix_binaries_on_unix() {
-        // On Unix, mv/cp are real binaries — handled by standard allowlist
-        assert_eq!(check_powershell_cmdlet("mv"), None);
-        assert_eq!(check_powershell_cmdlet("cp"), None);
+    fn read_verb_blocked_by_default_except_read_host() {
+        // Read- is in BLOCKED_VERB_PREFIXES, only Read-Host is excepted
+        assert_eq!(check_powershell_cmdlet("Read-Host"), Some(true));
+        assert_eq!(check_powershell_cmdlet("Read-Eval"), Some(false));
     }
 }
