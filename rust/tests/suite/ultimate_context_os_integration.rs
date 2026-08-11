@@ -211,7 +211,7 @@ mod shared_sessions {
 
 mod context_bus {
     use super::*;
-    use lean_ctx::core::context_os::{ContextBus, ContextEventKindV1};
+    use lean_ctx::core::context_os::ContextEventKindV1;
 
     #[test]
     fn multi_agent_event_storm() {
@@ -528,9 +528,7 @@ mod redaction {
 
 mod external_app_docking {
     use super::*;
-    use lean_ctx::core::context_os::{
-        ContextBus, ContextEventKindV1, ContextOsMetrics, SharedSessionStore,
-    };
+    use lean_ctx::core::context_os::{ContextEventKindV1, ContextOsMetrics, SharedSessionStore};
     use lean_ctx::core::session::FileTouched;
 
     #[tokio::test]
