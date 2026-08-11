@@ -30,6 +30,12 @@ fn rand_u32() -> u32 {
     (h.finish() & 0xFFFF_FFFF) as u32
 }
 
+fn isolated_bus() -> (lean_ctx::core::context_os::ContextBus, tempfile::TempDir) {
+    let td = tempfile::tempdir().expect("tempdir");
+    let bus = lean_ctx::core::context_os::ContextBus::open_at(td.path().join("test-ctx-os.db"));
+    (bus, td)
+}
+
 mod shared_sessions {
     use super::*;
     use lean_ctx::core::context_os::SharedSessionStore;
@@ -209,7 +215,8 @@ mod context_bus {
 
     #[test]
     fn multi_agent_event_storm() {
-        let bus = Arc::new(ContextBus::new());
+        let (bus_inner, _td) = isolated_bus();
+        let bus = Arc::new(bus_inner);
         let ws = unique_ws();
         let ch = unique_ch();
         let n_agents = 8;
@@ -270,7 +277,8 @@ mod context_bus {
 
     #[test]
     fn broadcast_receives_all_events_from_multiple_agents() {
-        let bus = Arc::new(ContextBus::new());
+        let (bus_inner, _td) = isolated_bus();
+        let bus = Arc::new(bus_inner);
         let ws = unique_ws();
         let ch = unique_ch();
 
@@ -312,7 +320,7 @@ mod context_bus {
 
     #[test]
     fn replay_from_cursor_with_multi_agent_events() {
-        let bus = ContextBus::new();
+        let (bus, _td) = isolated_bus();
         let ws = unique_ws();
         let ch = unique_ch();
 
@@ -348,7 +356,7 @@ mod context_bus {
 
     #[test]
     fn cross_workspace_isolation_with_events() {
-        let bus = ContextBus::new();
+        let (bus, _td) = isolated_bus();
         let pid = std::process::id();
 
         let ws_prod = format!("ws-prod-{pid}");
@@ -528,7 +536,8 @@ mod external_app_docking {
     #[tokio::test]
     async fn external_app_reads_agent_session_and_subscribes_to_events() {
         let store = Arc::new(SharedSessionStore::new());
-        let bus = Arc::new(ContextBus::new());
+        let (bus_inner, _td) = isolated_bus();
+        let bus = Arc::new(bus_inner);
         let metrics = Arc::new(ContextOsMetrics::default());
         let project = "/tmp/external-app-test";
         let ws = "ws-external";
@@ -599,7 +608,8 @@ mod external_app_docking {
     #[tokio::test]
     async fn multiple_external_apps_and_agents_coexist() {
         let store = Arc::new(SharedSessionStore::new());
-        let bus = Arc::new(ContextBus::new());
+        let (bus_inner, _td) = isolated_bus();
+        let bus = Arc::new(bus_inner);
         let project = "/tmp/multi-app-test";
         let ws = "ws-multi-app";
         let ch = "ch-default";
@@ -1084,7 +1094,8 @@ mod e2e_multi_agent_scenario {
     #[tokio::test]
     async fn full_multi_agent_workflow_simulation() {
         let store = Arc::new(SharedSessionStore::new());
-        let bus = Arc::new(ContextBus::new());
+        let (bus_inner, _td) = isolated_bus();
+        let bus = Arc::new(bus_inner);
         let metrics = Arc::new(ContextOsMetrics::default());
         let project = "/tmp/e2e-workflow";
         let ws = "ws-team";

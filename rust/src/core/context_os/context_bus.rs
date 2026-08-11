@@ -303,7 +303,9 @@ impl ContextBus {
         Self::open_at(path)
     }
 
-    fn open_at(path: PathBuf) -> Self {
+    /// Open a ContextBus backed by the given SQLite path. Useful for tests
+    /// that need an isolated database to avoid contention on Windows CI.
+    pub fn open_at(path: PathBuf) -> Self {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
