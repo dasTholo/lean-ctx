@@ -11,6 +11,7 @@ mod config;
 mod enforcement;
 mod heredoc;
 mod mode;
+mod powershell;
 mod substitution;
 mod tokenizer;
 

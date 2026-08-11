@@ -533,6 +533,20 @@ pub(super) fn check_all_segments(command: &str, allowlist: &[String]) -> Result<
         if SHELL_BUILTINS.contains(&base.as_str()) {
             continue;
         }
+        // #1442: PowerShell verb-prefix matching — safe cmdlets (Get-*, Test-*,
+        // etc.) pass without explicit allowlist entries.
+        match super::powershell::check_powershell_cmdlet(&base) {
+            Some(true) => continue,
+            Some(false) => {
+                return Err(format!(
+                    "[BLOCKED — DO NOT RETRY] PowerShell cmdlet '{base}' uses a destructive \
+                     verb and is not auto-allowed. Add it explicitly: lean-ctx allow {base}\n\
+                     This is a permanent restriction."
+                )
+                .into());
+            }
+            None => {} // not a cmdlet, fall through to standard check
+        }
         check_interpreter_abuse(seg, allowlist)?;
         check_dangerous_flags(seg)?;
         if !matches_allowlist_entry(&base, allowlist) {
