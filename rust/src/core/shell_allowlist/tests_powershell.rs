@@ -41,7 +41,6 @@ fn powershell_safe_exceptions_pass() {
         "Set-Location C:\\Users",
         "New-Guid",
         "New-TimeSpan -Hours 1",
-        "New-Object System.IO.MemoryStream",
         "Start-Sleep -Seconds 5",
         "Clear-Host",
         "Out-String",
@@ -50,12 +49,23 @@ fn powershell_safe_exceptions_pass() {
         "Import-Csv data.csv",
         "Import-Clixml backup.xml",
         "Export-Csv results.csv",
+        "Read-Host",
     ] {
         assert!(
             check_all_segments(cmd, &list).is_ok(),
             "Safe exception should pass: {cmd}"
         );
     }
+}
+
+/// New-Object is an execution primitive (download cradles, COM objects) and must
+/// be blocked despite being a "constructor".
+#[test]
+fn powershell_new_object_blocked() {
+    let list = allow(&["git"]);
+    assert!(check_all_segments("New-Object System.IO.MemoryStream", &list).is_err());
+    assert!(check_all_segments("New-Object Net.WebClient", &list).is_err());
+    assert!(check_all_segments("New-Object -ComObject WScript.Shell", &list).is_err());
 }
 
 /// Import-Module is blocked (can execute arbitrary code), but Import-Csv is safe.
@@ -131,17 +141,37 @@ fn powershell_aliases_pass_enforcement() {
     }
 }
 
-/// On Windows, dangerous PS aliases (iex, rm, kill) that overlap with POSIX names
-/// must be blocked to prevent bypassing the verb gate.
+/// PS-only dangerous aliases (iex, del, ni, etc.) must be blocked on ALL platforms.
+/// These don't collide with POSIX binaries, so pwsh keeps them on Linux/macOS.
 #[test]
-#[cfg(windows)]
-fn powershell_dangerous_aliases_blocked_on_windows() {
+fn powershell_ps_only_aliases_blocked_everywhere() {
     let list = allow(&["git", "cargo"]);
-    for cmd in ["iex $code", "rm file.txt", "rmdir folder", "kill 1234"] {
+    // iex is the critical one — Invoke-Expression
+    for cmd in ["iex $code", "del file.txt", "ni newfile", "si prop"] {
         let result = check_all_segments(cmd, &list);
         assert!(
             result.is_err(),
-            "Dangerous PS alias should be blocked on Windows: {cmd}"
+            "PS-only dangerous alias should be blocked: {cmd}"
+        );
+    }
+}
+
+/// On Windows, POSIX-colliding aliases (rm, kill, mv, cp) are also blocked.
+#[test]
+#[cfg(windows)]
+fn powershell_posix_colliding_aliases_blocked_on_windows() {
+    let list = allow(&["git", "cargo"]);
+    for cmd in [
+        "rm file.txt",
+        "rmdir folder",
+        "kill 1234",
+        "mv a b",
+        "cp a b",
+    ] {
+        let result = check_all_segments(cmd, &list);
+        assert!(
+            result.is_err(),
+            "POSIX-colliding alias should be blocked on Windows: {cmd}"
         );
     }
 }
@@ -201,4 +231,38 @@ fn powershell_start_sleep_safe_start_process_blocked() {
     assert!(check_all_segments("Start-Sleep 10", &list).is_ok());
     assert!(check_all_segments("Start-Process cmd.exe", &list).is_err());
     assert!(check_all_segments("Start-Job { heavy }", &list).is_err());
+}
+
+/// ogv/tee are no longer PS builtins (canonical forms are blocked/unresolved).
+#[test]
+fn powershell_ogv_tee_removed_from_builtins() {
+    let list = allow(&["git"]);
+    // ogv → Out-GridView is blocked (doesn't exist on Linux, hangs headless on Windows)
+    let ogv_result = check_all_segments("ogv", &list);
+    assert!(
+        ogv_result.is_err(),
+        "ogv should not pass as builtin anymore"
+    );
+    // tee → On Unix it's handled by standard allowlist, not PS builtins
+    // If tee is in the standard allowlist it passes, otherwise it's blocked
+    let tee_list = allow(&["git", "tee"]);
+    assert!(check_all_segments("tee output.log", &tee_list).is_ok());
+}
+
+/// When a PS-only alias (like `iex`) is explicitly in the allowlist (e.g. Elixir's
+/// `iex` REPL), the allowlist override takes precedence over PS alias blocking.
+#[test]
+fn powershell_explicit_allowlist_overrides_ps_alias_block() {
+    // With iex in allowlist (Elixir REPL use-case) → should pass
+    let list_with_iex = allow(&["git", "iex"]);
+    assert!(
+        check_all_segments("iex", &list_with_iex).is_ok(),
+        "iex should pass when explicitly allowlisted (Elixir REPL)"
+    );
+    // Without iex in allowlist → should be blocked (PS Invoke-Expression)
+    let list_without = allow(&["git", "cargo"]);
+    assert!(
+        check_all_segments("iex", &list_without).is_err(),
+        "iex should be blocked when not in allowlist"
+    );
 }

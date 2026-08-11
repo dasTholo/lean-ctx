@@ -537,7 +537,9 @@ pub(super) fn check_all_segments(command: &str, allowlist: &[String]) -> Result<
         // etc.) pass without explicit allowlist entries.
         match super::powershell::check_powershell_cmdlet(&base) {
             Some(true) => continue,
-            Some(false) => {
+            // PS blocked alias/cmdlet, but allowlist override takes precedence
+            // (supports e.g. Elixir's `iex` REPL alongside PS Invoke-Expression).
+            Some(false) if !matches_allowlist_entry(&base, allowlist) => {
                 return Err(format!(
                     "[BLOCKED — DO NOT RETRY] PowerShell cmdlet '{base}' uses a destructive \
                      verb and is not auto-allowed. Add it explicitly: lean-ctx allow {base}\n\
@@ -545,7 +547,7 @@ pub(super) fn check_all_segments(command: &str, allowlist: &[String]) -> Result<
                 )
                 .into());
             }
-            None => {} // not a cmdlet, fall through to standard check
+            Some(false) | None => {} // allowlisted override or not a cmdlet
         }
         check_interpreter_abuse(seg, allowlist)?;
         check_dangerous_flags(seg)?;
