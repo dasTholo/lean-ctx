@@ -145,6 +145,7 @@ pub fn generate_mcp_receipt(
     ContextReceiptV1 {
         receipt_id: format!("mcp-{tool_name}-{}", uuid_v4_short()),
         plan_id: plan_id.to_owned(),
+        task_id: crate::core::task_spine::TaskSpine::task_id(),
         delivered_tokens: output_tokens,
         cache_hits: usize::from(cache_hit),
         cache_misses: usize::from(!cache_hit),

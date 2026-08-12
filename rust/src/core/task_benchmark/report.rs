@@ -44,6 +44,9 @@ impl BenchReport {
         let mut out = String::new();
         out.push_str("# lean-ctx Task Benchmark Report\n\n");
         out.push_str(&format!("Repeats per config: {}\n\n", self.result.repeats));
+        out.push_str(
+            "The ten embedded fixtures make token and quality measurements reproducible. Time is measured wall-clock latency and is expected to vary by machine.\n\n",
+        );
         out.push_str(&self.md_summary_table());
         out.push_str(&self.md_per_task_table());
         if self.result.regression_detected {
@@ -90,7 +93,7 @@ impl BenchReport {
 
     fn per_task_table(&self) -> String {
         let mut out = String::new();
-        out.push_str("Per-task breakdown:\n\n");
+        out.push_str("Per-task breakdown (raw → compressed, ratio, measured latency):\n\n");
 
         let task_ids: Vec<String> = self
             .result
@@ -114,16 +117,24 @@ impl BenchReport {
                 if runs.is_empty() {
                     continue;
                 }
-                let avg_tokens: usize =
+                let avg_raw_tokens: usize =
+                    runs.iter().map(|r| r.raw_tokens).sum::<usize>() / runs.len().max(1);
+                let avg_compressed_tokens: usize =
                     runs.iter().map(|r| r.compressed_tokens).sum::<usize>() / runs.len().max(1);
                 let avg_savings: f64 =
                     runs.iter().map(|r| r.savings_pct).sum::<f64>() / runs.len() as f64;
+                let avg_latency_us: u64 =
+                    runs.iter().map(|r| r.latency_us).sum::<u64>() / runs.len() as u64;
                 let all_pass = runs.iter().all(|r| r.quality.passes());
                 let status = if all_pass { "✓" } else { "✗" };
 
                 out.push_str(&format!(
-                    "    {:<12} {status} {:>6} tokens ({:>5.1}% saved)\n",
-                    profile.profile, avg_tokens, avg_savings,
+                    "    {:<12} {status} {:>6} → {:>6} tokens ({:>5.1}% saved, {})\n",
+                    profile.profile,
+                    avg_raw_tokens,
+                    avg_compressed_tokens,
+                    avg_savings,
+                    format_duration(avg_latency_us),
                 ));
             }
         }
@@ -160,8 +171,8 @@ impl BenchReport {
     fn md_per_task_table(&self) -> String {
         let mut out = String::new();
         out.push_str("## Per-Task Results\n\n");
-        out.push_str("| Task | Profile | Tokens | Savings | Quality |\n");
-        out.push_str("|---|---|---|---|---|\n");
+        out.push_str("| Task | Profile | Raw Tokens | Compressed Tokens | Compression Ratio | Time | Quality |\n");
+        out.push_str("|---|---|---:|---:|---:|---:|---|\n");
 
         let task_ids: Vec<String> = self
             .result
@@ -184,16 +195,26 @@ impl BenchReport {
                 if runs.is_empty() {
                     continue;
                 }
-                let avg_tokens: usize =
+                let avg_raw_tokens: usize =
+                    runs.iter().map(|r| r.raw_tokens).sum::<usize>() / runs.len().max(1);
+                let avg_compressed_tokens: usize =
                     runs.iter().map(|r| r.compressed_tokens).sum::<usize>() / runs.len().max(1);
                 let avg_savings =
                     runs.iter().map(|r| r.savings_pct).sum::<f64>() / runs.len() as f64;
+                let avg_latency_us: u64 =
+                    runs.iter().map(|r| r.latency_us).sum::<u64>() / runs.len() as u64;
                 let all_pass = runs.iter().all(|r| r.quality.passes());
                 let status = if all_pass { "pass" } else { "FAIL" };
 
                 out.push_str(&format!(
-                    "| {} | {} | {} | {:.1}% | {} |\n",
-                    task_id, profile.profile, avg_tokens, avg_savings, status,
+                    "| {} | {} | {} | {} | {:.1}% saved | {} | {} |\n",
+                    task_id,
+                    profile.profile,
+                    avg_raw_tokens,
+                    avg_compressed_tokens,
+                    avg_savings,
+                    format_duration(avg_latency_us),
+                    status,
                 ));
             }
         }

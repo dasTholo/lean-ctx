@@ -266,6 +266,9 @@ pub struct ProviderStat {
 pub struct ContextReceiptV1 {
     pub receipt_id: String,
     pub plan_id: String,
+    /// Task lineage identifier when receipt originated at MCP ingress.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
     pub delivered_tokens: usize,
     pub cache_hits: usize,
     pub cache_misses: usize,
@@ -280,6 +283,7 @@ impl ContextReceiptV1 {
         Self {
             receipt_id: format!("receipt:{}", plan.plan_id),
             plan_id: plan.plan_id.clone(),
+            task_id: None,
             delivered_tokens: delivered,
             cache_hits: 0,
             cache_misses: 0,

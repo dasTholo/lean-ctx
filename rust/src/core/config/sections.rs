@@ -10,6 +10,27 @@ use super::serde_defaults;
 use super::*;
 use serde::{Deserialize, Serialize};
 
+/// Opt-in configuration for counterfactual Shadow Mode reports.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ShadowConfig {
+    pub enabled: bool,
+    pub report_interval: usize,
+    pub baseline_model: String,
+    pub report_dir: String,
+}
+
+impl Default for ShadowConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            report_interval: 10,
+            baseline_model: "gpt-4o".into(),
+            report_dir: String::new(),
+        }
+    }
+}
+
 /// OCLA deployment settings.
 ///
 /// This wrapper maps the TOML shape `[ocla.sidecar]` and `[ocla.grpc]`; the
@@ -412,6 +433,25 @@ impl Default for ProvidersConfig {
     }
 }
 
+/// Controls additive KnowledgeRouter hints in Context Gate output.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct KnowledgeRoutingConfig {
+    pub enabled: bool,
+    pub max_references: usize,
+    pub hint_prefix: String,
+}
+
+impl Default for KnowledgeRoutingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_references: 5,
+            hint_prefix: "--- Knowledge Context ---".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpBridgeEntry {
     /// HTTP/SSE URL for remote MCP servers.
@@ -805,6 +845,19 @@ pub struct CostConfig {
     /// `output_per_m = 0.40`.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub prices: HashMap<String, PriceOverride>,
+}
+
+/// MCP decision-loop runtime settings (`[decision_loop]`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DecisionLoopConfig {
+    pub enabled: bool,
+}
+
+impl Default for DecisionLoopConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
 }
 
 /// One `[cost.prices.<model>]` row: USD per million tokens. Omitted cache

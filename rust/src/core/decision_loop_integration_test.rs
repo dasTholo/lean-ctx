@@ -1,0 +1,189 @@
+//! Local MCP integration coverage for the decision-loop ingress-to-value path.
+
+use rmcp::model::CallToolRequestParams;
+use serde_json::{Value, json};
+
+use super::{decision_loop_runtime::DecisionLoopRuntime, session::EvidenceKind};
+
+fn request(name: &str, arguments: Value) -> CallToolRequestParams {
+    CallToolRequestParams::new(name.to_owned()).with_arguments(
+        arguments
+            .as_object()
+            .cloned()
+            .expect("test tool arguments must be a JSON object"),
+    )
+}
+
+async fn call(server: &crate::tools::LeanCtxServer, name: &str, arguments: Value) -> String {
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        server.call_tool_guarded(request(name, arguments)),
+    )
+    .await
+    .unwrap_or_else(|_| panic!("{name} MCP call must complete within 15 seconds"))
+    .unwrap_or_else(|error| panic!("{name} MCP call must complete: {error}"));
+    assert_ne!(
+        result.is_error,
+        Some(true),
+        "{name} MCP call must return a successful outcome"
+    );
+
+    server
+        .task_envelope
+        .read()
+        .await
+        .as_ref()
+        .map(|envelope| envelope.task_id.as_str().to_owned())
+        .expect("guarded ingress must create and retain a task envelope")
+}
+
+async fn assert_completed_task(
+    server: &crate::tools::LeanCtxServer,
+    task_id: &str,
+    expected_tool: &str,
+) {
+    let envelope = server.task_envelope.read().await.clone();
+    let envelope = envelope.expect("MCP ingress must retain the task envelope");
+    assert_eq!(envelope.task_id.as_str(), task_id);
+    assert!(!task_id.is_empty(), "ingress task id must not be empty");
+    assert!(
+        envelope
+            .intent
+            .as_deref()
+            .is_some_and(|intent| !intent.is_empty()),
+        "triage must produce an intent-backed task profile"
+    );
+    assert!(
+        envelope
+            .task_class
+            .as_deref()
+            .is_some_and(|class| !class.is_empty()),
+        "triage must enrich the ingress envelope with a task class"
+    );
+
+    let receipt_matches_task = server.session.read().await.evidence.iter().any(|receipt| {
+        matches!(&receipt.kind, EvidenceKind::ToolCall)
+            && receipt.tool.as_deref() == Some(expected_tool)
+            && receipt.task_id.as_deref() == Some(task_id)
+    });
+    assert!(
+        receipt_matches_task,
+        "execution receipt for {expected_tool} must retain the ingress task id"
+    );
+
+    let assessment = DecisionLoopRuntime::get_or_init()
+        .assessment_for(task_id)
+        .expect("completed MCP call must record a value-gate assessment");
+    assert_eq!(assessment.task_id, task_id);
+    assert!(
+        assessment.cost_micros > 0,
+        "completed MCP call must have a positive execution cost"
+    );
+    assert!(
+        assessment.cpao_micros.is_some_and(|cpao| cpao > 0),
+        "accepted MCP outcome must produce positive CPAO"
+    );
+    assert!(assessment.outcome_accepted);
+    assert!(
+        assessment
+            .evidence
+            .iter()
+            .any(|evidence| evidence == "signal=BuildSucceeded"),
+        "successful MCP outcome must be recorded as BuildSucceeded"
+    );
+}
+
+async fn server_with_fixture() -> (
+    tempfile::TempDir,
+    tempfile::TempDir,
+    crate::tools::LeanCtxServer,
+) {
+    let data_dir = tempfile::tempdir().expect("create isolated data directory");
+    let project_dir = tempfile::tempdir().expect("create local project fixture");
+    std::fs::write(
+        project_dir.path().join("fixture.txt"),
+        "decision loop fixture\n",
+    )
+    .expect("write local fixture");
+    let root = project_dir.path().to_string_lossy().to_string();
+    let server = crate::tools::LeanCtxServer::new_with_project_root(Some(&root));
+    (data_dir, project_dir, server)
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn decision_loop_integration_simple_read() {
+    let _lock = crate::core::data_dir::test_env_lock();
+    let (data_dir, project_dir, server) = server_with_fixture().await;
+    // SAFETY: test_env_lock serializes process-wide data directory changes.
+    unsafe { std::env::set_var("LEAN_CTX_DATA_DIR", data_dir.path()) };
+
+    let task_id = call(
+        &server,
+        "ctx_read",
+        json!({"path": project_dir.path().join("fixture.txt"), "mode": "full"}),
+    )
+    .await;
+    assert_completed_task(&server, &task_id, "ctx_read").await;
+
+    // SAFETY: test_env_lock serializes process-wide data directory changes.
+    unsafe { std::env::remove_var("LEAN_CTX_DATA_DIR") };
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn decision_loop_integration_shell() {
+    let _lock = crate::core::data_dir::test_env_lock();
+    let (data_dir, _project_dir, server) = server_with_fixture().await;
+    // SAFETY: test_env_lock serializes process-wide data directory changes.
+    unsafe { std::env::set_var("LEAN_CTX_DATA_DIR", data_dir.path()) };
+
+    let task_id = call(
+        &server,
+        "ctx_shell",
+        json!({"command": "printf decision-loop-shell", "workdir": "."}),
+    )
+    .await;
+    assert_completed_task(&server, &task_id, "ctx_shell").await;
+
+    // SAFETY: test_env_lock serializes process-wide data directory changes.
+    unsafe { std::env::remove_var("LEAN_CTX_DATA_DIR") };
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn decision_loop_integration_multi_step_operation() {
+    let _lock = crate::core::data_dir::test_env_lock();
+    let (data_dir, project_dir, server) = server_with_fixture().await;
+    // SAFETY: test_env_lock serializes process-wide data directory changes.
+    unsafe { std::env::set_var("LEAN_CTX_DATA_DIR", data_dir.path()) };
+
+    let first_task_id = call(
+        &server,
+        "ctx_read",
+        json!({"path": project_dir.path().join("fixture.txt"), "mode": "full"}),
+    )
+    .await;
+    assert_completed_task(&server, &first_task_id, "ctx_read").await;
+
+    let shell_task_id = call(
+        &server,
+        "ctx_shell",
+        json!({"command": "printf decision-loop-step", "workdir": "."}),
+    )
+    .await;
+    assert_completed_task(&server, &shell_task_id, "ctx_shell").await;
+
+    let final_task_id = call(
+        &server,
+        "ctx_read",
+        json!({"path": project_dir.path().join("fixture.txt"), "mode": "full"}),
+    )
+    .await;
+    assert_completed_task(&server, &final_task_id, "ctx_read").await;
+    assert_ne!(first_task_id, shell_task_id);
+    assert_ne!(shell_task_id, final_task_id);
+
+    // SAFETY: test_env_lock serializes process-wide data directory changes.
+    unsafe { std::env::remove_var("LEAN_CTX_DATA_DIR") };
+}

@@ -1,0 +1,127 @@
+//! `lean-ctx value-report` — local ValueGate outcome and cost report.
+
+use crate::core::value_gate::{report, store::ValueGateStore};
+
+/// Entry point for `lean-ctx value-report [--format table|markdown|json] [--last N] [--since YYYY-MM-DD]`.
+pub(crate) fn cmd_value_report(args: &[String]) {
+    if args
+        .iter()
+        .any(|arg| matches!(arg.as_str(), "-h" | "--help"))
+    {
+        usage();
+        return;
+    }
+    let Some((format, last, since)) = parse(args) else {
+        eprintln!(
+            "value-report: expected --format table|markdown|json, --last a positive integer, and --since YYYY-MM-DD"
+        );
+        usage();
+        std::process::exit(2);
+    };
+    let mut tasks = tasks_from_disk();
+    if let Some(date) = since {
+        tasks.retain(|task| task.timestamp.as_str() >= date);
+    }
+    tasks.truncate(last);
+    let report = report::build(tasks);
+    if report.total_tasks == 0 {
+        println!("No assessments recorded yet.");
+        return;
+    }
+    println!(
+        "{}",
+        match format {
+            "json" => report::json(&report),
+            "markdown" => report::markdown(&report),
+            _ => report::table(&report),
+        }
+    );
+}
+
+fn tasks_from_disk() -> Vec<crate::core::value_gate::ValueAssessment> {
+    let mut tasks = ValueGateStore::load_from_disk();
+    tasks.reverse();
+    tasks
+}
+
+fn parse(args: &[String]) -> Option<(&str, usize, Option<&str>)> {
+    let mut format = "table";
+    let mut last = 50;
+    let mut since = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--format" => {
+                format = args.get(index + 1)?.as_str();
+                index += 2;
+            }
+            "--last" => {
+                last = args.get(index + 1)?.parse().ok()?;
+                index += 2;
+            }
+            "--since" => {
+                since = Some(args.get(index + 1)?.as_str());
+                index += 2;
+            }
+            _ => return None,
+        }
+    }
+    (matches!(format, "table" | "markdown" | "json") && last > 0 && since.is_none_or(valid_date))
+        .then_some((format, last, since))
+}
+fn usage() {
+    println!(
+        "Summarize locally recorded Value Gate outcomes and cost.\n\nUsage: lean-ctx value-report [--format <table|markdown|json>] [--last N] [--since YYYY-MM-DD]\n\nExamples:\n  lean-ctx value-report\n  lean-ctx value-report --last 20 --since 2026-08-01\n  lean-ctx value-report --format json"
+    );
+}
+fn valid_date(date: &str) -> bool {
+    chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::value_gate::ValueAssessment;
+
+    fn sample() -> report::ValueReport {
+        report::build(vec![ValueAssessment {
+            task_id: "task-1234567890".into(),
+            model: "gpt-4o".into(),
+            total_tokens: 100,
+            cost_micros: 1_000_000,
+            outcome_accepted: true,
+            cpao_micros: Some(1_000_000),
+            evidence: vec![],
+            timestamp: "2026-08-01T00:00:00Z".into(),
+        }])
+    }
+    #[test]
+    fn test_format_table() {
+        assert!(report::table(&sample()).contains("accepted"));
+    }
+    #[test]
+    fn test_format_markdown() {
+        assert!(report::markdown(&sample()).contains("| Task |"));
+    }
+    #[test]
+    fn test_format_json() {
+        assert!(serde_json::from_str::<serde_json::Value>(&report::json(&sample())).is_ok());
+    }
+    #[test]
+    fn test_empty_report() {
+        assert_eq!(report::build(vec![]).accepted_rate, 0.0);
+    }
+    #[test]
+    fn test_parse_rejects_missing_or_invalid_values() {
+        assert!(parse(&["--last".into()]).is_none());
+        assert!(parse(&["--last".into(), "0".into()]).is_none());
+        assert!(parse(&["--since".into(), "invalid".into()]).is_none());
+    }
+    #[test]
+    fn test_cli_reads_disk() {
+        let _iso = crate::core::data_dir::isolated_data_dir();
+        let task = sample().tasks.pop().unwrap();
+        ValueGateStore::append_to_disk(&task).unwrap();
+        assert_eq!(tasks_from_disk(), vec![task]);
+    }
+}

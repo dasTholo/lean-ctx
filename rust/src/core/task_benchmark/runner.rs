@@ -99,6 +99,32 @@ fn execute_task(task: &TaskFixture, profile: &CompressionProfile) -> TaskRun {
     }
 }
 
+/// Returns a stable record of token and quality measurements.
+///
+/// Latency is intentionally excluded: it is observed wall-clock data and is
+/// therefore reported for a run but cannot be reproducible across machines.
+#[allow(dead_code)]
+pub(crate) fn deterministic_snapshot(result: &BenchmarkResult) -> String {
+    let mut snapshot = String::new();
+    for profile in &result.profiles {
+        for run in &profile.runs {
+            snapshot.push_str(&format!(
+                "{}|{}|{}|{}|{:.6}|{}/{}|{}/{}\n",
+                run.profile,
+                run.task_id,
+                run.raw_tokens,
+                run.compressed_tokens,
+                run.savings_pct,
+                run.quality.required_found,
+                run.quality.required_total,
+                run.quality.preferred_found,
+                run.quality.preferred_total,
+            ));
+        }
+    }
+    snapshot
+}
+
 fn compress_for_profile(content: &str, ext: &str, mode: ProfileMode) -> String {
     match mode {
         ProfileMode::Stock => content.to_string(),
@@ -286,5 +312,21 @@ mod tests {
         let (detected, details) = check_regressions(&profiles, 0.95);
         assert!(detected);
         assert!(!details.is_empty());
+    }
+
+    #[test]
+    fn token_and_quality_measurements_are_reproducible() {
+        let tasks = canonical_suite();
+        let config = BenchConfig {
+            repeats: 1,
+            ..BenchConfig::default()
+        };
+
+        let first = run_benchmark(&tasks, &config);
+        let second = run_benchmark(&tasks, &config);
+        assert_eq!(
+            deterministic_snapshot(&first),
+            deterministic_snapshot(&second)
+        );
     }
 }

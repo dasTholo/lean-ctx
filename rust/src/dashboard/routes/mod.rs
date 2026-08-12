@@ -30,6 +30,7 @@ fn match_component_path(path: &str) -> Option<String> {
         "/static/components/cockpit-context.js" => super::COCKPIT_COMPONENT_CONTEXT_JS,
         "/static/components/cockpit-overview.js" => super::COCKPIT_COMPONENT_OVERVIEW_JS,
         "/static/components/cockpit-live.js" => super::COCKPIT_COMPONENT_LIVE_JS,
+        "/static/components/cockpit-value-gate.js" => super::COCKPIT_COMPONENT_VALUE_GATE_JS,
         "/static/components/cockpit-knowledge.js" => super::COCKPIT_COMPONENT_KNOWLEDGE_JS,
         "/static/components/cockpit-agents.js" => super::COCKPIT_COMPONENT_AGENTS_JS,
         "/static/components/cockpit-memory.js" => super::COCKPIT_COMPONENT_MEMORY_JS,
@@ -165,6 +166,7 @@ pub fn route_response(
     }
 
     let response = stats::handle(path, query_str, method, body)
+        .or_else(|| super::api::value_gate::handle(path, method))
         .or_else(|| signals::handle(path, query_str, method, body))
         .or_else(|| context::handle(path, query_str, method, body))
         .or_else(|| risk::handle(path, query_str, method, body))

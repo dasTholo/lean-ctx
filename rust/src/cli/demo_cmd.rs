@@ -328,7 +328,7 @@ fn print_summary(raw_tokens: usize, compressed_tokens: usize) {
     );
     println!("{CYAN}│{RESET}  • Proxy komprimiert jeden Request automatisch        {CYAN}│{RESET}");
     println!("{CYAN}│{RESET}  • Dashboard zeigt Savings in Echtzeit                {CYAN}│{RESET}");
-    println!("{CYAN}│{RESET}  • 82 MCP Tools mit intelligenter Compression         {CYAN}│{RESET}");
+    println!("{CYAN}│{RESET}  • 79 MCP Tools mit intelligenter Compression         {CYAN}│{RESET}");
     println!("{CYAN}│{RESET}                                                      {CYAN}│{RESET}");
     println!(
         "{CYAN}│{RESET}  {BOLD}Was NEU ist (Phase 0-8, Infrastruktur):{RESET}             {CYAN}│{RESET}"

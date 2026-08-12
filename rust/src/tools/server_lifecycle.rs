@@ -160,6 +160,7 @@ impl LeanCtxServer {
             cache_ttl_secs: ttl,
             last_call: Arc::new(RwLock::new(Instant::now())),
             agent_id: Arc::new(RwLock::new(None)),
+            task_envelope: Arc::new(RwLock::new(None)),
             presence_agent_id: Arc::new(RwLock::new(presence_agent_id)),
             client_name: Arc::new(RwLock::new(String::new())),
             autonomy: Arc::new(crate::core::autonomy::AutonomyState::new()),
@@ -287,6 +288,7 @@ impl LeanCtxServer {
     /// Aggressive cleanup on connection drop: save session, consolidate knowledge, clear caches.
     pub async fn shutdown(&self) {
         self.record_shutdown_episode().await;
+        crate::core::savings_tracker::persist_session_summary();
         if let Some(agent_id) = self.presence_agent_id.read().await.clone()
             && let Err(error) = crate::core::agents::AgentRegistry::finish_persistent(&agent_id)
         {

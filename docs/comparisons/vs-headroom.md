@@ -15,7 +15,7 @@
 | **License** | Apache-2.0 | Apache-2.0 |
 | **Determinism** | Byte-stable output, prompt-cache safe (#498) | Not a stated contract |
 | **Locality** | 100% local, no telemetry by default | Local library; proxy/ML modes optional |
-| **Beyond compress()** | 80 MCP tools, session memory, code intelligence | Cross-agent memory, `headroom learn`, ML compression |
+| **Beyond compress()** | 79 MCP tools, session memory, code intelligence | Cross-agent memory, `headroom learn`, ML compression |
 
 ## The core difference
 
@@ -48,7 +48,7 @@ stateless library has nothing to anchor such a timeline to.
 |---------|:--------:|:--------:|
 | Drop-in `compress()` (Py + TS) | Yes | Yes |
 | Transparent proxy | Yes (multi-provider) | Yes |
-| MCP server | 80 tools | `headroom_compress/retrieve/stats` |
+| MCP server | 79 tools | `headroom_compress/retrieve/stats` |
 | Reversible (reference retrieval) | CCR (#482/#493) + `/v1/references/{id}`, `ctx_expand`/`ctx_retrieve` | `headroom_retrieve` store |
 | Deterministic / prompt-cache safe | Yes (#498, CI-guarded) | Not stated |
 | Vercel AI SDK middleware | `leanCtxMiddleware` / `withLeanCtx` | `headroomMiddleware` / `withHeadroom` |
@@ -172,7 +172,7 @@ agent case — compress far more. See [`bench/compress/`](../../bench/compress/R
   cache-aligner relocate (#974) and retrieve-coupled compression-learning loop
   (#941) deliver Smart-Crusher / cache-aligner / CCR-learning behaviour *without*
   sampling, ML weights or non-deterministic output.
-- **It's a whole layer** — compression is 1 of 80 MCP tools alongside cached
+- **It's a whole layer** — compression is 1 of 79 MCP tools alongside cached
   reads, shell compression, semantic search, code intelligence and memory.
 - **Stateful, with a temporal axis** — a Context Ledger, signed proofs, session
   memory and a temporal knowledge graph wrap every compression, and are composing
@@ -231,4 +231,3 @@ See the [compress() SDK cookbook](../guides/compress-sdk.md) for full recipes.
 run the benchmark on your own corpus and choose what fits.*
 
 [Get started with lean-ctx](https://leanctx.com/docs/getting-started) | [Headroom on GitHub](https://github.com/chopratejas/headroom)
-

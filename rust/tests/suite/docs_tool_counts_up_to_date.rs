@@ -2,8 +2,7 @@ use std::path::PathBuf;
 
 #[test]
 fn docs_tool_counts_match_manifest() {
-    let registry = lean_ctx::server::registry::build_registry();
-    let expected_granular = registry.len();
+    let expected_granular = lean_ctx::server::registry::tool_count();
     let expected_unified = lean_ctx::tool_defs::unified_tool_defs().len();
 
     let rust_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));

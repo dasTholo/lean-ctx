@@ -1,0 +1,20 @@
+347c7713a fix(glob): include pattern in directory-walk cache key (#1443)
+b67025162 fix(docs): wrap bare URLs in angle brackets for rustdoc
+54ccce8ce fix(shell): close iex bypass on Unix + retract New-Object + tee/ogv consistency (#1442)
+5c7f0b065 fix(shell): address all 4 PowerShell allowlist review findings (#1442)
+7eb2be785 fix(ci): isolate ContextBus tests + remove unused imports
+a10e67160 fix(ci): isolate ContextBus integration tests from shared SQLite DB
+23e184b76 fix(ci): extract PowerShell tests to stay within LOC gate
+aea1055e8 fix(shell): add PowerShell verb-prefix allowlist coverage (#1442)
+feb31bf80 fix(ci): stabilize Windows delta test against 8.3 short-name race
+76b6fa47e fix(cli): zsh completion bad substitution + wrapper delegation (#1441)
+6ff9cf2ff docs: regenerate config-keys reference
+2b09c8ff7 feat: enhance CLI enterprise command + proxy improvements
+51c2ef326 fix(ci): widen cache benchmark tolerance on Windows CI runners
+c4d26312b fix(ci): move unix-only imports into #[cfg(unix)] test functions
+a511cdd63 fix(ci): gate unix-only import behind #[cfg(unix)] for Windows CI
+fd87ad66e fix(ci): update OCLA public API pinned hash
+5d215f8f3 fix(ci): update OCLA golden fixtures and resolve rustdoc private-link errors
+702ae825f feat: premium polish — protocol sync, knowledge wiring, cost metric, cleanup
+2fa47668d chore: untrack website/ from main (belongs to deploy branch)
+018fdb5e9 feat: implement Control Plane architecture (Phase 0-8)

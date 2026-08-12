@@ -49,6 +49,8 @@ pub struct Config {
     /// Model declaration for measured-vs-estimated cost reporting (MCP-only IDEs).
     #[serde(default)]
     pub cost: CostConfig,
+    #[serde(default)]
+    pub decision_loop: DecisionLoopConfig,
     /// Code-health engine: cognitive complexity, naming, coupling, edit-gate.
     #[serde(default)]
     pub code_health: CodeHealthConfig,
@@ -56,6 +58,8 @@ pub struct Config {
     pub autonomy: AutonomyConfig,
     #[serde(default)]
     pub providers: ProvidersConfig,
+    #[serde(default)]
+    pub knowledge_routing: KnowledgeRoutingConfig,
     #[serde(default)]
     pub proxy: ProxyConfig,
     /// Conversation-history compression (`[conversation]`, opt-in; #1123).
@@ -66,6 +70,9 @@ pub struct Config {
     pub response_shaping: ResponseShapingConfig,
     #[serde(default)]
     pub ocla: OclaConfig,
+    /// Counterfactual Shadow Mode reporting (`[shadow]`), opt-in.
+    #[serde(default)]
+    pub shadow: ShadowConfig,
     /// Generalized L1/L2/L3 cache settings (`[cache]`).
     #[serde(default)]
     pub cache: CacheConfig,

@@ -29,6 +29,13 @@ impl LeanCtxServer {
         let output_md5 = helpers::hash_fast(result_text);
         let agent_id = self.agent_id.read().await.clone();
         let client_name = self.client_name.read().await.clone();
+        let task_id = self
+            .task_envelope
+            .read()
+            .await
+            .as_ref()
+            .map(|envelope| envelope.task_id.as_str().to_owned())
+            .or_else(crate::core::task_spine::TaskSpine::task_id);
         let mut explicit_intent: Option<(
             crate::core::intent_protocol::IntentRecord,
             Option<String>,
@@ -39,13 +46,14 @@ impl LeanCtxServer {
             let empty_args = serde_json::Map::new();
             let args_map = args.unwrap_or(&empty_args);
             let mut session = self.session.write().await;
-            session.record_tool_receipt(
+            session.record_tool_receipt_with_task(
                 name,
                 action,
                 &input_md5,
                 &output_md5,
                 agent_id.as_deref(),
                 Some(&client_name),
+                task_id.as_deref(),
             );
 
             if let Some(intent) = crate::core::intent_protocol::infer_from_tool_call(
@@ -134,6 +142,7 @@ impl LeanCtxServer {
         let input_token_count = crate::core::tokens::count_tokens(&input) as u64;
         let output_token_count_u64 = output_token_count as u64;
         let name_owned = name.to_string();
+        let task_id_for_receipt = task_id.clone();
         tokio::task::spawn_blocking(move || {
             let pricing = crate::core::gain::model_pricing::ModelPricing::load();
             // Honors a declared model for MCP-only IDEs (`[cost.models]`/default).
@@ -176,13 +185,14 @@ impl LeanCtxServer {
             );
 
             // Emit canonical ContextReceiptV1 on OclaBus.
-            let receipt = crate::core::context_kernel::mcp_bridge::generate_mcp_receipt(
+            let mut receipt = crate::core::context_kernel::mcp_bridge::generate_mcp_receipt(
                 "mcp-dispatch",
                 &name_owned,
                 input_token_count as usize,
                 output_token_count_u64 as usize,
                 false,
             );
+            receipt.task_id = task_id_for_receipt;
             crate::core::context_kernel::bridge::emit_receipt_event(&receipt);
 
             // Evidence pipeline: MCP data → envelope → normalizer → receipt chain.

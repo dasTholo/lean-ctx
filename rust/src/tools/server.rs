@@ -67,6 +67,7 @@ pub struct LeanCtxServer {
     pub cache_ttl_secs: u64,
     pub last_call: Arc<RwLock<Instant>>,
     pub agent_id: Arc<RwLock<Option<String>>>,
+    pub task_envelope: Arc<RwLock<Option<lean_ctx_protocol::TaskEnvelopeV1>>>,
     pub(crate) presence_agent_id: Arc<RwLock<Option<String>>>,
     pub client_name: Arc<RwLock<String>>,
     pub autonomy: Arc<crate::core::autonomy::AutonomyState>,

@@ -131,6 +131,7 @@ COMMANDS:
     spend                          Measured provider bill (real model + billed tokens)
     spend --json                   Machine-readable measured spend
     output-savings [--json]        Output-token reduction (A/B measured w/ 95% CI, else estimated)
+    value-report [--format F]      Task value report (table, markdown, or json)
     gain --tasks                   Task breakdown by category
     gain --agents                  Top agents by tool spend
     gain --by-tool [--json]        Per-tool savings breakdown (calls, tokens, USD, %)
@@ -153,7 +154,7 @@ COMMANDS:
     gain --link [CODE]             Combine machines into one leaderboard entry (pairing code, no account)
     gain --unpublish[=<id>]        Remove a published permalink (most recent if no id)
     config set gain.auto_publish true  Auto-(re)publish your recap on each `gain` (opt-in, throttled, off by default)
-    savings [summary|verify|export|sign|verify-batch] Verified savings ledger (local, signed)
+    savings [--period day|week|month|all] [--format table|json|markdown] Savings report (default: week/table)
     learning [status|export|import]  Adaptive-learning state: inspect, share with team, merge
          token-report [--json]          Token + memory report (project + session + CEP)
     pack --pr                      PR Context Pack (changed files, impact, tests, artifacts)
@@ -162,6 +163,7 @@ COMMANDS:
     embeddings <status|provision>  Managed ONNX Runtime for semantic embeddings (official CPU build, sha256-pinned)
     cep                            CEP report (compression metrics, cache, modes, trends)
     verify-cache [path] [--json]   Prove the session cache: re-read collapses to a ~13-token stub
+    prove [--format table|json|markdown] [--output FILE]  Generate Decision Loop evidence report
     health [path] [--json] [--gate]  Code-health report: cognitive complexity, naming, navigability score + token tax
     watch                          Live TUI dashboard (real-time event stream)
     dashboard [--port=N] [--host=H] [--base-path=/prefix] [--open=browser|none|vscode]  Open web dashboard (default: http://localhost:3333)

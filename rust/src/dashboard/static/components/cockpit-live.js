@@ -551,11 +551,11 @@ class CockpitLive extends HTMLElement {
 
   async _fetchAndApply(fetchJson, forceRender) {
     this._fetching = true;
-    var paths = ['/api/events', '/api/stats'];
+    var paths = ['/api/events', '/api/stats', '/api/session'];
     var cached = window.LctxApi && window.LctxApi.cachedFetch ? window.LctxApi.cachedFetch : fetchJson;
     var results = await Promise.all(
       paths.map(function (p) {
-        var fn = p === '/api/stats' ? cached : fetchJson;
+        var fn = (p === '/api/stats' || p === '/api/session') ? cached : fetchJson;
         return fn(p, { timeoutMs: 8000 }).catch(function (e) {
           return { __error: e && e.error ? e.error : String(e || 'error'), __path: p };
         });
@@ -565,6 +565,7 @@ class CockpitLive extends HTMLElement {
 
     var events = results[0];
     var stats = results[1];
+    var session = results[2];
 
     // A failed /api/events poll (daemon restart, expired token, timeout) must
     // not masquerade as "No events recorded yet": keep the last known feed and
@@ -589,6 +590,7 @@ class CockpitLive extends HTMLElement {
     this._data = {
       events: newEvents,
       stats: stats && !stats.__error ? stats : (this._data ? this._data.stats : null),
+      session: session && !session.__error ? session : (this._data ? this._data.session : null),
     };
 
     this._loading = false;
@@ -639,8 +641,13 @@ class CockpitLive extends HTMLElement {
     var events = this._data.events;
     var stats = this._data.stats;
     var windowStats = computeTokenWindow(events);
-    var sessionSaved = windowStats.saved;
-    var sessionOrig = windowStats.original;
+
+    // Prefer cumulative session stats over the event-feed window (which only
+    // holds the latest ~50 events and vastly understates savings).
+    var ses = this._data.session;
+    var sesStats = ses ? (ses.session_stats || ses.stats || null) : null;
+    var sessionSaved = sesStats ? Number(sesStats.total_tokens_saved || 0) : windowStats.saved;
+    var sessionOrig = sesStats ? Number(sesStats.total_tokens_input || 0) : windowStats.original;
 
     var allTimeSaved = 0;
     if (stats) {

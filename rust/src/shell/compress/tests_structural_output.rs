@@ -119,7 +119,6 @@ fn non_git_commands() {
 
 #[test]
 fn verbatim_commands_are_also_structural() {
-    assert!(has_structural_output("ls -la"));
     assert!(has_structural_output("docker ps"));
     assert!(has_structural_output("curl https://api.example.com"));
     assert!(has_structural_output("cat file.txt"));

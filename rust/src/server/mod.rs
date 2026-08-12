@@ -276,11 +276,10 @@ mod tests {
 
     #[test]
     fn test_registry_tool_count_ssot() {
-        let registry = crate::server::registry::build_registry();
         assert_eq!(
-            registry.len(),
-            83,
-            "Registry tool count drift! Update this test AND all docs when adding/removing tools."
+            crate::server::registry::tool_count(),
+            79,
+            "Official MCP tool count drift! Update this test AND all docs when adding/removing tools."
         );
     }
 

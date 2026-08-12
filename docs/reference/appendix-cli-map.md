@@ -34,6 +34,9 @@ Every CLI command lean-ctx exposes, grouped by purpose. Source of truth:
 | `ls [path]` | Compressed directory map; `--depth`, `-a` |
 | `deps [path]` | Show project dependencies |
 | `gain` | Token-savings dashboard; `--live`, `--graph`, `--daily`, `--json`, `--wrapped`, `--svg`, `--share`, `--copy`, `--open`, `--publish`, `--leaderboard`, `--unpublish`, `--cost`, `--tasks`, `--agents`, `--heatmap` |
+| `savings [--period day\|week\|month\|all] [--format table\|json\|markdown]` | Cost-intelligence report: token reduction, estimated versus actual cost, CPAO, and top savings sources; example: `lean-ctx savings --period month --format markdown` |
+| `value-report [--format table\|markdown\|json] [--last N]` | Outcome report for recent assessed tasks, including acceptance and CPAO; example: `lean-ctx value-report --format markdown --last 20` |
+| `shadow [--latest\|--list\|--force]` | Inspect or generate local baseline-versus-treatment recommendations; example: `lean-ctx shadow --latest` |
 | `token-report` (`report-tokens`) | Token + memory report; `--json` |
 | `learning` | Adaptive-learning state: `status`, `export [file]`, `import <file\|->` — share learned thresholds + LITM calibration with your team (secret-free, idempotent merge) |
 | `introspect` | Cognition v2 activity: `cognition` (which science subsystems are wired/active, `--json`), `qubo` (experimental QUBO-vs-greedy selection benchmark) |

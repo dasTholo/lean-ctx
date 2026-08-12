@@ -115,9 +115,12 @@ pub(super) fn handle(
 
                     if content.is_none() && !candidate.is_absolute() && !rel.trim().is_empty() {
                         // Premium path healing: try to map stale paths to current indexed files.
-                        let file_paths = crate::core::graph_provider::open_or_build(&root)
+                        let mut file_paths = crate::core::graph_provider::open_or_build(&root)
                             .map(|o| o.provider.file_paths())
                             .unwrap_or_default();
+                        if file_paths.is_empty() {
+                            file_paths = discover_files_for_path_healing(root_pb);
+                        }
                         let requested_key = crate::core::index_paths::graph_match_key(&rel);
                         let requested_name = requested_key.rsplit('/').next().unwrap_or("");
 
@@ -216,6 +219,24 @@ pub(super) fn handle(
         }
         _ => None,
     }
+}
+
+fn discover_files_for_path_healing(root: &Path) -> Vec<String> {
+    let mut files = Vec::new();
+    for entry in walkdir::WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let Ok(rel) = entry.path().strip_prefix(root) else {
+            continue;
+        };
+        files.push(rel.to_string_lossy().replace('\\', "/"));
+    }
+    files
 }
 
 fn compression_mode_json(output: &str, original_tokens: usize) -> serde_json::Value {

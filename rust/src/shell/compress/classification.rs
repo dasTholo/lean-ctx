@@ -445,7 +445,10 @@ fn is_file_listing(command: &str) -> bool {
     let first = first_binary(command);
     matches!(
         first,
-        "find" | "fd" | "fdfind" | "ls" | "exa" | "eza" | "lsd"
+        // `ls` has a dedicated, lossless-enough listing compressor that keeps
+        // every entry while removing permissions, ownership, and timestamps.
+        // Do not classify it as Verbatim, or that compressor is unreachable.
+        "find" | "fd" | "fdfind" | "exa" | "eza" | "lsd"
     )
 }
 

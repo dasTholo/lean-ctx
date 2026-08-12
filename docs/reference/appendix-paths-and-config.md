@@ -145,6 +145,9 @@ or the single dir for legacy/mixed installs — see §1); per-project override a
 | `[archive]` | Zero-loss tool-output archive: `enabled`, `threshold_chars` (800), `max_age_hours` (48), `max_disk_mb` (500) |
 | `[search]` | BM25/dense/splade weights + candidate counts |
 | `[autonomy]` | Auto preload/dedup/consolidate, cognition loop |
+| `[decision_loop]` | Enable the MCP decision-loop runtime (`enabled = true` by default) |
+| `[shadow]` | Counterfactual baseline comparisons: `enabled`, `report_interval`, `baseline_model` |
+| `[knowledge_routing]` | Add focused cross-source knowledge hints: `enabled`, `max_references` |
 | `[providers]` | GitHub/GitLab/Jira/Postgres + MCP bridges |
 | `[loop_detection]` | Per-tool call limits to prevent agent loops |
 | `[updates]` | `auto_update`, `check_interval_hours` (6), `notify_only` |
@@ -162,6 +165,29 @@ Key defaults worth knowing:
 - `memory_profile = "performance"`, `memory_cleanup = "aggressive"`.
 - `[memory.knowledge] max_facts = 200` — the source of doctor's "facts at
   capacity" warning.
+
+### AI Value Gate configuration
+
+```toml
+[decision_loop]
+enabled = true
+
+[shadow]
+enabled = false
+report_interval = 10
+baseline_model = "gpt-4o"
+
+[knowledge_routing]
+enabled = true
+max_references = 5
+```
+
+- `[decision_loop].enabled` enables outcome-aware decision-loop runtime; default `true`.
+- `[shadow].enabled` records counterfactual comparisons; default `false`.
+- `[shadow].report_interval` creates a report after this many measurements; default `10`.
+- `[shadow].baseline_model` names the model used for baseline cost comparisons; default `"gpt-4o"`.
+- `[knowledge_routing].enabled` adds relevant cross-source knowledge hints; default `true`.
+- `[knowledge_routing].max_references` caps references per routed hint; default `5`.
 
 ---
 

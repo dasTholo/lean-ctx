@@ -45,7 +45,8 @@ pub fn handle_deny() {
             && let Some(content) = extract_write_content(&stdin_payload)
             && has_compression_markers(&content)
         {
-            print_deny_compression_markers(&tool_name);
+            print_deny_compression_markers(&tool_name, &stdin_payload);
+            return;
         }
         print_allow();
         return;
@@ -217,6 +218,10 @@ fn has_compression_markers(content: &str) -> bool {
     if content.contains("[lean-ctx:") || content.contains("--- lean-ctx:") {
         return true;
     }
+    // Budget truncation markers from apply_turn_budget (#1306).
+    if content.contains("\u{2026} truncated at ~") || content.contains("use ctx_read with lines=") {
+        return true;
+    }
     // Cognitive/signatures mode section markers (#1444).
     for marker in [
         "§ function",
@@ -292,16 +297,30 @@ fn extract_write_content(payload: &str) -> Option<String> {
     }
 }
 
-fn print_deny_compression_markers(tool_name: &str) {
-    let msg = format!(
-        "Blocked {tool_name}: payload contains lean-ctx compression markers \
-         (§ function, [lean-ctx: omitted ...], or similar). The file was \
-         read in compressed mode — re-read with ctx_read(raw=true) or \
-         ctx_expand before editing. \
-         Set LEAN_CTX_ALLOW_COMPRESSED_WRITE=1 to override."
-    );
+fn print_deny_compression_markers(tool_name: &str, payload: &str) {
+    let source = detect_marker_source(payload);
+    let msg = match source {
+        MarkerSource::OldString => format!(
+            "Blocked {tool_name}: old_string contains lean-ctx compression markers. \
+             You read the file in compressed mode — the old_string does not match \
+             the real file on disk. Re-read with ctx_read(path, mode=\"full\") or \
+             use LEAN_CTX_DISABLED=1 before editing. \
+             Set LEAN_CTX_ALLOW_COMPRESSED_WRITE=1 to override."
+        ),
+        MarkerSource::NewString => format!(
+            "Blocked {tool_name}: new_string contains lean-ctx compression markers \
+             (§ function, [lean-ctx: omitted ...], or truncation marker). \
+             Never write compressed content back to disk. \
+             Set LEAN_CTX_ALLOW_COMPRESSED_WRITE=1 to override."
+        ),
+        MarkerSource::Both | MarkerSource::Content => format!(
+            "Blocked {tool_name}: payload contains lean-ctx compression markers. \
+             The file was read in compressed mode — re-read with \
+             ctx_read(path, mode=\"full\") before editing. \
+             Set LEAN_CTX_ALLOW_COMPRESSED_WRITE=1 to override."
+        ),
+    };
     let output = serde_json::json!({
-        // Grok PreToolUse decision field.
         "decision": "deny",
         "reason": msg,
         "permission": "deny",
@@ -309,6 +328,45 @@ fn print_deny_compression_markers(tool_name: &str) {
     });
     println!("{output}");
     std::process::exit(2);
+}
+
+#[derive(Debug)]
+enum MarkerSource {
+    OldString,
+    NewString,
+    Both,
+    Content,
+}
+
+fn detect_marker_source(payload: &str) -> MarkerSource {
+    let json: serde_json::Value = match serde_json::from_str(payload) {
+        Ok(v) => v,
+        Err(_) => return MarkerSource::Content,
+    };
+    let input = json
+        .get("input")
+        .or_else(|| json.get("hookSpecificInput").and_then(|h| h.get("input")));
+    let Some(input) = input else {
+        return MarkerSource::Content;
+    };
+    let old_has = input
+        .get("old_string")
+        .or_else(|| input.get("old_text"))
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(has_compression_markers);
+    let new_has = input
+        .get("new_string")
+        .or_else(|| input.get("new_text"))
+        .or_else(|| input.get("content"))
+        .or_else(|| input.get("contents"))
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(has_compression_markers);
+    match (old_has, new_has) {
+        (true, true) => MarkerSource::Both,
+        (true, false) => MarkerSource::OldString,
+        (false, true) => MarkerSource::NewString,
+        (false, false) => MarkerSource::Content,
+    }
 }
 
 /// Build a smart deny message that includes the exact ctx_* call with mapped arguments.
@@ -661,5 +719,42 @@ mod tests {
     fn extract_tool_name_top_level_tool_name_variant() {
         let payload = r#"{"toolName":"ctx_read"}"#;
         assert_eq!(extract_tool_name(payload), "ctx_read");
+    }
+
+    #[test]
+    fn has_compression_markers_detects_budget_truncation() {
+        assert!(has_compression_markers(
+            "content\n\u{2026} truncated at ~4080 of 14201 tokens"
+        ));
+        assert!(has_compression_markers(
+            "fn main() {}\nuse ctx_read with lines= parameter"
+        ));
+    }
+
+    #[test]
+    fn detect_marker_source_identifies_old_string() {
+        let payload = r#"{"tool_name":"StrReplace","input":{"path":"test.rs","old_string":"\u00a7 function foo","new_string":"fn foo() {}"}}"#;
+        assert!(matches!(
+            detect_marker_source(payload),
+            MarkerSource::OldString
+        ));
+    }
+
+    #[test]
+    fn detect_marker_source_identifies_new_string() {
+        let payload = r#"{"tool_name":"StrReplace","input":{"path":"test.rs","old_string":"fn foo()","new_string":"[lean-ctx: omitted 5 lines]"}}"#;
+        assert!(matches!(
+            detect_marker_source(payload),
+            MarkerSource::NewString
+        ));
+    }
+
+    #[test]
+    fn detect_marker_source_clean_payload() {
+        let payload = r#"{"tool_name":"StrReplace","input":{"path":"test.rs","old_string":"fn foo()","new_string":"fn bar()"}}"#;
+        assert!(matches!(
+            detect_marker_source(payload),
+            MarkerSource::Content
+        ));
     }
 }

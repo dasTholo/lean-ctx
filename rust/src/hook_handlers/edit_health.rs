@@ -255,6 +255,8 @@ const CORRUPTION_MARKERS: &[&str] = &[
     "§ trait",
     "§ mod",
     "[lean-ctx: omitted",
+    "… truncated at ~",
+    "use ctx_read with lines= parameter to see specific sections]",
 ];
 
 /// After a native edit, check if the written file contains lean-ctx compression

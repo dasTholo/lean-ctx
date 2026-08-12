@@ -359,7 +359,7 @@ mod tests {
         // but still in the registry so direct calls and ctx_call keep working
         // for one release. Removal is Phase 2.
         let _guard = crate::core::data_dir::isolated_data_dir();
-        let defs = crate::server::registry::build_registry().tool_defs();
+        let defs = crate::server::registry::build_registry().registered_tool_defs();
         for name in [
             "ctx_smart_read",
             "ctx_multi_read",

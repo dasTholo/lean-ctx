@@ -140,7 +140,7 @@ pub(super) fn exec_buffered(
     let (compressed, output_tokens) =
         super::compress::compress_and_measure(command, &stdout, &stderr, exit_code);
 
-    crate::core::tool_lifecycle::record_shell_command(input_tokens, output_tokens);
+    crate::core::tool_lifecycle::record_shell_command_named(command, input_tokens, output_tokens);
 
     if !compressed.is_empty() {
         let _ = io::stdout().write_all(compressed.as_bytes());

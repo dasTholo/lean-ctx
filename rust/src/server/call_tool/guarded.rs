@@ -123,8 +123,39 @@ impl LeanCtxServer {
         };
         let name = resolved_name.as_str();
         let args = resolved_args.as_ref();
+        let query = args
+            .and_then(|values| values.get("query").and_then(serde_json::Value::as_str))
+            .or_else(|| {
+                args.and_then(|values| values.get("task").and_then(serde_json::Value::as_str))
+            })
+            .unwrap_or(name);
+        let session_id = self.session.read().await.id.clone();
+        let agent_id = match self.agent_id.read().await.clone() {
+            Some(agent_id) => agent_id,
+            None => self
+                .presence_agent_id
+                .read()
+                .await
+                .clone()
+                .unwrap_or_else(|| "mcp-agent".to_owned()),
+        };
+        let config = crate::core::config::Config::load_arc();
+        let decision_context = config
+            .decision_loop
+            .enabled
+            .then(|| {
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    crate::core::decision_loop_runtime::DecisionLoopRuntime::get_or_init()
+                        .on_tool_start(name, query, &session_id, &agent_id)
+                }))
+                .map_err(|_| tracing::warn!(tool = name, "decision loop start panicked"))
+                .ok()
+            })
+            .flatten();
+        *self.task_envelope.write().await = crate::core::task_spine::TaskSpine::current();
 
         if let Some(denied) = Self::guard_role_and_policy(name) {
+            finish_decision_loop(decision_context.as_ref(), args, &denied);
             return Ok(denied);
         }
 
@@ -151,10 +182,12 @@ impl LeanCtxServer {
         };
 
         if let Some(blocked) = Self::guard_egress(guard_name, guard_args) {
+            finish_decision_loop(decision_context.as_ref(), args, &blocked);
             return Ok(blocked);
         }
 
         if let Some(blocked) = self.guard_workflow(name).await {
+            finish_decision_loop(decision_context.as_ref(), args, &blocked);
             return Ok(blocked);
         }
 
@@ -165,7 +198,9 @@ impl LeanCtxServer {
             && let Some(cap_msg) =
                 crate::core::budget_tracker::BudgetTracker::global().cost_cap_message()
         {
-            return Ok(CallToolResult::error(vec![ContentBlock::text(cap_msg)]));
+            let result = CallToolResult::error(vec![ContentBlock::text(cap_msg)]);
+            finish_decision_loop(decision_context.as_ref(), args, &result);
+            return Ok(result);
         }
 
         // #990: determine machine-readability *before* the once-per-session
@@ -285,7 +320,9 @@ impl LeanCtxServer {
 
         if throttle_result.level == crate::core::loop_detection::ThrottleLevel::Blocked {
             let msg = throttle_result.message.unwrap_or_default();
-            return Ok(CallToolResult::success(vec![ContentBlock::text(msg)]));
+            let result = CallToolResult::success(vec![ContentBlock::text(msg)]);
+            finish_decision_loop(decision_context.as_ref(), args, &result);
+            return Ok(result);
         }
 
         let throttle_warning =
@@ -295,7 +332,6 @@ impl LeanCtxServer {
                 None
             };
 
-        let config = crate::core::config::Config::load_arc();
         let minimal = config.minimal_overhead_effective();
 
         // IDE permission inheritance: when enabled, mirror the host IDE's
@@ -318,13 +354,16 @@ impl LeanCtxServer {
             );
             if let Some(blocked) = permission_inheritance::into_call_tool_result(&perm) {
                 tracing::warn!(tool = guard_name, "held back by IDE permission inheritance");
+                finish_decision_loop(decision_context.as_ref(), args, &blocked);
                 return Ok(blocked);
             }
         }
 
         if let Some(msg) = post_process::budget_exhausted_message(name) {
             tracing::warn!(tool = name, "{msg}");
-            return Ok(CallToolResult::success(vec![ContentBlock::text(msg)]));
+            let result = CallToolResult::success(vec![ContentBlock::text(msg)]);
+            finish_decision_loop(decision_context.as_ref(), args, &result);
+            return Ok(result);
         }
 
         if is_shell_tool_name(name) {
@@ -343,6 +382,7 @@ impl LeanCtxServer {
             .as_ref()
             .and_then(|key| cached_call_result(global_response_cache(), key))
         {
+            finish_decision_loop(decision_context.as_ref(), args, &cached);
             return Ok(cached);
         }
 
@@ -356,12 +396,40 @@ impl LeanCtxServer {
             auto_context,
             throttle_warning,
             args_fp,
+            decision_context,
         )
         .await;
         if let (Some(key), Ok(response)) = (cache_key, &result) {
             cache_call_result(global_response_cache(), key, response);
         }
         result
+    }
+}
+
+fn finish_decision_loop(
+    context: Option<&crate::core::decision_loop_runtime::TaskContext>,
+    args: Option<&Map<String, Value>>,
+    result: &CallToolResult,
+) {
+    let Some(context) = context else {
+        return;
+    };
+    let input_tokens = args
+        .and_then(|args| serde_json::to_string(args).ok())
+        .map_or(0, |input| (input.len() / 4) as u64);
+    let output_tokens = format!("{result:?}").len() as u64 / 4;
+    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        crate::core::decision_loop_runtime::DecisionLoopRuntime::get_or_init().on_tool_end(
+            context,
+            input_tokens,
+            output_tokens,
+            "mcp-tool",
+            result.is_error != Some(true),
+        );
+    }))
+    .is_err()
+    {
+        tracing::warn!("decision loop end panicked");
     }
 }
 

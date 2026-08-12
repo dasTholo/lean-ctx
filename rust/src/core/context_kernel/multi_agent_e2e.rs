@@ -12,6 +12,7 @@ mod tests {
         ContextReceiptV1 {
             receipt_id: format!("receipt:{id}"),
             plan_id: format!("plan:{id}"),
+            task_id: None,
             delivered_tokens,
             cache_hits,
             cache_misses: usize::from(cache_hits == 0),

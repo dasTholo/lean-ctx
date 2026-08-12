@@ -1,0 +1,26 @@
+   Compiling lean-ctx v3.9.18 (/Users/yvesgugger/Documents/Privat/Projects/lean-ctx/rust)
+warning: linker stderr: ld: __eh_frame section too large (max 16MB) to encode dwarf unwind offsets in compact unwind table, performance of exception handling might be affected
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `lean-ctx` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 19.26s
+     Running unittests src/lib.rs (target/debug/deps/lean_ctx-300b6dd5c34dedfc)
+
+running 13 tests
+test core::triage::confidence::tests::clamp_preserves_valid ... ok
+test core::triage::confidence::tests::clamp_caps_maximum ... ok
+test core::triage::confidence::tests::high_is_inclusive ... ok
+test core::triage::profile::tests::default_complexity_is_low ... ok
+test core::triage::profile::tests::default_confidence_is_zero ... ok
+test core::triage::profile::tests::default_scope_is_single_file ... ok
+test core::triage::fusion::tests::empty_uses_default ... ok
+test core::triage::confidence::tests::low_is_exclusive ... ok
+test core::triage::fusion::tests::files_or_modules_raise_complexity ... ok
+test core::triage::fusion::tests::highest_confidence_wins ... ok
+test core::triage::rules::tests::fallback_has_low_confidence ... ok
+test core::task_spine::tests::test_enrich_from_triage ... ok
+test core::triage::rules::tests::maps_all_intents ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 9968 filtered out; finished in 0.00s
+

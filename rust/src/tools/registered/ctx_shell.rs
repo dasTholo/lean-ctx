@@ -577,11 +577,11 @@ fn resolve_effective_cwd(
 fn resolve_shell_raw_flags(
     arg_raw: bool,
     arg_bypass: bool,
-    env_disabled: bool,
+    _env_disabled: bool,
     env_raw: bool,
 ) -> (bool, bool) {
     let bypass = arg_bypass || env_raw;
-    let raw = arg_raw || bypass || env_disabled;
+    let raw = arg_raw || bypass;
     (raw, bypass)
 }
 

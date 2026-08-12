@@ -103,6 +103,18 @@ pub fn run() {
                 super::cmd_output_savings(&rest);
                 return;
             }
+            "value-report" | "value_report" => {
+                super::cmd_value_report(&rest);
+                return;
+            }
+            "evidence-export" => {
+                super::cmd_evidence_export(&rest);
+                return;
+            }
+            "shadow" => {
+                super::cmd_shadow(&rest);
+                return;
+            }
             "token-report" | "report-tokens" => {
                 let code = token_report::run_cli(&rest);
                 if code != 0 {
@@ -143,6 +155,10 @@ pub fn run() {
             }
             "proof" => {
                 crate::cli::cmd_proof(&rest);
+                return;
+            }
+            "prove" => {
+                crate::cli::cmd_prove(&rest);
                 return;
             }
             "snapshot" => {

@@ -231,10 +231,14 @@ fn file_listings_are_verbatim() {
     assert!(is_verbatim_output("find /var/log -type f"));
     assert!(is_verbatim_output("fd --extension rs"));
     assert!(is_verbatim_output("fdfind .rs src/"));
-    assert!(is_verbatim_output("ls -la"));
-    assert!(is_verbatim_output("ls -lah /tmp"));
     assert!(is_verbatim_output("exa -la"));
     assert!(is_verbatim_output("eza --long"));
+}
+
+#[test]
+fn ls_is_compressible_via_its_dedicated_listing_pattern() {
+    assert!(!is_verbatim_output("ls -la"));
+    assert!(!is_verbatim_output("ls -lah /tmp"));
 }
 
 #[test]

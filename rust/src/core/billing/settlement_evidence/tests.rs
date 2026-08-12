@@ -117,6 +117,7 @@ fn receipt_claim_bridge_preserves_quality_and_bounded_attribution() {
     let receipt = ContextReceiptV1 {
         receipt_id: "receipt:test".to_string(),
         plan_id: "plan:test".to_string(),
+        task_id: None,
         delivered_tokens: 250,
         cache_hits: 0,
         cache_misses: 0,
