@@ -8,6 +8,7 @@ mod distillation_tests;
 pub mod fusion;
 pub mod profile;
 pub mod rules;
+pub mod semantic_analyzer;
 pub mod validation;
 #[cfg(test)]
 mod validation_tests;

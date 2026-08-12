@@ -720,6 +720,13 @@ pub static COMMAND_TREE: &[CommandNode] = &[
                 takes_value: true,
                 value_kind: None,
             },
+            FlagSpec {
+                long: "--live",
+                short: None,
+                description: "Read the live Value Gate store",
+                takes_value: false,
+                value_kind: None,
+            },
         ],
         positional: None,
         hidden: false,
@@ -808,7 +815,22 @@ pub static COMMAND_TREE: &[CommandNode] = &[
         aliases: &["proof"],
         description: "Verify cache integrity",
         subcommands: &[],
-        flags: &[],
+        flags: &[
+            FlagSpec {
+                long: "--real",
+                short: None,
+                description: "Measure the canonical ten-task production suite",
+                takes_value: false,
+                value_kind: None,
+            },
+            FlagSpec {
+                long: "--json",
+                short: None,
+                description: "JSON output for --real",
+                takes_value: false,
+                value_kind: None,
+            },
+        ],
         positional: None,
         hidden: false,
     },
@@ -1038,7 +1060,22 @@ pub static COMMAND_TREE: &[CommandNode] = &[
             positional: None,
             hidden: false,
         }],
-        flags: &[],
+        flags: &[
+            FlagSpec {
+                long: "--real",
+                short: None,
+                description: "Run with real file system tasks",
+                takes_value: false,
+                value_kind: None,
+            },
+            FlagSpec {
+                long: "--json",
+                short: None,
+                description: "JSON output",
+                takes_value: false,
+                value_kind: None,
+            },
+        ],
         positional: None,
         hidden: false,
     },
@@ -1310,5 +1347,16 @@ mod tests {
             missing.is_empty(),
             "KNOWN_COMMANDS entries missing from COMMAND_TREE: {missing:?}"
         );
+    }
+
+    #[test]
+    fn benchmark_real_is_registered_for_completion() {
+        assert!(crate::cli::dispatch::suggest::KNOWN_COMMANDS.contains(&"benchmark"));
+        let benchmark = COMMAND_TREE
+            .iter()
+            .find(|node| node.name == "benchmark")
+            .expect("benchmark command must be registered");
+        assert!(benchmark.flags.iter().any(|flag| flag.long == "--real"));
+        assert!(benchmark.flags.iter().any(|flag| flag.long == "--json"));
     }
 }

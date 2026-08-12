@@ -120,3 +120,16 @@ fn report_format_is_deterministic() {
 
     assert_eq!(format_report(&report), format_report(&report));
 }
+
+#[test]
+fn shadow_exit_gate_reports_savings_for_multiple_tasks_at_quality_floor() {
+    let tasks = [task(4_000, 2_000), task(3_000, 1_500), task(2_000, 1_000)];
+    let first = ShadowEngine::run_comparison(&tasks);
+    let second = ShadowEngine::run_comparison(&tasks);
+
+    assert_eq!(first.tasks_count, tasks.len() as u32);
+    assert!(first.baseline.total_tokens > first.treatment.total_tokens);
+    assert!(first.savings.relative_percent > 0.0);
+    assert!(first.savings.quality_maintained);
+    assert_eq!(format_report(&first), format_report(&second));
+}

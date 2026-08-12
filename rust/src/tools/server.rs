@@ -64,6 +64,7 @@ pub struct LeanCtxServer {
     pub session: Arc<RwLock<SessionState>>,
     pub tool_calls: Arc<RwLock<Vec<ToolCallRecord>>>,
     pub call_count: Arc<AtomicUsize>,
+    pub pro_trigger_check_count: Arc<AtomicUsize>,
     pub cache_ttl_secs: u64,
     pub last_call: Arc<RwLock<Instant>>,
     pub agent_id: Arc<RwLock<Option<String>>>,

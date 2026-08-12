@@ -414,7 +414,11 @@ pub fn run() {
                 return;
             }
             "benchmark" => {
-                super::cmd_benchmark(&rest);
+                if rest.iter().any(|arg| arg == "--real") {
+                    super::cmd_benchmark_real(&rest);
+                } else {
+                    super::cmd_benchmark(&rest);
+                }
                 return;
             }
             "compact" => {

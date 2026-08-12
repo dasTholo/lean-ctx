@@ -45,7 +45,10 @@ async fn assert_completed_task(
     let envelope = server.task_envelope.read().await.clone();
     let envelope = envelope.expect("MCP ingress must retain the task envelope");
     assert_eq!(envelope.task_id.as_str(), task_id);
-    assert!(!task_id.is_empty(), "ingress task id must not be empty");
+    let task_uuid = task_id
+        .strip_prefix("mcp-task-")
+        .expect("ingress task id must use the mcp-task UUID format");
+    uuid::Uuid::parse_str(task_uuid).expect("ingress task id must contain a valid UUID");
     assert!(
         envelope
             .intent
@@ -79,9 +82,13 @@ async fn assert_completed_task(
         assessment.cost_micros > 0,
         "completed MCP call must have a positive execution cost"
     );
+    let cpao = assessment
+        .cpao_micros
+        .expect("accepted MCP outcome must produce CPAO");
+    assert!(cpao > 0, "accepted MCP outcome must produce positive CPAO");
     assert!(
-        assessment.cpao_micros.is_some_and(|cpao| cpao > 0),
-        "accepted MCP outcome must produce positive CPAO"
+        (cpao as f64).is_finite(),
+        "CPAO must be representable as a finite report value"
     );
     assert!(assessment.outcome_accepted);
     assert!(
@@ -90,6 +97,17 @@ async fn assert_completed_task(
             .iter()
             .any(|evidence| evidence == "signal=BuildSucceeded"),
         "successful MCP outcome must be recorded as BuildSucceeded"
+    );
+    let exported = serde_json::to_value(&assessment)
+        .expect("value assessment evidence must serialize for audit export");
+    assert_eq!(exported["task_id"], task_id);
+    assert_eq!(exported["cost_micros"], assessment.cost_micros);
+    assert_eq!(exported["cpao_micros"], cpao);
+    assert!(
+        exported["evidence"]
+            .as_array()
+            .is_some_and(|evidence| !evidence.is_empty()),
+        "audit export must retain outcome evidence"
     );
 }
 
