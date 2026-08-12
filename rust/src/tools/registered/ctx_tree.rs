@@ -116,6 +116,7 @@ fn cached_or_walk(
             std::path::Path::new(path),
         ))
         .unwrap_or_default(),
+        selector: format!("tree:depth={depth}"),
     };
     let key = builder.cache_key();
     if let Some(entry) =

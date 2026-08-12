@@ -158,7 +158,7 @@ fn glob_cache_key(pattern: &str, path: &str, depth: usize) -> CacheKey {
 }
 
 fn glob_cache_builder(
-    _pattern: &str,
+    selector: &str,
     path: &str,
     depth: usize,
     respect_gitignore: bool,
@@ -171,6 +171,7 @@ fn glob_cache_builder(
         depth,
         gitignore: respect_gitignore,
         dir_mtime_ns,
+        selector: selector.to_owned(),
     }
 }
 
@@ -250,6 +251,74 @@ mod tests {
             second.text.contains("[cross-agent cache"),
             "{}",
             second.text
+        );
+    }
+
+    /// GH #1443: Different patterns in the same directory must each return
+    /// their own correct results — never a dedup stub from a prior pattern.
+    #[test]
+    fn different_patterns_same_directory_return_distinct_results() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.md"), "# A").unwrap();
+        std::fs::write(dir.path().join("b.md"), "# B").unwrap();
+        std::fs::write(dir.path().join("a.json"), "{}").unwrap();
+        std::fs::write(dir.path().join("b.json"), "[]").unwrap();
+        let path = dir.path().to_string_lossy();
+
+        let md_result = handle_single("*.md", &path, true, true, 100).unwrap();
+        assert!(
+            md_result.text.contains("a.md") && md_result.text.contains("b.md"),
+            "*.md should find both .md files: {}",
+            md_result.text
+        );
+
+        let json_result = handle_single("*.json", &path, true, true, 100).unwrap();
+        assert!(
+            json_result.text.contains("a.json") && json_result.text.contains("b.json"),
+            "*.json must return actual filenames, not a dedup stub: {}",
+            json_result.text
+        );
+        assert!(
+            !json_result.text.contains("[cross-agent cache"),
+            "*.json must NOT get a cache stub from prior *.md lookup: {}",
+            json_result.text
+        );
+    }
+
+    /// GH #1443: Same pattern repeated does get a cache hit (regression guard
+    /// for the dedup mechanism itself).
+    #[test]
+    fn same_pattern_repeated_uses_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("x.ts"), "export {}").unwrap();
+        let path = dir.path().to_string_lossy();
+
+        let first = handle_single("*.ts", &path, true, true, 100).unwrap();
+        assert!(first.text.contains("x.ts"));
+
+        let second = handle_single("*.ts", &path, true, true, 100).unwrap();
+        assert!(
+            second.text.contains("[cross-agent cache"),
+            "Repeated identical pattern should use cache: {}",
+            second.text
+        );
+    }
+
+    /// GH #1443: A pattern with zero matches returns a truthful empty result,
+    /// never a stub from a different cached pattern.
+    #[test]
+    fn no_match_pattern_returns_zero_not_stub() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("file.rs"), "fn main() {}").unwrap();
+        let path = dir.path().to_string_lossy();
+
+        let _ = handle_single("*.rs", &path, true, true, 100).unwrap();
+
+        let py_result = handle_single("*.py", &path, true, true, 100).unwrap();
+        assert!(
+            py_result.text.contains("0 files matched"),
+            "Non-matching pattern must report zero, not cached stub: {}",
+            py_result.text
         );
     }
 }

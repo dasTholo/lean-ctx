@@ -321,6 +321,10 @@ pub struct DirectoryWalkKey {
     pub gitignore: bool,
     /// Directory modification time in nanoseconds.
     pub dir_mtime_ns: u128,
+    /// Pattern/selector that scopes the walk (glob pattern + max_results).
+    /// Different patterns in the same directory produce different cache entries.
+    /// GH #1443: without this, a second distinct pattern returns a dedup stub.
+    pub selector: String,
 }
 
 impl CacheKeyBuilder for DirectoryWalkKey {
@@ -334,6 +338,7 @@ impl CacheKeyBuilder for DirectoryWalkKey {
             ("depth", self.depth.to_string()),
             ("gitignore", self.gitignore.to_string()),
             ("dir_mtime_ns", self.dir_mtime_ns.to_string()),
+            ("selector", self.selector.clone()),
         ])
     }
 
@@ -549,9 +554,11 @@ mod tests {
             depth: 2,
             gitignore: true,
             dir_mtime_ns: 5,
+            selector: "*.rs".into(),
         };
         assert_eq!(key.validator(), CacheValidator::Directory { mtime_ns: 5 });
         assert_eq!(key.kind(), DeliveryKind::DirectoryWalk);
+        assert!(key.canonical_input().contains("*.rs"));
     }
 
     #[test]
