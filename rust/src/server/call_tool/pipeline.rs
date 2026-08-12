@@ -13,6 +13,7 @@ pub(in crate::server) async fn dispatch_and_post_process(
     auto_context: Option<String>,
     throttle_warning: Option<String>,
     args_fp: String,
+    decision_context: Option<crate::core::decision_loop_runtime::TaskContext>,
 ) -> Result<CallToolResult, ErrorData> {
     let tool_start = std::time::Instant::now();
     let (mut result_text, tool_saved_tokens, shell_outcome, content_blocks) =
@@ -37,11 +38,13 @@ pub(in crate::server) async fn dispatch_and_post_process(
                         "converting INVALID_PARAMS to soft tool error for '{name}': {}",
                         e.message
                     );
-                    return Ok(CallToolResult::error(vec![ContentBlock::text(
-                        e.message.to_string(),
-                    )]));
+                    let result =
+                        CallToolResult::error(vec![ContentBlock::text(e.message.to_string())]);
+                    record_decision_loop_end(decision_context.as_ref(), args, &result, false);
+                    return Ok(result);
                 }
 
+                record_decision_loop_end_error(decision_context.as_ref(), args);
                 return Err(e);
             }
         };
@@ -54,6 +57,12 @@ pub(in crate::server) async fn dispatch_and_post_process(
         {
             result.is_error = Some(true);
         }
+        record_decision_loop_end(
+            decision_context.as_ref(),
+            args,
+            &result,
+            result.is_error != Some(true),
+        );
         return Ok(result);
     }
 
@@ -68,7 +77,6 @@ pub(in crate::server) async fn dispatch_and_post_process(
         let arg_bypass = helpers::get_bool(args, "bypass").unwrap_or(false);
         arg_raw
             || arg_bypass
-            || std::env::var("LEAN_CTX_DISABLED").is_ok()
             || crate::core::runtime_flags::raw_enabled()
             || inline_shell
             // #1260: dataset output (sqlite3/psql/jq/`gh --json`) is destroyed,
@@ -365,6 +373,20 @@ pub(in crate::server) async fn dispatch_and_post_process(
         result_text = format!("{result_text}\n\n{bw}");
     }
 
+    // Additive, best-effort reference advice. Resolver failures become empty
+    // advice, so normal Context Gate output is never affected.
+    if matches!(name, "ctx_read" | "ctx_search" | "ctx_compose") {
+        let query = helpers::get_str(args, "query")
+            .or_else(|| helpers::get_str(args, "task"))
+            .unwrap_or_default();
+        if !query.is_empty() {
+            let advice = context_gate::knowledge_advice(&query);
+            if let Some(hint) = advice.additional_context_hint {
+                result_text = format!("{result_text}\n\n{hint}");
+            }
+        }
+    }
+
     // Gated on `!machine_readable` (short-circuits before the swap) so a
     // json-first call does not consume this once-per-session slot for a tip
     // we would immediately discard; it then surfaces on the next call.
@@ -652,6 +674,7 @@ pub(in crate::server) async fn dispatch_and_post_process(
         output_tokens,
         tool_saved_tokens,
     );
+    record_compression_savings(name, tool_saved_tokens, output_token_count);
 
     let action = helpers::get_str(args, "action");
 
@@ -784,7 +807,14 @@ pub(in crate::server) async fn dispatch_and_post_process(
         // Stable header (#498): no interval interpolation — dynamic
         // text in repeated markers degrades provider prompt caching.
         let combined = format!("{result_text}\n\n--- AUTO CHECKPOINT ---\n{checkpoint}");
-        return Ok(finalize_call_result(&combined, shell_outcome));
+        let result = finalize_call_result(&combined, shell_outcome);
+        record_decision_loop_end(
+            decision_context.as_ref(),
+            args,
+            &result,
+            result.is_error != Some(true),
+        );
+        return Ok(result);
     }
 
     // #1020: tool-calls.log is now written on the dispatch path
@@ -829,8 +859,16 @@ pub(in crate::server) async fn dispatch_and_post_process(
     }
 
     // Turn-level budget enforcement (#1306): cap fresh tokens per response.
+    // Bypass for mode=full reads: the agent explicitly requested uncompressed
+    // content (typically for editing). Truncating would cause StrReplace to
+    // fail because old_string from truncated content won't match the real file.
+    let is_full_mode_read = name == "ctx_read"
+        && args
+            .and_then(|a| a.get("mode"))
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|m| m == "full");
     let budget_limit = crate::core::config::Config::load().turn_fresh_limit_effective();
-    if budget_limit > 0 && shell_outcome.is_none() {
+    if budget_limit > 0 && shell_outcome.is_none() && !is_full_mode_read {
         let (budgeted, action) = crate::core::budget::apply_turn_budget(&result_text, budget_limit);
         if let crate::core::budget::BudgetAction::Truncated {
             original_tokens,
@@ -852,5 +890,107 @@ pub(in crate::server) async fn dispatch_and_post_process(
         serde_json::Value::String(if has_dynamic { "ephemeral" } else { "stable" }.to_owned()),
     );
     result.meta = Some(meta);
+    record_decision_loop_end(
+        decision_context.as_ref(),
+        args,
+        &result,
+        result.is_error != Some(true),
+    );
     Ok(result)
+}
+
+fn record_decision_loop_end(
+    context: Option<&crate::core::decision_loop_runtime::TaskContext>,
+    args: Option<&serde_json::Map<String, serde_json::Value>>,
+    result: &CallToolResult,
+    success: bool,
+) {
+    let input_tokens = args
+        .and_then(|args| serde_json::to_string(args).ok())
+        .map_or(0, |input| (input.len() / 4) as u64);
+    let output_tokens = format!("{result:?}").len() as u64 / 4;
+    record_decision_loop(context, input_tokens, output_tokens, success);
+}
+
+/// Record real compression savings after every response rewrite is complete.
+///
+/// Registered tools report the raw-to-tool-output delta in `tool_saved_tokens`.
+/// The final output count includes dispatcher-level terse compression and
+/// decorations. This is deliberately best-effort: tracker failures cannot
+/// affect a completed tool response.
+fn record_compression_savings(name: &str, tool_saved_tokens: usize, output_tokens: usize) {
+    if let Some((raw_tokens, compressed_tokens)) =
+        compression_tracker_tokens(name, tool_saved_tokens, output_tokens)
+    {
+        crate::core::savings_tracker::record_compression(raw_tokens, compressed_tokens, name);
+    }
+}
+
+fn compression_tracker_tokens(
+    name: &str,
+    tool_saved_tokens: usize,
+    output_tokens: usize,
+) -> Option<(u64, u64)> {
+    matches!(
+        name,
+        "ctx_read" | "ctx_shell" | "ctx_search" | "ctx_compose"
+    )
+    .then(|| {
+        let raw_tokens = tool_saved_tokens.saturating_add(output_tokens) as u64;
+        (raw_tokens, output_tokens as u64)
+    })
+}
+
+fn record_decision_loop_end_error(
+    context: Option<&crate::core::decision_loop_runtime::TaskContext>,
+    args: Option<&serde_json::Map<String, serde_json::Value>>,
+) {
+    let input_tokens = args
+        .and_then(|args| serde_json::to_string(args).ok())
+        .map_or(0, |input| (input.len() / 4) as u64);
+    record_decision_loop(context, input_tokens, 0, false);
+}
+
+fn record_decision_loop(
+    context: Option<&crate::core::decision_loop_runtime::TaskContext>,
+    input_tokens: u64,
+    output_tokens: u64,
+    success: bool,
+) {
+    if let Some(context) = context
+        && std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            crate::core::decision_loop_runtime::DecisionLoopRuntime::get_or_init().on_tool_end(
+                context,
+                input_tokens,
+                output_tokens,
+                "mcp-tool",
+                success,
+            );
+        }))
+        .is_err()
+    {
+        tracing::warn!("decision loop end panicked");
+    }
+}
+
+#[cfg(test)]
+mod savings_tests {
+    use super::compression_tracker_tokens;
+
+    #[test]
+    fn test_tracker_in_pipeline() {
+        let mut tracker = crate::core::savings_tracker::SessionSavingsTracker::default();
+        let (raw, compressed) = compression_tracker_tokens("ctx_read", 75, 25).expect("tracked");
+        tracker.record_compression(raw, compressed, "ctx_read");
+        let after = tracker.session_summary();
+
+        assert_eq!(
+            (
+                after.total_raw,
+                after.total_compressed,
+                after.savings_tokens
+            ),
+            (100, 25, 75)
+        );
+    }
 }

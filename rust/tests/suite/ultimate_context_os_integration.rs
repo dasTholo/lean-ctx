@@ -714,6 +714,7 @@ mod session_features {
             agent_id: Some("test-agent".to_string()),
             client_name: None,
             timestamp: chrono::Utc::now(),
+            task_id: None,
         });
 
         if let Some(ref mut t) = session.task {
