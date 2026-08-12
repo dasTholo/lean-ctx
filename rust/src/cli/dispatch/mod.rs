@@ -115,6 +115,14 @@ pub fn run() {
                 super::cmd_shadow(&rest);
                 return;
             }
+            "triage" => {
+                super::cmd_triage(&rest);
+                return;
+            }
+            "measure" => {
+                super::cmd_measure(&rest);
+                return;
+            }
             "token-report" | "report-tokens" => {
                 let code = token_report::run_cli(&rest);
                 if code != 0 {
@@ -143,6 +151,10 @@ pub fn run() {
             }
             "embeddings" => {
                 crate::cli::embeddings_cmd::cmd_embeddings(&rest);
+                return;
+            }
+            "model" => {
+                crate::cli::model_cmd::cmd_model(&rest);
                 return;
             }
             "enable-gpu" | "gpu" => {

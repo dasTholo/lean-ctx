@@ -32,6 +32,14 @@
 - Pro conversion triggers + metering (OSS, Class A) ✅ R36
 - Phase 1-3 Exit Gates formally verified with integration tests ✅ R36
 - Distillation pipeline: train/val/test split, data augmentation (OSS, Class A) ✅ R36
+- ONNX Model Loader + `lean-ctx model install/status/remove` CLI (OSS, Class A) ✅ R37
+- Semantic Shadow Parallel Mode + accuracy tracker (OSS, Class A) ✅ R37
+- A/B Measurement Framework (baseline/treatment recorder, comparison) (OSS, Class A) ✅ R37
+- `lean-ctx measure` CLI (baseline-start/stop, treatment-start/stop, compare, report) ✅ R37
+- `lean-ctx triage accuracy` CLI (shadow agreement tracking) ✅ R37
+- Enterprise Control Plane contracts in protocol crate (OSS, Class B) ✅ R37
+  - ControlPlaneContract, OutcomeEngineContract, FleetControlContract, ValueShareContract
+  - Local (OSS) implementations + trait-based extension points
 
 ### What Is NOT Done
 
@@ -167,7 +175,7 @@ What makes this COMMERCIAL is the BUSINESS relationship: deployment services, su
 
 ---
 
-## Phase 5: Semantic Triage Model (Week 10–16)
+## Phase 5: Semantic Triage Model (Week 10–16) — 🔨 SCAFFOLDING COMPLETE (R37)
 
 **Goal:** Semantic understanding for ambiguous tasks where rules are insufficient.
 
