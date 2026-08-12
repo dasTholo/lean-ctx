@@ -4,32 +4,26 @@ use std::path::{Path, PathBuf};
 
 use super::{
     ProfileHypothesis, TaskAnalysisInput, TaskAnalyzer, TriageBackendLocal, TriageError,
-    profile::TaskProfileLocal,
+    model_loader::ModelLoader, profile::TaskProfileLocal,
 };
 
 #[derive(Debug)]
 pub struct SemanticAnalyzer {
     model_path: PathBuf,
-    model_available: bool,
-    #[cfg(feature = "neural")]
-    _session: Option<ort::session::Session>,
+    model: Option<ModelLoader>,
 }
 
 impl SemanticAnalyzer {
-    /// Configures the future ONNX model; inference remains disabled until Phase 5 integration.
+    /// Load the managed model from `<data_dir>/models/triage-v1.onnx`.
+    pub fn from_data_dir(data_dir: &Path) -> Self {
+        Self::from_model_path(super::model_loader::model_path(data_dir))
+    }
+
     pub fn from_model_path(model_path: impl Into<PathBuf>) -> Self {
         let model_path = model_path.into();
-        #[cfg(feature = "neural")]
-        let session = load_onnx_session(&model_path).ok();
-        #[cfg(feature = "neural")]
-        let model_available = session.is_some();
-        #[cfg(not(feature = "neural"))]
-        let model_available = false;
         Self {
+            model: ModelLoader::from_model_path(&model_path).ok().flatten(),
             model_path,
-            model_available,
-            #[cfg(feature = "neural")]
-            _session: session,
         }
     }
 
@@ -38,7 +32,7 @@ impl SemanticAnalyzer {
     }
 
     pub fn model_available(&self) -> bool {
-        self.model_available
+        self.model.is_some()
     }
 
     fn fallback(&self) -> ProfileHypothesis {
@@ -56,27 +50,21 @@ impl SemanticAnalyzer {
     }
 }
 
-#[cfg(feature = "neural")]
-fn load_onnx_session(model_path: &Path) -> anyhow::Result<ort::session::Session> {
-    if !model_path.is_file() {
-        anyhow::bail!("semantic model does not exist: {}", model_path.display());
-    }
-    let execution_providers = crate::core::ort_execution_providers::execution_providers();
-    crate::core::ort_environment::ensure_ort_env(&execution_providers)?;
-    ort::session::Session::builder()
-        .map_err(|error| anyhow::anyhow!("ORT builder: {error}"))?
-        .commit_from_file(model_path)
-        .map_err(|error| anyhow::anyhow!("ORT load semantic model: {error}"))
-}
-
 impl TaskAnalyzer for SemanticAnalyzer {
-    fn analyze(&self, _input: &TaskAnalysisInput) -> Result<ProfileHypothesis, TriageError> {
-        // ONNX session/tokenizer wiring is intentionally deferred to Phase 5.
-        Ok(self.fallback())
+    fn analyze(&self, input: &TaskAnalysisInput) -> Result<ProfileHypothesis, TriageError> {
+        Ok(self
+            .model
+            .as_ref()
+            .and_then(|model| model.infer(input).ok())
+            .unwrap_or_else(|| self.fallback()))
     }
 
     fn name(&self) -> &'static str {
         "semantic"
+    }
+
+    fn shadow_enabled(&self) -> bool {
+        self.model_available()
     }
 }
 
@@ -90,8 +78,18 @@ mod tests {
         let result = analyzer.analyze(&TaskAnalysisInput::default()).unwrap();
 
         assert!(!analyzer.model_available());
-        assert_eq!(result.profile.intent, "needs_semantic_model");
         assert_eq!(result.confidence_milli, 0);
-        assert_eq!(result.backend, TriageBackendLocal::Semantic);
+        assert_eq!(result.profile.intent, "needs_semantic_model");
+    }
+
+    #[test]
+    fn data_dir_constructor_uses_managed_model_path() {
+        let data = tempfile::tempdir().unwrap();
+        let analyzer = SemanticAnalyzer::from_data_dir(data.path());
+        assert_eq!(
+            analyzer.model_path(),
+            data.path().join("models/triage-v1.onnx")
+        );
+        assert!(!analyzer.model_available());
     }
 }

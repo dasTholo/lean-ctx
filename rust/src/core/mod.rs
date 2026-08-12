@@ -231,6 +231,7 @@ pub mod decision_loop_runtime;
 #[cfg(test)]
 mod decision_loop_runtime_tests;
 pub mod litm_calibration;
+pub mod measurement;
 pub mod mode_predictor;
 pub(crate) mod model_registry;
 pub mod shadow;

@@ -117,7 +117,9 @@ default = [
 jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl"]
 dev-tools = []
 no-jail = []
-neural = ["dep:ort", "dep:ndarray", "dep:libloading"]
+onnx = ["dep:ort", "dep:ndarray", "dep:libloading"]
+# Backwards-compatible feature name for existing local builds.
+neural = ["onnx"]
 embeddings = ["dep:ort", "dep:ndarray", "dep:libloading"]
 ort-cuda = ["ort?/cuda"]
 ort-webgpu = ["ort?/webgpu"]

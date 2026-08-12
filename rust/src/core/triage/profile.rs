@@ -1,4 +1,4 @@
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TaskProfileLocal {
     pub task_class: String,
     pub intent: String,
@@ -10,7 +10,7 @@ pub struct TaskProfileLocal {
     pub confidence_milli: u16,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum TaskScopeLocal {
     #[default]
     SingleFile,
