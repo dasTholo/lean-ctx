@@ -157,6 +157,9 @@ pub struct EvidenceRecord {
     pub output_md5: Option<String>,
     pub agent_id: Option<String>,
     pub client_name: Option<String>,
+    /// Task lineage identifier for MCP-ingress evidence.
+    #[serde(default)]
+    pub task_id: Option<String>,
     pub timestamp: DateTime<Utc>,
 }
 

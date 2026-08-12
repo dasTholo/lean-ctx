@@ -4,7 +4,7 @@
 use crate::core;
 
 pub(in crate::cli::dispatch) fn cmd_savings(rest: &[String]) {
-    let action = rest.first().map_or("summary", String::as_str);
+    let action = rest.first().map_or("", String::as_str);
     match action {
         "verify" => {
             let v = core::savings_ledger::verify();
@@ -41,7 +41,8 @@ pub(in crate::cli::dispatch) fn cmd_savings(rest: &[String]) {
         "team" => cmd_savings_team(&rest[1..]),
         "verify-batch" => cmd_savings_verify_batch(rest.get(1).map(String::as_str)),
         "roi" => cmd_savings_roi(&rest[1..]),
-        "summary" | "" => print!("{}", format_savings_summary()),
+        "summary" => print!("{}", format_savings_summary()),
+        "" | "--period" | "--format" | "-h" | "--help" => crate::cli::cmd_savings_report(rest),
         _ => {
             eprintln!(
                 "Usage: lean-ctx savings [summary|team|verify|rechain|export|sign|push|verify-batch|roi]"

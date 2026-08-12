@@ -1,0 +1,11 @@
+task	raw_chars	compressed_chars	raw_tokens	compressed_tokens
+read_core_mod	14795	14796	3698	3699
+read_registry	13267	1755	3316	438
+test_triage	1495	1495	373	373
+git_log	1472	1472	368	368
+git_diff_stat	3540	3540	885	885
+search_task_envelope	4184	75	1046	18
+read_cargo_toml	16109	2694	4027	673
+clippy_head	401	163	100	40
+tree_core	40138	193	10034	48
+read_readme	35499	24123	8874	6030

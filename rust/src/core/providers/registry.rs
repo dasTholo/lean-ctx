@@ -23,6 +23,15 @@ pub struct ProviderRegistry {
     providers: RwLock<HashMap<String, Arc<dyn ContextProvider>>>,
 }
 
+impl std::fmt::Debug for ProviderRegistry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let count = self.providers.read().map(|p| p.len()).unwrap_or(0);
+        f.debug_struct("ProviderRegistry")
+            .field("providers_count", &count)
+            .finish()
+    }
+}
+
 impl ProviderRegistry {
     pub fn new() -> Self {
         Self {

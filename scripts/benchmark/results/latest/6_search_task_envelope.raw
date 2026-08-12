@@ -1,0 +1,43 @@
+./rust/tests/ocla_contract_suite_v1.rs:14:    KnowledgeObjectV1, TaskEnvelopeV1, ValidationError,
+./rust/tests/ocla_contract_suite_v1.rs:90:    typed_round_trip::<TaskEnvelopeV1, _>("task-envelope", TaskEnvelopeV1::validate);
+./rust/src/core/task_spine.rs:5:    AgentId, ProjectId, SessionId, TaskComplexity, TaskEnvelopeV1, TaskId, TaskProfileV1, TraceId,
+./rust/src/core/task_spine.rs:12:    static CURRENT: RefCell<Option<TaskEnvelopeV1>> = const { RefCell::new(None) };
+./rust/src/core/task_spine.rs:18:    pub fn create_envelope(query: &str, session_id: &str, agent_id: &str) -> TaskEnvelopeV1 {
+./rust/src/core/task_spine.rs:22:        let envelope = TaskEnvelopeV1 {
+./rust/src/core/task_spine.rs:23:            schema_version: TaskEnvelopeV1::SCHEMA_VERSION,
+./rust/src/core/task_spine.rs:54:    pub fn enrich_from_triage(envelope: &mut TaskEnvelopeV1, profile: &TaskProfileLocal) {
+./rust/src/core/task_spine.rs:71:    pub fn current() -> Option<TaskEnvelopeV1> {
+./rust/src/core/task_spine.rs:75:    pub fn set(envelope: TaskEnvelopeV1) {
+./docs/contracts/task-envelope-v1.schema.json:4:  "title": "LeanCTX TaskEnvelopeV1",
+./rust/tests/shadow_scheduler_invariant.rs:11:    TaskEnvelopeV1,
+./rust/tests/shadow_scheduler_invariant.rs:48:fn envelope() -> TaskEnvelopeV1 {
+./rust/tests/shadow_scheduler_invariant.rs:49:    TaskEnvelopeV1 {
+./rust/tests/execution_receipt_roundtrip.rs:4:use lean_ctx_protocol::{ExecutionReceiptV1, TaskEnvelopeV1};
+./rust/tests/execution_receipt_roundtrip.rs:77:        let envelope: TaskEnvelopeV1 = read_typed(&envelope_path);
+./scripts/benchmark/token_reduction.sh:29:    6) LEAN_CTX_DISABLED=1 rg -n --glob '!.git/**' --glob '!rust/target/**' TaskEnvelope .;;
+./scripts/benchmark/token_reduction.sh:44:    6) lean-ctx grep TaskEnvelope .;;
+./rust/crates/lean-ctx-protocol/src/task.rs:35:pub struct TaskEnvelopeV1 {
+./rust/crates/lean-ctx-protocol/src/task.rs:77:impl TaskEnvelopeV1 {
+./rust/crates/lean-ctx-protocol/src/task.rs:122:        let task = TaskEnvelopeV1 {
+./rust/crates/lean-ctx-protocol/src/task.rs:146:        let decoded: TaskEnvelopeV1 = serde_json::from_str(&json).expect("task should deserialize");
+./rust/crates/lean-ctx-protocol/src/task.rs:164:        assert!(serde_json::from_str::<TaskEnvelopeV1>(json).is_err());
+./rust/src/tools/server.rs:70:    pub task_envelope: Arc<RwLock<Option<lean_ctx_protocol::TaskEnvelopeV1>>>,
+./rust/src/core/ocla/scheduler_service.rs:7:use lean_ctx_protocol::{CapabilityManifestV1, ExecutionPlanV1, TaskEnvelopeV1};
+./rust/src/core/ocla/scheduler_service.rs:22:        envelope: &TaskEnvelopeV1,
+./rust/src/core/ocla/reference_scheduler.rs:12:    TaskEnvelopeV1,
+./rust/src/core/ocla/reference_scheduler.rs:42:        envelope: &TaskEnvelopeV1,
+./rust/src/core/ocla/reference_scheduler.rs:64:        envelope: &TaskEnvelopeV1,
+./rust/src/core/ocla/reference_scheduler.rs:73:    pub fn fallback_plan(&self, envelope: &TaskEnvelopeV1) -> OclaResult<ExecutionPlanV1> {
+./rust/src/core/ocla/reference_scheduler.rs:77:    fn fallback_candidate(&self, envelope: &TaskEnvelopeV1) -> OclaResult<ExecutionCandidate> {
+./rust/src/core/ocla/reference_scheduler.rs:107:        envelope: &TaskEnvelopeV1,
+./rust/src/core/ocla/reference_scheduler.rs:251:    envelope: &TaskEnvelopeV1,
+./rust/src/core/ocla/reference_scheduler.rs:416:    fn envelope() -> TaskEnvelopeV1 {
+./rust/src/core/ocla/reference_scheduler.rs:417:        TaskEnvelopeV1 {
+./rust/src/core/ocla/scheduler_client.rs:3:use lean_ctx_protocol::{CapabilityManifestV1, ExecutionPlanV1, TaskEnvelopeV1};
+./rust/src/core/ocla/scheduler_client.rs:11:        envelope: &TaskEnvelopeV1,
+./rust/src/core/ocla/scheduler_client.rs:44:        envelope: &TaskEnvelopeV1,
+./rust/src/core/ocla/scheduler_client.rs:143:    fn task() -> TaskEnvelopeV1 {
+./rust/src/core/ocla/scheduler_client.rs:144:        TaskEnvelopeV1 {
+./benchmarks/efficiency/task-spine-v1/README.md:12:| `task_envelope.json` | TaskEnvelopeV1 admission and lineage metadata |
+./rust/src/cli/demo_cmd.rs:41:    println!("  {DIM}Der Demo-Befehl verwendet echte Protocol-Typen (TaskEnvelopeV1,");
+./rust/src/cli/demo_cmd.rs:90:    section("STEP 1: Task Identity (TaskEnvelopeV1)");

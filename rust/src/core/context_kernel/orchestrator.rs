@@ -98,6 +98,7 @@ impl ContextKernel {
         ContextReceiptV1 {
             receipt_id: format!("receipt_{}", short_hash(&receipt_material)),
             plan_id: plan.plan_id.clone(),
+            task_id: None,
             delivered_tokens,
             cache_hits: 0,
             cache_misses: 0,

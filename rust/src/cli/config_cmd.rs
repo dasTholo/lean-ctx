@@ -564,11 +564,22 @@ pub fn cmd_benchmark(args: &[String]) {
     use crate::core::benchmark;
     use crate::core::benchmark_compare;
 
+    if args.is_empty() || args.first().is_some_and(|arg| arg.starts_with('-')) {
+        super::benchmark_tasks_cmd::cmd_benchmark_tasks(args);
+        return;
+    }
+
     let action = args.first().map_or("run", std::string::String::as_str);
 
     match action {
         "--help" | "-h" => {
-            println!("Usage: lean-ctx benchmark run [path] [--json]");
+            println!(
+                "Usage: lean-ctx benchmark [--config stock|standard|aggressive] [--repeats N] [--json|--markdown] [--output file]"
+            );
+            println!(
+                "       lean-ctx benchmark tasks [--config stock|standard|aggressive] [--repeats N] [--json|--markdown] [--output file]"
+            );
+            println!("       lean-ctx benchmark run [path] [--json]");
             println!("       lean-ctx benchmark report [path]");
             println!("       lean-ctx benchmark replay <sessions.json> [--output report.md]");
             println!("       lean-ctx benchmark eval [path] [--json]");

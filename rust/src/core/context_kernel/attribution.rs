@@ -127,6 +127,7 @@ pub mod tests {
         ContextReceiptV1 {
             receipt_id: "receipt:test".to_owned(),
             plan_id: "plan:test".to_owned(),
+            task_id: None,
             delivered_tokens: 500,
             cache_hits: 0,
             cache_misses: 0,

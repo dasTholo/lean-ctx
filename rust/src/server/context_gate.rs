@@ -37,6 +37,17 @@ pub struct PostDispatchResult {
     pub prefetch_hint: Option<String>,
 }
 
+/// Best-effort KnowledgeRouter advice for the completed Context Gate flow.
+pub fn knowledge_advice(
+    query: &str,
+) -> crate::core::knowledge_router::gate_integration::KnowledgeAdvice {
+    let current = crate::core::context_kernel::ContextState::new(
+        Vec::new(),
+        crate::core::knowledge::KnowledgeQuery::default(),
+    );
+    crate::core::knowledge_router::gate_integration::KnowledgeGateAdvisor::advise(query, &current)
+}
+
 pub fn pre_dispatch_read(
     path: &str,
     requested_mode: &str,

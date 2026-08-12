@@ -47,12 +47,29 @@ impl ToolRegistry {
         self.tools.contains_key(name)
     }
 
-    /// Returns MCP Tool definitions for all registered tools.
-    /// Used by `list_tools` to expose schemas to clients.
+    /// Returns MCP Tool definitions in the official public surface.
+    /// Deprecated aliases remain callable through dispatch but are not
+    /// published or counted as official tools.
     /// Applies MCP `ToolAnnotations` (readOnlyHint, destructiveHint) so clients
     /// can make informed decisions about tool usage in restricted contexts.
     pub fn tool_defs(&self) -> Vec<Tool> {
-        let mut defs: Vec<Tool> = self.tools.values().map(|t| t.tool_def()).collect();
+        self.tool_defs_filtered(true)
+    }
+
+    /// Returns MCP Tool definitions for every registered tool, including
+    /// deprecated compatibility aliases.
+    /// Used by callability and schema checks that cover the full registry.
+    pub fn registered_tool_defs(&self) -> Vec<Tool> {
+        self.tool_defs_filtered(false)
+    }
+
+    fn tool_defs_filtered(&self, exclude_deprecated: bool) -> Vec<Tool> {
+        let mut defs: Vec<Tool> = self
+            .tools
+            .values()
+            .filter(|t| !exclude_deprecated || !super::dynamic_tools::is_deprecated_alias(t.name()))
+            .map(|t| t.tool_def())
+            .collect();
         defs.sort_by(|a, b| a.name.as_ref().cmp(b.name.as_ref()));
         crate::tool_defs::apply_tool_annotations(defs)
     }
@@ -67,7 +84,10 @@ impl ToolRegistry {
         let mut defs: Vec<Tool> = self
             .tools
             .values()
-            .filter(|t| state.is_tool_active(t.name()))
+            .filter(|t| {
+                state.is_tool_active(t.name())
+                    && !super::dynamic_tools::is_deprecated_alias(t.name())
+            })
             .map(|t| t.tool_def())
             .collect();
         defs.sort_by(|a, b| a.name.as_ref().cmp(b.name.as_ref()));
@@ -83,7 +103,10 @@ impl ToolRegistry {
         let mut defs: Vec<Tool> = self
             .tools
             .values()
-            .filter(|t| profile.is_tool_enabled(t.name()))
+            .filter(|t| {
+                profile.is_tool_enabled(t.name())
+                    && !super::dynamic_tools::is_deprecated_alias(t.name())
+            })
             .map(|t| t.tool_def())
             .collect();
         defs.sort_by(|a, b| a.name.as_ref().cmp(b.name.as_ref()));
@@ -111,11 +134,11 @@ impl Default for ToolRegistry {
     }
 }
 
-/// Number of registered MCP tools — the single source of truth for the
+/// Number of official MCP tools — the single source of truth for the
 /// "N MCP tools" count shown in `--help`, the README, and the feature catalog.
-/// Deriving it here means the count can never drift from the actual registry.
+/// Deprecated aliases remain callable for compatibility but are not counted.
 pub fn tool_count() -> usize {
-    build_registry().len()
+    build_registry().tool_defs().len()
 }
 
 /// Register all trait-based tools. Called once during server startup.
@@ -141,7 +164,6 @@ pub fn build_registry() -> ToolRegistry {
     registry.register(Box::new(registered::ctx_callgraph::CtxCallgraphTool));
     registry.register(Box::new(registered::ctx_refactor::CtxRefactorTool));
     registry.register(Box::new(registered::ctx_repomap::CtxRepomapTool));
-    registry.register(Box::new(registered::ctx_symbol::CtxSymbolTool));
     registry.register(Box::new(
         registered::ctx_discover_tools::CtxDiscoverToolsTool,
     ));
@@ -161,9 +183,7 @@ pub fn build_registry() -> ToolRegistry {
         registered::ctx_compress_memory::CtxCompressMemoryTool,
     ));
     registry.register(Box::new(registered::ctx_read::CtxReadTool));
-    registry.register(Box::new(registered::ctx_multi_read::CtxMultiReadTool));
     registry.register(Box::new(registered::ctx_multi_repo::CtxMultiRepoTool));
-    registry.register(Box::new(registered::ctx_smart_read::CtxSmartReadTool));
     registry.register(Box::new(registered::ctx_delta::CtxDeltaTool));
     registry.register(Box::new(registered::ctx_edit::CtxEditTool));
     registry.register(Box::new(registered::ctx_patch::CtxPatchTool));
@@ -196,9 +216,6 @@ pub fn build_registry() -> ToolRegistry {
     registry.register(Box::new(registered::ctx_overview::CtxOverviewTool));
     registry.register(Box::new(registered::ctx_preload::CtxPreloadTool));
     registry.register(Box::new(registered::ctx_prefetch::CtxPrefetchTool));
-    registry.register(Box::new(
-        registered::ctx_semantic_search::CtxSemanticSearchTool,
-    ));
     registry.register(Box::new(registered::ctx_feedback::CtxFeedbackTool));
     registry.register(Box::new(registered::ctx_control::CtxControlTool));
     registry.register(Box::new(registered::ctx_plan::CtxPlanTool));
@@ -220,6 +237,14 @@ pub fn build_registry() -> ToolRegistry {
     registry.register(Box::new(registered::ctx_workflow::CtxWorkflowTool));
     registry.register(Box::new(registered::ctx_load_tools::CtxLoadToolsTool));
 
+    // #509: deprecated aliases — hidden from tools/list but stay registered so
+    // direct calls and ctx_call keep working for one release cycle.
+    registry.register(Box::new(registered::ctx_smart_read::CtxSmartReadTool));
+    registry.register(Box::new(registered::ctx_multi_read::CtxMultiReadTool));
+    registry.register(Box::new(
+        registered::ctx_semantic_search::CtxSemanticSearchTool,
+    ));
+    registry.register(Box::new(registered::ctx_symbol::CtxSymbolTool));
     register_plugin_tools(&mut registry);
 
     registry

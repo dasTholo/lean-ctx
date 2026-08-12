@@ -11,16 +11,14 @@
 
 ### **Control what your AI can see.**
 
-**LeanCTX — Context Engineering Layer for AI Coding Agents**
+**LeanCTX — AI Value Gate for AI Coding Agents**
 
-LeanCTX — short for **Lean Context** — is the context engineering layer for AI
-coding agents. It runs locally alongside your coding agent, helping it read
-repositories, run development commands, and send focused context to the model:
-it **decides** what agents read, **compresses** what they send (an optional
-local proxy shrinks every request — system prompt, history and tool results —
-prompt-cache-safe), **remembers** what they learn, **guards** what they touch —
-and **proves** what they save with a signed, verifiable savings ledger. The
-result: 60–90% fewer tokens.
+LeanCTX — short for **Lean Context** — is an AI Value Gate and context
+engineering layer for AI coding agents. It runs locally alongside your coding
+agent, helping it read repositories, run development commands, and send focused
+context to the model: it **understands** the task, **routes** the right context,
+**compresses** what it sends, and **tracks** the cost and outcome of that work.
+The result: 50–80% fewer tokens where compression applies.
 Zero config required.
 Local-first.
 
@@ -57,7 +55,9 @@ Local-first.
 
 ---
 
-> **Control what your AI can see.** LeanCTX — short for **Lean Context** — is the **context engineering layer for AI coding agents**: one local Rust binary that helps agents read repositories, run development commands, compress context sent to the model, remember what they learn, guard what they touch — and prove what they save.
+> **Control what your AI can see — and what it costs.** LeanCTX is an **AI Value
+> Gate** for coding agents: it understands tasks, routes and compresses context,
+> remembers what it learns, and measures cost against accepted outcomes.
 
 > Token savings are the receipt. Intelligence is the product. Works with **Cursor, Claude Code, Copilot, Windsurf, Codex, Gemini** and 30+ other agents — no config needed.
 
@@ -94,7 +94,7 @@ Local-first.
 ## Why developers use LeanCTX
 
 - **Longer useful coding sessions** — less context waste = more room for actual code reasoning
-- **Lower API costs** — 60–90% fewer tokens on reads and shell output, cached re-reads cost ~13 tokens
+- **Lower API costs** — 50–80% fewer tokens on reads and shell output, cached re-reads cost ~13 tokens
 - **No more "I already showed you this file"** — session memory persists across chats
 - **Works with your existing setup** — one `lean-ctx setup` command, no config changes needed
 - **Full visibility** — see exactly where your context window budget goes
@@ -116,14 +116,16 @@ That's the shift behind "agent entities" that live in your chat and remember you
 
 ---
 
-## What it does — the four dimensions of context
+## What it does — five capabilities of an AI Value Gate
 
-LeanCTX treats context as a managed resource, not an afterthought. One binary
-covers the four dimensions that decide how well an AI agent actually performs:
+LeanCTX treats context and AI spend as managed resources, not afterthoughts.
+One binary covers the capabilities that decide how well an AI agent performs:
 
-### 1. Compression — input efficiency
+### 1. Context Compression — input efficiency
 
 Your AI agent reads files and runs commands. LeanCTX compresses both automatically.
+
+- **50–80% token reduction** on eligible context while preserving recovery paths
 
 - **File reads**: 10 read modes (`full`, `map`, `signatures`, `diff`, `lines:N-M`, `density:X`, …) — cached re-reads cost ~13 tokens
 - **Target density** (`density:0.4`): SDE-style budget compression — keeps the highest-entropy lines until ~40% of the original tokens remain, deterministic
@@ -132,33 +134,66 @@ Your AI agent reads files and runs commands. LeanCTX compresses both automatical
 - **Tree-sitter AST**: structural understanding for 27 languages — not just text compression
 - **Reversible by design (CCR)**: compression never *discards* content — pruned or truncated payloads move to a content-addressed store with a deterministic handle, so the model can pull the original bytes back on demand via `ctx_expand`, `ctx_retrieve`, an in-band marker, or `GET /v1/references/{id}`. [Five recovery paths →](docs/comparisons/vs-headroom.md#reversibility)
 
-### 2. Routing — the right fidelity per read
+### 2. Intelligent Triage — task understanding
 
-Not every file needs the same depth. LeanCTX sends the signal, not the noise.
+Not every task or file needs the same depth. LeanCTX classifies the task, then
+sends the signal rather than the noise.
 
 - **10 read modes**: from full content down to AST signatures and entropy-filtered views
 - **Adaptive `ModePredictor`**: learns the optimal read mode per file type from past sessions
 - **`IntentEngine`**: classifies query complexity so simple lookups stay cheap
 
-### 3. Memory — context that persists
+### 3. Knowledge Routing — cross-source context
 
-Context doesn't disappear between chats anymore.
+Relevant code, sessions, and connected sources become focused context instead of
+a larger prompt.
 
 - **Session memory (CCP)**: persist task/facts/decisions across chats — structured recovery queries survive compaction
 - **Knowledge graph**: temporal facts with validity windows, episodic + procedural memory
 - **Property Graph**: multi-edge code graph (imports, calls, exports, type_ref) powers impact analysis and search ranking
 - **Yours, not the vendor's**: memory stays local and portable — export it as a `.ctxpkg` package and move it across machines or models, instead of locking it in a vendor's black box
 
-### 4. Verification — control what reaches the model
+### 4. AI Value Gate — cost and outcome tracking
 
-Performance is accuracy, not just speed. You stay in control of the window.
+Performance is the cost of a useful result, not just speed. LeanCTX records
+costs and outcomes locally; **CPAO (Cost per Accepted Outcome)** is the north-star
+metric for comparing useful AI work.
 
 - **Context Manager**: browser dashboard with real-time token tracking, compression stats, utilization gauge
 - **Budgets & SLOs**: profiles, roles, per-agent budgets, and throttling policies
 - **Context Proof** (`ctx_proof`, `ctx_verify`): 4-layer verification engine with CI drift gates
 
+### 5. Shadow Recommendations — savings proof
+
+Shadow Mode compares LeanCTX treatment with a configured baseline without
+changing the active workflow. Its reports show cost, tokens, CPAO, and whether
+quality held, then recommend savings only when the comparison supports them.
+
+## Cost Intelligence
+
+LeanCTX automatically tracks local cost and outcome signals; it does not add
+those reports to agent context. CPAO — cost per accepted outcome — is the
+north-star metric, while Shadow Mode provides a baseline comparison for savings.
+
+```bash
+lean-ctx savings --period week                 # costs, token savings, and CPAO
+lean-ctx value-report --format markdown --last 20  # recent outcome quality
+lean-ctx shadow --latest                       # latest baseline comparison
+```
+
+### Quick start: value tracking
+
+```bash
+# Enable shadow mode for savings comparison
+echo '[shadow]\nenabled = true' >> ~/.config/lean-ctx/config.toml
+
+# After using LeanCTX for a while:
+lean-ctx savings
+lean-ctx shadow --latest
+```
+
 <details>
-<summary><strong>Full feature list (83 MCP tools)</strong></summary>
+<summary><strong>Full feature list (79 MCP tools)</strong></summary>
 
 - **Web & Research** (`ctx_url_read`): pull a public web page, PDF, or YouTube transcript into context as compressed, citation-backed text — `facts`/`quotes` return claims with a confidence score + source URL, relevance-ranked research-compression distils to a token budget, SSRF-guarded (http/https only)
 - **Graph-Powered Intelligence**: hybrid search (BM25 + embeddings + graph proximity via RRF), incremental git-diff updates
@@ -304,7 +339,7 @@ Start the server with `lean-ctx serve`, then point a client at it. → **[API re
 
 LeanCTX grows with you. Below are the journeys most people actually take — each
 links to a complete, function-by-function walkthrough in the
-**[Reference](docs/reference/README.md)** (every CLI command and all 82 MCP
+**[Reference](docs/reference/README.md)** (every CLI command and all 79 MCP
 tools are documented there).
 
 <table>
@@ -470,7 +505,7 @@ All analytics live in the CLI/dashboard — never burning agent tokens.
 ### 📚 The full reference
 *"I want to read everything."*
 
-Every command and all 83 MCP tools, organized as user journeys, plus
+Every command and all 79 MCP tools, organized as user journeys, plus
 appendices for the [CLI map](docs/reference/appendix-cli-map.md),
 [MCP tools](docs/reference/appendix-mcp-tools.md), and
 [paths & config](docs/reference/appendix-paths-and-config.md).
@@ -487,7 +522,7 @@ LeanCTX is a standard **MCP server**, so it works with any MCP-compatible client
 | Mode | How it works | Best for |
 |---|---|---|
 | **Hybrid** | MCP for cached reads (~13 tokens) + shell hooks for command compression | Agents with shell access (Cursor, Claude Code, Codex, ...) |
-| **MCP** | All 83 tools via MCP protocol, no shell hooks | Protocol-only agents (JetBrains, VS Code, Zed, ...) |
+| **MCP** | All 79 tools via MCP protocol, no shell hooks | Protocol-only agents (JetBrains, VS Code, Zed, ...) |
 
 ### Agent compatibility matrix
 
@@ -614,7 +649,7 @@ committed recorded subset that blocks CI on any regression.
 - **280+ forks** — active community contributions
 - **200+ releases** — shipped near-daily since launch
 - **30+ supported AI coding agents** — broadest MCP compatibility
-- **83 MCP tools** — from simple file reads to multi-agent orchestration
+- **79 MCP tools** — from simple file reads to multi-agent orchestration
 - Used in production by teams running Claude Code, Cursor, and Codex daily
 - **Live adoption metrics**: [leanctx.com/metrics](https://leanctx.com/metrics/) — installs, stars and savings, updated continuously
 
@@ -693,4 +728,3 @@ Start with [CONTRIBUTING.md](CONTRIBUTING.md). Easy first PR: propose a new CLI 
 Apache License 2.0 — see [LICENSE](LICENSE).
 
 
---- lean-ctx: ctx_compose bundles search+read+symbols in one call ---

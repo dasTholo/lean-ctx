@@ -1,0 +1,45 @@
+registry.rs 298L cognitive
+// /Users/yvesgugger/Documents/Privat/Projects/lean-ctx/rust/src/server/registry.rs
+§ import imports (L1-L7)
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use rmcp::model::Tool;
+
+use super::tool_trait::McpTool;
+
+§ type ToolRegistry (L8-L19)
+/// Central registry mapping tool names to their trait-based handlers.
+/// Every tool is trait-based and resolved here; the earlier
+/// match-cascade dispatch has been fully retired.
+///
+/// Handlers are stored behind `Arc` (not `Box`) so the dispatch layer can hand
+/// an owned, `'static` handle to `tokio::task::spawn_blocking`. That lets a
+/// blocking handler run on the dedicated blocking pool under a watchdog
+/// deadline instead of pinning a scarce core worker via `block_in_place`
+/// (#271 — a hung handler must never swallow the JSON-RPC response).
+pub struct ToolRegistry {
+    tools: HashMap<&'static str, Arc<dyn McpTool>>,
+}
+// ... 1 lines omitted
+§ type ToolRegistry (L21-L21)
+impl ToolRegistry {
+§ function new (L22-L26)
+    pub fn new() -> Self {
+        Self {
+            tools: HashMap::new(),
+        }
+    }
+// ... 1 lines omitted
+§ function register(&mut (L28-L31)
+    pub fn register(&mut self, tool: Box<dyn McpTool>) {
+        let name = tool.name();
+        self.tools.insert(name, Arc::from(tool));
+    }
+// ... 1 lines omitted
+§ function get(&self (L33-L35)
+    pub fn get(&self, name: &str) -> Option<&dyn McpTool> {
+        self.tools.get(name).map(|t| &**t)
+    }
+6/28 chunks shown (280 tokens)
+[lean-ctx] full source: read "/Users/yvesgugger/Documents/Privat/Projects/lean-ctx/rust/src/server/registry.rs" directly (no MCP)  ·  or ctx_read("/Users/yvesgugger/Documents/Privat/Projects/lean-ctx/rust/src/server/registry.rs", mode="full")

@@ -397,6 +397,28 @@ impl SessionState {
         agent_id: Option<&str>,
         client_name: Option<&str>,
     ) {
+        self.record_tool_receipt_with_task(
+            tool,
+            action,
+            input_md5,
+            output_md5,
+            agent_id,
+            client_name,
+            None,
+        );
+    }
+
+    /// Records a tool receipt with optional MCP task lineage.
+    pub fn record_tool_receipt_with_task(
+        &mut self,
+        tool: &str,
+        action: Option<&str>,
+        input_md5: &str,
+        output_md5: &str,
+        agent_id: Option<&str>,
+        client_name: Option<&str>,
+        task_id: Option<&str>,
+    ) {
         let now = Utc::now();
         let mut push = |key: String| {
             self.evidence.push(EvidenceRecord {
@@ -408,6 +430,7 @@ impl SessionState {
                 output_md5: Some(output_md5.to_string()),
                 agent_id: agent_id.map(std::string::ToString::to_string),
                 client_name: client_name.map(std::string::ToString::to_string),
+                task_id: task_id.map(std::string::ToString::to_string),
                 timestamp: now,
             });
         };
@@ -433,6 +456,7 @@ impl SessionState {
             output_md5: None,
             agent_id: None,
             client_name: None,
+            task_id: None,
             timestamp: Utc::now(),
         });
         while self.evidence.len() > MAX_EVIDENCE {

@@ -17,6 +17,8 @@ const COCKPIT_COMPONENT_NAV_JS: &str = include_str!("static/components/cockpit-n
 const COCKPIT_COMPONENT_CONTEXT_JS: &str = include_str!("static/components/cockpit-context.js");
 const COCKPIT_COMPONENT_OVERVIEW_JS: &str = include_str!("static/components/cockpit-overview.js");
 const COCKPIT_COMPONENT_LIVE_JS: &str = include_str!("static/components/cockpit-live.js");
+const COCKPIT_COMPONENT_VALUE_GATE_JS: &str =
+    include_str!("static/components/cockpit-value-gate.js");
 const COCKPIT_COMPONENT_KNOWLEDGE_JS: &str = include_str!("static/components/cockpit-knowledge.js");
 const COCKPIT_COMPONENT_AGENTS_JS: &str = include_str!("static/components/cockpit-agents.js");
 const COCKPIT_COMPONENT_MEMORY_JS: &str = include_str!("static/components/cockpit-memory.js");
@@ -66,6 +68,7 @@ fn match_font_asset(path: &str) -> Option<&'static [u8]> {
     }
 }
 
+pub mod api;
 pub mod base_path;
 pub mod routes;
 pub(crate) mod vscode_open;

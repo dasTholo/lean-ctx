@@ -1,0 +1,112 @@
+Cargo.toml [471L]
+[[bench]
+  name = "compression"
+  harness = false
+  name = "graph_export"
+  harness = false
+  name = "efficiency"
+  harness = false
+[[bin]
+  name = "lean-ctx"
+  path = "src/main.rs"
+[[example]
+  name = "gen_mcp_manifest"
+  path = "src/bin/gen_mcp_manifest.rs"
+  required-features = ["dev-tools"]
+  name = "gen_tdd_schema"
+  path = "src/bin/gen_tdd_schema.rs"
+  required-features = ["dev-tools"]
+  name = "gen_docs"
+  path = "src/bin/gen_docs.rs"
+  required-features = ["dev-tools"]
+  name = "gen_registry"
+  ...+17 more
+[dependencies]
+  lean-ctx-ocla = ...
+  lean-ctx-protocol = ...
+  rmcp = { version = "2", features = [
+  http = "1.4"
+  tiktoken-rs = "0.12"
+  tokio = { version = "1.52", features = [
+  serde = ...
+  serde_json = "1.0"
+  clap = "4.5"
+  subtle = "2.6"
+  ...+93 more
+[dev-dependencies]
+  criterion = ...
+  filetime = "0.2"
+  insta = "1.48"
+  jsonschema = ...
+  proptest = "1.11"
+  serial_test = "3.5"
+  tempfile = "3.27"
+  wat = "1.252"
+[features]
+  enterprise = []
+  default = [
+  jemalloc = ...
+  dev-tools = []
+  no-jail = []
+  neural = ...
+  embeddings = ...
+  ort-cuda = ["ort?/cuda"]
+  ort-webgpu = ["ort?/webgpu"]
+  ort-rocm = ["ort?/rocm"]
+  ...+11 more
+[lib]
+  name = "lean_ctx"
+  path = "src/lib.rs"
+[lints.clippy]
+  pedantic = { level = "warn", priority = -1 }
+  unwrap_used = "warn"
+  module_name_repetitions = "allow"
+  must_use_candidate = "allow"
+  return_self_not_must_use = "allow"
+  similar_names = "allow"
+  unreadable_literal = "allow"
+  missing_errors_doc = "allow"
+  missing_panics_doc = "allow"
+  doc_markdown = "allow"
+  ...+25 more
+[lints.rust]
+  unreachable_pub = "warn"
+  unexpected_cfgs = ...
+[package]
+  name = "lean-ctx"
+  version = "3.9.18"
+  edition = "2024"
+  autobins = false
+  description = ...
+  license = "Apache-2.0"
+  repository = "https://github.com/yvgude/lean-ctx"
+  homepage = "https://leanctx.com"
+  readme = "README.md"
+  keywords = ...
+  ...+2 more
+[package.metadata.binstall]
+  bin-dir = "{ bin }{ binary-ext }"
+  pkg-url = ...
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+  pkg-fmt = "zip"
+  pkg-url = ...
+[patch.crates-io]
+  rmcp = { path = "crates/vendor/rmcp" }
+  rmcp-macros = { path = "crates/vendor/rmcp-macros" }
+[profile.dev]
+  debug = "line-tables-only"
+  split-debuginfo = "unpacked"
+[profile.release]
+  opt-level = "z"
+  lto = true
+  codegen-units = 1
+  strip = true
+  panic = "unwind"
+[target.'cfg(not(windows))'.dependencies]
+  tikv-jemallocator = { version = "0.7", optional = true }
+  tikv-jemalloc-ctl = { version = "0.7", optional = true }
+[target.'cfg(windows)'.dependencies]
+  windows-sys = { version = "0.61", features = [
+[workspace]
+  members = [
+  default-members = ["."]

@@ -152,7 +152,49 @@ Honesty is the point of the ledger:
 
 ---
 
-## 3. `token-report` — tokens + memory
+## 3. Cost Intelligence — `savings`, `value-report`, and `shadow`
+
+These reports keep cost and outcome analysis outside the agent context. CPAO
+(Cost per Accepted Outcome) is the primary measure of useful AI spend.
+
+### 3.1 `savings` — period cost and compression report
+
+```bash
+lean-ctx savings --period week                        # current week, terminal table
+lean-ctx savings --period month --format markdown     # shareable monthly report
+lean-ctx savings --period all --format json           # machine-readable history
+```
+
+`savings` combines compression events and accepted-task assessments to show
+tokens processed and saved, estimated versus actual cost, CPAO, ETPAO, and the
+five largest savings sources. `--period` accepts `day`, `week`, `month`, or
+`all`; `--format` accepts `table`, `json`, or `markdown`.
+
+### 3.2 `value-report` — accepted outcomes and CPAO
+
+```bash
+lean-ctx value-report                                 # latest 50 assessments
+lean-ctx value-report --format markdown --last 20     # recent review-ready report
+lean-ctx value-report --format json --last 100        # automation input
+```
+
+Use this report to inspect task acceptance, total cost, and CPAO across recent
+assessments. `--format` accepts `table`, `markdown`, or `json`; `--last N`
+limits the number of recent tasks included.
+
+### 3.3 `shadow` — counterfactual savings recommendations
+
+```bash
+lean-ctx shadow --latest                              # view the newest comparison
+lean-ctx shadow --list                                # list stored comparisons
+lean-ctx shadow --force                               # create a report now
+```
+
+Shadow Mode compares the configured baseline model with LeanCTX treatment.
+Reports include cost, tokens, average CPAO, latency, and a quality-maintained
+check; recommendations appear only when the comparison supports savings.
+
+## 4. `token-report` — tokens + memory
 
 ```bash
 lean-ctx token-report              # tokens saved + memory footprint
@@ -180,7 +222,7 @@ The `cep(last)` line is the most recent Context Engineering Protocol scorecard
 
 ---
 
-## 4. Finding waste — `discover` and `ghost`
+## 5. Finding waste — `discover` and `ghost`
 
 ```bash
 lean-ctx discover                  # commands in your shell history that ran uncompressed
@@ -195,7 +237,7 @@ lean-ctx ghost --json
 
 ---
 
-## 5. Performance — `slow-log`
+## 6. Performance — `slow-log`
 
 ```bash
 lean-ctx slow-log list             # slowest commands lean-ctx wrapped
@@ -207,7 +249,7 @@ commands were slow to compress, so you can exclude or filter them.
 
 ---
 
-## 6. Output logs — `tee`
+## 7. Output logs — `tee`
 
 ```bash
 lean-ctx tee list                  # captured output logs
@@ -221,7 +263,7 @@ output of something you ran earlier without re-running it.
 
 ---
 
-## 7. The web dashboard — `dashboard`
+## 8. The web dashboard — `dashboard`
 
 ```bash
 lean-ctx dashboard                 # http://localhost:3333
@@ -255,7 +297,7 @@ so the command is never a no-op. `--open=vscode` and
 
 ---
 
-## 8. The live TUI — `watch`
+## 9. The live TUI — `watch`
 
 ```bash
 lean-ctx watch                     # real-time event stream in the terminal
@@ -267,7 +309,7 @@ actually intercepting this?" in real time.
 
 ---
 
-## 9. Quality scoring — `cep` and `benchmark`
+## 10. Quality scoring — `cep` and `benchmark`
 
 ```bash
 lean-ctx cep                       # CEP score trends (Context Engineering Protocol)
@@ -332,7 +374,7 @@ benchmark corpus, tiny-span exceptions included honestly in the print-out).
 
 ---
 
-## 10. Learning loops — `learn` and `gotchas`
+## 11. Learning loops — `learn` and `gotchas`
 
 These turn observed history into durable insight:
 
@@ -349,7 +391,7 @@ lean-ctx learn --apply             # promote them into AGENTS.md
 
 ---
 
-## 11. Raw stats & transcript compaction
+## 12. Raw stats & transcript compaction
 
 ```bash
 lean-ctx stats                     # raw stats store summary
@@ -368,19 +410,22 @@ transcripts so long histories don't bloat the data dir.
 | You want… | Reach for |
 |-----------|-----------|
 | Headline savings | `gain` (§1) |
+| Cost, CPAO, and savings sources | `savings` (§3.1) |
+| Assessed outcomes and CPAO | `value-report` (§3.2) |
+| Baseline savings evidence | `shadow` (§3.3) |
 | A shareable recap | `wrapped` (§2.1) |
 | A social/OG image or hostable page | `gain --svg` / `gain --share` (§2.2) |
 | An auditable, per-event savings record | `savings` (§2.3) |
-| Tokens **and** memory footprint | `token-report` (§3) |
-| Where am I still wasting tokens? | `discover`, `ghost` (§4) |
-| Is lean-ctx slowing me down? | `slow-log` (§5) |
-| Recover an earlier full output | `tee` (§6) |
-| Rich visual exploration | `dashboard` (§7) |
-| Watch it work live | `watch` (§8) |
-| Context-quality / regression tracking | `cep`, `benchmark` (§9) |
-| Is anchored editing actually paying off? | `ctx_metrics` / Edit Efficiency card (§9) |
-| Turn history into rules | `learn`, `gotchas` (§10) |
-| Raw numbers / shrink transcripts | `stats`, `compact` (§11) |
+| Tokens **and** memory footprint | `token-report` (§4) |
+| Where am I still wasting tokens? | `discover`, `ghost` (§5) |
+| Is lean-ctx slowing me down? | `slow-log` (§6) |
+| Recover an earlier full output | `tee` (§7) |
+| Rich visual exploration | `dashboard` (§8) |
+| Watch it work live | `watch` (§9) |
+| Context-quality / regression tracking | `cep`, `benchmark` (§10) |
+| Is anchored editing actually paying off? | `ctx_metrics` / Edit Efficiency card (§10) |
+| Turn history into rules | `learn`, `gotchas` (§11) |
+| Raw numbers / shrink transcripts | `stats`, `compact` (§12) |
 
 ---
 

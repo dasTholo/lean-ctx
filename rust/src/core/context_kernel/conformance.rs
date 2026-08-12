@@ -94,6 +94,7 @@ mod tests {
         let receipt = ContextReceiptV1 {
             receipt_id: "receipt:conformance".to_owned(),
             plan_id: plan.plan_id.clone(),
+            task_id: None,
             delivered_tokens: 500,
             cache_hits: 1,
             cache_misses: 2,
@@ -127,6 +128,7 @@ mod tests {
         let receipt = ContextReceiptV1 {
             receipt_id: "receipt:learning".to_owned(),
             plan_id: "plan:learning".to_owned(),
+            task_id: None,
             delivered_tokens: 300,
             cache_hits: 0,
             cache_misses: 0,

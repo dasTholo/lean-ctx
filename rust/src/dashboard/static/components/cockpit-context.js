@@ -501,11 +501,11 @@ class CockpitContext extends HTMLElement {
     ).join('');
 
     let h = '<div class="card" style="margin-bottom:16px">';
-    h += '<div class="card-header"><h3>Files in Context</h3>';
+    h += '<div class="card-header"><h3>Context Items</h3>';
     h += '<div style="display:flex;align-items:center;gap:8px">';
     h += '<span class="badge">' + filtered.length + '/' + rows.length + '</span>';
     h += '<select id="cockpitCtxModeFilter" class="btn" style="padding:4px 8px;font-size:11px">' + modeOpts + '</select></div></div>';
-    h += '<div class="ctx-explain">Files read via lean-ctx. Use actions to pin, exclude, or change read modes.</div>';
+    h += '<div class="ctx-explain">Files & shell output read via lean-ctx. Use actions to pin, exclude, or change read modes.</div>';
 
     if (filtered.length === 0) {
       h += '<p class="hs" style="padding:16px">No files loaded yet.</p>';
@@ -524,7 +524,7 @@ class CockpitContext extends HTMLElement {
         ).join('');
         const ctxRowCls = r.state === 'excluded' ? ' cmdr-row-excluded' : '';
         h += '<tr class="' + ctxRowCls + '">';
-        h += '<td title="' + esc(r.path) + '" class="ctx-path-cell">' + esc(shortenPath(r.path)) + '</td>';
+        var kindIcon = (r.raw && r.raw.kind === 'shell') ? '▶ ' : ''; h += '<td title="' + esc(r.path) + '" class="ctx-path-cell">' + kindIcon + esc(shortenPath(r.path)) + '</td>';
         h += '<td><span class="tag tg">' + esc(r.mode) + '</span></td>';
         h += '<td class="r">' + ff(r.sent_tokens) + '</td>';
         h += '<td class="r">' + ff(r.original_tokens) + '</td>';

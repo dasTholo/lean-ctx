@@ -38,6 +38,13 @@ impl ContextLedger {
         self.record_with_task(path, mode, original_tokens, sent_tokens, None);
     }
 
+    pub fn record_shell(&mut self, command: &str, original_tokens: usize, sent_tokens: usize) {
+        self.record_with_task(command, "shell", original_tokens, sent_tokens, None);
+        if let Some(entry) = self.entries.iter_mut().find(|e| e.path == command) {
+            entry.kind = Some(ContextKind::Shell);
+        }
+    }
+
     pub fn record_with_task(
         &mut self,
         path: &str,

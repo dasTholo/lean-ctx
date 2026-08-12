@@ -1,0 +1,4 @@
+    Checking lean-ctx-protocol v0.1.0 (/Users/yvesgugger/Documents/Privat/Projects/lean-ctx/rust/crates/lean-ctx-protocol)
+   Compiling lean-ctx v3.9.18 (/Users/yvesgugger/Documents/Privat/Projects/lean-ctx/rust)
+    Checking lean-ctx-ocla v1.0.0 (/Users/yvesgugger/Documents/Privat/Projects/lean-ctx/rust/crates/lean-ctx-ocla)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 39.24s

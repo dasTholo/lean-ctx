@@ -3,6 +3,28 @@
 All notable changes to lean-ctx are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Sprint R35 (2026-08-12)
+
+### Added
+
+- `output-savings` CLI command, token benchmark module, and a 500-task gold set.
+
+### Fixed
+
+- Deprecated alias backward compatibility and benchmark signal matching.
+
+### Changed
+- Unified the documented tool count across the project.
+- Reconciled internal progress, architecture and roadmap documentation with the
+  implemented local decision-loop modules: triage, knowledge routing, Value
+  Gate, shadow recommendations and task spine/runtime integration.
+- Documented the verified library-test snapshot: 10,061 passed, 0 failed.
+
+### Documentation
+- Distinguished deterministic/local OSS capabilities from pending trained
+  models, configured live providers, adaptive commercial routing, verified
+  attribution, settlement and customer-POC claims.
+
 
 ## [3.9.18] — 2026-08-08
 

@@ -1,4 +1,4 @@
-# Appendix — MCP Tool Map (all 80 tools)
+# Appendix — MCP Tool Map (all 79 tools)
 
 Every tool lean-ctx registers via `rust/src/server/registry.rs`. Your AI editor
 calls these instead of its native file/search tools. The **Profile** column
@@ -14,11 +14,11 @@ shows the smallest tool profile that exposes the tool (`M` minimal, `S` standard
 |---------|-------|--------------|
 | **minimal** | 5 | Lowest context overhead; the absolute essentials |
 | **standard** | 16 | Balanced default for most coding workflows |
-| **power** | 76 | Everything (default for existing installs) |
+| **power** | 72 | Everything (default for existing installs) |
 
 - **minimal (5):** `ctx_read`, `ctx_shell`, `ctx_search`, `ctx_glob`, `ctx_tree`
 - **standard (+11):** + `ctx_compose`, `ctx_explore`, `ctx_knowledge`, `ctx_callgraph`, `ctx_graph`, `ctx_delta`, `ctx_execute`, `ctx_expand`, `ctx_overview`, `ctx_url_read`, `ctx_patch`
-- **power (+47):** all remaining tools.
+- **power (+43):** all remaining tools.
 
 ---
 
@@ -140,7 +140,7 @@ shows the smallest tool profile that exposes the tool (`M` minimal, `S` standard
 
 ## Notes
 
-1. `power` enables all 80 tools; `ToolProfile::is_tool_enabled()` returns `true`
+1. `power` enables all 79 tools; `ToolProfile::is_tool_enabled()` returns `true`
    for everything under power.
 2. `ctx_load_tools` controls *dynamic* categories (`arch`, `debug`, `memory`,
    `metrics`, `session`) independently of the static profile filter.

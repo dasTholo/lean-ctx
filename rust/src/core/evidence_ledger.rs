@@ -36,6 +36,9 @@ pub struct EvidenceItemV1 {
     pub agent_id: Option<String>,
     #[serde(default)]
     pub client_name: Option<String>,
+    /// Task lineage identifier for MCP-ingress evidence.
+    #[serde(default)]
+    pub task_id: Option<String>,
     /// For referenced evidence payloads, store the **basename only** to avoid leaking full paths.
     #[serde(default)]
     pub artifact_name: Option<String>,
@@ -104,6 +107,30 @@ impl EvidenceLedgerV1 {
         client_name: Option<&str>,
         created_at: DateTime<Utc>,
     ) {
+        self.record_tool_receipt_with_task(
+            tool,
+            action,
+            input_md5,
+            output_md5,
+            agent_id,
+            client_name,
+            None,
+            created_at,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_tool_receipt_with_task(
+        &mut self,
+        tool: &str,
+        action: Option<&str>,
+        input_md5: &str,
+        output_md5: &str,
+        agent_id: Option<&str>,
+        client_name: Option<&str>,
+        task_id: Option<&str>,
+        created_at: DateTime<Utc>,
+    ) {
         let r = ToolReceiptRecord {
             tool,
             action,
@@ -111,6 +138,7 @@ impl EvidenceLedgerV1 {
             output_md5,
             agent_id,
             client_name,
+            task_id,
             ts: created_at,
         };
         self.record_tool_receipt_key(&format!("tool:{tool}"), &r);
@@ -145,12 +173,24 @@ impl EvidenceLedgerV1 {
             output_md5: Some(r.output_md5.to_string()),
             agent_id: r.agent_id.map(std::string::ToString::to_string),
             client_name: r.client_name.map(std::string::ToString::to_string),
+            task_id: r.task_id.map(std::string::ToString::to_string),
             artifact_name: None,
             timestamp: r.ts,
         });
     }
 
     pub fn record_manual(&mut self, key: &str, value: Option<&str>, created_at: DateTime<Utc>) {
+        self.record_manual_with_task(key, value, None, created_at);
+    }
+
+    /// Records a task-scoped stage without persisting raw task content.
+    pub fn record_manual_with_task(
+        &mut self,
+        key: &str,
+        value: Option<&str>,
+        task_id: Option<&str>,
+        created_at: DateTime<Utc>,
+    ) {
         let key = truncate(key, MAX_KEY_CHARS);
         let value_redacted = value.map(crate::core::redaction::redact_text);
         let value_md5 = value_redacted.as_deref().map(crate::core::hasher::hash_str);
@@ -158,8 +198,9 @@ impl EvidenceLedgerV1 {
             .as_deref()
             .map(|v| truncate(v, MAX_VALUE_EXCERPT_CHARS));
         let id = crate::core::hasher::hash_str(&format!(
-            "manual|{key}|{}",
-            value_md5.as_deref().unwrap_or("")
+            "manual|{key}|{}|{}",
+            value_md5.as_deref().unwrap_or(""),
+            task_id.unwrap_or("")
         ));
         self.upsert_item(EvidenceItemV1 {
             id,
@@ -173,6 +214,7 @@ impl EvidenceLedgerV1 {
             output_md5: None,
             agent_id: None,
             client_name: None,
+            task_id: task_id.map(std::string::ToString::to_string),
             artifact_name: None,
             timestamp: created_at,
         });
@@ -209,6 +251,7 @@ impl EvidenceLedgerV1 {
             output_md5: None,
             agent_id: None,
             client_name: None,
+            task_id: None,
             artifact_name: Some(name),
             timestamp: created_at,
         });
@@ -228,6 +271,7 @@ impl EvidenceLedgerV1 {
             existing.output_md5 = item.output_md5;
             existing.agent_id = item.agent_id;
             existing.client_name = item.client_name;
+            existing.task_id = item.task_id;
             existing.artifact_name = item.artifact_name;
             self.updated_at = Utc::now();
             return;
@@ -265,6 +309,7 @@ struct ToolReceiptRecord<'a> {
     output_md5: &'a str,
     agent_id: Option<&'a str>,
     client_name: Option<&'a str>,
+    task_id: Option<&'a str>,
     ts: DateTime<Utc>,
 }
 
@@ -309,5 +354,17 @@ pub mod tests {
             l.record_manual(&format!("k{i}"), None, ts);
         }
         assert!(l.items.len() <= MAX_ITEMS);
+    }
+
+    #[test]
+    fn task_scoped_manual_evidence_retains_lineage() {
+        let mut ledger = EvidenceLedgerV1::default();
+        ledger.record_manual_with_task(
+            "decision.triage",
+            Some("profile"),
+            Some("task-1"),
+            Utc::now(),
+        );
+        assert_eq!(ledger.items[0].task_id.as_deref(), Some("task-1"));
     }
 }

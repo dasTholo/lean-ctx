@@ -11,7 +11,7 @@ pub(crate) struct TaskFixture {
     pub id: String,
     pub category: TaskCategory,
     pub description: String,
-    /// Source file content the agent would read.
+    /// Fixed tool output supplied to the compressor.
     pub source_content: String,
     /// File extension for mode selection.
     pub extension: String,
@@ -27,9 +27,6 @@ pub(crate) struct TaskFixture {
 pub(crate) enum TaskCategory {
     FileRead,
     CodeSearch,
-    BugFix,
-    Refactoring,
-    Documentation,
     ShellOutput,
 }
 
@@ -38,9 +35,6 @@ impl TaskCategory {
         match self {
             Self::FileRead => "file-read",
             Self::CodeSearch => "code-search",
-            Self::BugFix => "bug-fix",
-            Self::Refactoring => "refactoring",
-            Self::Documentation => "documentation",
             Self::ShellOutput => "shell-output",
         }
     }
@@ -101,229 +95,268 @@ impl TaskFixture {
     }
 }
 
-/// The canonical benchmark suite: 12 tasks across 6 categories.
+/// The canonical benchmark suite: ten fixed operations representative of the
+/// public tool surface.  Its inputs are embedded, rather than read from the
+/// checkout, so a clean checkout, a dirty checkout, and CI all measure the
+/// exact same corpus.
 pub(crate) fn canonical_suite() -> Vec<TaskFixture> {
     vec![
-        fixture_read_rust_module(),
-        fixture_read_typescript_component(),
-        fixture_search_error_handling(),
-        fixture_search_api_endpoints(),
-        fixture_bugfix_off_by_one(),
-        fixture_bugfix_null_check(),
-        fixture_refactor_rename(),
-        fixture_refactor_extract(),
-        fixture_docs_api(),
-        fixture_docs_readme(),
-        fixture_shell_test_output(),
-        fixture_shell_build_errors(),
+        fixture_small_file_read(),
+        fixture_medium_file_read(),
+        fixture_large_file_read(),
+        fixture_directory_listing(),
+        fixture_shell_git_log(),
+        fixture_search_results(),
+        fixture_multi_file_compose(),
+        fixture_symbol_lookup(),
+        fixture_tree_output(),
+        fixture_mixed_operation_sequence(),
     ]
 }
 
-fn fixture_read_rust_module() -> TaskFixture {
+#[cfg(test)]
+mod benchmark_suite_tests {
+    use super::*;
+
+    #[test]
+    fn canonical_suite_has_the_ten_documented_operations() {
+        let tasks = canonical_suite();
+        let ids: Vec<_> = tasks.iter().map(|task| task.id.as_str()).collect();
+
+        assert_eq!(tasks.len(), 10);
+        assert_eq!(
+            ids,
+            vec![
+                "small-file-read",
+                "medium-file-read",
+                "large-file-read",
+                "directory-listing",
+                "shell-git-log",
+                "search-results",
+                "multi-file-compose",
+                "code-symbol-lookup",
+                "tree-output",
+                "mixed-operation-sequence",
+            ]
+        );
+    }
+
+    #[test]
+    fn read_fixture_sizes_cover_documented_line_ranges() {
+        let tasks = canonical_suite();
+        let lines = |id: &str| {
+            tasks
+                .iter()
+                .find(|task| task.id == id)
+                .unwrap()
+                .source_content
+                .lines()
+                .count()
+        };
+
+        assert!(lines("small-file-read") < 100);
+        assert!((100..=500).contains(&lines("medium-file-read")));
+        assert!(lines("large-file-read") > 500);
+    }
+}
+
+fn fixture_small_file_read() -> TaskFixture {
     TaskFixture {
-        id: "read-rust-module".into(),
+        id: "small-file-read".into(),
         category: TaskCategory::FileRead,
-        description: "Read and understand a Rust module with structs, impls, and error handling"
-            .into(),
+        description: "Read a fixed Rust file with fewer than 100 lines".into(),
         source_content: RUST_MODULE_SOURCE.into(),
+        extension: "rs".into(),
+        required_signals: vec!["struct Config".into(), "fn validate".into()],
+        preferred_signals: vec!["ConfigError".into(), "max_connections".into()],
+    }
+}
+
+fn fixture_medium_file_read() -> TaskFixture {
+    TaskFixture {
+        id: "medium-file-read".into(),
+        category: TaskCategory::FileRead,
+        description: "Read a fixed 100-500 line source file".into(),
+        source_content: format!(
+            "{RUST_MODULE_SOURCE}\n{TS_COMPONENT_SOURCE}\n{ERROR_HANDLING_SOURCE}"
+        ),
         extension: "rs".into(),
         required_signals: vec![
             "struct Config".into(),
-            "fn load".into(),
-            "fn validate".into(),
-            "ConfigError".into(),
-            "max_connections".into(),
-        ],
-        preferred_signals: vec!["impl Default".into(), "pub fn".into(), "Result<".into()],
-    }
-}
-
-fn fixture_read_typescript_component() -> TaskFixture {
-    TaskFixture {
-        id: "read-ts-component".into(),
-        category: TaskCategory::FileRead,
-        description: "Read a React TypeScript component with props, hooks, and event handlers"
-            .into(),
-        source_content: TS_COMPONENT_SOURCE.into(),
-        extension: "tsx".into(),
-        required_signals: vec![
             "UserProfile".into(),
-            "useState".into(),
-            "useEffect".into(),
-            "onSubmit".into(),
-            "interface".into(),
-        ],
-        preferred_signals: vec!["loading".into(), "error".into(), "async".into()],
-    }
-}
-
-fn fixture_search_error_handling() -> TaskFixture {
-    TaskFixture {
-        id: "search-error-handling".into(),
-        category: TaskCategory::CodeSearch,
-        description: "Find all error handling patterns in a module".into(),
-        source_content: ERROR_HANDLING_SOURCE.into(),
-        extension: "rs".into(),
-        required_signals: vec![
             "DatabaseError".into(),
-            "NetworkError".into(),
-            "ValidationError".into(),
-            "fn handle_error".into(),
         ],
-        preferred_signals: vec!["retry".into(), "fallback".into(), "context".into()],
+        preferred_signals: vec!["useEffect".into(), "NetworkError".into()],
     }
 }
 
-fn fixture_search_api_endpoints() -> TaskFixture {
+fn fixture_large_file_read() -> TaskFixture {
     TaskFixture {
-        id: "search-api-endpoints".into(),
-        category: TaskCategory::CodeSearch,
-        description: "Identify all API endpoint definitions and their methods".into(),
-        source_content: API_ENDPOINTS_SOURCE.into(),
+        id: "large-file-read".into(),
+        category: TaskCategory::FileRead,
+        description: "Read a fixed source corpus with more than 500 lines".into(),
+        source_content: format!(
+            "{RUST_MODULE_SOURCE}\n{TS_COMPONENT_SOURCE}\n{ERROR_HANDLING_SOURCE}\n{API_ENDPOINTS_SOURCE}\n{PAGINATION_BUG_SOURCE}\n{NULL_CHECK_BUG_SOURCE}\n{RENAME_REFACTOR_SOURCE}\n{EXTRACT_REFACTOR_SOURCE}\n{API_DOCS_SOURCE}\n{README_SOURCE}"
+        ),
         extension: "rs".into(),
         required_signals: vec![
-            "/api/users".into(),
-            "/api/projects".into(),
-            "GET".into(),
-            "POST".into(),
-            "DELETE".into(),
-        ],
-        preferred_signals: vec!["auth".into(), "middleware".into(), "handler".into()],
-    }
-}
-
-fn fixture_bugfix_off_by_one() -> TaskFixture {
-    TaskFixture {
-        id: "bugfix-off-by-one".into(),
-        category: TaskCategory::BugFix,
-        description: "Identify an off-by-one error in pagination logic".into(),
-        source_content: PAGINATION_BUG_SOURCE.into(),
-        extension: "rs".into(),
-        required_signals: vec![
+            "struct Config".into(),
+            "UserProfile".into(),
             "fn paginate".into(),
-            "page_size".into(),
-            "total_items".into(),
-            "offset".into(),
-        ],
-        preferred_signals: vec!["page *".into(), "start".into(), "end".into()],
-    }
-}
-
-fn fixture_bugfix_null_check() -> TaskFixture {
-    TaskFixture {
-        id: "bugfix-null-check".into(),
-        category: TaskCategory::BugFix,
-        description: "Find a missing null/None check that causes a panic".into(),
-        source_content: NULL_CHECK_BUG_SOURCE.into(),
-        extension: "rs".into(),
-        required_signals: vec![
-            "fn process_user".into(),
-            "unwrap".into(),
-            "email".into(),
-            "Option<".into(),
-        ],
-        preferred_signals: vec!["None".into(), "expect".into()],
-    }
-}
-
-fn fixture_refactor_rename() -> TaskFixture {
-    TaskFixture {
-        id: "refactor-rename".into(),
-        category: TaskCategory::Refactoring,
-        description: "Rename a function and all its call sites".into(),
-        source_content: RENAME_REFACTOR_SOURCE.into(),
-        extension: "rs".into(),
-        required_signals: vec![
-            "fn get_data".into(),
-            "get_data(".into(),
-            "struct DataService".into(),
-        ],
-        preferred_signals: vec!["impl".into(), "pub fn".into(), "self".into()],
-    }
-}
-
-fn fixture_refactor_extract() -> TaskFixture {
-    TaskFixture {
-        id: "refactor-extract".into(),
-        category: TaskCategory::Refactoring,
-        description: "Identify code that should be extracted into a separate function".into(),
-        source_content: EXTRACT_REFACTOR_SOURCE.into(),
-        extension: "rs".into(),
-        required_signals: vec![
-            "fn process_order".into(),
-            "validate".into(),
-            "calculate_total".into(),
-            "apply_discount".into(),
-        ],
-        preferred_signals: vec!["tax".into(), "shipping".into(), "fn ".into()],
-    }
-}
-
-fn fixture_docs_api() -> TaskFixture {
-    TaskFixture {
-        id: "docs-api".into(),
-        category: TaskCategory::Documentation,
-        description: "Generate API documentation from function signatures".into(),
-        source_content: API_DOCS_SOURCE.into(),
-        extension: "rs".into(),
-        required_signals: vec![
             "fn create_user".into(),
-            "fn delete_user".into(),
-            "fn list_users".into(),
-            "UserRequest".into(),
-            "UserResponse".into(),
         ],
-        preferred_signals: vec!["///".into(), "pub".into(), "Result".into()],
+        preferred_signals: vec!["Installation".into(), "DatabaseError".into()],
     }
 }
 
-fn fixture_docs_readme() -> TaskFixture {
+fn fixture_directory_listing() -> TaskFixture {
+    task(
+        "directory-listing",
+        TaskCategory::FileRead,
+        "Compress a deterministic directory listing",
+        DIRECTORY_LISTING,
+        "txt",
+        &["src/core", "src/cli", "Cargo.toml"],
+    )
+}
+
+fn fixture_shell_git_log() -> TaskFixture {
+    task(
+        "shell-git-log",
+        TaskCategory::ShellOutput,
+        "Compress deterministic git log output",
+        GIT_LOG_OUTPUT,
+        "txt",
+        &["feat: add", "fix: preserve", "docs: benchmark"],
+    )
+}
+
+fn fixture_search_results() -> TaskFixture {
+    task(
+        "search-results",
+        TaskCategory::CodeSearch,
+        "Compress grep-like source search results",
+        ERROR_HANDLING_SOURCE,
+        "rs",
+        &["DatabaseError", "NetworkError", "ValidationError"],
+    )
+}
+
+fn fixture_multi_file_compose() -> TaskFixture {
     TaskFixture {
-        id: "docs-readme".into(),
-        category: TaskCategory::Documentation,
-        description: "Understand project structure from a README".into(),
-        source_content: README_SOURCE.into(),
-        extension: "md".into(),
+        id: "multi-file-compose".into(),
+        category: TaskCategory::FileRead,
+        description: "Compose three fixed files into a single context".into(),
+        source_content: format!(
+            "// config.rs\n{RUST_MODULE_SOURCE}\n// api.rs\n{API_DOCS_SOURCE}\n// README.md\n{README_SOURCE}"
+        ),
+        extension: "rs".into(),
         required_signals: vec![
+            "struct Config".into(),
+            "fn create_user".into(),
             "Installation".into(),
-            "Usage".into(),
-            "API".into(),
-            "Configuration".into(),
         ],
-        preferred_signals: vec!["example".into(), "license".into(), "contributing".into()],
+        preferred_signals: vec!["Configuration".into(), "UserRequest".into()],
     }
 }
 
-fn fixture_shell_test_output() -> TaskFixture {
+fn fixture_symbol_lookup() -> TaskFixture {
+    task(
+        "code-symbol-lookup",
+        TaskCategory::CodeSearch,
+        "Find fixed code symbols in an API module",
+        API_DOCS_SOURCE,
+        "rs",
+        &["fn create_user", "fn delete_user", "UserResponse"],
+    )
+}
+
+fn fixture_tree_output() -> TaskFixture {
+    task(
+        "tree-output",
+        TaskCategory::FileRead,
+        "Compress a deterministic project tree",
+        TREE_OUTPUT,
+        "txt",
+        &["core", "cli", "Cargo.lock"],
+    )
+}
+
+fn fixture_mixed_operation_sequence() -> TaskFixture {
     TaskFixture {
-        id: "shell-test-output".into(),
+        id: "mixed-operation-sequence".into(),
         category: TaskCategory::ShellOutput,
-        description: "Parse test runner output to identify failures".into(),
-        source_content: TEST_OUTPUT_SOURCE.into(),
+        description: "Process a fixed read, search, tree, and shell-output sequence".into(),
+        source_content: format!(
+            "READ\n{RUST_MODULE_SOURCE}\nSEARCH\n{ERROR_HANDLING_SOURCE}\nTREE\n{TREE_OUTPUT}\nSHELL\n{TEST_OUTPUT_SOURCE}"
+        ),
         extension: "txt".into(),
         required_signals: vec![
-            "FAILED".into(),
+            "struct Config".into(),
+            "DatabaseError".into(),
+            "compressor.rs".into(),
             "test_pagination".into(),
-            "assertion".into(),
-            "3 passed".into(),
         ],
-        preferred_signals: vec!["line".into(), "expected".into(), "actual".into()],
+        preferred_signals: vec!["ConfigError".into(), "FAILED".into()],
     }
 }
 
-fn fixture_shell_build_errors() -> TaskFixture {
+fn task(
+    id: &str,
+    category: TaskCategory,
+    description: &str,
+    source_content: &str,
+    extension: &str,
+    required_signals: &[&str],
+) -> TaskFixture {
     TaskFixture {
-        id: "shell-build-errors".into(),
-        category: TaskCategory::ShellOutput,
-        description: "Parse compiler output to identify build errors".into(),
-        source_content: BUILD_ERROR_SOURCE.into(),
-        extension: "txt".into(),
-        required_signals: vec!["error[E".into(), "cannot find".into(), "src/main.rs".into()],
-        preferred_signals: vec!["help:".into(), "warning".into()],
+        id: id.into(),
+        category,
+        description: description.into(),
+        source_content: source_content.into(),
+        extension: extension.into(),
+        required_signals: required_signals
+            .iter()
+            .map(|signal| (*signal).into())
+            .collect(),
+        preferred_signals: Vec::new(),
     }
 }
 
 // ── Embedded source content ──────────────────────────────────────────
+
+const DIRECTORY_LISTING: &str = r"Cargo.toml
+Cargo.lock
+rust/
+rust/Cargo.toml
+rust/src/
+rust/src/cli/
+rust/src/cli/mod.rs
+rust/src/core/
+rust/src/core/mod.rs
+rust/src/tools/
+rust/tests/";
+
+const GIT_LOG_OUTPUT: &str = r"a1b2c3d feat: add deterministic context fixtures
+b2c3d4e fix: preserve required signals in compressor output
+c3d4e5f docs: benchmark reproducibility notes
+d4e5f6a refactor: extract token accounting
+e5f6a7b test: cover shell output compression";
+
+const TREE_OUTPUT: &str = r".
+├── Cargo.toml
+├── Cargo.lock
+├── rust
+│   ├── Cargo.toml
+│   ├── src
+│   │   ├── cli
+│   │   │   └── mod.rs
+│   │   ├── core
+│   │   │   ├── compressor.rs
+│   │   │   └── mod.rs
+│   │   └── tools
+│   └── tests
+└── README.md";
 
 const RUST_MODULE_SOURCE: &str = r#"use std::path::Path;
 use serde::{Deserialize, Serialize};
@@ -939,49 +972,14 @@ failures:
 test result: FAILED. 3 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out
 "#;
 
-const BUILD_ERROR_SOURCE: &str = r"error[E0433]: cannot find value `connection_pool` in this scope
- --> src/main.rs:15:9
-  |
-15|     let pool = connection_pool();
-  |                ^^^^^^^^^^^^^^^ not found in this scope
-  |
-help: consider importing this function
-  |
-1 | use crate::db::connection_pool;
-  |
-
-error[E0308]: mismatched types
- --> src/main.rs:28:20
-  |
-28|     let count: i32 = query.count();
-  |                ----   ^^^^^^^^^^^^ expected `i32`, found `i64`
-  |                |
-  |                expected due to this
-  |
-help: you can convert an `i64` to an `i32` and panic if the converted value doesn't fit
-  |
-28|     let count: i32 = query.count().try_into().unwrap();
-  |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning: unused import: `std::collections::HashMap`
- --> src/main.rs:3:5
-  |
-3 | use std::collections::HashMap;
-  |     ^^^^^^^^^^^^^^^^^^^^^^^^^
-  |
-  = note: `#[warn(unused_imports)]` on by default
-
-error: aborting due to 2 previous errors; 1 warning emitted
-";
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn canonical_suite_has_12_tasks() {
+    fn canonical_suite_has_10_tasks() {
         let suite = canonical_suite();
-        assert_eq!(suite.len(), 12);
+        assert_eq!(suite.len(), 10);
     }
 
     #[test]
@@ -1019,15 +1017,12 @@ mod tests {
     }
 
     #[test]
-    fn all_categories_represented() {
+    fn required_operation_categories_are_represented() {
         let suite = canonical_suite();
         let categories: std::collections::HashSet<_> =
             suite.iter().map(|t| t.category.label()).collect();
         assert!(categories.contains("file-read"));
         assert!(categories.contains("code-search"));
-        assert!(categories.contains("bug-fix"));
-        assert!(categories.contains("refactoring"));
-        assert!(categories.contains("documentation"));
         assert!(categories.contains("shell-output"));
     }
 }

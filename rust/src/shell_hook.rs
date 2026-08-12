@@ -463,7 +463,7 @@ const REDIRECT_SKIP_MARKERS: &[&str] = &[
 /// (see [`REDIRECT_SKIP_MARKERS`]).
 fn redirect_block(exec_var: &str, env_check: &str) -> String {
     let mut lines = vec![format!(
-        "if [[ -z \"$LEAN_CTX_ACTIVE\" && -z \"$LEAN_CTX_NO_HOOK\" && -n \"${exec_var}\" ]] \\"
+        "if [[ -z \"$LEAN_CTX_ACTIVE\" && -z \"$LEAN_CTX_DISABLED\" && -z \"$LEAN_CTX_NO_HOOK\" && -n \"${exec_var}\" ]] \\"
     )];
     for marker in REDIRECT_SKIP_MARKERS {
         lines.push(format!("  && [[ \"${exec_var}\" != *\"{marker}\"* ]] \\"));

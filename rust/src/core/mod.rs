@@ -27,6 +27,7 @@ pub mod html_crush;
 #[allow(unused_imports)]
 pub mod ib;
 pub mod information_bottleneck;
+pub mod integration_proof;
 pub mod json_crush;
 pub mod json_sample;
 pub(crate) mod markdown_compact;
@@ -136,6 +137,7 @@ pub mod knowledge_bridge;
 pub mod knowledge_embedding;
 pub mod knowledge_provider_extract;
 pub mod knowledge_relations;
+pub mod knowledge_router;
 pub mod outcome;
 pub mod trust;
 
@@ -221,10 +223,18 @@ pub(crate) mod adaptive_mode_policy;
 pub mod adaptive_thresholds;
 pub mod auto_mode_resolver;
 pub mod bandit;
+pub mod decision_loop;
+#[cfg(test)]
+mod decision_loop_integration_test;
+pub mod decision_loop_runtime;
+#[cfg(test)]
+mod decision_loop_runtime_tests;
 pub mod litm_calibration;
 pub mod mode_predictor;
 pub(crate) mod model_registry;
+pub mod shadow;
 pub mod task_relevance;
+pub mod task_spine;
 pub mod token_calibration;
 
 // ---------------------------------------------------------------------------
@@ -428,6 +438,7 @@ pub(crate) mod sanitize;
 pub(crate) mod savings_autopush;
 pub mod savings_footer;
 pub mod savings_ledger;
+pub mod savings_tracker;
 pub mod scent_field;
 pub(crate) mod search_delta;
 pub mod search_index;
@@ -462,8 +473,10 @@ pub(crate) mod tool_health;
 pub(crate) mod tool_lifecycle;
 pub mod tool_profiles;
 pub(crate) mod transcript_compact;
+pub mod triage;
 pub(crate) mod update_scheduler;
 pub(crate) mod updater;
+pub mod value_gate;
 pub(crate) mod version_check;
 pub(crate) mod visualizer;
 pub(crate) mod walk_filter;
