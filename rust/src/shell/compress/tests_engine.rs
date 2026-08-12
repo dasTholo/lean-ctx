@@ -81,13 +81,34 @@ mod outcome_aware_tests {
         log
     }
 
+    fn small_noisy_log() -> String {
+        let mut log = String::new();
+        for i in 0..80 {
+            log.push_str(&format!(
+                "2026-06-04T10:00:{:02}Z INFO worker processed item {i} in 12ms\n",
+                i % 60
+            ));
+        }
+        log
+    }
+
     #[test]
-    fn failed_generic_command_is_verbatim() {
-        let log = noisy_log();
+    fn failed_small_command_is_verbatim() {
+        let log = small_noisy_log();
         let failed = compress_for_outcome("./run-batch.sh", &log, 1);
         assert_eq!(
             failed, log,
-            "a failed command's output must be preserved verbatim, not digested"
+            "a failed command ≤2000 tokens must be preserved verbatim"
+        );
+    }
+
+    #[test]
+    fn failed_large_command_gets_compressed() {
+        let log = noisy_log();
+        let failed = compress_for_outcome("./run-batch.sh", &log, 1);
+        assert_ne!(
+            failed, log,
+            "a failed command >2000 tokens should attempt pattern compression"
         );
     }
 
@@ -209,13 +230,29 @@ fn chained_git_fetch_preserves_worktree_output() {
 #[test]
 fn small_output_stays_verbatim() {
     let cmd = "ls -la /tmp/templates";
-    let output: String = (0..59)
+    let output: String = (0..25)
         .map(|i| format!("template_{i:02}.yaml"))
         .collect::<Vec<_>>()
         .join("\n");
     let compressed = super::engine::compress_if_beneficial_pub(cmd, &output);
     assert_eq!(
         compressed, output,
-        "#1129: output under 200 tokens must stay verbatim, got: {compressed}"
+        "#1129: output under 120 tokens must stay verbatim, got: {compressed}"
     );
+}
+
+#[test]
+fn large_long_ls_uses_the_dedicated_listing_pattern() {
+    let cmd = "ls -la /tmp/templates";
+    let mut output = String::from("total 160\n");
+    for i in 0..40 {
+        output.push_str(&format!(
+            "-rw-r--r--  1 user staff  4096 May 20 10:00 template_{i:02}.yaml\n"
+        ));
+    }
+
+    let compressed = super::engine::compress_if_beneficial_pub(cmd, &output);
+    assert!(compressed.contains("template_00.yaml  4.0K"));
+    assert!(compressed.contains("40 files, 0 dirs"));
+    assert_ne!(compressed, output, "large ls output should be summarized");
 }

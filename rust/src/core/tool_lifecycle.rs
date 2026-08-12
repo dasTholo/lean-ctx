@@ -423,6 +423,11 @@ pub(crate) fn record_search(
         None,
         None,
     );
+    crate::core::savings_tracker::record_compression(
+        modeled_baseline as u64,
+        output_tokens as u64,
+        "cli_grep",
+    );
 
     if let Some(mut session) = SessionState::load_latest() {
         session.record_command();
@@ -485,6 +490,14 @@ pub(crate) fn record_tree(original_tokens: usize, output_tokens: usize) {
 /// Always records in stats (even for track-only 0-token calls) so the dashboard
 /// command counter stays accurate. Adding 0 tokens does not inflate savings.
 pub(crate) fn record_shell_command(original_tokens: usize, output_tokens: usize) {
+    record_shell_command_named("(shell)", original_tokens, output_tokens);
+}
+
+pub(crate) fn record_shell_command_named(
+    command: &str,
+    original_tokens: usize,
+    output_tokens: usize,
+) {
     stats::record("cli_shell", original_tokens, output_tokens);
 
     // Emit event so the live dashboard feed sees shadow-mode shell compression.
@@ -508,7 +521,18 @@ pub(crate) fn record_shell_command(original_tokens: usize, output_tokens: usize)
         None,
         None,
     );
+    crate::core::savings_tracker::record_compression(
+        original_tokens as u64,
+        output_tokens as u64,
+        "cli_shell",
+    );
 
+    if original_tokens > 0 {
+        let label = shell_ledger_label(command);
+        let mut ledger = crate::core::context_ledger::ContextLedger::load();
+        ledger.record_shell(&label, original_tokens, output_tokens);
+        ledger.save();
+    }
     if let Some(mut session) = SessionState::load_latest() {
         session.record_command();
         let project_root = session.project_root.clone();
@@ -630,6 +654,18 @@ fn project_ocla_savings(path: &str, original_tokens: u64, output_tokens: u64) {
         .savings_ledger
         .record_savings(evidence);
 }
+
+/// Truncate a shell command to a short label suitable for the context ledger.
+fn shell_ledger_label(command: &str) -> String {
+    let first_line = command.lines().next().unwrap_or(command);
+    let trimmed = first_line.trim();
+    if trimmed.len() <= 80 {
+        format!("$ {trimmed}")
+    } else {
+        format!("$ {}…", &trimmed[..trimmed.floor_char_boundary(77)])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

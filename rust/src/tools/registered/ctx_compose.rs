@@ -1,3 +1,6 @@
+use std::collections::HashSet;
+use std::path::Path;
+
 use crate::core::ocla::cache_types::{CacheKeyBuilder, ComposedContextKey};
 use rmcp::ErrorData;
 use rmcp::model::Tool;
@@ -7,6 +10,53 @@ use crate::server::tool_trait::{McpTool, ToolContext, ToolOutput, get_str};
 use crate::tool_defs::tool_def;
 
 pub struct CtxComposeTool;
+
+/// Extract unique file paths from compose output and sum their raw byte sizes
+/// to compute what the agent would have read without compose.
+fn estimate_raw_input_tokens(compose_output: &str, project_root: &str) -> usize {
+    let mut seen = HashSet::new();
+    let mut raw_bytes: u64 = 0;
+    let root = Path::new(project_root);
+
+    for line in compose_output.lines() {
+        let trimmed = line.trim();
+        let candidate = if let Some(rest) = trimmed.strip_prefix("// ") {
+            rest.split(':').next().map(str::trim)
+        } else if trimmed.bytes().next().is_some_and(|b| b.is_ascii_digit()) {
+            trimmed
+                .split_once(". ")
+                .map(|x| x.1)
+                .and_then(|s| s.split(" (").next())
+                .map(str::trim)
+        } else if trimmed.contains(':') && !trimmed.starts_with('#') && !trimmed.starts_with("TASK")
+        {
+            let part = trimmed.split(':').next().unwrap_or("").trim();
+            if part.contains('.') && !part.contains(' ') {
+                Some(part)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if let Some(rel) = candidate {
+            if rel.is_empty() || rel.len() > 256 {
+                continue;
+            }
+            let full = root.join(rel);
+            if seen.insert(full.clone()) {
+                if let Ok(meta) = std::fs::metadata(&full) {
+                    if meta.is_file() {
+                        raw_bytes += meta.len();
+                    }
+                }
+            }
+        }
+    }
+
+    (raw_bytes / 4) as usize
+}
 
 impl McpTool for CtxComposeTool {
     fn name(&self) -> &'static str {
@@ -98,10 +148,14 @@ impl McpTool for CtxComposeTool {
             return Err(ErrorData::invalid_params(text, None));
         }
 
+        let raw_tokens = estimate_raw_input_tokens(&text, &path);
+        let original = if raw_tokens > sent { raw_tokens } else { sent };
+        let saved = original.saturating_sub(sent);
+
         Ok(ToolOutput {
             text,
-            original_tokens: sent,
-            saved_tokens: 0,
+            original_tokens: original,
+            saved_tokens: saved,
             mode: Some("compose".to_string()),
             path: Some(path),
             changed: false,

@@ -4,7 +4,7 @@
 
 Source of truth: `rust/src/server/registry.rs` and the tool definitions it registers.
 
-lean-ctx registers **83 MCP tools** (granular profile). Each entry below lists the tool name, what it does, and its parameters (`*` marks required).
+lean-ctx registers **79 MCP tools** (granular profile). Each entry below lists the tool name, what it does, and its parameters (`*` marks required).
 
 ## `ctx_agent`
 
@@ -375,13 +375,6 @@ Complements ctx_radar for budget analysis.
 
 Parameters: _none_
 
-## `ctx_multi_read`
-
-DEPRECATED → use ctx_read with paths=['a.rs','b.rs']. Folded into ctx_read
-(#509); hidden from tools/list, still callable for one release.
-
-Parameters: `fresh`, `mode`, `paths`*
-
 ## `ctx_multi_repo`
 
 Multi-repository — add, remove, search project directories.
@@ -611,14 +604,6 @@ Search code: regex(pattern, default) | semantic(query) | symbol(name|handle) | r
 
 Parameters: `action`, `anchored`, `exclude`, `exclude_pattern`, `file`, `file_path`, `handle`, `include`, `kind`, `line`, `max_results`, `mode`, `name`, `path`, `paths`, `pattern`, `queries`, `query`, `top_k`
 
-## `ctx_semantic_search`
-
-[Deprecated → ctx_search action="semantic"] Search code by meaning (BM25+embeddings);
-reindex / find_related are ctx_search actions too. Hidden from tools/list but still
-callable for one release — prefer ctx_search.
-
-Parameters: `action`, `file_path`, `languages`, `line`, `mode`, `path`, `path_glob`, `query`*, `top_k`
-
 ## `ctx_session`
 
 Session memory. save at session end, load at start, status = snapshot;
@@ -655,13 +640,6 @@ ANTIPATTERN: one-off rules → write .mdc by hand.
 
 Parameters: `action`, `slug`
 
-## `ctx_smart_read`
-
-DEPRECATED → use ctx_read (it auto-selects the mode; omit `mode`). Folded
-into ctx_read (#509); hidden from tools/list, still callable for one release.
-
-Parameters: `path`*
-
 ## `ctx_smells`
 
 WORKFLOW: rules (list detectors) → scan (run on project).
@@ -679,14 +657,6 @@ Actions: recall|record|list. Auto-captured on checkpoints.
 ANTIPATTERN: structured facts → ctx_knowledge.
 
 Parameters: `action`, `query`, `top_k`
-
-## `ctx_symbol`
-
-[Deprecated → ctx_search action="symbol"] Get one symbol's body by name (AST-precise);
-optional file/kind narrow. Hidden from tools/list but still callable for one release —
-prefer ctx_search.
-
-Parameters: `file`, `kind`, `name`*
 
 ## `ctx_task`
 

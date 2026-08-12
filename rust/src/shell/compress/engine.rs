@@ -72,7 +72,16 @@ pub(crate) fn compress_for_outcome_for(
     family: TokenizerFamily,
 ) -> String {
     if exit_code != 0 && !output.trim().is_empty() && !crate::core::protect::has_markers(output) {
-        return truncate_verbatim(output, count_tokens_for(output, family), family);
+        let tokens = count_tokens_for(output, family);
+        if tokens <= 2000 {
+            return truncate_verbatim(output, tokens, family);
+        }
+        let compressed = compress_if_beneficial_with_exit(command, output, 0, family);
+        let compressed_tokens = count_tokens_for(&compressed, family);
+        if compressed_tokens < tokens {
+            return compressed;
+        }
+        return truncate_verbatim(output, tokens, family);
     }
     compress_if_beneficial_with_exit(command, output, exit_code, family)
 }
@@ -119,7 +128,7 @@ pub(crate) fn verbatim_json_crush_for(
 /// so genuinely varying-but-meaningful columns are kept.
 /// #1129: minimum token savings to justify compression overhead (tee-log pointer
 /// + potential read-back round-trip). Below this floor, verbatim is cheaper.
-const MIN_USEFUL_SAVINGS: usize = 100;
+const MIN_USEFUL_SAVINGS: usize = 50;
 
 const LOSSY_DROP_ENTROPY: f64 = 0.9;
 
@@ -351,7 +360,7 @@ fn min_compression_tokens(command: &str) -> usize {
     if cmd.starts_with("kubectl ") || cmd.starts_with("docker ") {
         return 100;
     }
-    200
+    120
 }
 
 fn compress_if_beneficial_with_exit(
@@ -449,7 +458,7 @@ fn compress_if_beneficial_with_exit(
         }
     }
 
-    let min_output_tokens = 20;
+    let min_output_tokens = 15;
 
     let cfg = crate::core::config::Config::load();
     let policy = crate::shell::output_policy::classify(command, &cfg.excluded_commands);
@@ -877,7 +886,7 @@ fn is_test_runner_command(command: &str) -> bool {
         })
 }
 
-const MAX_VERBATIM_TOKENS: usize = 8000;
+const MAX_VERBATIM_TOKENS: usize = 4000;
 
 /// For verbatim commands: never transform content, only head/tail truncate if huge.
 ///
