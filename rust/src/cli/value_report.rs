@@ -2,7 +2,7 @@
 
 use crate::core::value_gate::{report, store::ValueGateStore};
 
-/// Entry point for `lean-ctx value-report [--format table|markdown|json] [--last N] [--since YYYY-MM-DD]`.
+/// Entry point for `lean-ctx value-report [--live] [--format table|markdown|json] [--last N] [--since YYYY-MM-DD]`.
 pub(crate) fn cmd_value_report(args: &[String]) {
     if args
         .iter()
@@ -11,14 +11,18 @@ pub(crate) fn cmd_value_report(args: &[String]) {
         usage();
         return;
     }
-    let Some((format, last, since)) = parse(args) else {
+    let Some((format, last, since, live)) = parse(args) else {
         eprintln!(
-            "value-report: expected --format table|markdown|json, --last a positive integer, and --since YYYY-MM-DD"
+            "value-report: expected --live, --format table|markdown|json, --last a positive integer, and --since YYYY-MM-DD"
         );
         usage();
         std::process::exit(2);
     };
-    let mut tasks = tasks_from_disk();
+    let mut tasks = if live {
+        tasks_from_live_store(last)
+    } else {
+        tasks_from_disk()
+    };
     if let Some(date) = since {
         tasks.retain(|task| task.timestamp.as_str() >= date);
     }
@@ -44,10 +48,15 @@ fn tasks_from_disk() -> Vec<crate::core::value_gate::ValueAssessment> {
     tasks
 }
 
-fn parse(args: &[String]) -> Option<(&str, usize, Option<&str>)> {
+fn tasks_from_live_store(last: usize) -> Vec<crate::core::value_gate::ValueAssessment> {
+    crate::core::value_gate::store().recent(last)
+}
+
+fn parse(args: &[String]) -> Option<(&str, usize, Option<&str>, bool)> {
     let mut format = "table";
     let mut last = 50;
     let mut since = None;
+    let mut live = false;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
@@ -63,15 +72,19 @@ fn parse(args: &[String]) -> Option<(&str, usize, Option<&str>)> {
                 since = Some(args.get(index + 1)?.as_str());
                 index += 2;
             }
+            "--live" => {
+                live = true;
+                index += 1;
+            }
             _ => return None,
         }
     }
     (matches!(format, "table" | "markdown" | "json") && last > 0 && since.is_none_or(valid_date))
-        .then_some((format, last, since))
+        .then_some((format, last, since, live))
 }
 fn usage() {
     println!(
-        "Summarize locally recorded Value Gate outcomes and cost.\n\nUsage: lean-ctx value-report [--format <table|markdown|json>] [--last N] [--since YYYY-MM-DD]\n\nExamples:\n  lean-ctx value-report\n  lean-ctx value-report --last 20 --since 2026-08-01\n  lean-ctx value-report --format json"
+        "Summarize locally recorded Value Gate outcomes and cost.\n\nUsage: lean-ctx value-report [--live] [--format <table|markdown|json>] [--last N] [--since YYYY-MM-DD]\n\nExamples:\n  lean-ctx value-report --live --last 20\n  lean-ctx value-report --last 20 --since 2026-08-01\n  lean-ctx value-report --format json"
     );
 }
 fn valid_date(date: &str) -> bool {
@@ -123,5 +136,22 @@ mod tests {
         let task = sample().tasks.pop().unwrap();
         ValueGateStore::append_to_disk(&task).unwrap();
         assert_eq!(tasks_from_disk(), vec![task]);
+    }
+
+    #[test]
+    fn value_report_live_reads_from_store() {
+        let _iso = crate::core::data_dir::isolated_data_dir();
+        let task = sample().tasks.pop().unwrap();
+        crate::core::value_gate::store().record(&task);
+
+        assert_eq!(tasks_from_live_store(1), vec![task]);
+    }
+
+    #[test]
+    fn live_flag_is_accepted() {
+        let args = ["--live".into(), "--last".into(), "2".into()];
+        let parsed = parse(&args).unwrap();
+        assert!(parsed.3);
+        assert_eq!(parsed.1, 2);
     }
 }

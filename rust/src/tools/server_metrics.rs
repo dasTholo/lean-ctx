@@ -138,6 +138,14 @@ impl LeanCtxServer {
         );
 
         let output_tokens = original.saturating_sub(saved);
+        crate::core::metering::MeterStore::append_best_effort(
+            crate::core::metering::MeterEntry::new(
+                tool,
+                original as u64,
+                output_tokens as u64,
+                saved as u64,
+            ),
+        );
         crate::core::stats::record_at_turn(
             tool,
             original,
@@ -230,6 +238,26 @@ impl LeanCtxServer {
         };
         drop(calls);
         drop(session);
+
+        let pro_count = self.pro_trigger_check_count.fetch_add(1, Ordering::Relaxed) + 1;
+        if pro_count.is_multiple_of(10) {
+            let current = {
+                let session = self.session.read().await;
+                let mut agent_ids = std::collections::BTreeSet::new();
+                if let Some(agent_id) = self.agent_id.read().await.clone() {
+                    agent_ids.insert(agent_id);
+                }
+                crate::core::pro_triggers::SessionSignal {
+                    id: session.id.clone(),
+                    agent_ids,
+                }
+            };
+            tokio::task::spawn_blocking(move || {
+                for event in crate::core::pro_triggers::check_local(current) {
+                    tracing::info!(reason = ?event.reason, evidence = %event.evidence, "lean-ctx Pro trigger fired");
+                }
+            });
+        }
 
         if let Some(prepared) = pending_save {
             tokio::task::spawn_blocking(move || {

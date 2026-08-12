@@ -42,7 +42,7 @@ pub fn build(tasks: Vec<ValueAssessment>) -> ValueReport {
 
 pub fn table(report: &ValueReport) -> String {
     let mut output = format!(
-        "Value Report\nTasks: {}  Accepted: {:.1}%  CPAO: {}  ETPAO: {}  Cost: ${:.4}  Savings: ${:.2}\n\n{:<12} {:>10} {:<9} {:<18}\n{}\n",
+        "Value Report\nTasks: {}  Accepted: {:.1}%  CPAO: {}  ETPAO: {}  Cost: ${:.4}  Savings: ${:.2}\n\n{:<12} {:>10} {:<9} {:>10} {:<18}\n{}\n",
         report.total_tasks,
         report.accepted_rate * 100.0,
         money(report.cpao_micros),
@@ -52,15 +52,17 @@ pub fn table(report: &ValueReport) -> String {
         "Task",
         "Cost",
         "Outcome",
+        "CPAO",
         "Model",
-        "-".repeat(54)
+        "-".repeat(66)
     );
     for task in &report.tasks {
         output.push_str(&format!(
-            "{:<12} {:>10} {:<9} {:<18}\n",
+            "{:<12} {:>10} {:<9} {:>10} {:<18}\n",
             short(&task.task_id),
             money(Some(task.cost_micros)),
             outcome(task),
+            money(task.cpao_micros),
             task.model
         ));
     }
@@ -69,7 +71,7 @@ pub fn table(report: &ValueReport) -> String {
 
 pub fn markdown(report: &ValueReport) -> String {
     let mut output = format!(
-        "# Value Report\n\n- **Total tasks:** {}\n- **Accepted rate:** {:.1}%\n- **CPAO:** {}\n- **ETPAO:** {}\n- **Total cost:** ${:.4}\n- **Savings:** ${:.2}\n\n| Task | Cost | Outcome | Model |\n|---|---:|---|---|\n",
+        "# Value Report\n\n- **Total tasks:** {}\n- **Accepted rate:** {:.1}%\n- **CPAO:** {}\n- **ETPAO:** {}\n- **Total cost:** ${:.4}\n- **Savings:** ${:.2}\n\n| Task | Cost | Outcome | CPAO | Model |\n|---|---:|---|---:|---|\n",
         report.total_tasks,
         report.accepted_rate * 100.0,
         money(report.cpao_micros),
@@ -79,10 +81,11 @@ pub fn markdown(report: &ValueReport) -> String {
     );
     for task in &report.tasks {
         output.push_str(&format!(
-            "| {} | {} | {} | {} |\n",
+            "| {} | {} | {} | {} | {} |\n",
             short(&task.task_id),
             money(Some(task.cost_micros)),
             outcome(task),
+            money(task.cpao_micros),
             task.model
         ));
     }

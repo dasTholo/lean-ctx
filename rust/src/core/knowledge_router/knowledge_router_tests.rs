@@ -1,14 +1,15 @@
 use std::sync::Arc;
 
 use super::{
-    BundleStrategy, PatternReferenceResolver, ProviderBridge, QueryPlanner, ReferenceResolver,
-    ResolvedReference, build_manifests_for_provider_ids, builtin_manifests,
+    BundleStrategy, KnowledgeRouter, PatternReferenceResolver, ProviderBridge, QueryPlanner,
+    ReferenceResolver, ResolvedReference, build_manifests_for_provider_ids, builtin_manifests,
     context_bundle::create_bundle,
 };
 use crate::core::knowledge_router::reference_resolver::ReferenceType;
 use crate::core::providers::{
     ContextProvider, ProviderItem, ProviderParams, ProviderRegistry, ProviderResult,
 };
+use crate::core::task_spine::TaskProfileLocal;
 
 #[derive(Debug)]
 struct RecordingProvider;
@@ -95,6 +96,51 @@ fn context_bundle_assembles_resolved_references() {
             .sum::<u64>()
     );
     assert!(bundle.coverage_milli > 0);
+}
+
+#[test]
+fn knowledge_router_exit_gate_resolves_jira_into_auditable_context_receipt() {
+    let task_id = "routing-task-LEAN-42";
+    let query = "Implement LEAN-42 using src/core/knowledge_router/mod.rs";
+    let router = KnowledgeRouter {
+        manifests: builtin_manifests(),
+        resolvers: vec![Arc::new(PatternReferenceResolver)],
+    };
+
+    let result = router.route(task_id, query, &TaskProfileLocal::default(), &[], None);
+
+    assert!(
+        result
+            .candidates
+            .iter()
+            .any(|candidate| candidate.reference.as_deref() == Some("LEAN-42"))
+    );
+    assert!(
+        result.bundle.total_tokens > 0
+            && result.bundle.total_tokens <= result.receipt.budget_tokens,
+        "context bundle must account for tokens within its planned budget"
+    );
+    assert_eq!(result.receipt.task_id, task_id);
+    assert_eq!(result.receipt.bundle_id, result.bundle.bundle_id);
+    assert_eq!(
+        result.receipt.materialized_tokens,
+        result.bundle.total_tokens.min(result.receipt.budget_tokens)
+    );
+    assert_eq!(
+        result.receipt.candidates_selected as usize,
+        result.bundle.candidates.len()
+    );
+    assert!(
+        result
+            .receipt
+            .sources_used
+            .iter()
+            .any(|source| source == "jira")
+    );
+    assert!(
+        chrono::DateTime::parse_from_rfc3339(&result.receipt.timestamp).is_ok(),
+        "context receipt must retain an auditable creation time"
+    );
 }
 
 #[test]
