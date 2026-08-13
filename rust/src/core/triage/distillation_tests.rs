@@ -83,7 +83,11 @@ fn test_model_config_defaults() {
 
 #[test]
 fn test_model_pack_path() {
-    assert!(model_pack_path().starts_with(dirs::home_dir().unwrap()));
+    let p = model_pack_path();
+    assert!(
+        p.ends_with("models/triage-tiny-v1"),
+        "model_pack_path must end with models/triage-tiny-v1, got: {p:?}"
+    );
 }
 
 #[test]
