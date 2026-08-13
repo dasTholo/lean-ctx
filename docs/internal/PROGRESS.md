@@ -2,18 +2,19 @@
 
 > Stand: 2026-08-13 — verified against all three repositories.
 
-## Current round: Sprint R39 — Vision Completion
+## Current round: Sprint R41 — Adaptive Intelligence + Team Tier
 
 **Status: ✅ COMPLETE.** All code-implementable items from the vision are done.
-Inference gateway tested, Pro backend with integration tests, benchmark hardened.
+R40: Outcome learning, task fingerprints, personal adaptive routing, conversion UX.
+R41: Cross-customer learning, reasoning allocator, provider economics, team tier.
 
 ## Repository health
 
 | Repo | Tests | Clippy | CI |
 |---|---|---|---|
-| `lean-ctx` (OSS) | 10,103 ✓ | clean | GitHub Actions ✅ |
-| `lean-ctx-cloud` | 151 ✓ | clean | — |
-| `lean-ctx-enterprise` | 454 ✓ | clean (`--all-features`) | GitLab CI fixed (rustfmt/clippy) |
+| `lean-ctx` (OSS) | 10,114 ✓ | clean | GitHub Actions ✅ |
+| `lean-ctx-cloud` | 183 ✓ | clean | — |
+| `lean-ctx-enterprise` | 530+ ✓ | clean (`--all-features`) | GitLab CI ✅ |
 
 ## Vision alignment: "What Does NOT Work Yet" (from LEANCTX_VISION_COMPLETE.md §14)
 
@@ -43,7 +44,7 @@ Inference gateway tested, Pro backend with integration tests, benchmark hardened
 | Benchmark | 10 canonical tasks, deterministic JSON, verify_determinism | ✅ |
 | CLI | prove, savings, value-report, shadow, benchmark, measure, model, triage | ✅ |
 
-### `lean-ctx-cloud` — 22K LOC, 151 tests
+### `lean-ctx-cloud` — 24K LOC, 183 tests
 
 | Feature | Routes | Status |
 |---|---|---|
@@ -56,20 +57,26 @@ Inference gateway tested, Pro backend with integration tests, benchmark hardened
 | Cross-Device Sync | /api/pro/sync/* (4) | ✅ R38 |
 | Background Delta Sync | Worker (15min) | ✅ R38 |
 | Personal Dashboard | /api/pro/dashboard | ✅ R38 |
+| Personal Adaptive Source Routing | /api/pro/adaptive/sources/* (2) | ✅ R40 |
+| Personal Adaptive Model Routing | /api/pro/adaptive/models/* (2) | ✅ R40 |
+| Adaptive Recommendations | /api/pro/adaptive/recommendations | ✅ R40 |
+| Team Shared Knowledge | /api/team/:id/knowledge (2) | ✅ R41 |
+| Team Value Gate + Leaderboard | /api/team/:id/savings, leaderboard | ✅ R41 |
+| Team Model Routing | /api/team/:id/routing (2) | ✅ R41 |
 | Registry (Extensions) | /api/registry/* | ✅ |
 
-### `lean-ctx-enterprise` — 91K LOC, 454 tests
+### `lean-ctx-enterprise` — 94K LOC, 530+ tests
 
 | Crate | LOC | Tests | Status |
 |---|---|---|---|
-| auto-routing | 1,364 | 24 | ✅ Adaptive routing with calibration |
+| auto-routing | 1,800+ | 46 | ✅ Thompson Sampling, outcome scoring, reasoning allocator |
 | control-plane-scheduler | 1,773 | 23 | ✅ Candidate gen, budget/quality, ranking |
-| intelligence | 2,370 | — | ✅ Decision engine, observations, circuit breaker |
+| intelligence | 3,200+ | 51 | ✅ Task fingerprints, outcome learning, cross-customer |
 | knowledge-hub | 2,220 | 36 | ✅ Authority, provenance, reconciliation |
 | govern | 2,033 | 23 | ✅ Fleet control, budgets, policy, audit |
 | identity | 1,944 | — | ✅ OAuth, OIDC, SCIM, sessions, teams |
 | optimize | 1,363 | 21 | ✅ Attribution, baseline, fee engine |
-| inference-gateway | 2,597 | 60 | ✅ Pipeline: model→provider→dispatch→settle |
+| inference-gateway | 3,100+ | 71 | ✅ Pipeline + provider economics (wholesale/margin) |
 | commercial-core | ~5,000 | 77 | ✅ Plans, license, OIDC, SCIM, policy |
 | billing-settlement | 899 | — | ✅ Settlement calculations |
 | wallet-stripe | 1,148 | — | ✅ Enterprise Stripe |
@@ -112,3 +119,4 @@ Inference gateway tested, Pro backend with integration tests, benchmark hardened
 | R37 | ✅ | — | A/B measurement, ONNX loader, shadow |
 | R38 | ✅ | +83 (cloud+enterprise) | Pro backend, enterprise compile fix |
 | R39 | ✅ | +152 (all repos) | Gateway E2E, Pro integration tests, benchmark hardening, CI fix |
+
