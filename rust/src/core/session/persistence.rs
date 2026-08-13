@@ -81,6 +81,20 @@ impl SessionState {
         signals
     }
 
+    /// Counts locally recorded decisions from the trailing seven days.
+    #[must_use]
+    pub fn decision_count_this_week() -> u64 {
+        let cutoff = Utc::now() - chrono::Duration::days(7);
+        Self::list_sessions()
+            .into_iter()
+            .filter_map(|summary| Self::load_by_id(&summary.id))
+            .flat_map(|session| session.decisions)
+            .filter(|decision| decision.timestamp >= cutoff)
+            .count()
+            .try_into()
+            .unwrap_or(u64::MAX)
+    }
+
     /// Serializes and writes the session state to disk synchronously.
     pub fn save(&mut self) -> Result<(), String> {
         let prepared = self.prepare_save()?;

@@ -126,6 +126,20 @@ pub fn cmd_session_action(args: &[String]) {
             let _ = session.save();
             println!("{out}");
         }
+        Some("dismiss-pro") => {
+            match crate::core::pro_triggers::set_conversion_messages_dismissed(true) {
+                Ok(()) => println!("Pro messages dismissed."),
+                Err(error) => eprintln!("Could not dismiss Pro messages: {error}"),
+            }
+        }
+        Some("show-pro") => {
+            if let Err(error) = crate::core::pro_triggers::set_conversion_messages_dismissed(false)
+            {
+                eprintln!("Could not restore Pro messages: {error}");
+            } else {
+                println!("Pro messages restored.");
+            }
+        }
         Some("reset" | "new") => {
             #[cfg(unix)]
             {
@@ -191,6 +205,8 @@ Usage:
   lean-ctx session finding <summary>    Record a finding
   lean-ctx session decision <summary>   Record a decision
   lean-ctx session save                 Save current session
+  lean-ctx session dismiss-pro          Hide Pro conversion messages
+  lean-ctx session show-pro             Restore Pro conversion messages
   lean-ctx session load [session-id]    Load a session (latest if no ID)
   lean-ctx session status               Show session status
   lean-ctx session reset|new            Reset session
