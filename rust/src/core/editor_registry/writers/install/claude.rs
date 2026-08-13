@@ -11,7 +11,9 @@ pub(crate) fn write_mcp_json(
     opts: WriteOptions,
 ) -> Result<WriteResult, String> {
     let include_aa = supports_auto_approve(target);
-    let desired = if target.agent_key.is_empty() {
+    let constraints = crate::core::client_constraints::by_client_id(&target.agent_key);
+    let wants_instructions = constraints.is_none_or(|c| c.supports_config_instructions);
+    let desired = if target.agent_key.is_empty() || !wants_instructions {
         lean_ctx_server_entry(binary, include_aa)
     } else {
         lean_ctx_server_entry_with_instructions(binary, include_aa, &target.agent_key)

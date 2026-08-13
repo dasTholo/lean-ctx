@@ -10,7 +10,10 @@ use crate::core::{
     decision_loop::{DecisionLoop, protocol_profile},
     knowledge_router::{KnowledgeRouter, PatternReferenceResolver, builtin_manifests},
     shadow::{ShadowEngine, ShadowTask},
-    triage::{TaskAnalysisInput, TriageEngine},
+    triage::{
+        TaskAnalysisInput, TriageEngine, rules::RuleTriageBackend,
+        semantic_analyzer::SemanticAnalyzer,
+    },
     value_gate::{ExecutionCost, OutcomeSignal, cost_tracker::calculate_cost},
 };
 
@@ -106,7 +109,12 @@ fn run_all_scenarios() -> Result<Vec<ScenarioResult>> {
 }
 
 fn run_triage_scenario() -> Result<ScenarioResult> {
-    let engine = TriageEngine::default();
+    let data_dir = crate::core::data_dir::lean_ctx_data_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let engine = TriageEngine::new(vec![
+        Box::new(RuleTriageBackend),
+        Box::new(SemanticAnalyzer::from_data_dir(&data_dir)),
+    ]);
     let tasks = [
         "fix the authentication bug in src/auth.rs",
         "review PR #42 for the release branch",
