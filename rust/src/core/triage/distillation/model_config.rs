@@ -37,9 +37,9 @@ pub struct ModelManifest {
 }
 
 pub fn model_pack_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_default()
-        .join(".lean-ctx/models/triage-tiny-v1")
+    crate::core::paths::cache_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join("models/triage-tiny-v1")
 }
 
 pub fn manifest() -> ModelManifest {

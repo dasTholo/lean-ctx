@@ -299,10 +299,11 @@ pub fn shell_name() -> String {
         .to_string()
 }
 
-/// Wrap a command to disable zsh `nomatch` (GitHub #1439).
-/// zsh aborts commands with unquoted glob-like args that match no files.
-/// Prepending `setopt nonomatch` makes it pass them through as literals,
-/// matching POSIX/bash behavior.
+/// Wrap a command to disable zsh `nomatch` and `equals` (GH #1439, #1448).
+/// - `nomatch`: zsh aborts when unquoted globs match no files; POSIX passes
+///   the word through unchanged. Agents emit `--include=*.go` etc.
+/// - `equals`: zsh expands `=foo` to the path of the `foo` binary, so
+///   `echo ===` fails with "= not found". Agents use `===` as separators.
 pub(crate) fn zsh_safe_command(command: &str, shell: &str) -> String {
     if cfg!(unix) {
         let basename = std::path::Path::new(shell)
@@ -310,7 +311,7 @@ pub(crate) fn zsh_safe_command(command: &str, shell: &str) -> String {
             .and_then(|n| n.to_str())
             .unwrap_or("");
         if basename == "zsh" {
-            return format!("setopt nonomatch; {command}");
+            return format!("setopt nonomatch noequals; {command}");
         }
     }
     command.to_string()
@@ -1007,16 +1008,27 @@ mod zsh_safe_tests {
 
     #[test]
     #[cfg(unix)]
-    fn prepends_nonomatch_for_zsh() {
+    fn prepends_nonomatch_noequals_for_zsh() {
         let cmd = zsh_safe_command("grep --include=*.go pattern", "/bin/zsh");
-        assert_eq!(cmd, "setopt nonomatch; grep --include=*.go pattern");
+        assert_eq!(
+            cmd,
+            "setopt nonomatch noequals; grep --include=*.go pattern"
+        );
     }
 
     #[test]
     #[cfg(unix)]
-    fn prepends_nonomatch_for_usr_bin_zsh() {
+    fn prepends_nonomatch_noequals_for_usr_bin_zsh() {
         let cmd = zsh_safe_command("echo *.rs", "/usr/bin/zsh");
-        assert_eq!(cmd, "setopt nonomatch; echo *.rs");
+        assert_eq!(cmd, "setopt nonomatch noequals; echo *.rs");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn equals_separator_safe_under_zsh() {
+        let cmd = zsh_safe_command("echo ===", "/bin/zsh");
+        assert!(cmd.starts_with("setopt nonomatch noequals;"));
+        assert!(cmd.contains("echo ==="));
     }
 
     #[test]

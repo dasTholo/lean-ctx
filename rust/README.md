@@ -368,7 +368,7 @@ $ lean-ctx gain
   lean-ctx v3.6.10  |  leanctx.com  |  lean-ctx dashboard
 ```
 
-## 81+ MCP Tools
+## 79+ MCP Tools
 
 When configured as an MCP server, lean-ctx provides 80 tools that replace or augment your editor's built-in tools:
 

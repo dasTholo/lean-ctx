@@ -64,6 +64,7 @@ pub(crate) fn execute_command_with_env_cancellable(
 ) -> (String, i32) {
     let (shell, flag) = crate::shell::shell_and_flag();
     let normalized_cmd = crate::tools::ctx_shell::normalize_command_for_shell(command);
+    let normalized_cmd = crate::shell::platform::zsh_safe_command(&normalized_cmd, &shell);
     let dir = std::path::Path::new(cwd);
     let mut cmd = std::process::Command::new(&shell);
     if cfg!(windows) && crate::shell::platform::is_powershell(&shell) {
