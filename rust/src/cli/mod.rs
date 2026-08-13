@@ -58,6 +58,7 @@ mod roi_cmd;
 pub mod rules_cmd;
 pub mod rules_dedup;
 pub mod savings;
+pub(crate) mod scenario_cmd;
 mod security_cmd;
 mod semantic_search_cmd;
 mod session_cmd;

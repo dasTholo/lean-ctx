@@ -119,6 +119,13 @@ pub fn run() {
                 super::cmd_triage(&rest);
                 return;
             }
+            "scenario" => {
+                if let Err(error) = crate::cli::scenario_cmd::cmd_scenario_from_cli(&rest) {
+                    eprintln!("scenario: {error}");
+                    std::process::exit(2);
+                }
+                return;
+            }
             "measure" => {
                 super::cmd_measure(&rest);
                 return;

@@ -823,6 +823,21 @@ pub static COMMAND_TREE: &[CommandNode] = &[
         hidden: false,
     },
     CommandNode {
+        name: "scenario",
+        aliases: &[],
+        description: "Run Decision Loop scenarios",
+        subcommands: &[],
+        flags: &[FlagSpec {
+            long: "--format",
+            short: None,
+            description: "Output: text or json",
+            takes_value: true,
+            value_kind: None,
+        }],
+        positional: None,
+        hidden: false,
+    },
+    CommandNode {
         name: "measure",
         aliases: &[],
         description: "Record and compare baseline versus lean-ctx treatment",
