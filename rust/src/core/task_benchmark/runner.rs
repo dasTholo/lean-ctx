@@ -43,6 +43,80 @@ pub(crate) struct BenchmarkResult {
     pub regression_details: Vec<String>,
 }
 
+/// Serialize the reproducible portion of a benchmark result for CI and audit
+/// consumers. Wall-clock latency is deliberately omitted.
+#[allow(dead_code)]
+pub(crate) fn benchmark_summary_json(result: &BenchmarkResult) -> String {
+    #[derive(Serialize)]
+    struct Run<'a> {
+        task_id: &'a str,
+        raw_tokens: usize,
+        compressed_tokens: usize,
+        savings_pct: f64,
+        required_found: usize,
+        required_total: usize,
+        preferred_found: usize,
+        preferred_total: usize,
+    }
+
+    #[derive(Serialize)]
+    struct Profile<'a> {
+        name: &'a str,
+        mode: ProfileMode,
+        total_raw_tokens: usize,
+        total_compressed_tokens: usize,
+        avg_savings_pct: f64,
+        tasks_passed: usize,
+        tasks_total: usize,
+        avg_quality_score: f64,
+        runs: Vec<Run<'a>>,
+    }
+
+    #[derive(Serialize)]
+    struct Summary<'a> {
+        repeats: u32,
+        regression_detected: bool,
+        regression_details: &'a [String],
+        profiles: Vec<Profile<'a>>,
+    }
+
+    let profiles = result
+        .profiles
+        .iter()
+        .map(|profile| Profile {
+            name: &profile.profile,
+            mode: profile.mode,
+            total_raw_tokens: profile.total_raw_tokens,
+            total_compressed_tokens: profile.total_compressed_tokens,
+            avg_savings_pct: profile.avg_savings_pct,
+            tasks_passed: profile.tasks_passed,
+            tasks_total: profile.tasks_total,
+            avg_quality_score: profile.avg_quality_score,
+            runs: profile
+                .runs
+                .iter()
+                .map(|run| Run {
+                    task_id: &run.task_id,
+                    raw_tokens: run.raw_tokens,
+                    compressed_tokens: run.compressed_tokens,
+                    savings_pct: run.savings_pct,
+                    required_found: run.quality.required_found,
+                    required_total: run.quality.required_total,
+                    preferred_found: run.quality.preferred_found,
+                    preferred_total: run.quality.preferred_total,
+                })
+                .collect(),
+        })
+        .collect();
+    serde_json::to_string_pretty(&Summary {
+        repeats: result.repeats,
+        regression_detected: result.regression_detected,
+        regression_details: &result.regression_details,
+        profiles,
+    })
+    .unwrap_or_else(|_| "{}".to_owned())
+}
+
 /// Run the full benchmark suite.
 pub(crate) fn run_benchmark(tasks: &[TaskFixture], config: &BenchConfig) -> BenchmarkResult {
     let mut profile_results = Vec::new();
@@ -327,6 +401,38 @@ mod tests {
         assert_eq!(
             deterministic_snapshot(&first),
             deterministic_snapshot(&second)
+        );
+    }
+
+    #[test]
+    fn verify_determinism_runs_each_fixture_twice() {
+        let tasks = canonical_suite();
+        let config = BenchConfig::single_profile(ProfileMode::Standard);
+
+        for task in &tasks {
+            let first = run_benchmark(std::slice::from_ref(task), &config);
+            let second = run_benchmark(std::slice::from_ref(task), &config);
+            assert_eq!(
+                benchmark_summary_json(&first),
+                benchmark_summary_json(&second),
+                "{} produced a non-deterministic benchmark result",
+                task.id
+            );
+        }
+    }
+
+    #[test]
+    fn benchmark_summary_json_excludes_wall_clock_latency() {
+        let tasks = canonical_suite();
+        let result = run_benchmark(&tasks, &BenchConfig::single_profile(ProfileMode::Standard));
+        let report = benchmark_summary_json(&result);
+        let json: serde_json::Value = serde_json::from_str(&report).unwrap();
+
+        assert_eq!(json["profiles"][0]["tasks_total"], 10);
+        assert!(
+            json["profiles"][0]["runs"]
+                .as_array()
+                .is_some_and(|runs| runs.iter().all(|run| run.get("latency_us").is_none()))
         );
     }
 }

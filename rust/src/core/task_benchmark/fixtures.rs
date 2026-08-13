@@ -15,6 +15,11 @@ pub(crate) struct TaskFixture {
     pub source_content: String,
     /// File extension for mode selection.
     pub extension: String,
+    /// Token count of `source_content` under the production tokenizer.  This
+    /// makes corpus growth or tokenizer changes an explicit benchmark update.
+    pub expected_raw_tokens: usize,
+    /// Token count after the production standard compression path.
+    pub expected_standard_tokens: usize,
     /// Strings that MUST appear in the compressed output for it to be
     /// considered quality-preserving. These represent critical information
     /// an agent needs to complete the task.
@@ -158,6 +163,26 @@ mod benchmark_suite_tests {
         assert!((100..=500).contains(&lines("medium-file-read")));
         assert!(lines("large-file-read") > 500);
     }
+
+    #[test]
+    fn canonical_fixture_token_counts_match_the_production_tokenizer() {
+        for task in canonical_suite() {
+            assert_eq!(
+                crate::core::tokens::count_tokens(&task.source_content),
+                task.expected_raw_tokens,
+                "{} raw token count changed",
+                task.id
+            );
+            assert_eq!(
+                crate::core::tokens::count_tokens(&crate::core::compressor::lightweight_cleanup(
+                    &task.source_content,
+                )),
+                task.expected_standard_tokens,
+                "{} standard token count changed",
+                task.id
+            );
+        }
+    }
 }
 
 fn fixture_small_file_read() -> TaskFixture {
@@ -167,6 +192,8 @@ fn fixture_small_file_read() -> TaskFixture {
         description: "Read a fixed Rust file with fewer than 100 lines".into(),
         source_content: RUST_MODULE_SOURCE.into(),
         extension: "rs".into(),
+        expected_raw_tokens: 507,
+        expected_standard_tokens: 497,
         required_signals: vec!["struct Config".into(), "fn validate".into()],
         preferred_signals: vec!["ConfigError".into(), "max_connections".into()],
     }
@@ -181,6 +208,8 @@ fn fixture_medium_file_read() -> TaskFixture {
             "{RUST_MODULE_SOURCE}\n{TS_COMPONENT_SOURCE}\n{ERROR_HANDLING_SOURCE}"
         ),
         extension: "rs".into(),
+        expected_raw_tokens: 1522,
+        expected_standard_tokens: 1497,
         required_signals: vec![
             "struct Config".into(),
             "UserProfile".into(),
@@ -199,6 +228,8 @@ fn fixture_large_file_read() -> TaskFixture {
             "{RUST_MODULE_SOURCE}\n{TS_COMPONENT_SOURCE}\n{ERROR_HANDLING_SOURCE}\n{API_ENDPOINTS_SOURCE}\n{PAGINATION_BUG_SOURCE}\n{NULL_CHECK_BUG_SOURCE}\n{RENAME_REFACTOR_SOURCE}\n{EXTRACT_REFACTOR_SOURCE}\n{API_DOCS_SOURCE}\n{README_SOURCE}"
         ),
         extension: "rs".into(),
+        expected_raw_tokens: 3766,
+        expected_standard_tokens: 3714,
         required_signals: vec![
             "struct Config".into(),
             "UserProfile".into(),
@@ -216,6 +247,8 @@ fn fixture_directory_listing() -> TaskFixture {
         "Compress a deterministic directory listing",
         DIRECTORY_LISTING,
         "txt",
+        47,
+        47,
         &["src/core", "src/cli", "Cargo.toml"],
     )
 }
@@ -227,6 +260,8 @@ fn fixture_shell_git_log() -> TaskFixture {
         "Compress deterministic git log output",
         GIT_LOG_OUTPUT,
         "txt",
+        71,
+        71,
         &["feat: add", "fix: preserve", "docs: benchmark"],
     )
 }
@@ -238,6 +273,8 @@ fn fixture_search_results() -> TaskFixture {
         "Compress grep-like source search results",
         ERROR_HANDLING_SOURCE,
         "rs",
+        461,
+        448,
         &["DatabaseError", "NetworkError", "ValidationError"],
     )
 }
@@ -251,6 +288,8 @@ fn fixture_multi_file_compose() -> TaskFixture {
             "// config.rs\n{RUST_MODULE_SOURCE}\n// api.rs\n{API_DOCS_SOURCE}\n// README.md\n{README_SOURCE}"
         ),
         extension: "rs".into(),
+        expected_raw_tokens: 1068,
+        expected_standard_tokens: 1057,
         required_signals: vec![
             "struct Config".into(),
             "fn create_user".into(),
@@ -267,6 +306,8 @@ fn fixture_symbol_lookup() -> TaskFixture {
         "Find fixed code symbols in an API module",
         API_DOCS_SOURCE,
         "rs",
+        336,
+        336,
         &["fn create_user", "fn delete_user", "UserResponse"],
     )
 }
@@ -278,6 +319,8 @@ fn fixture_tree_output() -> TaskFixture {
         "Compress a deterministic project tree",
         TREE_OUTPUT,
         "txt",
+        107,
+        107,
         &["core", "cli", "Cargo.lock"],
     )
 }
@@ -291,6 +334,8 @@ fn fixture_mixed_operation_sequence() -> TaskFixture {
             "READ\n{RUST_MODULE_SOURCE}\nSEARCH\n{ERROR_HANDLING_SOURCE}\nTREE\n{TREE_OUTPUT}\nSHELL\n{TEST_OUTPUT_SOURCE}"
         ),
         extension: "txt".into(),
+        expected_raw_tokens: 1273,
+        expected_standard_tokens: 1249,
         required_signals: vec![
             "struct Config".into(),
             "DatabaseError".into(),
@@ -307,6 +352,8 @@ fn task(
     description: &str,
     source_content: &str,
     extension: &str,
+    expected_raw_tokens: usize,
+    expected_standard_tokens: usize,
     required_signals: &[&str],
 ) -> TaskFixture {
     TaskFixture {
@@ -315,6 +362,8 @@ fn task(
         description: description.into(),
         source_content: source_content.into(),
         extension: extension.into(),
+        expected_raw_tokens,
+        expected_standard_tokens,
         required_signals: required_signals
             .iter()
             .map(|signal| (*signal).into())
