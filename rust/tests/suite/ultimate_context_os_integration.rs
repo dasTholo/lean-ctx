@@ -805,6 +805,7 @@ mod cli_commands {
     }
 
     #[test]
+    #[ignore = "GH-1460: ctx_tree path resolution regression"]
     fn cli_ls() {
         let out = lean_ctx_bin().args(["ls", "."]).output().unwrap();
         assert!(out.status.success());

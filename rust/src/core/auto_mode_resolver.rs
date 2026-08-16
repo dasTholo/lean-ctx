@@ -227,7 +227,14 @@ fn resolve_inner(ctx: &AutoModeContext) -> ResolvedMode {
     }
 
     if let Some(mode) = intent_recommended_mode(ctx.task) {
-        return resolved(&mode, "intent");
+        // "full" is intentionally skipped here: only the `task_suspect_file`
+        // guard above is allowed to force full mode for a specific file. The
+        // general intent should never broadcast "full" to every file in the
+        // session — that kills compression for the 90%+ of reads that are
+        // context-gathering, not editing.
+        if mode != "full" {
+            return resolved(&mode, "intent");
+        }
     }
 
     // Adaptive learning signals (predictor, bandit, heatmap, adaptive policy,
@@ -899,6 +906,32 @@ mod tests {
 
         crate::test_env::remove_var("LEAN_CTX_DATA_DIR");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn intent_full_skipped_for_non_suspect_files() {
+        // A coding task (e.g. "fix the bug in parser.rs") should NOT force
+        // `full` mode on unrelated files. Only the named file (parser.rs)
+        // gets `full` via `task_suspect_file`; other files fall through to
+        // compressed modes so the 90%+ context-gathering reads still save
+        // tokens.
+        let _iso = crate::core::data_dir::isolated_data_dir();
+        let ctx = AutoModeContext {
+            path: "unrelated_module.rs",
+            token_count: 5000,
+            line_count: None,
+            task: Some("fix the bug in parser.rs"),
+            cache: None,
+        };
+        let result = resolve(&ctx);
+        assert_ne!(
+            result.mode, "full",
+            "non-suspect file must not get full mode from a coding task intent"
+        );
+        assert_ne!(
+            result.source, "intent",
+            "general intent must not force full on non-suspect files"
+        );
     }
 
     #[test]

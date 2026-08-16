@@ -119,6 +119,9 @@ All `std::sync::Mutex` unless noted otherwise.
 | L100 | `STORE_LOCK` | `core/shared_context.rs:72` | `OnceLock<Mutex<()>>` | Serializes shared context store writes; independent leaf lock, never nested |
 | L101 | `PRELOADER` | `server/predictive_preload.rs:127` | `OnceLock<Mutex<PredictivePreloader>>` | Predictive file preloader state; independent leaf lock, never nested |
 | L102 | `SUMMARY_CACHE` | `core/savings_ledger/store.rs:381` | `Mutex<Option<(u64, LedgerSummary)>>` | Ledger summary cache keyed by file length; independent leaf lock, never nested |
+| L103 | `SUPPRESSION` | `core/pro_triggers.rs:70` | `OnceLock<Mutex<Option<DateTime<Utc>>>>` | Pro trigger suppression timestamp; independent leaf lock, never nested |
+| L104 | `SESSION_LINEAGES` | `core/task_spine.rs:18` | `OnceLock<Arc<Mutex<HashMap<String, String>>>>` | Maps session IDs to parent lineage; independent leaf lock, never nested |
+| L105 | `ROUTER` | `core/model_router.rs:9` | `LazyLock<Mutex<ModelRouter>>` | Thompson-sampling model router (OSS stub: first-candidate passthrough); independent leaf lock, never nested |
 
 ### Test / Environment Locks (serialise env-var mutations)
 
