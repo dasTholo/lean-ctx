@@ -34,6 +34,7 @@ impl McpTool for CtxOptimizeTool {
                     },
                     "category": {
                         "type": "string",
+                        "enum": ["stdlib", "native", "reuse", "yagni", "one-line", "debt"],
                         "description": "Resolved finding category: stdlib, native, reuse, yagni, one-line, or debt"
                     },
                     "path": {
@@ -66,6 +67,14 @@ impl McpTool for CtxOptimizeTool {
                             }
                         },
                         "then": {"required": ["path"]}
+                    },
+                    {
+                        "if": {
+                            "properties": {
+                                "action": {"const": "resolve"}
+                            }
+                        },
+                        "then": {"required": ["decision", "category"]}
                     },
                     {
                         "if": {
@@ -110,16 +119,19 @@ impl McpTool for CtxOptimizeTool {
                     .ok_or_else(|| {
                         ErrorData::invalid_params("decision is required for resolve", None)
                     })?;
-                let category = args
-                    .get("category")
-                    .and_then(Value::as_str)
-                    .unwrap_or("reuse");
+                let category = required_enum(
+                    args,
+                    "category",
+                    &["stdlib", "native", "reuse", "yagni", "one-line", "debt"],
+                    None,
+                )?;
                 if let Some(project_root) = crate::server::derive_project_root_from_cwd() {
                     crate::core::solution_auto_capture::capture_optimize_resolution(
                         &project_root,
-                        category,
+                        &category,
                         decision,
-                    );
+                    )
+                    .map_err(|error| ErrorData::invalid_params(error, None))?;
                 }
                 (format!("Resolved {category} finding: {decision}"), None)
             }

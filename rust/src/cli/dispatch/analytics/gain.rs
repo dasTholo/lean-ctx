@@ -256,6 +256,11 @@ fn print_solution_intelligence() {
         return;
     }
 
+    println!(
+        "\nSolution Intelligence: {}",
+        core::solution_tracker::gain_summary()
+    );
+
     let solution = core::solution_tracker::snapshot();
     let output_saved = solution
         .output_tokens_baseline

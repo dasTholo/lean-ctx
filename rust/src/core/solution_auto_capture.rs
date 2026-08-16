@@ -149,20 +149,20 @@ pub fn capture_edit_decisions(
 }
 
 /// Persist a user-confirmed `ctx_optimize` finding using its reported category.
-pub fn capture_optimize_resolution(project_root: &str, category: &str, chosen: &str) {
+pub fn capture_optimize_resolution(
+    project_root: &str,
+    category: &str,
+    chosen: &str,
+) -> Result<(), String> {
     let cfg = crate::core::config::Config::load();
     if !cfg.solution.enabled || !cfg.solution.track_decisions {
-        return;
+        return Ok(());
     }
-    let normalized = category.trim().to_lowercase();
-    let kind = match normalized.as_str() {
-        "stdlib" | "standard-library" | "standard_library" => SolutionDecisionKind::StdlibChosen,
-        "native" | "platform" => SolutionDecisionKind::NativeUsed,
-        "yagni" => SolutionDecisionKind::YagniSkip,
-        "one-line" | "one_line" | "oneline" => SolutionDecisionKind::OneLineSolution,
-        "debt" | "solution-debt" | "solution_debt" => SolutionDecisionKind::DebtAccepted,
-        _ => SolutionDecisionKind::Reuse,
-    };
+    let kind = SolutionDecisionKind::from_category(category).ok_or_else(|| {
+        format!(
+            "category must be one of: stdlib, native, reuse, yagni, one-line, debt; got `{category}`"
+        )
+    })?;
     let status = if matches!(kind, SolutionDecisionKind::DebtAccepted) {
         SolutionStatus::Deferred
     } else {
@@ -184,10 +184,11 @@ pub fn capture_optimize_resolution(project_root: &str, category: &str, chosen: &
             upgrade_condition: None,
         },
     );
+    Ok(())
 }
 
 fn capture_decision(project_root: &str, decision: &SolutionDecisionMeta) {
-    let kind = decision_kind_name(&decision.kind);
+    let kind = decision.kind.tracker_key();
     let category = if matches!(decision.kind, SolutionDecisionKind::DebtAccepted) {
         "solution-debt"
     } else {
@@ -206,17 +207,6 @@ fn capture_decision(project_root: &str, decision: &SolutionDecisionMeta) {
             summary: format!("{category}: {summary}"),
         },
     );
-}
-
-fn decision_kind_name(kind: &SolutionDecisionKind) -> &'static str {
-    match kind {
-        SolutionDecisionKind::StdlibChosen => "StdlibChosen",
-        SolutionDecisionKind::NativeUsed => "NativeUsed",
-        SolutionDecisionKind::Reuse => "Reuse",
-        SolutionDecisionKind::YagniSkip => "YagniSkip",
-        SolutionDecisionKind::OneLineSolution => "OneLineSolution",
-        SolutionDecisionKind::DebtAccepted => "DebtAccepted",
-    }
 }
 
 fn stdlib_imports(content: &str) -> BTreeSet<String> {
