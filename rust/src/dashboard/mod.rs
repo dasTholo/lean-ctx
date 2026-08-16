@@ -939,7 +939,7 @@ async fn handle_request(
     // Observability: a slow light endpoint is exactly the #431 symptom, so make
     // any handler that crosses 1s visible in the logs for future diagnosis.
     let route_elapsed = route_started.elapsed();
-    if route_elapsed >= std::time::Duration::from_secs(1) {
+    if route_elapsed >= std::time::Duration::from_secs(3) {
         tracing::warn!(
             target: "lean_ctx::dashboard",
             "slow dashboard route {route_label} took {} ms",

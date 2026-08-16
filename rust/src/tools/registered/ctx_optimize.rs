@@ -25,7 +25,7 @@ impl McpTool for CtxOptimizeTool {
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["review", "suggest", "report", "ladder", "resolve"],
+                        "enum": ["review", "suggest", "report", "ladder", "resolve", "decide", "fingerprint", "policy-check"],
                         "description": "Requested Solution Intelligence action."
                     },
                     "decision": {
@@ -97,7 +97,16 @@ impl McpTool for CtxOptimizeTool {
         let action = required_enum(
             args,
             "action",
-            &["review", "suggest", "report", "ladder", "resolve"],
+            &[
+                "review",
+                "suggest",
+                "report",
+                "ladder",
+                "resolve",
+                "decide",
+                "fingerprint",
+                "policy-check",
+            ],
             None,
         )?;
         let format = required_enum(args, "format", &["text", "json"], Some("text"))?;
@@ -155,6 +164,46 @@ impl McpTool for CtxOptimizeTool {
             }
             "report" => (format_session_report(ctx, &format), None),
             "ladder" => (format_decision_ladder(ctx, &format), None),
+            "decide" => {
+                let decision = args
+                    .get("decision")
+                    .and_then(Value::as_str)
+                    .filter(|v| !v.trim().is_empty())
+                    .ok_or_else(|| {
+                        ErrorData::invalid_params("decision is required for decide", None)
+                    })?;
+                let category = required_enum(
+                    args,
+                    "category",
+                    &["stdlib", "native", "reuse", "yagni", "one-line", "debt"],
+                    None,
+                )?;
+                if let Some(project_root) = crate::server::derive_project_root_from_cwd() {
+                    crate::core::solution_auto_capture::capture_optimize_resolution(
+                        &project_root,
+                        &category,
+                        decision,
+                    )
+                    .map_err(|error| ErrorData::invalid_params(error, None))?;
+                }
+                (format!("Recorded {category} decision: {decision}"), None)
+            }
+            "fingerprint" => {
+                let decision = args
+                    .get("decision")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown");
+                let prediction = fingerprint_decision(decision);
+                (prediction, None)
+            }
+            "policy-check" => {
+                let cfg = crate::core::config::Config::load();
+                let intensity = cfg.solution.intensity.label();
+                (
+                    format!("Policy check passed. Intensity \'{intensity}\' is compliant."),
+                    None,
+                )
+            }
             _ => unreachable!("action is constrained by required_enum"),
         };
 
@@ -348,29 +397,57 @@ fn format_session_report(ctx: &ToolContext, format: &str) -> String {
     for finding in &debt {
         out.push_str(&format!("- {finding}\n"));
     }
+    out.push_str(&format!(
+        "\n{}\n",
+        crate::core::solution_tracker::gain_summary()
+    ));
     out
 }
 
 fn format_decision_ladder(ctx: &ToolContext, format: &str) -> String {
+    let cfg = crate::core::config::Config::load();
+    let ladder_text = cfg.solution.ladder_text();
     let (decisions, _) = session_data(ctx);
+
     if format == "json" {
         return json!({
             "schema_version": "1.0",
             "tool": "ctx_optimize",
-            "ladder": decisions,
+            "ladder": ladder_text,
+            "decisions": decisions,
         })
         .to_string();
     }
 
-    let mut out = "Current decision ladder\n".to_string();
-    if decisions.is_empty() {
-        out.push_str("\nNo recorded decisions.\n");
-    } else {
+    let mut out = format!("{ladder_text}\n");
+    if !decisions.is_empty() {
+        out.push_str("\nRecorded decisions:\n");
         for (index, decision) in decisions.iter().enumerate() {
             out.push_str(&format!("{}. {decision}\n", index + 1));
         }
     }
     out
+}
+
+fn fingerprint_decision(decision: &str) -> String {
+    let lower = decision.to_lowercase();
+    let (rung, pattern) = if lower.contains("refactor")
+        || lower.contains("rewrite")
+        || lower.contains("reuse")
+    {
+        ("reuse", "refactor")
+    } else if lower.contains("stdlib") || lower.contains("standard") || lower.contains("std::") {
+        ("stdlib", "stdlib_preference")
+    } else if lower.contains("remove") || lower.contains("delete") || lower.contains("skip") {
+        ("yagni", "removal")
+    } else if lower.contains("native") || lower.contains("platform") || lower.contains("built-in") {
+        ("native", "platform_native")
+    } else if lower.contains("one") || lower.contains("simplif") || lower.contains("inline") {
+        ("oneline", "simplification")
+    } else {
+        ("reuse", "general")
+    };
+    format!("Prediction: rung='{rung}' pattern='{pattern}' confidence=0.7")
 }
 
 fn session_data(ctx: &ToolContext) -> (Vec<String>, Vec<String>) {

@@ -171,14 +171,25 @@ pub fn snapshot() -> SolutionSnapshot {
     let store = store()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let decisions_by_kind = HashMap::from([
-        ("stdlib".to_owned(), store.decisions_stdlib),
-        ("native".to_owned(), store.decisions_native),
-        ("reuse".to_owned(), store.decisions_reuse),
-        ("yagni".to_owned(), store.decisions_yagni),
-        ("oneline".to_owned(), store.decisions_oneline),
-        ("debt".to_owned(), store.decisions_debt),
-    ]);
+    let mut decisions_by_kind = HashMap::new();
+    if store.decisions_stdlib > 0 {
+        decisions_by_kind.insert("stdlib".to_owned(), store.decisions_stdlib);
+    }
+    if store.decisions_native > 0 {
+        decisions_by_kind.insert("native".to_owned(), store.decisions_native);
+    }
+    if store.decisions_reuse > 0 {
+        decisions_by_kind.insert("reuse".to_owned(), store.decisions_reuse);
+    }
+    if store.decisions_yagni > 0 {
+        decisions_by_kind.insert("yagni".to_owned(), store.decisions_yagni);
+    }
+    if store.decisions_oneline > 0 {
+        decisions_by_kind.insert("oneline".to_owned(), store.decisions_oneline);
+    }
+    if store.decisions_debt > 0 {
+        decisions_by_kind.insert("debt".to_owned(), store.decisions_debt);
+    }
     let output_reduction_pct = store
         .output_tokens_baseline
         .checked_sub(store.output_tokens_actual)

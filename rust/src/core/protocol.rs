@@ -117,7 +117,7 @@ pub fn detect_project_root_or_cwd(file_path: &str) -> String {
         }
     };
 
-    if is_broad_directory(&fallback) {
+    if is_broad_directory(&fallback) && !crate::core::runtime_flags::is_dashboard_server() {
         use std::sync::Once;
         static WARN_ONCE: Once = Once::new();
         WARN_ONCE.call_once(|| {
