@@ -542,6 +542,15 @@ pub fn apply_triage_filter(
         return (output.to_string(), 0);
     }
 
+    // Never filter structured JSON output — the line-based heuristics destroy
+    // key-value pairs while keeping only braces, producing invalid JSON.
+    let trimmed = output.trim_start();
+    if (trimmed.starts_with('{') || trimmed.starts_with('['))
+        && serde_json::from_str::<serde_json::Value>(trimmed).is_ok()
+    {
+        return (output.to_string(), 0);
+    }
+
     let lines: Vec<&str> = output.lines().collect();
     let filtered: Vec<&str> = match level {
         1 => lines

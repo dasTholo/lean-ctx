@@ -115,6 +115,10 @@ All `std::sync::Mutex` unless noted otherwise.
 | L96 | `RECOMMENDED_LEVEL` | `core/verbosity/runtime.rs:16` | `LazyLock<Mutex<Option<CompressionLevel>>>` | Behavioral verbosity learning (F10): caches the recommended compression level derived from transcript analysis; locked briefly to read or update; independent leaf lock, never nested |
 | L97 | `SESSION_EVENTS` | `core/anti_interrupt/tracker.rs:51` | `Mutex<Vec<TimestampedEvent>>` | Anti-interruption score (F7): tracks timestamped file-access events to detect and penalize redundant reads/bounces; locked briefly to push or query; independent leaf lock, never nested |
 | L98 | `STIGMERGY_TEST_LOCK` | `core/science_benchmark.rs:24` | `Mutex<()>` | Serializes stigmergy benchmark tests to prevent concurrent signal-store mutations from interfering with each other; independent leaf lock, never nested |
+| L99 | `TURN_BUDGETS` | `core/agent_budget.rs:7` | `Mutex<Option<HashMap<String, TurnBudget>>>` | Per-agent per-turn budget tracking; independent leaf lock, never nested |
+| L100 | `STORE_LOCK` | `core/shared_context.rs:72` | `OnceLock<Mutex<()>>` | Serializes shared context store writes; independent leaf lock, never nested |
+| L101 | `PRELOADER` | `server/predictive_preload.rs:127` | `OnceLock<Mutex<PredictivePreloader>>` | Predictive file preloader state; independent leaf lock, never nested |
+| L102 | `SUMMARY_CACHE` | `core/savings_ledger/store.rs:381` | `Mutex<Option<(u64, LedgerSummary)>>` | Ledger summary cache keyed by file length; independent leaf lock, never nested |
 
 ### Test / Environment Locks (serialise env-var mutations)
 
