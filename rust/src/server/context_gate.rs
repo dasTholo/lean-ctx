@@ -552,6 +552,17 @@ pub fn apply_triage_filter(
     }
 
     let lines: Vec<&str> = output.lines().collect();
+
+    // Also bypass when JSON is embedded after a short header (e.g. "ctx_handoff show\n path: …\n{…}")
+    if let Some(json_start) = lines.iter().position(|l| {
+        let t = l.trim_start();
+        t.starts_with('{') || t.starts_with('[')
+    }) {
+        let json_portion = lines[json_start..].join("\n");
+        if serde_json::from_str::<serde_json::Value>(&json_portion).is_ok() {
+            return (output.to_string(), 0);
+        }
+    }
     let filtered: Vec<&str> = match level {
         1 => lines
             .iter()
