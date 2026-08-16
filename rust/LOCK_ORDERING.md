@@ -122,6 +122,9 @@ All `std::sync::Mutex` unless noted otherwise.
 | L103 | `SUPPRESSION` | `core/pro_triggers.rs:70` | `OnceLock<Mutex<Option<DateTime<Utc>>>>` | Pro trigger suppression timestamp; independent leaf lock, never nested |
 | L104 | `SESSION_LINEAGES` | `core/task_spine.rs:18` | `OnceLock<Arc<Mutex<HashMap<String, String>>>>` | Maps session IDs to parent lineage; independent leaf lock, never nested |
 | L105 | `ROUTER` | `core/model_router.rs:9` | `LazyLock<Mutex<ModelRouter>>` | Thompson-sampling model router (OSS stub: first-candidate passthrough); independent leaf lock, never nested |
+| L106 | `EXPLICIT_FREEZE` | `proxy/live_zone.rs:42` | `OnceLock<Mutex<Option<ExplicitFreeze>>>` | Live-zone explicit freeze state; independent leaf lock, never nested |
+| L107 | `LATEST_CONTEXT` | `proxy/live_zone.rs:43` | `OnceLock<Mutex<Vec<Value>>>` | Latest context messages for live-zone management; independent leaf lock, never nested |
+| L108 | `PROXY_VALUE_METRICS` | `proxy/value_gate_proxy.rs:19` | `Mutex<ProxyValueMetrics>` | Proxy-level value gate metrics counters; independent leaf lock, never nested |
 
 ### Test / Environment Locks (serialise env-var mutations)
 
