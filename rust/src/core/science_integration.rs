@@ -399,7 +399,7 @@ fn interruption_and_echo_pipeline() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[cfg(feature = "enterprise")]
+#[ignore = "requires enterprise implementation (GitLab)"]
 fn coordination_pipeline() {
     reset_signals();
 

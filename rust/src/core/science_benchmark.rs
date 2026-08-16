@@ -464,7 +464,7 @@ fn compression_rank(level: CompressionLevel) -> u8 {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[cfg(feature = "enterprise")]
+#[ignore = "requires enterprise implementation (GitLab)"]
 fn benchmark_stigmergy_coordination() {
     let _guard = STIGMERGY_TEST_LOCK
         .lock()
@@ -530,7 +530,7 @@ fn benchmark_stigmergy_coordination() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[cfg(feature = "enterprise")]
+#[ignore = "requires enterprise implementation (GitLab)"]
 fn benchmark_context_prefetch_accuracy() {
     let paths = ["src/a.rs", "src/b.rs", "src/c.rs"];
 

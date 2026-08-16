@@ -179,7 +179,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "enterprise")]
+    #[ignore = "requires enterprise implementation (GitLab)"]
     fn value_gate_attributes_chunks_present_for_accepted_task() {
         let envelope = crate::core::task_spine::TaskSpine::create_envelope(
             "attribute context",
@@ -228,7 +228,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "enterprise")]
+    #[ignore = "requires enterprise implementation (GitLab)"]
     fn value_gate_records_adaptive_policy_feedback() {
         let _data = crate::core::data_dir::isolated_data_dir();
         let mut envelope = crate::core::task_spine::TaskSpine::create_envelope(
