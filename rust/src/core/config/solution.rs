@@ -2,11 +2,16 @@ use serde::{Deserialize, Serialize};
 
 /// Controls how strongly solution-efficiency guidance is applied.
 #[derive(Default, Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "lowercase")]
 pub enum SolutionIntensity {
+    #[serde(alias = "Off")]
     Off,
+    #[serde(alias = "Minimal")]
     Minimal,
     #[default]
+    #[serde(alias = "Balanced")]
     Balanced,
+    #[serde(alias = "Aggressive")]
     Aggressive,
 }
 

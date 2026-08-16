@@ -47,27 +47,20 @@ pub struct OptimizeSummary {
 
 /// Analyze `content` for simple, high-signal simplification opportunities.
 pub fn analyze_file(content: &str, path: &str, project_root: &Path) -> OptimizeReport {
-    let mut findings = detect_single_impl_traits(content);
+    let mut findings = Vec::new();
+    findings.extend(detect_single_impl_traits(content));
+    findings.extend(detect_single_product_factories(content));
     findings.extend(detect_stdlib_alternatives(content));
+    findings.extend(detect_native_feature_replacements(content, project_root));
     findings.extend(detect_yagni(content));
     findings.extend(detect_oneline_candidates(content));
     findings.extend(detect_reuse_candidates(content, path, project_root));
 
     findings.sort_by(|left, right| {
-        (
-            left.line,
-            &left.category,
-            &left.severity,
-            &left.current,
-            &left.recommended,
-        )
-            .cmp(&(
-                right.line,
-                &right.category,
-                &right.severity,
-                &right.current,
-                &right.recommended,
-            ))
+        finding_score(right)
+            .cmp(&finding_score(left))
+            .then_with(|| left.line.cmp(&right.line))
+            .then_with(|| left.category.cmp(&right.category))
     });
     findings.dedup_by(|left, right| {
         left.line == right.line
@@ -77,7 +70,6 @@ pub fn analyze_file(content: &str, path: &str, project_root: &Path) -> OptimizeR
     });
 
     let mut by_category = HashMap::new();
-    let estimated_loc_reduction = findings.iter().map(|finding| finding.loc_impact).sum();
     for finding in &findings {
         *by_category.entry(finding.category.clone()).or_insert(0) += 1;
     }
@@ -85,7 +77,7 @@ pub fn analyze_file(content: &str, path: &str, project_root: &Path) -> OptimizeR
     OptimizeReport {
         summary: OptimizeSummary {
             total_findings: findings.len(),
-            estimated_loc_reduction,
+            estimated_loc_reduction: findings.iter().map(|finding| finding.loc_impact).sum(),
             by_category,
         },
         findings,
@@ -406,6 +398,99 @@ pub fn detect_reuse_candidates(
 }
 
 /// Render a human-readable optimization report.
+pub fn detect_single_product_factories(content: &str) -> Vec<OptimizeFinding> {
+    let factory = static_regex!(
+        r"(?m)^[ \t]*(?:pub(?:\([^)]*\))?\s+)?(?:struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*(?:Factory|Builder|Creator))\b"
+    );
+    let return_type = static_regex!(
+        r"(?m)^[ \t]*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+[A-Za-z_][A-Za-z0-9_]*[^\n{]*->\s*([A-Za-z_][A-Za-z0-9_:]*)"
+    );
+
+    factory
+        .captures_iter(content)
+        .filter_map(|captures| {
+            let name = captures.get(1)?.as_str();
+            let declaration = captures.get(0)?;
+            let impl_start = content.find(&format!("impl {name}"))?;
+            let impl_end = content[impl_start + 1..]
+                .find("\nimpl ")
+                .map_or(content.len(), |offset| impl_start + 1 + offset);
+            let products: HashSet<_> = return_type
+                .captures_iter(&content[impl_start..impl_end])
+                .filter_map(|return_capture| return_capture.get(1))
+                .map(|product| product.as_str())
+                .filter(|product| !matches!(*product, "Self" | "Result" | "Option"))
+                .collect();
+
+            (products.len() == 1).then(|| {
+                let product = products.into_iter().next().unwrap_or_default();
+                OptimizeFinding {
+                    line: line_number_at(content, declaration.start()),
+                    category: "single-product-factory".to_string(),
+                    severity: "low".to_string(),
+                    current: format!("'{name}' only constructs '{product}'."),
+                    recommended: format!(
+                        "Construct '{product}' directly; retain '{name}' when it supports multiple products."
+                    ),
+                    loc_impact: 4,
+                }
+            })
+        })
+        .collect()
+}
+
+pub fn detect_native_feature_replacements(
+    content: &str,
+    project_root: &Path,
+) -> Vec<OptimizeFinding> {
+    let Ok(manifest) = fs::read_to_string(project_root.join("Cargo.toml")) else {
+        return Vec::new();
+    };
+    let replacements = [
+        (
+            "once_cell",
+            "once_cell::",
+            "std::sync::OnceLock or std::sync::LazyLock",
+        ),
+        ("lazy_static", "lazy_static!", "std::sync::LazyLock"),
+    ];
+
+    replacements
+        .iter()
+        .filter_map(|(dependency, usage, native)| {
+            let declared = manifest.lines().any(|line| {
+                let line = line.trim_start();
+                line.starts_with(dependency)
+                    && matches!(
+                        line.as_bytes().get(dependency.len()),
+                        Some(b' ' | b'\t' | b'=')
+                    )
+            });
+            let offset = content.find(usage)?;
+            declared.then(|| OptimizeFinding {
+                line: line_number_at(content, offset),
+                category: "native-feature-replacement".to_string(),
+                severity: "medium".to_string(),
+                current: format!("'{dependency}' is declared and '{usage}' is used in this file."),
+                recommended: format!(
+                    "Use '{native}' when its standard-library behavior covers this use case."
+                ),
+                loc_impact: 1,
+            })
+        })
+        .collect()
+}
+
+fn finding_score(finding: &OptimizeFinding) -> i32 {
+    let severity = match finding.severity.as_str() {
+        "critical" => 400,
+        "high" => 300,
+        "medium" => 200,
+        _ => 100,
+    };
+    severity + finding.loc_impact.max(0)
+}
+
 pub fn format_report_text(report: &OptimizeReport, path: &str) -> String {
     let mut out = format!(
         "Solution Intelligence: {path}\n\n{} finding(s); estimated reduction: {} LOC\n",

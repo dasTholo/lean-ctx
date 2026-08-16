@@ -423,6 +423,22 @@ fn utility_hint(utility_files: &[String]) -> Option<String> {
 
 /// Extract unique file paths from compose output and sum their raw byte sizes
 /// to compute what the agent would have read without compose.
+fn project_stdlib_hint(project_root: &Path) -> &'static str {
+    if project_root.join("Cargo.toml").is_file() {
+        "std::{fs, path, collections, io, process}"
+    } else if project_root.join("package.json").is_file() {
+        "node:fs, node:path, node:util, node:child_process"
+    } else if project_root.join("requirements.txt").is_file()
+        || project_root.join("pyproject.toml").is_file()
+    {
+        "pathlib, collections, json, subprocess"
+    } else if project_root.join("go.mod").is_file() {
+        "io, os, path/filepath, strings, net/http"
+    } else {
+        "filesystem, collections, and process APIs"
+    }
+}
+
 fn estimate_raw_input_tokens(compose_output: &str, project_root: &str) -> usize {
     let mut seen = HashSet::new();
     let mut raw_bytes: u64 = 0;
@@ -564,9 +580,22 @@ impl McpTool for CtxComposeTool {
             if cfg.solution.enabled && cfg.solution.inject_in_compose {
                 let project_root = Path::new(&path);
                 let project_deps = project_dependencies(project_root);
-                let mut hints =
-                    crate::core::solution_rules::solution_compose_hints(true, &project_deps);
-                if let Some(utility_hint) = utility_hint(&project_utility_files(project_root)) {
+                let helper_files = project_utility_files(project_root);
+                let dependencies = if project_deps.is_empty() {
+                    "no manifest dependencies detected".to_string()
+                } else {
+                    project_deps.join(", ")
+                };
+                let mut hints = format!(
+                    "--- SOLUTION HINTS ---\n\
+• Found {} existing helpers that may apply\n\
+• Project uses: {} (check before adding new)\n\
+• stdlib covers: {}",
+                    helper_files.len(),
+                    dependencies,
+                    project_stdlib_hint(project_root),
+                );
+                if let Some(utility_hint) = utility_hint(&helper_files) {
                     hints.push('\n');
                     hints.push_str(&utility_hint);
                 }

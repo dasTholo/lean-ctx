@@ -1,15 +1,18 @@
 //! End-to-end coverage for the Solution Intelligence `ctx_optimize` surface.
 
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Output};
 
 use lean_ctx::core::config::solution::{SolutionConfig, SolutionIntensity};
+use lean_ctx::core::edit_metering::EditMetrics;
+use lean_ctx::core::knowledge::KnowledgeArchetype;
 use lean_ctx::core::solution_auto_capture::{detect_debt_marker, detect_stdlib_choice};
 use lean_ctx::core::solution_commercial::{
     analyze_cross_project_patterns, append_solution_audit_event, commercial_features_available,
     verify_attribution,
 };
 use lean_ctx::core::solution_tracker;
+use lean_ctx::core::solution_types::{SolutionDecisionKind, SolutionStatus};
 use lean_ctx::instructions::solution::solution_ladder_text;
 use serde_json::{Value, json};
 
@@ -22,6 +25,37 @@ fn solution_config_defaults_are_sane() {
     assert!(config.inject_in_instructions);
     assert!(config.inject_in_compose);
     assert!(config.inject_in_subagents);
+    assert!(config.track_decisions);
+    assert!(config.track_loc);
+    assert!(config.platform_hints);
+    assert!(!config.commercial.adaptive.enabled);
+    assert_eq!(config.commercial.adaptive.learning_rate, 0.1);
+    assert_eq!(config.commercial.adaptive.min_observations, 20);
+    assert!(!config.commercial.team_policy.enabled);
+    assert_eq!(config.commercial.team_policy.min_intensity, "balanced");
+    assert!(!config.commercial.team_policy.require_decision_logging);
+    assert!(!config.commercial.fingerprints_enabled);
+    assert!(!config.commercial.cross_project_patterns);
+}
+
+#[test]
+fn solution_intensity_parses_canonical_and_legacy_strings() {
+    for (input, expected_label) in [
+        ("\"off\"", "off"),
+        ("\"minimal\"", "minimal"),
+        ("\"balanced\"", "balanced"),
+        ("\"aggressive\"", "aggressive"),
+        ("\"Balanced\"", "balanced"),
+    ] {
+        let intensity: SolutionIntensity =
+            serde_json::from_str(input).expect("configured intensity must deserialize");
+
+        assert_eq!(intensity.label(), expected_label);
+        assert_eq!(
+            serde_json::to_string(&intensity).unwrap(),
+            input.to_ascii_lowercase()
+        );
+    }
 }
 
 #[test]
@@ -49,6 +83,7 @@ fn solution_tracker_lifecycle() {
     solution_tracker::reset();
     solution_tracker::record_decision("stdlib");
     solution_tracker::record_decision("reuse");
+    solution_tracker::record_loc_change(18, 31);
     solution_tracker::record_output_tokens(100, 75);
 
     let snapshot = solution_tracker::snapshot();
@@ -58,6 +93,9 @@ fn solution_tracker_lifecycle() {
     assert_eq!(snapshot.output_tokens_baseline, 100);
     assert_eq!(snapshot.output_tokens_actual, 75);
     assert_eq!(snapshot.output_reduction_pct, 25);
+    assert_eq!(snapshot.loc_added, 18);
+    assert_eq!(snapshot.loc_removed, 31);
+    assert_eq!(snapshot.loc_net_saved, 13);
 
     solution_tracker::reset();
     let reset = solution_tracker::snapshot();
@@ -69,9 +107,60 @@ fn solution_tracker_lifecycle() {
 }
 
 #[test]
+fn solution_decision_kind_serializes_a_real_stdlib_decision() {
+    let kind: SolutionDecisionKind =
+        serde_json::from_str("\"StdlibChosen\"").expect("stdlib decision kind must deserialize");
+
+    assert_eq!(kind.to_string(), "stdlib chosen");
+    assert_eq!(serde_json::to_string(&kind).unwrap(), "\"StdlibChosen\"");
+}
+
+#[test]
+fn solution_status_lifecycle_serializes_each_terminal_state() {
+    for state in ["Accepted", "Deferred", "Resolved"] {
+        let status: SolutionStatus =
+            serde_json::from_str(&format!("\"{state}\"")).expect("status must deserialize");
+
+        assert_eq!(
+            serde_json::to_string(&status).unwrap(),
+            format!("\"{state}\"")
+        );
+    }
+}
+
+#[test]
+fn solution_categories_map_to_decision_knowledge() {
+    assert_eq!(
+        KnowledgeArchetype::infer_from_category("solution-decision"),
+        KnowledgeArchetype::Decision
+    );
+    assert_eq!(
+        KnowledgeArchetype::infer_from_category("solution-debt"),
+        KnowledgeArchetype::Decision
+    );
+}
+
+#[test]
+fn edit_metrics_exposes_real_refactor_delta_fields() {
+    let metrics = EditMetrics {
+        lines_added: 18,
+        lines_removed: 31,
+        net_loc_delta: 13,
+        edits_count: 4,
+        files_touched: 2,
+    };
+
+    assert_eq!(metrics.lines_added, 18);
+    assert_eq!(metrics.lines_removed, 31);
+    assert_eq!(metrics.net_loc_delta, 13);
+    assert_eq!(metrics.edits_count, 4);
+    assert_eq!(metrics.files_touched, 2);
+}
+
+#[test]
 fn commercial_features_return_license_error() {
     let features = commercial_features_available();
-    assert!(!features.is_empty());
+    assert!(features.is_empty());
     assert!(features.iter().all(|(_, available)| !available));
 
     for result in [
@@ -83,6 +172,48 @@ fn commercial_features_return_license_error() {
         let normalized = error.to_ascii_lowercase();
         assert!(normalized.contains("enterprise"));
         assert!(normalized.contains("license"));
+    }
+}
+
+#[test]
+fn every_commercial_solution_api_returns_its_license_error() {
+    use lean_ctx::core::solution_commercial::{
+        AdaptiveConfig, TeamPolicyConfig, predict_rung, recommend_intensity, validate_team_policy,
+    };
+
+    let decisions = solution_tracker::snapshot();
+    let gates = [
+        (
+            "adaptive_intensity",
+            recommend_intensity(&AdaptiveConfig::default(), &decisions).map(|_| ()),
+        ),
+        (
+            "solution_fingerprints",
+            predict_rung("Replace a custom request index with HashMap").map(|_| ()),
+        ),
+        (
+            "team_policy",
+            validate_team_policy(&TeamPolicyConfig::default(), "balanced"),
+        ),
+        (
+            "cross_project_patterns",
+            analyze_cross_project_patterns("acme-platform-engineering"),
+        ),
+        (
+            "verified_attribution",
+            verify_attribution("build-2026-08-16"),
+        ),
+        (
+            "solution_audit_trail",
+            append_solution_audit_event("request-pipeline-refactor"),
+        ),
+    ];
+
+    for (feature, result) in gates {
+        assert_eq!(
+            result.expect_err("OSS commercial APIs must be license-gated"),
+            format!("requires enterprise license: {feature}")
+        );
     }
 }
 
@@ -125,11 +256,11 @@ impl Sandbox {
         }
     }
 
-    fn optimize(&self, args: &Value) -> String {
-        let output = Command::new(env!("CARGO_BIN_EXE_lean-ctx"))
+    fn call(&self, tool: &str, args: &Value) -> Output {
+        Command::new(env!("CARGO_BIN_EXE_lean-ctx"))
             .args([
                 "call",
-                "ctx_optimize",
+                tool,
                 "--project-root",
                 self.project.to_str().expect("UTF-8 project root"),
                 "--json",
@@ -143,7 +274,11 @@ impl Sandbox {
             .env("LEAN_CTX_CACHE_DIR", &self.cache)
             .env("LEAN_CTX_DISABLED", "1")
             .output()
-            .expect("run ctx_optimize through the CLI registry");
+            .expect("run tool through the CLI registry")
+    }
+
+    fn optimize(&self, args: &Value) -> String {
+        let output = self.call("ctx_optimize", args);
 
         assert!(
             output.status.success(),
@@ -152,6 +287,47 @@ impl Sandbox {
         );
         String::from_utf8(output.stdout).expect("ctx_optimize must return UTF-8")
     }
+}
+
+#[test]
+fn ctx_edit_records_loc_as_a_ledger_edit_event() {
+    let sandbox = Sandbox::new();
+    let target = sandbox.project.join("solution.rs");
+    let target_path = target.to_string_lossy().into_owned();
+    std::fs::write(&target, "alpha\nbeta\n").expect("write edit fixture");
+
+    let output = sandbox.call(
+        "ctx_edit",
+        &json!({
+            "path": target_path,
+            "old_string": "alpha\nbeta\n",
+            "new_string": "alpha\n"
+        }),
+    );
+    assert!(
+        output.status.success(),
+        "ctx_edit failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let ledger = sandbox.data.join("savings/ledger.jsonl");
+    let contents = std::fs::read_to_string(&ledger).expect("edit must append a ledger event");
+    let event: Value = serde_json::from_str(
+        contents
+            .lines()
+            .last()
+            .expect("ledger must contain one edit event"),
+    )
+    .expect("edit ledger event must be JSON");
+
+    assert_eq!(event["tool"], "edit");
+    assert_eq!(event["path"], target_path);
+    assert_eq!(event["lines_added"], 1);
+    assert_eq!(event["lines_removed"], 2);
+    assert_eq!(
+        event["net"], 1,
+        "removals must produce positive net LOC savings"
+    );
 }
 
 #[test]
@@ -218,5 +394,16 @@ fn auto_capture_detects_lean_ctx_debt_markers() {
     assert_eq!(
         detect_debt_marker("  // lean-ctx: remove after migration\n"),
         Some("Added lean-ctx debt marker: remove after migration".to_string())
+    );
+}
+
+#[test]
+fn auto_capture_ignores_existing_imports_and_ordinary_comments() {
+    let existing_stdlib = "use std::collections::HashMap;\nfn index() {}\n";
+
+    assert_eq!(detect_stdlib_choice(existing_stdlib, existing_stdlib), None);
+    assert_eq!(
+        detect_debt_marker("// remove temporary log after on-call review\n"),
+        None
     );
 }

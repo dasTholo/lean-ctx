@@ -91,6 +91,10 @@ fn event(
         solution_decision: None,
         loc_added: None,
         loc_removed: None,
+        path: None,
+        lines_added: None,
+        lines_removed: None,
+        net: None,
     };
     event.entry_hash = compute_hash(previous, &event.canonical_content());
     event

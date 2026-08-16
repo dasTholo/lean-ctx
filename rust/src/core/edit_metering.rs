@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 #[allow(dead_code)]
-pub(crate) struct EditMetrics {
+pub struct EditMetrics {
     pub lines_added: u64,
     pub lines_removed: u64,
     pub net_loc_delta: i64,

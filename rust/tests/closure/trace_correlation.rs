@@ -67,6 +67,10 @@ fn savings_event_with_trace(
         solution_decision: None,
         loc_added: None,
         loc_removed: None,
+        path: None,
+        lines_added: None,
+        lines_removed: None,
+        net: None,
     }
 }
 

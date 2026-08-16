@@ -1,4 +1,4 @@
-use super::solution::*;
+use super::{Config, solution::*};
 use std::sync::Mutex;
 
 static TRACKER_LOCK: Mutex<()> = Mutex::new(());
@@ -59,13 +59,43 @@ fn effective_intensity_is_off_when_disabled() {
 fn solution_config_deserializes_from_toml() {
     let toml_str = r#"
         enabled = true
-        intensity = "Aggressive"
+        intensity = "aggressive"
         inject_in_instructions = false
     "#;
     let cfg: SolutionConfig = toml::from_str(toml_str).unwrap();
     assert!(cfg.enabled);
     assert_eq!(cfg.intensity.label(), "aggressive");
     assert!(!cfg.inject_in_instructions);
+}
+
+#[test]
+fn config_parses_solution_section_with_all_sprint_one_fields() {
+    let cfg: Config = toml::from_str(
+        r#"
+        [solution]
+        enabled = false
+        intensity = "aggressive"
+        inject_in_instructions = false
+        inject_in_compose = true
+        inject_in_subagents = false
+        track_decisions = true
+        track_loc = false
+        platform_hints = true
+        "#,
+    )
+    .expect("[solution] must parse every Sprint 1 field");
+
+    assert!(!cfg.solution.enabled);
+    assert!(matches!(
+        cfg.solution.intensity,
+        SolutionIntensity::Aggressive
+    ));
+    assert!(!cfg.solution.inject_in_instructions);
+    assert!(cfg.solution.inject_in_compose);
+    assert!(!cfg.solution.inject_in_subagents);
+    assert!(cfg.solution.track_decisions);
+    assert!(!cfg.solution.track_loc);
+    assert!(cfg.solution.platform_hints);
 }
 
 #[test]
