@@ -220,15 +220,18 @@ fn current_task_profile(
     let session = ctx.session.as_ref()?.try_read().ok()?;
     crate::core::decision_loop_runtime::DecisionLoopRuntime::get_or_init()
         .profile_for_session(&session.id)
+}
+
 const SOLUTION_HINT_ITEM_LIMIT: usize = 20;
 const UTILITY_DIRECTORIES: &[&str] = &["utils", "helpers", "common"];
 
-/// Collect declared runtime dependencies from manifest files at the project root.
+/// Collect declared dependencies from manifest files at the project root.
 fn project_dependencies(project_root: &Path) -> Vec<String> {
     let mut dependencies = Vec::new();
     cargo_dependencies(&project_root.join("Cargo.toml"), &mut dependencies);
     package_dependencies(&project_root.join("package.json"), &mut dependencies);
     requirements_dependencies(&project_root.join("requirements.txt"), &mut dependencies);
+    go_dependencies(&project_root.join("go.mod"), &mut dependencies);
     dependencies
 }
 
@@ -259,16 +262,59 @@ fn package_dependencies(manifest: &Path, dependencies: &mut Vec<String>) {
     let Ok(content) = std::fs::read_to_string(manifest) else {
         return;
     };
-    let Ok(package) = serde_json::from_str::<Value>(&content) else {
-        return;
-    };
-    let Some(dependencies_object) = package.get("dependencies").and_then(Value::as_object) else {
-        return;
-    };
 
-    for dependency in dependencies_object.keys() {
-        add_dependency(dependencies, dependency);
+    for section in ["dependencies", "devDependencies"] {
+        let Some(dependency_object) = json_object_section(&content, section) else {
+            continue;
+        };
+        for entry in dependency_object.split(',') {
+            let name = entry
+                .trim_start()
+                .strip_prefix('"')
+                .and_then(|entry| entry.split_once('"'))
+                .map(|(name, _)| name)
+                .unwrap_or_default();
+            add_dependency(dependencies, name);
+        }
     }
+}
+
+fn json_object_section<'a>(content: &'a str, section: &str) -> Option<&'a str> {
+    let section_marker = format!("\"{section}\"");
+    let section_start = content.find(&section_marker)? + section_marker.len();
+    let value = content[section_start..].split_once(':')?.1.trim_start();
+    if !value.starts_with('{') {
+        return None;
+    }
+    let object_start = content.len() - value.len();
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+
+    for (offset, character) in content[object_start..].char_indices() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match character {
+            '"' => in_string = true,
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(&content[object_start + 1..object_start + offset]);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn requirements_dependencies(manifest: &Path, dependencies: &mut Vec<String>) {
@@ -287,6 +333,38 @@ fn requirements_dependencies(manifest: &Path, dependencies: &mut Vec<String>) {
             .unwrap_or_default()
             .trim();
         add_dependency(dependencies, name);
+    }
+}
+
+fn go_dependencies(manifest: &Path, dependencies: &mut Vec<String>) {
+    let Ok(content) = std::fs::read_to_string(manifest) else {
+        return;
+    };
+
+    let mut in_require_block = false;
+    for line in content.lines() {
+        let trimmed = line.split("//").next().unwrap_or_default().trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Some(requirement) = trimmed.strip_prefix("require") {
+            let requirement = requirement.trim();
+            if requirement == "(" {
+                in_require_block = true;
+            } else if let Some(name) = requirement.split_whitespace().next() {
+                add_dependency(dependencies, name);
+            }
+            continue;
+        }
+        if in_require_block && trimmed == ")" {
+            in_require_block = false;
+            continue;
+        }
+        if in_require_block {
+            if let Some(name) = trimmed.split_whitespace().next() {
+                add_dependency(dependencies, name);
+            }
+        }
     }
 }
 
@@ -549,6 +627,9 @@ mod tests {
                 false
             ),
             output
+        );
+    }
+
     use super::{project_dependencies, project_utility_files};
 
     #[test]
@@ -561,7 +642,7 @@ mod tests {
         .expect("Cargo.toml");
         std::fs::write(
             root.path().join("package.json"),
-            r#"{"dependencies":{"react":"1","zod":"1"}}"#,
+            r#"{"dependencies":{"react":"1","zod":"1"},"devDependencies":{"vitest":"1"}}"#,
         )
         .expect("package.json");
         std::fs::write(
@@ -569,6 +650,11 @@ mod tests {
             "requests>=2\nrich[markdown]==1\n# comment\n",
         )
         .expect("requirements.txt");
+        std::fs::write(
+            root.path().join("go.mod"),
+            "module example.com/project\n\nrequire (\n\tgithub.com/gin-gonic/gin v1.0.0\n\tgolang.org/x/crypto v0.1.0\n)\n",
+        )
+        .expect("go.mod");
 
         assert_eq!(
             project_dependencies(root.path()),
@@ -577,8 +663,11 @@ mod tests {
                 "serde".to_string(),
                 "react".to_string(),
                 "zod".to_string(),
+                "vitest".to_string(),
                 "requests".to_string(),
                 "rich".to_string(),
+                "github.com/gin-gonic/gin".to_string(),
+                "golang.org/x/crypto".to_string(),
             ]
         );
     }
@@ -645,6 +734,9 @@ mod tests {
         assert!(filtered.contains("// TODO: keep this"));
         assert!(filtered.contains("// boilerplate"));
         assert!(!filtered.contains("filtered by triage"));
+    }
+
+    #[test]
     fn finds_files_in_root_utility_directories() {
         let root = tempfile::tempdir().expect("tempdir");
         std::fs::create_dir_all(root.path().join("utils/nested")).expect("utils directory");

@@ -51,7 +51,8 @@ struct DecisionMetrics {
 #[derive(Serialize)]
 struct TrendDay {
     date: String,
-    count: u64,
+    decisions: u64,
+    loc_net_saved: i64,
 }
 
 #[derive(Serialize)]
@@ -126,9 +127,14 @@ fn solution_response() -> (&'static str, &'static str, String) {
                 .copied()
                 .unwrap_or_default(),
         },
-        // The persistent tracker currently records aggregate counters only.
-        // Keep this typed field ready for date-stamped tracker records.
-        trend_7d: Vec::<TrendDay>::new(),
+        trend_7d: crate::core::solution_tracker::trend_7d()
+            .iter()
+            .map(|(date, decisions, loc)| TrendDay {
+                date: date.clone(),
+                decisions: *decisions,
+                loc_net_saved: *loc,
+            })
+            .collect(),
         top_patterns,
     };
 

@@ -14,7 +14,7 @@ function csolNumber(value) {
 }
 
 function csolSparkline(values) {
-  var levels = '▁▃▅▇';
+  var levels = '▁▂▃▄▅▆▇█';
   var max = Math.max.apply(null, values.concat([0]));
   if (!values.length) return '—';
   if (!max) return values.map(function () { return levels[0]; }).join('');
@@ -75,6 +75,9 @@ class CockpitSolution extends HTMLElement {
     var trendValues = trend.map(function (day) {
       return csolNumber(day.count != null ? day.count : day.decisions != null ? day.decisions : day.value);
     });
+    var trendLocSaved = trend.reduce(function (total, day) {
+      return total + csolNumber(day.loc_net_saved);
+    }, 0);
     var topPatterns = Array.isArray(data.top_patterns) ? data.top_patterns.slice(0, 5) : [];
     var reduction = csolNumber(metrics.output_reduction_pct != null ? metrics.output_reduction_pct : output.reduction_pct);
     var netSaved = csolNumber(metrics.net_loc_saved != null ? metrics.net_loc_saved : loc.net_saved);
@@ -124,7 +127,7 @@ class CockpitSolution extends HTMLElement {
       '</div>' +
       '<div style="margin-top:20px;"><div style="color:var(--text-secondary);font-size:11px;letter-spacing:.1em;">DECISION BREAKDOWN</div>' + decisionHtml + '</div>' +
       '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:20px;">' +
-        '<div style="border-top:1px solid var(--border);padding-top:14px;"><div style="color:var(--text-secondary);font-size:11px;letter-spacing:.1em;margin-bottom:8px;">7-DAY DECISION TREND</div><div style="color:var(--accent-green);font-family:monospace;font-size:24px;letter-spacing:.12em;line-height:1;">' + csolSparkline(trendValues) + '</div><div style="color:var(--text-tertiary);font-size:10px;margin-top:8px;">' + (trend.length ? format(trendValues.reduce(function (total, value) { return total + value; }, 0)) + ' DECISIONS' : 'NO DAILY DATA') + '</div></div>' +
+        '<div style="border-top:1px solid var(--border);padding-top:14px;"><div style="color:var(--text-secondary);font-size:11px;letter-spacing:.1em;margin-bottom:8px;">7-DAY DECISION TREND</div><div style="color:var(--accent-green);font-family:monospace;font-size:24px;letter-spacing:.12em;line-height:1;">' + csolSparkline(trendValues) + '</div><div style="color:var(--text-tertiary);font-size:10px;margin-top:8px;">' + (trend.length ? format(trendValues.reduce(function (total, value) { return total + value; }, 0)) + ' DECISIONS · ' + format(trendLocSaved) + ' LOC SAVED' : 'NO DAILY DATA') + '</div></div>' +
         '<div style="border-top:1px solid var(--border);padding-top:14px;"><div style="color:var(--text-secondary);font-size:11px;letter-spacing:.1em;margin-bottom:8px;">TOP PATTERNS</div>' + patternsHtml + '</div>' +
       '</div>' +
       '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:20px;">' +

@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+const ENTERPRISE_LICENSE_REQUIRED: &str = "requires enterprise license";
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct AdaptiveConfig {
@@ -43,6 +45,30 @@ pub struct SolutionCommercialConfig {
     pub team_policy: TeamPolicyConfig,
     pub fingerprints_enabled: bool,
     pub cross_project_patterns: bool,
+}
+
+/// Lists capabilities exposed by this OSS build and whether they are active.
+///
+/// The names include the tier so callers can render an actionable availability
+/// status without inferring entitlement from the boolean alone.
+pub fn commercial_features_available() -> Vec<(String, bool)> {
+    vec![
+        ("adaptive (available in basic)".to_owned(), true),
+        ("fingerprint (available in basic)".to_owned(), true),
+        ("team_policy (available in basic)".to_owned(), true),
+        (
+            "cross_project_patterns (requires enterprise license)".to_owned(),
+            false,
+        ),
+        (
+            "verified_attribution (requires enterprise license)".to_owned(),
+            false,
+        ),
+        (
+            "solution_audit_trail (requires enterprise license)".to_owned(),
+            false,
+        ),
+    ]
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -160,6 +186,25 @@ pub fn validate_team_policy(
     Ok(())
 }
 
+// Commercial feature gate: implementations belong exclusively to the private
+// enterprise repository. OSS exposes only stable request boundaries and never
+// aggregates, uploads, or retains commercial feature data.
+
+/// OSS boundary for `POST /cross-project-patterns:analyze`.
+pub fn analyze_cross_project_patterns(_organization_id: &str) -> Result<(), String> {
+    Err(ENTERPRISE_LICENSE_REQUIRED.to_owned())
+}
+
+/// OSS boundary for `POST /attribution/envelopes` verification.
+pub fn verify_attribution(_event_id: &str) -> Result<(), String> {
+    Err(ENTERPRISE_LICENSE_REQUIRED.to_owned())
+}
+
+/// OSS boundary for `POST /solution-audit/events`.
+pub fn append_solution_audit_event(_project_id: &str) -> Result<(), String> {
+    Err(ENTERPRISE_LICENSE_REQUIRED.to_owned())
+}
+
 fn intensity_rank(intensity: &str) -> u8 {
     match intensity {
         "minimal" => 1,
@@ -215,5 +260,40 @@ mod tests {
     #[test]
     fn disabled_policy_allows_everything() {
         assert!(validate_team_policy(&TeamPolicyConfig::default(), "off").is_ok());
+    }
+
+    #[test]
+    fn feature_availability_marks_the_oss_and_enterprise_boundaries() {
+        assert_eq!(
+            commercial_features_available(),
+            vec![
+                ("adaptive (available in basic)".to_owned(), true),
+                ("fingerprint (available in basic)".to_owned(), true),
+                ("team_policy (available in basic)".to_owned(), true),
+                (
+                    "cross_project_patterns (requires enterprise license)".to_owned(),
+                    false,
+                ),
+                (
+                    "verified_attribution (requires enterprise license)".to_owned(),
+                    false,
+                ),
+                (
+                    "solution_audit_trail (requires enterprise license)".to_owned(),
+                    false,
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn enterprise_stubs_do_not_expose_commercial_logic() {
+        for result in [
+            analyze_cross_project_patterns("org-123"),
+            verify_attribution("event-123"),
+            append_solution_audit_event("project-123"),
+        ] {
+            assert_eq!(result, Err(ENTERPRISE_LICENSE_REQUIRED.to_owned()));
+        }
     }
 }
