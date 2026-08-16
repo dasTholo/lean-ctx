@@ -15,6 +15,7 @@ mod roi;
 mod settings;
 mod signals;
 mod snapshots;
+mod solution;
 mod stats;
 mod system;
 mod telemetry;
@@ -52,6 +53,7 @@ fn match_component_path(path: &str) -> Option<String> {
         "/static/components/cockpit-settings.js" => super::COCKPIT_COMPONENT_SETTINGS_JS,
         "/static/components/cockpit-telemetry.js" => super::COCKPIT_COMPONENT_TELEMETRY_JS,
         "/static/components/cockpit-adoption.js" => super::COCKPIT_COMPONENT_ADOPTION_JS,
+        "/static/components/cockpit-solution.js" => super::COCKPIT_COMPONENT_SOLUTION_JS,
         _ => return None,
     };
     Some(content.to_string())
@@ -186,6 +188,7 @@ pub fn route_response(
     #[cfg(feature = "enterprise")]
     let response = response.or_else(|| usage_breakdown::handle(path, query_str, method, body));
     response
+        .or_else(|| solution::handle(path, query_str, method, body))
         .or_else(|| telemetry::handle(path, query_str, method, body))
         .or_else(|| system::handle(path, query_str, method, body))
         .unwrap_or_else(|| ("404 Not Found", "text/plain", "Not Found".to_string()))

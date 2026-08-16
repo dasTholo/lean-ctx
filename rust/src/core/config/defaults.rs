@@ -195,6 +195,7 @@ impl Default for Config {
             write_allow_paths: Vec::new(),
             shell_allow_inline_scripts: false,
             setup: SetupConfig::default(),
+            solution: super::solution::SolutionConfig::default(),
         }
     }
 }

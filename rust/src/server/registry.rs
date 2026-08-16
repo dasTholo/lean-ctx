@@ -249,6 +249,7 @@ pub fn build_registry() -> ToolRegistry {
         registered::ctx_semantic_search::CtxSemanticSearchTool,
     ));
     registry.register(Box::new(registered::ctx_symbol::CtxSymbolTool));
+    registry.register(Box::new(registered::ctx_optimize::CtxOptimizeTool));
     register_plugin_tools(&mut registry);
 
     registry
