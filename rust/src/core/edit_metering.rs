@@ -27,6 +27,16 @@ use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+#[allow(dead_code)]
+pub(crate) struct EditMetrics {
+    pub lines_added: u64,
+    pub lines_removed: u64,
+    pub net_loc_delta: i64,
+    pub edits_count: u32,
+    pub files_touched: u32,
+}
+
 const STORE_FILE: &str = "edit_metering.json";
 const FLUSH_EVERY: usize = 5;
 

@@ -233,6 +233,7 @@ pub(in crate::cli::dispatch) fn cmd_gain(rest: &[String]) {
         cmd_stats_raw(rest);
     } else {
         println!("{}", core::stats::format_gain_hero());
+        print_solution_intelligence();
         // Surface available updates where users actually look (#563) — the
         // banner functions existed but had no caller, so terminals never
         // showed update hints at all.
@@ -250,6 +251,71 @@ pub(in crate::cli::dispatch) fn cmd_gain(rest: &[String]) {
 
 /// Nudge free/unauthenticated users toward Personal Cloud sync when they
 /// have meaningful local context worth backing up.
+fn print_solution_intelligence() {
+    if !core::config::Config::load().solution.enabled {
+        return;
+    }
+
+    let solution = core::solution_tracker::snapshot();
+    let output_saved = solution
+        .output_tokens_baseline
+        .saturating_sub(solution.output_tokens_actual);
+    let loc_delta = match solution.loc_net_saved {
+        0 => "0".to_string(),
+        saved if saved > 0 => format!("-{}", format_thousands(saved.unsigned_abs())),
+        added => format!("+{}", format_thousands(added.unsigned_abs())),
+    };
+    let mut decisions: Vec<_> = solution.decisions_by_kind.iter().collect();
+    decisions.sort_unstable_by_key(|(k, _)| (*k).clone());
+    let breakdown = if decisions.is_empty() {
+        "none".to_string()
+    } else {
+        decisions
+            .into_iter()
+            .map(|(kind, count)| format!("{kind}: {}", format_thousands(*count)))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+
+    let token_savings = core::savings_ledger::summary().net_saved_tokens();
+    let token_baseline = core::stats::load_for_display().total_input_tokens;
+    let combined_saved = token_savings.saturating_add(output_saved);
+    let combined_baseline = token_baseline.saturating_add(solution.output_tokens_baseline);
+    let combined_reduction = if combined_baseline == 0 {
+        0.0
+    } else {
+        combined_saved as f64 * 100.0 / combined_baseline as f64
+    };
+
+    println!(
+        "\nSolution Efficiency: {} output tokens saved ({}% reduction)",
+        format_thousands(output_saved),
+        solution.output_reduction_pct,
+    );
+    println!(
+        "  LOC: {loc_delta} net lines | Decisions: {} ({breakdown})",
+        format_thousands(solution.decisions_total),
+    );
+    println!(
+        "Combined: {} total tokens saved ({combined_reduction:.1}% total reduction)",
+        format_thousands(combined_saved),
+    );
+}
+
+fn format_thousands(value: u64) -> String {
+    let digits = value.to_string();
+    let mut formatted = String::with_capacity(digits.len() + digits.len() / 3);
+
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            formatted.push(',');
+        }
+        formatted.push(digit);
+    }
+
+    formatted
+}
+
 fn print_cloud_sync_hint() {
     if crate::cloud_client::is_logged_in() {
         let plan = crate::cloud_client::resolve_effective_plan_cached();

@@ -677,3 +677,51 @@ fn find_original_span(content: &str, normalized_needle: &str) -> Option<String> 
     }
     None
 }
+
+pub fn captured_solution_decision_kinds(old_content: &str, new_content: &str) -> Vec<&'static str> {
+    let mut kinds = Vec::new();
+
+    if new_content.contains("use std::") && !old_content.contains("use std::") {
+        kinds.push("stdlib");
+    }
+
+    if new_content.contains("// lean-ctx:") && !old_content.contains("// lean-ctx:") {
+        kinds.push("debt");
+    }
+
+    let old_deps = old_content
+        .lines()
+        .filter(|line| line.contains("[dependencies]") || line.contains("= \""))
+        .count();
+    let new_deps = new_content
+        .lines()
+        .filter(|line| line.contains("[dependencies]") || line.contains("= \""))
+        .count();
+    if new_deps < old_deps {
+        kinds.push("native");
+    }
+
+    let old_lines = old_content.lines().count();
+    let new_lines = new_content.lines().count();
+    if old_lines > 5 && new_lines < old_lines / 2 {
+        kinds.push("oneline");
+    }
+
+    kinds
+}
+
+#[cfg(test)]
+mod solution_auto_capture_tests {
+    use super::captured_solution_decision_kinds;
+
+    #[test]
+    fn classifies_decisions_from_completed_edit_content() {
+        let old = "use crate::core::Config;\n[dependencies]\nlegacy = \"1\"\nfn verbose() {\n    first();\n    second();\n    third();\n    fourth();\n    fifth();\n    sixth();\n}\n";
+        let new = "use crate::core::Config;\nuse std::collections::HashMap;\n[dependencies]\n// lean-ctx: replace legacy dependency\nfn concise() {}\n";
+
+        assert_eq!(
+            captured_solution_decision_kinds(old, new),
+            ["stdlib", "debt", "native"]
+        );
+    }
+}

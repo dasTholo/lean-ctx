@@ -2,6 +2,9 @@ use crate::core::config::CompressionLevel;
 use crate::core::rules_canonical::{self as rc, Wrapper};
 use crate::tools::CrpMode;
 
+pub mod solution;
+pub use solution::solution_ladder_text;
+
 /// Universal instruction cap for all MCP clients (in tokens, not bytes).
 const INSTRUCTION_CAP_TOKENS: usize = 800;
 
@@ -397,7 +400,8 @@ fn build_full_instructions(
         let loaded_config = crate::core::config::Config::load();
         let sol_cfg = &loaded_config.solution;
         if !minimal && sol_cfg.enabled && sol_cfg.inject_in_instructions {
-            let ladder = sol_cfg.ladder_text();
+            let ladder =
+                crate::instructions::solution::solution_ladder_text(sol_cfg.effective_intensity());
             if ladder.is_empty() {
                 String::new()
             } else {
