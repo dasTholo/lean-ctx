@@ -11,8 +11,8 @@ const MAX_RELAY_CONTENT_BYTES: usize = 8192;
 /// — so they safely bypass the gate while the content-hash check still
 /// guarantees correctness.
 fn is_terminal_poll_file(path: &str) -> bool {
-    path.contains("/.cursor/")
-        && path.contains("/terminals/")
+    (path.contains("/.cursor/") || path.contains("\\.cursor\\"))
+        && (path.contains("/terminals/") || path.contains("\\terminals\\"))
         && std::path::Path::new(path)
             .extension()
             .is_some_and(|ext| ext.eq_ignore_ascii_case("txt"))
