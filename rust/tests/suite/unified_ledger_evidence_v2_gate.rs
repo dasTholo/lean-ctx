@@ -88,6 +88,9 @@ fn event(
         request_id: None,
         session_id: None,
         trace_id: None,
+        solution_decision: None,
+        loc_added: None,
+        loc_removed: None,
     };
     event.entry_hash = compute_hash(previous, &event.canonical_content());
     event

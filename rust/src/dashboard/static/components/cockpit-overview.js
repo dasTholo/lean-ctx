@@ -130,6 +130,7 @@ class CockpitOverview extends HTMLElement {
       '/api/spend',
       '/api/workspaces',
       '/api/kernel',
+      '/api/solution',
     ];
 
     var cached = window.LctxApi && window.LctxApi.cachedFetch ? window.LctxApi.cachedFetch : fetchJson;
@@ -165,6 +166,7 @@ class CockpitOverview extends HTMLElement {
       spend: ok(results[8]),
       workspaces: ok(results[9]),
       kernel: ok(results[10]),
+      solution: ok(results[11]),
     };
     // De-hardcode the estimated cost model's blended rate from the server.
     var Fp = fmtLib();
@@ -311,6 +313,8 @@ class CockpitOverview extends HTMLElement {
       '<p class="hs">estimated input cost avoided</p>' +
       '</div>' +
 
+      this._solutionHeroCard(esc) +
+
       this._measuredSpendCard(esc, fu) +
 
       '<div class="hc">' +
@@ -363,6 +367,20 @@ class CockpitOverview extends HTMLElement {
       '<span class="tag tg" style="margin-left:6px">measured</span></span>' +
       '<div class="hv" style="color:var(--green)">' + esc(fu(spend.total_usd)) + '</div>' +
       '<p class="hs">real provider bill (proxy-routed)</p>' +
+      '</div>'
+    );
+  }
+
+  _solutionHeroCard(esc) {
+    var solution = this._data && this._data.solution;
+    if (!solution) return '';
+    var output = solution.output_savings || {};
+    var reduction = Math.max(0, Math.min(100, Math.round(Number(output.reduction_pct) || 0)));
+    return (
+      '<div class="hc">' +
+      '<span class="hl">Solution: -' + esc(String(reduction)) + '% output</span>' +
+      '<div class="hv" style="color:var(--green)">-' + esc(String(reduction)) + '%</div>' +
+      '<p class="hs">Solution Intelligence</p>' +
       '</div>'
     );
   }

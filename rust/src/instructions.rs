@@ -113,31 +113,13 @@ pub fn build_instructions_for_test(crp_mode: CrpMode) -> String {
     let skeleton = rc::render(shadow, Wrapper::Bare, level, &tp);
     let shell_hint = build_shell_hint();
 
-    // Solution Intelligence: inject the efficiency ladder when enabled
-    let solution_ladder = {
-        let loaded_config = crate::core::config::Config::load();
-        let sol_cfg = &loaded_config.solution;
-        if sol_cfg.enabled && sol_cfg.inject_in_instructions {
-            let ladder = sol_cfg.ladder_text();
-            if ladder.is_empty() {
-                String::new()
-            } else {
-                format!("\n{ladder}\n")
-            }
-        } else {
-            String::new()
-        }
-    };
-
     let base = format!(
         "{skeleton}\n\
-        {solution_ladder}\
         {shell_hint}\n\
         {decoder_block}\n\
         {origin}",
         decoder_block =
             crate::core::protocol::instruction_decoder_block(matches!(crp_mode, CrpMode::Tdd)),
-        solution_ladder = solution_ladder,
         origin = crate::core::integrity::origin_line(),
     );
 
@@ -161,31 +143,13 @@ pub fn build_instructions_with_client_for_compiler(
     let skeleton = rc::render(true, Wrapper::Bare, CompressionLevel::Off, &tp);
     let shell_hint = build_shell_hint();
 
-    // Solution Intelligence: inject the efficiency ladder when enabled
-    let solution_ladder = {
-        let loaded_config = crate::core::config::Config::load();
-        let sol_cfg = &loaded_config.solution;
-        if sol_cfg.enabled && sol_cfg.inject_in_instructions {
-            let ladder = sol_cfg.ladder_text();
-            if ladder.is_empty() {
-                String::new()
-            } else {
-                format!("\n{ladder}\n")
-            }
-        } else {
-            String::new()
-        }
-    };
-
     let base = format!(
         "{skeleton}\n\
-        {solution_ladder}\
         {shell_hint}\n\
         {decoder_block}\n\
         {origin}",
         decoder_block =
             crate::core::protocol::instruction_decoder_block(matches!(crp_mode, CrpMode::Tdd)),
-        solution_ladder = solution_ladder,
         origin = crate::core::integrity::origin_line(),
     );
 
@@ -432,7 +396,7 @@ fn build_full_instructions(
     let solution_ladder = {
         let loaded_config = crate::core::config::Config::load();
         let sol_cfg = &loaded_config.solution;
-        if sol_cfg.enabled && sol_cfg.inject_in_instructions {
+        if !minimal && sol_cfg.enabled && sol_cfg.inject_in_instructions {
             let ladder = sol_cfg.ladder_text();
             if ladder.is_empty() {
                 String::new()

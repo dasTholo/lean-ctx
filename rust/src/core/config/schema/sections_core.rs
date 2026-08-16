@@ -1005,6 +1005,79 @@ pub(super) fn build(sections: &mut BTreeMap<String, SectionSchema>) {
         },
     );
 
+    let mut solution = BTreeMap::new();
+    solution.insert(
+        "enabled".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.solution.enabled),
+            "Enable solution-efficiency guidance",
+        ),
+    );
+    solution.insert(
+        "intensity".into(),
+        key_enum(
+            &["off", "minimal", "balanced", "aggressive"],
+            cfg.solution.intensity.label(),
+            "How strongly solution-efficiency guidance is applied",
+        ),
+    );
+    solution.insert(
+        "inject_in_instructions".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.solution.inject_in_instructions),
+            "Inject solution-efficiency guidance into MCP instructions",
+        ),
+    );
+    solution.insert(
+        "inject_in_compose".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.solution.inject_in_compose),
+            "Inject solution-efficiency guidance into composed context",
+        ),
+    );
+    solution.insert(
+        "inject_in_subagents".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.solution.inject_in_subagents),
+            "Inject solution-efficiency guidance into subagent prompts",
+        ),
+    );
+    solution.insert(
+        "track_decisions".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.solution.track_decisions),
+            "Track solution decisions for efficiency guidance",
+        ),
+    );
+    solution.insert(
+        "track_loc".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.solution.track_loc),
+            "Track lines of code changed for solution-efficiency guidance",
+        ),
+    );
+    solution.insert(
+        "platform_hints".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.solution.platform_hints),
+            "Include platform-native solution hints",
+        ),
+    );
+    sections.insert(
+        "solution".into(),
+        SectionSchema {
+            description: "Solution Intelligence guidance and decision tracking".into(),
+            keys: solution,
+        },
+    );
+
     let mut skillify = BTreeMap::new();
     skillify.insert(
         "enabled".into(),
