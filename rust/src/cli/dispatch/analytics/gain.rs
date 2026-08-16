@@ -834,6 +834,37 @@ fn cmd_stats_raw(rest: &[String]) {
         println!("Output:      {} tokens", store.total_output_tokens);
         println!("Saved:       {input_saved} tokens ({pct:.1}%)");
         println!();
+
+        // Solution Intelligence metrics
+        let sol = crate::core::solution_tracker::snapshot();
+        if sol.decisions_total > 0 || sol.loc_added > 0 || sol.loc_removed > 0 {
+            let sol_pct = sol.output_reduction_pct;
+            println!("Solution Efficiency:");
+            if sol.output_tokens_baseline > 0 {
+                let sol_saved = sol
+                    .output_tokens_baseline
+                    .saturating_sub(sol.output_tokens_actual);
+                println!("  Output:    {sol_saved} tokens saved ({sol_pct}% reduction)");
+            }
+            println!(
+                "  LOC:       {} net lines saved | {} decisions ({} stdlib, {} reuse, {} native, {} yagni)",
+                sol.loc_net_saved,
+                sol.decisions_total,
+                sol.decisions_by_kind.get("stdlib").unwrap_or(&0),
+                sol.decisions_by_kind.get("reuse").unwrap_or(&0),
+                sol.decisions_by_kind.get("native").unwrap_or(&0),
+                sol.decisions_by_kind.get("yagni").unwrap_or(&0),
+            );
+            if input_saved > 0 || sol.output_tokens_baseline > 0 {
+                let combined = input_saved
+                    + sol
+                        .output_tokens_baseline
+                        .saturating_sub(sol.output_tokens_actual);
+                println!("  Combined:  {combined} total tokens saved");
+            }
+            println!();
+        }
+
         println!("CEP sessions:  {}", store.cep.sessions);
         println!(
             "CEP tokens:    {} → {}",

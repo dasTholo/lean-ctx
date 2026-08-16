@@ -15,7 +15,7 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 static DOCTOR_CACHE: Mutex<Option<(Instant, String)>> = Mutex::new(None);
-const DOCTOR_TTL_SECS: u64 = 300;
+const DOCTOR_TTL_SECS: u64 = 600;
 
 pub(super) fn handle(
     path: &str,

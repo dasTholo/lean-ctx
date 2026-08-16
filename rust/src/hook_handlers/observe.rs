@@ -30,6 +30,7 @@ pub fn handle_observe() {
     // host's native Edit/MultiEdit tools (bypassing ctx_edit's gate), surface an
     // advisory complexity-regression notice via PostToolUse additionalContext.
     super::edit_health::maybe_emit(&input);
+    super::solution_capture::maybe_capture(&input);
 
     let Some(event) = parse_observe_event(&input) else {
         return;
