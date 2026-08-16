@@ -125,6 +125,9 @@ All `std::sync::Mutex` unless noted otherwise.
 | L106 | `EXPLICIT_FREEZE` | `proxy/live_zone.rs:42` | `OnceLock<Mutex<Option<ExplicitFreeze>>>` | Live-zone explicit freeze state; independent leaf lock, never nested |
 | L107 | `LATEST_CONTEXT` | `proxy/live_zone.rs:43` | `OnceLock<Mutex<Vec<Value>>>` | Latest context messages for live-zone management; independent leaf lock, never nested |
 | L108 | `PROXY_VALUE_METRICS` | `proxy/value_gate_proxy.rs:19` | `Mutex<ProxyValueMetrics>` | Proxy-level value gate metrics counters; independent leaf lock, never nested |
+| L109 | `PROXY_STARTED` | `proxy/web_app/dashboard.rs:10` | `LazyLock<Mutex<Option<Instant>>>` | Proxy start timestamp for uptime display; independent leaf lock, never nested |
+| L110 | `ROI_CACHE` | `dashboard/routes/roi.rs:23` | `Mutex<Option<(Instant, String)>>` | Cached ROI dashboard response; independent leaf lock, never nested |
+| L111 | `DOCTOR_CACHE` | `dashboard/routes/doctor.rs:17` | `Mutex<Option<(Instant, String)>>` | Cached doctor check response; independent leaf lock, never nested |
 
 ### Test / Environment Locks (serialise env-var mutations)
 
