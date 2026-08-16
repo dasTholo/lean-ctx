@@ -81,11 +81,12 @@ pub fn evaluate_task(
         tracing::debug!(%error, task_id, "causal attribution ValueGate recording failed");
     }
     evidence.push(format!("causal_chunks_present={}", causal_chunks.len()));
-    evidence.extend(
-        causal_chunks
-            .iter()
-            .map(|chunk| format!("causal_chunk id={} source={}", chunk.id, chunk.source)),
-    );
+    evidence.extend(causal_chunks.iter().map(|chunk| {
+        format!(
+            "causal_chunk id={} source={}",
+            chunk.content_hash, chunk.source
+        )
+    }));
 
     let assessment = ValueAssessment {
         task_id: task_id.to_owned(),
@@ -107,6 +108,7 @@ pub fn evaluate_task(
 }
 
 /// Feeds every completed Value Gate assessment back into adaptive policy selection.
+#[cfg(feature = "enterprise")]
 fn record_adaptive_policy_outcome(task_id: &str, assessment: &ValueAssessment) {
     let task_class = crate::core::task_spine::TaskSpine::current()
         .filter(|envelope| envelope.task_id.as_str() == task_id)
@@ -177,6 +179,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "enterprise")]
     fn value_gate_attributes_chunks_present_for_accepted_task() {
         let envelope = crate::core::task_spine::TaskSpine::create_envelope(
             "attribute context",

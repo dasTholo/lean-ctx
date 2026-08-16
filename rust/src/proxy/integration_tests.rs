@@ -1,3 +1,10 @@
+#![allow(
+    clippy::all,
+    clippy::pedantic,
+    clippy::suspicious,
+    clippy::nursery,
+    unused
+)]
 //! Realistic, synchronous agent-transcript coverage for the compression stack.
 //!
 //! These tests deliberately use the public tool and proxy entry points instead

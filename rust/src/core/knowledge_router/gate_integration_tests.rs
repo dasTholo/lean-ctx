@@ -1,3 +1,10 @@
+#![allow(
+    clippy::all,
+    clippy::pedantic,
+    clippy::suspicious,
+    clippy::nursery,
+    unused
+)]
 use super::*;
 use crate::core::knowledge::KnowledgeQuery;
 use crate::core::stigmergy::{PheromoneSignal, SignalKind, deposit_signal};
