@@ -375,8 +375,31 @@ pub fn daily_bounce_trend(path: &Path, days: u32) -> Vec<(String, u64, u64)> {
     by_day.into_iter().map(|(d, (b, r))| (d, b, r)).collect()
 }
 
-/// Streams the ledger and aggregates totals sliceable by model / day / tool.
+/// In-memory summary cache: `(file_len, LedgerSummary)`. Invalidated when the
+/// ledger grows (append-only). Avoids re-parsing the entire file on every
+/// dashboard refresh — critical for large ledgers (40MB+, 70k+ events).
+static SUMMARY_CACHE: std::sync::Mutex<Option<(u64, LedgerSummary)>> = std::sync::Mutex::new(None);
+
+/// Returns a cached summary if the ledger hasn't grown since the last read.
+/// Falls back to a full re-parse on size change or cache miss.
 pub fn summarize(path: &Path) -> LedgerSummary {
+    let file_len = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    if let Ok(guard) = SUMMARY_CACHE.lock() {
+        if let Some((cached_len, ref summary)) = *guard {
+            if cached_len == file_len {
+                return summary.clone();
+            }
+        }
+    }
+    let result = summarize_uncached(path);
+    if let Ok(mut guard) = SUMMARY_CACHE.lock() {
+        *guard = Some((file_len, result.clone()));
+    }
+    result
+}
+
+/// Full re-parse of the ledger file (expensive for large files).
+fn summarize_uncached(path: &Path) -> LedgerSummary {
     use std::collections::HashMap;
     let Ok(file) = fs::File::open(path) else {
         return LedgerSummary::default();

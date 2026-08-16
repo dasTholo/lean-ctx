@@ -21,7 +21,7 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 static ROI_CACHE: Mutex<Option<(Instant, String)>> = Mutex::new(None);
-const ROI_TTL_SECS: u64 = 30;
+const ROI_TTL_SECS: u64 = 120;
 
 pub(super) fn handle(
     path: &str,
