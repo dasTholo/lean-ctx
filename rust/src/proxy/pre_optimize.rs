@@ -291,7 +291,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "enterprise")]
+    #[ignore = "requires enterprise implementation (GitLab)"]
     fn triage_creates_a_prefetch_plan_from_live_read_trajectory() {
         let first = "src/r4_prefetch_trajectory_first.rs";
         let predicted = "src/r4_prefetch_trajectory_predicted.rs";
