@@ -142,6 +142,17 @@ pub fn record_outcome(params: &EditParams, last_mode: &str, text: &str, effect: 
         || (matches!(effect, CacheEffect::None)
             && text.starts_with("ERROR: old_string not found")
             && !text.contains("already"));
+    if success {
+        if let Some(project_root) = crate::server::derive_project_root_from_cwd() {
+            crate::core::solution_auto_capture::capture_edit_decisions(
+                &project_root,
+                &params.path,
+                &params.old_string,
+                &params.new_string,
+            );
+        }
+    }
+
     if success || not_found_failure {
         crate::core::edit_quality::record_edit_outcome(&params.path, last_mode, success);
     }
@@ -490,6 +501,21 @@ fn do_replace(
         return (e, CacheEffect::None);
     }
 
+    let replacements = if args.replace_all {
+        args.occurrences
+    } else {
+        1
+    };
+    let replacements = u64::try_from(replacements).unwrap_or(u64::MAX);
+    let lines_added = u64::try_from(args.new_str.lines().count())
+        .unwrap_or(u64::MAX)
+        .saturating_mul(replacements);
+    let lines_removed = u64::try_from(args.old_str.lines().count())
+        .unwrap_or(u64::MAX)
+        .saturating_mul(replacements);
+    crate::core::edit_metering::record_loc_change(lines_added, lines_removed);
+    crate::core::savings_ledger::record_edit_event(&params.path, lines_added, lines_removed);
+
     if let Ok(mut bt) = crate::core::bounce_tracker::global().lock() {
         bt.record_edit(&params.path);
     }
@@ -621,6 +647,13 @@ fn handle_create(file_path: &str, content: &str, params: &EditParams) -> (String
     if let Err(e) = write_atomic_bytes_with_permissions(path, content.as_bytes(), perms) {
         return (e, CacheEffect::None);
     }
+
+    let lines_added = u64::try_from(content.lines().count()).unwrap_or(u64::MAX);
+    let lines_removed = preimage.as_ref().map_or(0, |pre| {
+        u64::try_from(pre.text.lines().count()).unwrap_or(u64::MAX)
+    });
+    crate::core::edit_metering::record_loc_change(lines_added, lines_removed);
+    crate::core::savings_ledger::record_edit_event(file_path, lines_added, lines_removed);
 
     let lines = content.lines().count();
     let tokens = count_tokens(content);

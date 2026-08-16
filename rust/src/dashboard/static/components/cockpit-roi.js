@@ -629,7 +629,7 @@ class CockpitRoi extends HTMLElement {
       metrics.output_reduction_pct != null ? metrics.output_reduction_pct : output.reduction_pct
     ) || 0)));
     var locReduced = Math.round(Number(
-      metrics.net_loc_saved != null ? metrics.net_loc_saved : loc.net_saved
+      metrics.net_loc_saved != null ? metrics.net_loc_saved : (loc.net_reduced != null ? loc.net_reduced : loc.net_saved)
     ) || 0);
     var countedDecisions = Number(decisions.stdlib || 0) + Number(decisions.native || 0) +
       Number(decisions.reuse || 0) + Number(decisions.yagni || 0) +

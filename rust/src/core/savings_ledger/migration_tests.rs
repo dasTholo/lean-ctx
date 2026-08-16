@@ -92,7 +92,8 @@ fn linked(mut ev: SavingsEvent, prev: &str, version: u8) -> SavingsEvent {
         1 => ev.canonical_content_legacy(),
         3 => ev.canonical_content_v3(),
         4 => ev.canonical_content_v4(),
-        5 => ev.canonical_content(),
+        5 => ev.canonical_content_v5(),
+        6 => ev.canonical_content(),
         _ => unreachable!("test fixture version"),
     };
     ev.entry_hash = compute_hash(prev, &content);

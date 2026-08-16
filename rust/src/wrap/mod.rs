@@ -136,6 +136,16 @@ fn run_wrap_for_agent(agent_key: &str) {
     );
     hooks::install_agent_hook_with_mode(agent_key, true, mode);
 
+    // Re-render managed rule files on every wrap so [solution] changes add or
+    // remove the canonical solution block instead of leaving stale guidance.
+    for status in crate::rules_inject::collect_rules_status(&home) {
+        snap.record_file(std::path::Path::new(&status.path));
+    }
+    let rules = crate::rules_inject::inject_rules_for_agent(&home, agent_key);
+    for error in rules.errors {
+        eprintln!("  Rules: {error}");
+    }
+
     // --- Step 5: Daemon ---
     eprintln!("  Starting daemon...");
     if !crate::daemon::is_daemon_running() {

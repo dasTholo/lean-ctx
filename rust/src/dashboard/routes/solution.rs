@@ -3,11 +3,11 @@ use serde::Serialize;
 pub(super) fn handle(
     path: &str,
     _query_str: &str,
-    _method: &str,
+    method: &str,
     _body: &str,
 ) -> Option<(&'static str, &'static str, String)> {
-    match path {
-        "/api/solution" => Some(solution_response()),
+    match (path, method) {
+        ("/api/solution", "GET") => Some(solution_response()),
         _ => None,
     }
 }
@@ -35,6 +35,7 @@ struct LocMetrics {
     added: u64,
     removed: u64,
     net_reduced: i64,
+    reduction_pct: u8,
 }
 
 #[derive(Serialize)]
@@ -44,20 +45,19 @@ struct DecisionMetrics {
     native: u64,
     reuse: u64,
     yagni: u64,
-    one_line: u64,
     debt_open: u64,
 }
 
 #[derive(Serialize)]
 struct TrendDay {
     date: String,
+    loc_reduced: i64,
     decisions: u64,
-    loc_net_saved: i64,
 }
 
 #[derive(Serialize)]
 struct PatternMetric {
-    kind: String,
+    pattern: String,
     count: u64,
 }
 
@@ -69,7 +69,7 @@ fn solution_response() -> (&'static str, &'static str, String) {
         .iter()
         .filter(|(_, count)| **count > 0)
         .map(|(kind, count)| PatternMetric {
-            kind: kind.clone(),
+            pattern: kind.clone(),
             count: *count,
         })
         .collect();
@@ -77,9 +77,18 @@ fn solution_response() -> (&'static str, &'static str, String) {
         right
             .count
             .cmp(&left.count)
-            .then_with(|| left.kind.cmp(&right.kind))
+            .then_with(|| left.pattern.cmp(&right.pattern))
     });
     top_patterns.truncate(5);
+
+    let loc_reduction_pct = if snapshot.loc_removed == 0 {
+        0
+    } else {
+        ((snapshot.loc_net_saved.max(0) as u64)
+            .saturating_mul(100)
+            .saturating_div(snapshot.loc_removed)
+            .min(100)) as u8
+    };
 
     let response = SolutionApiResponse {
         enabled: config.solution.enabled,
@@ -93,6 +102,7 @@ fn solution_response() -> (&'static str, &'static str, String) {
             added: snapshot.loc_added,
             removed: snapshot.loc_removed,
             net_reduced: snapshot.loc_net_saved,
+            reduction_pct: loc_reduction_pct,
         },
         decisions: DecisionMetrics {
             total: snapshot.decisions_total,
@@ -116,11 +126,6 @@ fn solution_response() -> (&'static str, &'static str, String) {
                 .get("yagni")
                 .copied()
                 .unwrap_or_default(),
-            one_line: snapshot
-                .decisions_by_kind
-                .get("oneline")
-                .copied()
-                .unwrap_or_default(),
             debt_open: snapshot
                 .decisions_by_kind
                 .get("debt")
@@ -131,8 +136,8 @@ fn solution_response() -> (&'static str, &'static str, String) {
             .iter()
             .map(|(date, decisions, loc)| TrendDay {
                 date: date.clone(),
+                loc_reduced: *loc,
                 decisions: *decisions,
-                loc_net_saved: *loc,
             })
             .collect(),
         top_patterns,

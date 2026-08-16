@@ -374,7 +374,7 @@ pub mod work_graph;
 pub(crate) mod agent_registry;
 pub mod compliance;
 pub mod compliance_report;
-pub(crate) mod edit_metering;
+pub mod edit_metering;
 pub(crate) mod edit_quality;
 pub(crate) mod efficacy;
 pub mod evidence_bundle;

@@ -331,6 +331,22 @@ mod archetype_tests {
     }
 
     #[test]
+    fn solution_categories_infer_decision_archetype() {
+        for category in [
+            "solution-decision",
+            "solution_decision",
+            "solution-debt",
+            "solution_debt",
+        ] {
+            assert_eq!(
+                KnowledgeArchetype::infer_from_category(category),
+                KnowledgeArchetype::Decision,
+                "category {category}"
+            );
+        }
+    }
+
+    #[test]
     fn salience_bonus_ordering() {
         assert!(
             KnowledgeArchetype::Architecture.salience_bonus()

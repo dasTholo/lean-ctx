@@ -94,9 +94,8 @@ impl Default for AdaptiveRecommendation {
 pub fn recommend_intensity(
     _config: &AdaptiveConfig,
     _decisions: &crate::core::solution_tracker::SolutionSnapshot,
-) -> Option<AdaptiveRecommendation> {
-    enterprise_license_warning("adaptive_recommendations");
-    None
+) -> Result<AdaptiveRecommendation, String> {
+    Err(enterprise_license_error("adaptive_intensity"))
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -117,9 +116,8 @@ impl Default for SolutionFingerprint {
 }
 
 // COMMERCIAL: implementation in enterprise/intelligence-layer branch
-pub fn predict_rung(_task_description: &str) -> SolutionFingerprint {
-    enterprise_license_warning("solution_fingerprint");
-    SolutionFingerprint::default()
+pub fn predict_rung(_task_description: &str) -> Result<SolutionFingerprint, String> {
+    Err(enterprise_license_error("solution_fingerprints"))
 }
 
 // COMMERCIAL: implementation in enterprise/intelligence-layer branch
@@ -174,15 +172,18 @@ mod tests {
             output_reduction_pct: 0,
         };
 
-        assert!(recommend_intensity(&config, &decisions).is_none());
+        assert_eq!(
+            recommend_intensity(&config, &decisions).unwrap_err(),
+            enterprise_license_error("adaptive_intensity")
+        );
     }
 
     #[test]
     fn fingerprint_is_gated_in_oss() {
-        let fingerprint = predict_rung("Refactor the request pipeline");
-
-        assert_eq!(fingerprint.predicted_rung, "");
-        assert_eq!(fingerprint.confidence, 0.0);
+        assert_eq!(
+            predict_rung("Refactor the request pipeline").unwrap_err(),
+            enterprise_license_error("solution_fingerprints")
+        );
     }
 
     #[test]

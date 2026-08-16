@@ -71,6 +71,22 @@ pub const SOLUTION_BLOCK_START: &str = "<!-- lean-ctx-solution -->";
 /// Closing marker of the solution-intelligence block.
 pub const SOLUTION_BLOCK_END: &str = "<!-- /lean-ctx-solution -->";
 
+/// The solution-efficiency guidance shared by rule-file generators that do not
+/// use [`render`] directly.
+pub fn enabled_solution_rules_block() -> String {
+    if !crate::core::config::Config::load().solution.enabled {
+        return String::new();
+    }
+
+    format!(
+        "{SOLUTION_BLOCK_START}\n\
+SOLUTION EFFICIENCY: stop at first level that applies:\n\
+skip (YAGNI) → reuse codebase → stdlib → native platform → installed dep → one-line → minimum code.\n\
+Never skip: validation, security, error handling.\n\
+{SOLUTION_BLOCK_END}"
+    )
+}
+
 /// Current rules version (monotonically increasing integer).  Embedded as
 /// `<!-- version: {RULES_VERSION} -->` right after `START_MARK` so the
 /// injection layer can parse it and decide whether a file is up-to-date.

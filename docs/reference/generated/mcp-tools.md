@@ -404,11 +404,9 @@ Parameters: `action`*, `alias`, `max_results`, `mode`, `path`, `query`, `roots`
 
 ## `ctx_optimize`
 
-Solution Intelligence — review code for optimizations, record decisions, get session report.
-Actions: ladder (show optimization ladder), decide (record a decision), report (session summary),
-review (analyze a file), suggest (simplify a snippet), fingerprint (predict solution rung), policy-check (validate team policy).
+Review code for over-engineering and propose simplifications.
 
-Parameters: `action`*, `category`, `decision`, `path`
+Parameters: `action`*, `category`, `decision`, `format`, `path`, `scope`, `symbol`
 
 ## `ctx_outline`
 
