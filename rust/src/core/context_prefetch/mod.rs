@@ -83,3 +83,11 @@ pub fn build_prefetch_plan(
         .collect();
     PrefetchPlan { files }
 }
+
+/// Records a file read for trajectory learning (OSS: no-op).
+pub fn record_file_read(_path: &str) {}
+
+/// Checks if a path was predicted by the prefetch engine (OSS: always false).
+pub fn is_prefetch_prediction(_path: &str) -> bool {
+    false
+}

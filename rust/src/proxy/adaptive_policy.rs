@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Compression tuning knobs applied per-request based on task classification.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct CompressionPolicy {
     pub compress_tool_output: bool,
     pub log_compression_level: u8,
@@ -42,4 +42,13 @@ pub fn record_value_gate_outcome(
     _accepted: bool,
     _savings_pct: f64,
 ) {
+}
+
+/// Recorded policy outcome for feedback learning.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct PolicyOutcome {
+    pub task_class: String,
+    pub policy_used: CompressionPolicy,
+    pub session_success: Option<bool>,
+    pub savings_pct: f64,
 }
