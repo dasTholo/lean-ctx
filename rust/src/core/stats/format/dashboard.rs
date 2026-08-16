@@ -658,6 +658,20 @@ fn append_gain_footer(out: &mut Vec<String>, t: &Theme, store: &StatsStore) {
     }
 
     {
+        let snap = crate::core::solution_tracker::snapshot();
+        if snap.decisions_total > 0 {
+            let a = t.accent.fg();
+            let m = t.muted.fg();
+            out.push(format!("    {a}{bold}⚡ Solution Intelligence{rst}"));
+            out.push(format!(
+                "    {m}   Decisions: {}  |  LOC saved: {}  |  Output reduction: {}%{rst}",
+                snap.decisions_total, snap.loc_net_saved, snap.output_reduction_pct,
+            ));
+            out.push(String::new());
+        }
+    }
+
+    {
         let project_root = std::env::current_dir()
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default();

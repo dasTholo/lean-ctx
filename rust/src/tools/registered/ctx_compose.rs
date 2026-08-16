@@ -360,6 +360,19 @@ impl McpTool for CtxComposeTool {
             || text.clone(),
             |profile| apply_task_aware_filter(&text, &task, &profile, task_aware),
         );
+        let text = {
+            let cfg = crate::core::config::Config::load();
+            if cfg.solution.enabled && cfg.solution.inject_in_compose {
+                let hints = crate::core::solution_rules::solution_compose_hints(true, &[]);
+                if hints.is_empty() {
+                    text
+                } else {
+                    format!("{text}\n\n{hints}")
+                }
+            } else {
+                text
+            }
+        };
         let sent = crate::core::tokens::count_tokens(&text);
 
         let raw_tokens = estimate_raw_input_tokens(&text, &path);

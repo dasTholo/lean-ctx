@@ -127,6 +127,9 @@ impl KnowledgeArchetype {
             "workflow" | "workflows" => Self::Workflow,
             "preference" | "preferences" | "pref" => Self::Preference,
             "observation" | "finding" | "findings" => Self::Observation,
+            "solution-decision" | "solution_decision" | "solution-debt" | "solution_debt" => {
+                Self::Decision
+            }
             _ => Self::Fact,
         }
     }

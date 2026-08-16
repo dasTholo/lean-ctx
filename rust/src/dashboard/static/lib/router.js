@@ -52,6 +52,7 @@ const COCKPIT_AREAS = [
       { tab: 'value-gate', view: 'value-gate', label: 'ValueGate' },
       { tab: 'replay', view: 'replay', label: 'Time Machine' },
       { tab: 'trends', view: 'learning', label: 'Trends' },
+      { tab: 'solution', view: 'solution', label: 'Solution' },
       { tab: 'leaderboard', view: 'leaderboard', label: 'Leaderboard' },
       { tab: 'telemetry', view: 'telemetry', label: 'Telemetry' },
     ],
@@ -91,6 +92,7 @@ const ROUTE_ALIASES = {
 const KNOWN_ROUTES = [
   'overview',
   'roi',
+  'solution',
   'value-gate',
   'replay',
   'learning',
@@ -118,6 +120,7 @@ const KNOWN_ROUTES = [
 const ROUTE_LABELS = {
   overview: 'Home',
   roi: 'ROI & Plan',
+  solution: 'Solution Intelligence',
   'value-gate': 'ValueGate',
   replay: 'Time Machine',
   learning: 'Trends',
@@ -146,6 +149,7 @@ const ROUTE_LABELS = {
 const ROUTE_DESCRIPTIONS = {
   overview: 'Status, receipt and top savings — the 5-second answer.',
   roi: 'Signed, verifiable savings plus your plan and entitlements.',
+  solution: 'Output optimization metrics — LOC reduction, decision tracking, efficiency ladder.',
   'value-gate': 'Task outcomes, cost per accepted outcome, and quality.',
   replay: 'Rewind to any snapshot — see what the model saw, why, and the token-ROI.',
   learning: 'How your savings and efficiency change over time.',
@@ -367,6 +371,7 @@ function initRouter() {
   var viewElementMap = {
     overview: 'overviewView',
     roi: 'roiView',
+    solution: 'solutionView',
     'value-gate': 'valueGateView',
     replay: 'replayView',
     leaderboard: 'leaderboardView',
