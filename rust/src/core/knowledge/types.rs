@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use std::collections::BTreeMap;
+use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
@@ -172,6 +173,47 @@ pub enum SolutionDecisionKind {
     YagniSkip,
     OneLineSolution,
     DebtAccepted,
+}
+
+impl SolutionDecisionKind {
+    /// Convert a supported Solution Intelligence category into its decision kind.
+    pub fn from_category(category: &str) -> Option<Self> {
+        match category.trim().to_ascii_lowercase().as_str() {
+            "stdlib" | "standard-library" | "standard_library" => Some(Self::StdlibChosen),
+            "native" | "platform" => Some(Self::NativeUsed),
+            "reuse" => Some(Self::Reuse),
+            "yagni" => Some(Self::YagniSkip),
+            "one-line" | "one_line" | "oneline" => Some(Self::OneLineSolution),
+            "debt" | "solution-debt" | "solution_debt" => Some(Self::DebtAccepted),
+            _ => None,
+        }
+    }
+
+    /// Stable key used by the persisted Solution Intelligence tracker.
+    pub const fn tracker_key(&self) -> &'static str {
+        match self {
+            Self::StdlibChosen => "stdlib",
+            Self::NativeUsed => "native",
+            Self::Reuse => "reuse",
+            Self::YagniSkip => "yagni",
+            Self::OneLineSolution => "oneline",
+            Self::DebtAccepted => "debt",
+        }
+    }
+}
+
+impl fmt::Display for SolutionDecisionKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let label = match self {
+            Self::StdlibChosen => "stdlib chosen",
+            Self::NativeUsed => "native used",
+            Self::Reuse => "reuse",
+            Self::YagniSkip => "YAGNI skip",
+            Self::OneLineSolution => "one-line solution",
+            Self::DebtAccepted => "debt accepted",
+        };
+        f.write_str(label)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
