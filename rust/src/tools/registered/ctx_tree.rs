@@ -108,6 +108,17 @@ fn cached_or_walk(
     show_hidden: bool,
     respect_gitignore: bool,
 ) -> (String, usize) {
+    // GH #1461: The sandboxed LaunchAgent daemon cannot stat paths under
+    // ~/Documents, ~/Desktop, ~/Downloads (TCC). Bail early so the caller
+    // can fall through to a non-sandboxed process (CLI local or MCP server).
+    if crate::core::pathutil::process_is_tcc_standalone()
+        && crate::core::pathutil::is_under_tcc_protected_dir(std::path::Path::new(path))
+    {
+        return (
+            format!("ERROR:TCC_RESTRICTED: daemon cannot access {path} (sandboxed)"),
+            0,
+        );
+    }
     let builder = DirectoryWalkKey {
         path: crate::core::pathutil::safe_canonicalize_or_self(std::path::Path::new(path))
             .to_string_lossy()

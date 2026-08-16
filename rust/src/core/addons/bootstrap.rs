@@ -442,7 +442,22 @@ fn binary_on_path(bin: &str) -> bool {
     let Some(path) = std::env::var_os("PATH") else {
         return false;
     };
-    std::env::split_paths(&path).any(|dir| is_executable(&dir.join(bin)))
+    std::env::split_paths(&path).any(|dir| {
+        if is_executable(&dir.join(bin)) {
+            return true;
+        }
+        // GH #1449: On Windows, binaries have `.exe`/`.cmd`/`.bat` extensions
+        // that are implicit in PATH resolution but not in our manual join.
+        if cfg!(windows) {
+            for ext in &[".exe", ".cmd", ".bat"] {
+                let with_ext = dir.join(format!("{bin}{ext}"));
+                if is_executable(&with_ext) {
+                    return true;
+                }
+            }
+        }
+        false
+    })
 }
 
 #[cfg(unix)]

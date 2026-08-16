@@ -15,6 +15,9 @@ use crate::core::signatures;
 #[cfg(unix)]
 fn is_failed_daemon_result(output: &str) -> bool {
     let first_line = output.lines().next().unwrap_or("");
+    if first_line.starts_with("ERROR:TCC_RESTRICTED:") {
+        return true;
+    }
     if first_line.starts_with("Cannot read file:") || first_line.starts_with("File is empty:") {
         return true;
     }
@@ -150,14 +153,16 @@ pub fn cmd_read(args: &[String]) {
     #[cfg(unix)]
     {
         #[cfg(unix)]
-        if let Some(out) = crate::daemon_client::try_daemon_tool_call_blocking_text(
-            "ctx_read",
-            Some(serde_json::json!({
-                "path": path,
-                "mode": mode,
-                "fresh": force_fresh,
-            })),
-        ) {
+        if !crate::core::pathutil::is_under_tcc_protected_dir(std::path::Path::new(path))
+            && let Some(out) = crate::daemon_client::try_daemon_tool_call_blocking_text(
+                "ctx_read",
+                Some(serde_json::json!({
+                    "path": path,
+                    "mode": mode,
+                    "fresh": force_fresh,
+                })),
+            )
+        {
             let filtered = super::common::filter_daemon_output(&out);
             if !filtered.trim().is_empty() && !is_failed_daemon_result(&filtered) {
                 println!("{filtered}");
@@ -523,13 +528,15 @@ pub fn cmd_grep(args: &[String]) {
     #[cfg(unix)]
     {
         #[cfg(unix)]
-        if let Some(out) = crate::daemon_client::try_daemon_tool_call_blocking_text(
-            "ctx_search",
-            Some(serde_json::json!({
-                "pattern": pattern,
-                "path": path,
-            })),
-        ) {
+        if !crate::core::pathutil::is_under_tcc_protected_dir(std::path::Path::new(path))
+            && let Some(out) = crate::daemon_client::try_daemon_tool_call_blocking_text(
+                "ctx_search",
+                Some(serde_json::json!({
+                    "pattern": pattern,
+                    "path": path,
+                })),
+            )
+        {
             let out = super::common::filter_daemon_output(&out);
             println!("{out}");
             if out.trim_start().starts_with("0 matches") {
@@ -585,13 +592,15 @@ pub fn cmd_glob(args: &[String]) {
     let path = abs_path.as_str();
 
     #[cfg(unix)]
-    if let Some(out) = crate::daemon_client::try_daemon_tool_call_blocking_text(
-        "ctx_glob",
-        Some(serde_json::json!({
-            "pattern": pattern,
-            "path": path,
-        })),
-    ) {
+    if !crate::core::pathutil::is_under_tcc_protected_dir(std::path::Path::new(path))
+        && let Some(out) = crate::daemon_client::try_daemon_tool_call_blocking_text(
+            "ctx_glob",
+            Some(serde_json::json!({
+                "pattern": pattern,
+                "path": path,
+            })),
+        )
+    {
         let out = super::common::filter_daemon_output(&out);
         println!("{out}");
         return;
@@ -701,17 +710,21 @@ pub fn cmd_ls(args: &[String]) {
     #[cfg(unix)]
     {
         #[cfg(unix)]
-        if let Some(out) = crate::daemon_client::try_daemon_tool_call_blocking_text(
-            "ctx_tree",
-            Some(serde_json::json!({
-                "path": path,
-                "depth": depth,
-                "show_hidden": show_hidden,
-                "respect_gitignore": respect_gitignore,
-            })),
-        ) {
-            println!("{}", super::common::filter_daemon_output(&out));
-            return;
+        if !crate::core::pathutil::is_under_tcc_protected_dir(std::path::Path::new(path))
+            && let Some(out) = crate::daemon_client::try_daemon_tool_call_blocking_text(
+                "ctx_tree",
+                Some(serde_json::json!({
+                    "path": path,
+                    "depth": depth,
+                    "show_hidden": show_hidden,
+                    "respect_gitignore": respect_gitignore,
+                })),
+            )
+        {
+            if !out.starts_with("ERROR:TCC_RESTRICTED:") {
+                println!("{}", super::common::filter_daemon_output(&out));
+                return;
+            }
         }
     }
     super::common::daemon_fallback_hint();
@@ -773,6 +786,13 @@ fn main() {}
             "file.rs 0L
 [no extractable structure for .rs]
 "
+        ));
+    }
+
+    #[test]
+    fn detects_tcc_restricted_marker() {
+        assert!(is_failed_daemon_result(
+            "ERROR:TCC_RESTRICTED: daemon cannot access /Users/me/Documents/proj (sandboxed)"
         ));
     }
 }
