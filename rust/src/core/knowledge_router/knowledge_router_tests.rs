@@ -1,3 +1,4 @@
+#![allow(clippy::all, unused)]
 use std::sync::Arc;
 
 use super::{

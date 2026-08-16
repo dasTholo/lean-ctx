@@ -203,10 +203,10 @@ pub async fn forward_request(
     // Thompson sampling only selects configured model aliases. The existing
     // rule router still resolves the alias to a provider and preserves all
     // shape, credential, and enterprise-policy checks below.
-    let thompson_task_class = pre_optimize_result
+    let _thompson_task_class = pre_optimize_result
         .as_ref()
         .map_or_else(|| "unknown".to_owned(), |result| result.task_class.clone());
-    let thompson_model: Option<String> = if route_upstreams
+    let _thompson_model: Option<String> = if route_upstreams
         .as_ref()
         .is_some_and(|upstreams| upstreams.providers.len() > 1)
     {
@@ -221,7 +221,7 @@ pub async fn forward_request(
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
                     router
-                        .select_model(&thompson_task_class, &available_models)
+                        .select_model(&_thompson_task_class, &available_models)
                         .to_owned()
                 };
                 serde_json::from_slice::<serde_json::Value>(&body_bytes)
@@ -409,6 +409,7 @@ pub async fn forward_request(
     let parsed = prepared.parsed;
     let intent_classification =
         classify_and_store_proxy_intent(&mut parts, parsed.as_ref(), lineage.as_ref(), &body_bytes);
+    #[cfg(feature = "enterprise")]
     if let Some(request) = parsed.as_ref() {
         let session_id = lineage
             .as_ref()
@@ -678,14 +679,14 @@ pub async fn forward_request(
     )
     .await?;
     #[cfg(feature = "enterprise")]
-    if let Some(model) = thompson_model.as_deref() {
+    if let Some(model) = _thompson_model.as_deref() {
         let router = crate::core::model_router::global_model_router();
         let mut router = router
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         router.record_outcome(
             model,
-            &thompson_task_class,
+            &_thompson_task_class,
             response.status().is_success(),
             0.0,
         );

@@ -121,14 +121,14 @@ class CockpitLearning extends HTMLElement {
 
     var F2 = remFmt();
     var fmt2 = F2.fmt || function (n) { return String(n); };
-    var daily2 = data.daily || [];
+    var daily2 = (this._data || {}).daily || [];
     var todayD = daily2.length > 0 ? daily2[daily2.length - 1] : null;
     var todayIn = todayD ? Number(todayD.input_tokens || todayD.total_input || 0) : 0;
     var todayOut = todayD ? Number(todayD.output_tokens || todayD.total_output || 0) : 0;
     var todaySaved = todayIn - todayOut;
     var todayCalls = todayD ? Number(todayD.count || todayD.commands || todayD.calls || 0) : 0;
-    var totalIn = data.total_input_tokens || 0;
-    var totalSaved = totalIn - (data.total_output_tokens || 0);
+    var totalIn = (this._data || {}).total_input_tokens || 0;
+    var totalSaved = totalIn - ((this._data || {}).total_output_tokens || 0);
 
     this.innerHTML =
       '<div class="row r3">' +
@@ -144,7 +144,7 @@ class CockpitLearning extends HTMLElement {
       '<div class="chart-footer"><span>Hover to explore daily rates</span>' +
       '<span>Baseline ÷ Delivered</span></div></div>' +
       '<div class="card card-interactive"><div class="card-header"><h3>Command Volume' + tip('command_volume') + '</h3>' +
-      '<span class="badge badge-accent" style="font-size:11px">' + fmt2(data.total_commands || 0) + ' total</span></div>' +
+      '<span class="badge badge-accent" style="font-size:11px">' + fmt2((this._data || {}).total_commands || 0) + ' total</span></div>' +
       '<canvas id="ckle-volume" height="200"></canvas>' +
       '<div class="chart-footer"><span>Today: ' + todayCalls.toLocaleString() + ' calls</span>' +
       '<span>Hover for daily breakdown</span></div></div>' +
@@ -330,7 +330,7 @@ class CockpitLearning extends HTMLElement {
     var data = this._data;
     if (!data) return;
 
-    var daily = data.daily || [];
+    var daily = (this._data || {}).daily || [];
     var labels = [];
     var savings = [];
     var compression = [];

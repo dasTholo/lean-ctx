@@ -172,7 +172,10 @@ mod tests {
 
         assert!(parent.parent_task_id.is_none());
         assert_eq!(
-            child.parent_task_id.as_ref().map(|id| id.as_str()),
+            child
+                .parent_task_id
+                .as_ref()
+                .map(lean_ctx_protocol::TaskId::as_str),
             Some(parent.task_id.as_str())
         );
         assert_eq!(

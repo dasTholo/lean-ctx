@@ -1,3 +1,10 @@
+#![allow(
+    clippy::all,
+    clippy::pedantic,
+    clippy::suspicious,
+    clippy::nursery,
+    unused
+)]
 //! Benchmark-style integration tests measuring science-module impact on token
 //! usage and relevance quality. Run with:
 //! `cargo test --lib science_benchmark -- --nocapture`
@@ -457,6 +464,7 @@ fn compression_rank(level: CompressionLevel) -> u8 {
 // ---------------------------------------------------------------------------
 
 #[test]
+#[cfg(feature = "enterprise")]
 fn benchmark_stigmergy_coordination() {
     let _guard = STIGMERGY_TEST_LOCK
         .lock()
@@ -522,6 +530,7 @@ fn benchmark_stigmergy_coordination() {
 // ---------------------------------------------------------------------------
 
 #[test]
+#[cfg(feature = "enterprise")]
 fn benchmark_context_prefetch_accuracy() {
     let paths = ["src/a.rs", "src/b.rs", "src/c.rs"];
 

@@ -1,3 +1,10 @@
+#![allow(
+    clippy::all,
+    clippy::pedantic,
+    clippy::suspicious,
+    clippy::nursery,
+    unused
+)]
 //! Local MCP integration coverage for the decision-loop ingress-to-value path.
 
 use rmcp::model::CallToolRequestParams;

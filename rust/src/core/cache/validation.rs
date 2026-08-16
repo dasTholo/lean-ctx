@@ -226,26 +226,27 @@ pub fn is_cache_entry_stale_verified(
     cached_mtime: Option<SystemTime>,
     cached_hash: &str,
 ) -> bool {
-    if is_cache_entry_stale(path, cached_mtime) {
-        return true;
-    }
-    if cached_hash.is_empty() || !cache_verify_enabled() {
+    let mtime_stale = is_cache_entry_stale(path, cached_mtime);
+
+    if !mtime_stale && (cached_hash.is_empty() || !cache_verify_enabled()) {
         return false;
     }
+
+    if cached_hash.is_empty() {
+        return mtime_stale;
+    }
+
     let Ok(meta) = std::fs::metadata(path) else {
-        // Can't stat → never serve a stub on top of it.
         return true;
     };
     if meta.len() > VERIFY_HASH_CAP_BYTES {
-        return false;
+        return mtime_stale;
     }
     match std::fs::read(path) {
-        // Hash the same view of the bytes that `store()` hashed (lossy UTF-8).
         Ok(bytes) => compute_md5(&String::from_utf8_lossy(&bytes)) != cached_hash,
         Err(_) => true,
     }
 }
-
 pub(super) fn compute_md5(content: &str) -> String {
     let mut hasher = Md5::new();
     hasher.update(content.as_bytes());
@@ -310,5 +311,194 @@ mod tests {
         assert!(!ReuseOutcome::FreshBypass.is_ctx_read_eligible());
         assert!(!ReuseOutcome::PolicyBypass.is_ctx_read_eligible());
         assert!(ReuseOutcome::Stale.is_ctx_read_eligible());
+    }
+
+    #[test]
+    fn stale_mtime_but_same_hash_is_not_stale() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("poll.txt");
+        std::fs::write(&p, "terminal output line 1").unwrap();
+
+        let mtime1 = std::fs::metadata(&p).unwrap().modified().unwrap();
+        let hash = super::compute_md5("terminal output line 1");
+
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        {
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .open(&p)
+                .unwrap();
+            f.write_all(b"terminal output line 1").unwrap();
+        }
+        let mtime2 = std::fs::metadata(&p).unwrap().modified().unwrap();
+        assert_ne!(mtime1, mtime2, "mtime must differ after rewrite");
+
+        let stale = super::is_cache_entry_stale_verified(p.to_str().unwrap(), Some(mtime1), &hash);
+        assert!(
+            !stale,
+            "same content with different mtime must NOT be stale"
+        );
+    }
+
+    #[test]
+    fn stale_mtime_with_changed_content_is_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("changed.txt");
+        std::fs::write(&p, "version 1").unwrap();
+
+        let mtime1 = std::fs::metadata(&p).unwrap().modified().unwrap();
+        let hash = super::compute_md5("version 1");
+
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        std::fs::write(&p, "version 2 with new content").unwrap();
+
+        let stale = super::is_cache_entry_stale_verified(p.to_str().unwrap(), Some(mtime1), &hash);
+        assert!(stale, "changed content must be stale");
+    }
+
+    #[test]
+    fn same_mtime_same_hash_is_not_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("stable.txt");
+        std::fs::write(&p, "stable content").unwrap();
+
+        let mtime = std::fs::metadata(&p).unwrap().modified().unwrap();
+        let hash = super::compute_md5("stable content");
+
+        let stale = super::is_cache_entry_stale_verified(p.to_str().unwrap(), Some(mtime), &hash);
+        assert!(!stale, "unchanged file must not be stale");
+    }
+
+    #[test]
+    fn empty_hash_falls_back_to_mtime_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("nohash.txt");
+        std::fs::write(&p, "content").unwrap();
+
+        let mtime = std::fs::metadata(&p).unwrap().modified().unwrap();
+        assert!(
+            !super::is_cache_entry_stale_verified(p.to_str().unwrap(), Some(mtime), ""),
+            "same mtime + empty hash = not stale"
+        );
+
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        std::fs::write(&p, "content").unwrap();
+        assert!(
+            super::is_cache_entry_stale_verified(p.to_str().unwrap(), Some(mtime), ""),
+            "different mtime + empty hash = stale (no hash to rescue)"
+        );
+    }
+
+    #[test]
+    fn large_file_uses_mtime_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("big.txt");
+        let big = "x".repeat(9 * 1024 * 1024);
+        std::fs::write(&p, &big).unwrap();
+
+        let mtime = std::fs::metadata(&p).unwrap().modified().unwrap();
+        let hash = super::compute_md5(&big);
+
+        assert!(
+            !super::is_cache_entry_stale_verified(p.to_str().unwrap(), Some(mtime), &hash),
+            "same mtime on large file = not stale"
+        );
+
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        std::fs::write(&p, &big).unwrap();
+        assert!(
+            super::is_cache_entry_stale_verified(p.to_str().unwrap(), Some(mtime), &hash),
+            "large files skip hash check even if content matches"
+        );
+    }
+
+    #[test]
+    fn deleted_file_is_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("ephemeral.txt");
+        std::fs::write(&p, "temp").unwrap();
+
+        let mtime = std::fs::metadata(&p).unwrap().modified().unwrap();
+        let hash = super::compute_md5("temp");
+
+        std::fs::remove_file(&p).unwrap();
+
+        assert!(
+            super::is_cache_entry_stale_verified(p.to_str().unwrap(), Some(mtime), &hash),
+            "deleted file must be stale"
+        );
+    }
+
+    #[test]
+    fn empty_file_hash_matches_correctly() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("empty.txt");
+        std::fs::write(&p, "").unwrap();
+
+        let mtime = std::fs::metadata(&p).unwrap().modified().unwrap();
+        let hash = super::compute_md5("");
+
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        std::fs::write(&p, "").unwrap();
+
+        assert!(
+            !super::is_cache_entry_stale_verified(p.to_str().unwrap(), Some(mtime), &hash),
+            "empty file rewritten with same content must not be stale"
+        );
+    }
+
+    #[test]
+    fn rapid_touch_cycles_stay_cached() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("rapid.txt");
+        let content = "rapid polling content that stays stable";
+        std::fs::write(&p, content).unwrap();
+
+        let mtime_initial = std::fs::metadata(&p).unwrap().modified().unwrap();
+        let hash = super::compute_md5(content);
+
+        for _ in 0..10 {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            std::fs::write(&p, content).unwrap();
+
+            let stale = super::is_cache_entry_stale_verified(
+                p.to_str().unwrap(),
+                Some(mtime_initial),
+                &hash,
+            );
+            assert!(
+                !stale,
+                "repeated rewrites of same content must never be stale"
+            );
+        }
+    }
+
+    #[test]
+    fn binary_content_hash_works() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("binary.bin");
+        let data: Vec<u8> = (0..=255).collect();
+        std::fs::write(&p, &data).unwrap();
+
+        let mtime = std::fs::metadata(&p).unwrap().modified().unwrap();
+        let hash = super::compute_md5(&String::from_utf8_lossy(&data));
+
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        std::fs::write(&p, &data).unwrap();
+
+        assert!(
+            !super::is_cache_entry_stale_verified(p.to_str().unwrap(), Some(mtime), &hash),
+            "binary content with same bytes must not be stale"
+        );
+
+        let mut changed = data.clone();
+        changed[100] = 0;
+        std::fs::write(&p, &changed).unwrap();
+        assert!(
+            super::is_cache_entry_stale_verified(p.to_str().unwrap(), Some(mtime), &hash),
+            "binary content with 1 byte changed must be stale"
+        );
     }
 }
