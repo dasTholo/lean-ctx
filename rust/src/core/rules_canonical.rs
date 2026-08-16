@@ -65,6 +65,12 @@ pub const COMPRESSION_BLOCK_START: &str = "<!-- lean-ctx-compression -->";
 /// [`COMPRESSION_BLOCK_START`]).
 pub const COMPRESSION_BLOCK_END: &str = "<!-- /lean-ctx-compression -->";
 
+/// Opening marker of the solution-intelligence block.
+pub const SOLUTION_BLOCK_START: &str = "<!-- lean-ctx-solution -->";
+
+/// Closing marker of the solution-intelligence block.
+pub const SOLUTION_BLOCK_END: &str = "<!-- /lean-ctx-solution -->";
+
 /// Current rules version (monotonically increasing integer).  Embedded as
 /// `<!-- version: {RULES_VERSION} -->` right after `START_MARK` so the
 /// injection layer can parse it and decide whether a file is up-to-date.
@@ -475,6 +481,27 @@ pub fn render(
             body.push_str(compression);
             body.push('\n');
             body.push_str(COMPRESSION_BLOCK_END);
+        }
+    }
+
+    // Solution Intelligence block: inject efficiency ladder when enabled
+    {
+        let cfg = crate::core::config::Config::load();
+        if cfg.solution.enabled {
+            let ladder = cfg.solution.ladder_text();
+            if !ladder.is_empty() {
+                body.push('\n');
+                if matches!(wrapper, Wrapper::Bare) {
+                    body.push_str(ladder);
+                } else {
+                    body.push_str(SOLUTION_BLOCK_START);
+                    body.push('\n');
+                    body.push_str("SOLUTION EFFICIENCY: stop at first level that applies:\n");
+                    body.push_str("skip (YAGNI) → reuse codebase → stdlib → native platform → installed dep → one-line → minimum code.\n");
+                    body.push_str("Never skip: validation, security, error handling.\n");
+                    body.push_str(SOLUTION_BLOCK_END);
+                }
+            }
         }
     }
 

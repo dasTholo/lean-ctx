@@ -220,6 +220,127 @@ fn current_task_profile(
     let session = ctx.session.as_ref()?.try_read().ok()?;
     crate::core::decision_loop_runtime::DecisionLoopRuntime::get_or_init()
         .profile_for_session(&session.id)
+const SOLUTION_HINT_ITEM_LIMIT: usize = 20;
+const UTILITY_DIRECTORIES: &[&str] = &["utils", "helpers", "common"];
+
+/// Collect declared runtime dependencies from manifest files at the project root.
+fn project_dependencies(project_root: &Path) -> Vec<String> {
+    let mut dependencies = Vec::new();
+    cargo_dependencies(&project_root.join("Cargo.toml"), &mut dependencies);
+    package_dependencies(&project_root.join("package.json"), &mut dependencies);
+    requirements_dependencies(&project_root.join("requirements.txt"), &mut dependencies);
+    dependencies
+}
+
+fn cargo_dependencies(manifest: &Path, dependencies: &mut Vec<String>) {
+    let Ok(content) = std::fs::read_to_string(manifest) else {
+        return;
+    };
+
+    let mut in_dependencies = false;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some(section) = trimmed.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            in_dependencies = section == "dependencies"
+                || section == "workspace.dependencies"
+                || section.ends_with(".dependencies");
+            continue;
+        }
+        if !in_dependencies || trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if let Some((name, _)) = trimmed.split_once('=') {
+            add_dependency(dependencies, name.trim().trim_matches(['\"', '\'']));
+        }
+    }
+}
+
+fn package_dependencies(manifest: &Path, dependencies: &mut Vec<String>) {
+    let Ok(content) = std::fs::read_to_string(manifest) else {
+        return;
+    };
+    let Ok(package) = serde_json::from_str::<Value>(&content) else {
+        return;
+    };
+    let Some(dependencies_object) = package.get("dependencies").and_then(Value::as_object) else {
+        return;
+    };
+
+    for dependency in dependencies_object.keys() {
+        add_dependency(dependencies, dependency);
+    }
+}
+
+fn requirements_dependencies(manifest: &Path, dependencies: &mut Vec<String>) {
+    let Ok(content) = std::fs::read_to_string(manifest) else {
+        return;
+    };
+
+    for line in content.lines() {
+        let requirement = line.split('#').next().unwrap_or_default().trim();
+        if requirement.is_empty() || requirement.starts_with('-') {
+            continue;
+        }
+        let name = requirement
+            .split(|c: char| matches!(c, '=' | '<' | '>' | '!' | '~' | ';' | '[' | ' '))
+            .next()
+            .unwrap_or_default()
+            .trim();
+        add_dependency(dependencies, name);
+    }
+}
+
+fn add_dependency(dependencies: &mut Vec<String>, dependency: &str) {
+    if !dependency.is_empty() && !dependencies.iter().any(|known| known == dependency) {
+        dependencies.push(dependency.to_string());
+    }
+}
+
+/// List files in conventional utility directories rooted at the project.
+fn project_utility_files(project_root: &Path) -> Vec<String> {
+    let mut files = Vec::new();
+    for directory in UTILITY_DIRECTORIES {
+        let utility_root = project_root.join(directory);
+        if !utility_root.is_dir() {
+            continue;
+        }
+        for entry in ignore::WalkBuilder::new(&utility_root)
+            .hidden(false)
+            .follow_links(false)
+            .build()
+            .flatten()
+        {
+            if !entry
+                .file_type()
+                .is_some_and(|file_type| file_type.is_file())
+            {
+                continue;
+            }
+            if let Ok(relative_path) = entry.path().strip_prefix(project_root) {
+                files.push(relative_path.to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
+    files.sort();
+    files.dedup();
+    files
+}
+
+fn utility_hint(utility_files: &[String]) -> Option<String> {
+    (!utility_files.is_empty()).then(|| {
+        let listed = utility_files
+            .iter()
+            .take(SOLUTION_HINT_ITEM_LIMIT)
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let remaining = utility_files.len().saturating_sub(listed.len());
+        let suffix = (remaining > 0).then(|| format!(", … (+{remaining} more)"));
+        format!(
+            "Existing utilities: {}{}",
+            listed.join(", "),
+            suffix.unwrap_or_default()
+        )
+    })
 }
 
 /// Extract unique file paths from compose output and sum their raw byte sizes
@@ -363,7 +484,14 @@ impl McpTool for CtxComposeTool {
         let text = {
             let cfg = crate::core::config::Config::load();
             if cfg.solution.enabled && cfg.solution.inject_in_compose {
-                let hints = crate::core::solution_rules::solution_compose_hints(true, &[]);
+                let project_root = Path::new(&path);
+                let project_deps = project_dependencies(project_root);
+                let mut hints =
+                    crate::core::solution_rules::solution_compose_hints(true, &project_deps);
+                if let Some(utility_hint) = utility_hint(&project_utility_files(project_root)) {
+                    hints.push('\n');
+                    hints.push_str(&utility_hint);
+                }
                 if hints.is_empty() {
                     text
                 } else {
@@ -421,6 +549,37 @@ mod tests {
                 false
             ),
             output
+    use super::{project_dependencies, project_utility_files};
+
+    #[test]
+    fn detects_root_manifest_dependencies() {
+        let root = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            root.path().join("Cargo.toml"),
+            "[dependencies]\ntokio = \"1\"\nserde = { version = \"1\" }\n",
+        )
+        .expect("Cargo.toml");
+        std::fs::write(
+            root.path().join("package.json"),
+            r#"{"dependencies":{"react":"1","zod":"1"}}"#,
+        )
+        .expect("package.json");
+        std::fs::write(
+            root.path().join("requirements.txt"),
+            "requests>=2\nrich[markdown]==1\n# comment\n",
+        )
+        .expect("requirements.txt");
+
+        assert_eq!(
+            project_dependencies(root.path()),
+            vec![
+                "tokio".to_string(),
+                "serde".to_string(),
+                "react".to_string(),
+                "zod".to_string(),
+                "requests".to_string(),
+                "rich".to_string(),
+            ]
         );
     }
 
@@ -486,5 +645,26 @@ mod tests {
         assert!(filtered.contains("// TODO: keep this"));
         assert!(filtered.contains("// boilerplate"));
         assert!(!filtered.contains("filtered by triage"));
+    fn finds_files_in_root_utility_directories() {
+        let root = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(root.path().join("utils/nested")).expect("utils directory");
+        std::fs::create_dir_all(root.path().join("helpers")).expect("helpers directory");
+        std::fs::create_dir_all(root.path().join("common")).expect("common directory");
+        for file in [
+            "utils/nested/time.rs",
+            "helpers/format.ts",
+            "common/model.py",
+        ] {
+            std::fs::write(root.path().join(file), "").expect("utility file");
+        }
+
+        assert_eq!(
+            project_utility_files(root.path()),
+            vec![
+                "common/model.py".to_string(),
+                "helpers/format.ts".to_string(),
+                "utils/nested/time.rs".to_string(),
+            ]
+        );
     }
 }

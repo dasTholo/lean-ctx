@@ -104,6 +104,7 @@ class CockpitRoi extends HTMLElement {
         // [gateway_server].admin_url is set, else this machine's snapshot.
         fetchJson('/api/usage-breakdown', { timeoutMs: 12000 }).catch(function () { return null; }),
         fetchJson('/api/kernel', { timeoutMs: 8000 }).catch(function () { return null; }),
+        fetchJson('/api/solution', { timeoutMs: 8000 }).catch(function () { return null; }),
       ]);
       this._data = results[0];
       this._stats = results[1];
@@ -112,6 +113,7 @@ class CockpitRoi extends HTMLElement {
       this._spend = results[2];
       this._usage = results[3];
       this._kernel = results[4];
+      this._solution = results[5];
       var Fp = croiFmt();
       if (this._spend && this._spend.pricing && Fp.applyServerPricing) {
         Fp.applyServerPricing(this._spend.pricing);
@@ -172,6 +174,7 @@ class CockpitRoi extends HTMLElement {
       // (and users their plan) even before this machine has local events.
       this.innerHTML += this._renderOrgUsage(esc);
       this.innerHTML += this._renderPlan(esc);
+      this.innerHTML += this._renderSolutionEfficiency(esc);
       return;
     }
 
@@ -180,6 +183,7 @@ class CockpitRoi extends HTMLElement {
     body += this._renderOutputEfficiency(esc);
     body += this._renderEditEfficiency(esc);
     body += this._renderOutputSavings(esc);
+    body += this._renderSolutionEfficiency(esc);
     body += this._renderVerification(esc);
     body += this._renderMethodology();
     body += this._renderMeasuredSpend(esc);
@@ -609,6 +613,25 @@ class CockpitRoi extends HTMLElement {
       'measure your real output savings:</p>' +
       '<pre class="mono" style="background:var(--bg-elev,#0d1117);padding:10px;border-radius:8px;overflow:auto">' +
       'lean-ctx config set proxy.output_holdout 0.1</pre>' +
+      '</div>'
+    );
+  }
+
+  /** Solution Intelligence's tracked output reduction, separate from holdouts. */
+  _renderSolutionEfficiency(esc) {
+    var solution = this._solution;
+    if (!solution) return '';
+    var output = solution.output_savings || {};
+    var reduction = Math.max(0, Math.min(100, Math.round(Number(output.reduction_pct) || 0)));
+    var enabled = Boolean(solution.enabled);
+    return (
+      '<div class="card" style="margin-bottom:16px">' +
+      '<div class="card-header"><h3>Solution Efficiency</h3>' +
+      '<span class="tag ' + (enabled ? 'tg' : 'tb') + '">' +
+      (enabled ? 'enabled' : 'off') + '</span></div>' +
+      '<div style="display:flex;align-items:baseline;gap:12px">' +
+      '<div class="hv" style="color:var(--green)">-' + esc(String(reduction)) + '%</div>' +
+      '<span class="hs">output reduction</span></div>' +
       '</div>'
     );
   }

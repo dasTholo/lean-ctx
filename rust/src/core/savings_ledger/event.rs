@@ -187,6 +187,17 @@ pub struct SavingsEvent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace_id: Option<String>,
 
+    // ── Solution Intelligence Fields ──
+    /// Decision selected by the solution workflow.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub solution_decision: Option<String>,
+    /// Lines added by the selected solution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loc_added: Option<u64>,
+    /// Lines removed by the selected solution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loc_removed: Option<u64>,
+
     /// Quality signal from outcome tracking.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quality_signal: Option<String>,
@@ -427,6 +438,9 @@ mod tests {
             request_id: None,
             session_id: None,
             trace_id: None,
+            solution_decision: None,
+            loc_added: None,
+            loc_removed: None,
             quality_signal: None,
             attribution_group: None,
             attribution_id: None,

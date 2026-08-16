@@ -32,7 +32,7 @@ pub fn solution_compose_hints(config_enabled: bool, project_deps: &[String]) -> 
 
     let mut lines = vec![START_MARKER.to_string()];
     if !project_deps.is_empty() {
-        lines.push(format!("installed deps: {}", project_deps.join(", ")));
+        lines.push(format!("Installed deps: {}", project_deps.join(", ")));
     }
     lines.push(
         "Prefer the standard library and platform-native capabilities before adding dependencies."
@@ -45,4 +45,18 @@ pub fn solution_compose_hints(config_enabled: bool, project_deps: &[String]) -> 
 /// Solution rules are injected only when configuration and request both allow it.
 pub fn should_inject(config_enabled: bool, inject_flag: bool) -> bool {
     config_enabled && inject_flag
+}
+
+#[cfg(test)]
+mod tests {
+    use super::solution_compose_hints;
+
+    #[test]
+    fn compose_hints_include_detected_dependencies() {
+        let dependencies = ["tokio".to_string(), "serde".to_string()];
+
+        let hints = solution_compose_hints(true, &dependencies);
+
+        assert!(hints.contains("Installed deps: tokio, serde"));
+    }
 }

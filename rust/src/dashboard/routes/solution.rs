@@ -19,6 +19,8 @@ struct SolutionApiResponse {
     output_savings: OutputSavings,
     loc: LocMetrics,
     decisions: DecisionMetrics,
+    trend_7d: Vec<TrendDay>,
+    top_patterns: Vec<PatternMetric>,
 }
 
 #[derive(Serialize)]
@@ -46,9 +48,38 @@ struct DecisionMetrics {
     debt_open: u64,
 }
 
+#[derive(Serialize)]
+struct TrendDay {
+    date: String,
+    count: u64,
+}
+
+#[derive(Serialize)]
+struct PatternMetric {
+    kind: String,
+    count: u64,
+}
+
 fn solution_response() -> (&'static str, &'static str, String) {
     let config = crate::core::config::Config::load();
     let snapshot = crate::core::solution_tracker::snapshot();
+    let mut top_patterns: Vec<PatternMetric> = snapshot
+        .decisions_by_kind
+        .iter()
+        .filter(|(_, count)| **count > 0)
+        .map(|(kind, count)| PatternMetric {
+            kind: kind.clone(),
+            count: *count,
+        })
+        .collect();
+    top_patterns.sort_unstable_by(|left, right| {
+        right
+            .count
+            .cmp(&left.count)
+            .then_with(|| left.kind.cmp(&right.kind))
+    });
+    top_patterns.truncate(5);
+
     let response = SolutionApiResponse {
         enabled: config.solution.enabled,
         intensity: config.solution.effective_intensity().label().to_string(),
@@ -95,6 +126,10 @@ fn solution_response() -> (&'static str, &'static str, String) {
                 .copied()
                 .unwrap_or_default(),
         },
+        // The persistent tracker currently records aggregate counters only.
+        // Keep this typed field ready for date-stamped tracker records.
+        trend_7d: Vec::<TrendDay>::new(),
+        top_patterns,
     };
 
     (

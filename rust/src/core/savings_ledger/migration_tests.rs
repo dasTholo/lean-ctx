@@ -48,6 +48,9 @@ fn assert_p5_defaults(ev: &SavingsEvent) {
     assert!(ev.measurement_method.is_none());
     assert!(ev.evidence_class.is_none());
     assert!(ev.confidence.is_none());
+    assert!(ev.solution_decision.is_none());
+    assert!(ev.loc_added.is_none());
+    assert!(ev.loc_removed.is_none());
     assert!(ev.quality_signal.is_none());
     assert!(ev.attribution_group.is_none());
     assert!(ev.attribution_id.is_none());
