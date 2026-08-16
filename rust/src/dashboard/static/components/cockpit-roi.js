@@ -621,8 +621,23 @@ class CockpitRoi extends HTMLElement {
   _renderSolutionEfficiency(esc) {
     var solution = this._solution;
     if (!solution) return '';
-    var output = solution.output_savings || {};
-    var reduction = Math.max(0, Math.min(100, Math.round(Number(output.reduction_pct) || 0)));
+    var metrics = solution.metrics || solution;
+    var output = solution.output_token_savings || solution.output_savings || solution.output || {};
+    var loc = solution.loc_metrics || solution.loc || {};
+    var decisions = solution.decision_breakdown || solution.decisions || {};
+    var reduction = Math.max(0, Math.min(100, Math.round(Number(
+      metrics.output_reduction_pct != null ? metrics.output_reduction_pct : output.reduction_pct
+    ) || 0)));
+    var locReduced = Math.round(Number(
+      metrics.net_loc_saved != null ? metrics.net_loc_saved : loc.net_saved
+    ) || 0);
+    var countedDecisions = Number(decisions.stdlib || 0) + Number(decisions.native || 0) +
+      Number(decisions.reuse || 0) + Number(decisions.yagni || 0) +
+      Number(decisions.one_line != null ? decisions.one_line : decisions.oneLine || 0) +
+      Number(decisions.debt != null ? decisions.debt : decisions.debt_open || 0);
+    var decisionCount = Math.round(Number(
+      metrics.total_decisions != null ? metrics.total_decisions : decisions.total
+    ) || countedDecisions);
     var enabled = Boolean(solution.enabled);
     return (
       '<div class="card" style="margin-bottom:16px">' +
@@ -632,6 +647,10 @@ class CockpitRoi extends HTMLElement {
       '<div style="display:flex;align-items:baseline;gap:12px">' +
       '<div class="hv" style="color:var(--green)">-' + esc(String(reduction)) + '%</div>' +
       '<span class="hs">output reduction</span></div>' +
+      '<div class="sr" style="margin-top:10px"><span class="sl">LOC reduced</span>' +
+      '<span class="sv">' + esc(String(locReduced)) + '</span></div>' +
+      '<div class="sr"><span class="sl">Decisions</span>' +
+      '<span class="sv">' + esc(String(decisionCount)) + '</span></div>' +
       '</div>'
     );
   }

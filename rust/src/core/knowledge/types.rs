@@ -152,6 +152,35 @@ impl Default for FidelityScore {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SolutionDecisionMeta {
+    pub kind: SolutionDecisionKind,
+    pub chosen: String,
+    pub alternatives: Vec<String>,
+    pub rationale: Option<String>,
+    pub status: SolutionStatus,
+    pub scope: Vec<String>,
+    pub loc_impact: Option<i32>,
+    pub upgrade_condition: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SolutionDecisionKind {
+    StdlibChosen,
+    NativeUsed,
+    Reuse,
+    YagniSkip,
+    OneLineSolution,
+    DebtAccepted,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SolutionStatus {
+    Accepted,
+    Deferred,
+    Resolved,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct KnowledgeIndex {
     pub(super) token_positions: BTreeMap<String, Vec<usize>>,

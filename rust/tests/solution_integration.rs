@@ -3,8 +3,88 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+use lean_ctx::core::config::solution::{SolutionConfig, SolutionIntensity};
 use lean_ctx::core::solution_auto_capture::{detect_debt_marker, detect_stdlib_choice};
+use lean_ctx::core::solution_commercial::{
+    analyze_cross_project_patterns, append_solution_audit_event, commercial_features_available,
+    verify_attribution,
+};
+use lean_ctx::core::solution_tracker;
+use lean_ctx::instructions::solution::solution_ladder_text;
 use serde_json::{Value, json};
+
+#[test]
+fn solution_config_defaults_are_sane() {
+    let config = SolutionConfig::default();
+
+    assert!(config.enabled);
+    assert!(matches!(config.intensity, SolutionIntensity::Balanced));
+    assert!(config.inject_in_instructions);
+    assert!(config.inject_in_compose);
+    assert!(config.inject_in_subagents);
+}
+
+#[test]
+fn solution_ladder_text_covers_all_intensities() {
+    assert!(solution_ladder_text(&SolutionIntensity::Off).is_empty());
+
+    for intensity in [
+        SolutionIntensity::Minimal,
+        SolutionIntensity::Balanced,
+        SolutionIntensity::Aggressive,
+    ] {
+        assert!(
+            !solution_ladder_text(&intensity).is_empty(),
+            "{intensity:?} should inject solution guidance"
+        );
+    }
+
+    let balanced = solution_ladder_text(&SolutionIntensity::Balanced).to_ascii_lowercase();
+    assert!(balanced.contains("stdlib"));
+    assert!(balanced.contains("reuse"));
+}
+
+#[test]
+fn solution_tracker_lifecycle() {
+    solution_tracker::reset();
+    solution_tracker::record_decision("stdlib");
+    solution_tracker::record_decision("reuse");
+    solution_tracker::record_output_tokens(100, 75);
+
+    let snapshot = solution_tracker::snapshot();
+    assert_eq!(snapshot.decisions_total, 2);
+    assert_eq!(snapshot.decisions_by_kind.get("stdlib"), Some(&1));
+    assert_eq!(snapshot.decisions_by_kind.get("reuse"), Some(&1));
+    assert_eq!(snapshot.output_tokens_baseline, 100);
+    assert_eq!(snapshot.output_tokens_actual, 75);
+    assert_eq!(snapshot.output_reduction_pct, 25);
+
+    solution_tracker::reset();
+    let reset = solution_tracker::snapshot();
+    assert_eq!(reset.decisions_total, 0);
+    assert!(reset.decisions_by_kind.is_empty());
+    assert_eq!(reset.output_tokens_baseline, 0);
+    assert_eq!(reset.output_tokens_actual, 0);
+    assert_eq!(reset.output_reduction_pct, 0);
+}
+
+#[test]
+fn commercial_features_return_license_error() {
+    let features = commercial_features_available();
+    assert!(!features.is_empty());
+    assert!(features.iter().all(|(_, available)| !available));
+
+    for result in [
+        analyze_cross_project_patterns("integration-test-org"),
+        verify_attribution("integration-test-event"),
+        append_solution_audit_event("integration-test-project"),
+    ] {
+        let error = result.expect_err("commercial capability must remain license-gated");
+        let normalized = error.to_ascii_lowercase();
+        assert!(normalized.contains("enterprise"));
+        assert!(normalized.contains("license"));
+    }
+}
 
 struct Sandbox {
     _root: tempfile::TempDir,
