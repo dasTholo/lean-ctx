@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
+use chrono::Local;
 use serde::{Deserialize, Serialize};
 
 const STORE_FILE: &str = "solution_tracker.json";
@@ -20,6 +21,15 @@ struct SolutionStore {
     loc_net_saved: i64,
     output_tokens_baseline: u64,
     output_tokens_actual: u64,
+    #[serde(default)]
+    daily_records: Vec<DayRecord>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct DayRecord {
+    date: String,
+    decisions: u64,
+    loc_net_saved: i64,
 }
 
 #[derive(Clone, Serialize)]
@@ -83,9 +93,32 @@ fn with_store<F: FnOnce(&mut SolutionStore)>(f: F) {
     flush(&store);
 }
 
+fn current_day_record(store: &mut SolutionStore) -> &mut DayRecord {
+    let date = Local::now().format("%F").to_string();
+    if let Some(index) = store
+        .daily_records
+        .iter()
+        .position(|record| record.date == date)
+    {
+        return &mut store.daily_records[index];
+    }
+
+    store.daily_records.push(DayRecord {
+        date,
+        decisions: 0,
+        loc_net_saved: 0,
+    });
+    store
+        .daily_records
+        .last_mut()
+        .expect("daily record was just inserted")
+}
+
 pub fn record_decision(kind: &str) {
     with_store(|store| {
         store.decisions_total = store.decisions_total.saturating_add(1);
+        let record = current_day_record(store);
+        record.decisions = record.decisions.saturating_add(1);
         match kind {
             "stdlib" => store.decisions_stdlib = store.decisions_stdlib.saturating_add(1),
             "native" => store.decisions_native = store.decisions_native.saturating_add(1),
@@ -104,10 +137,27 @@ pub fn record_loc_change(added: u64, removed: u64) {
         store.loc_removed = store.loc_removed.saturating_add(removed);
         let added = i64::try_from(added).unwrap_or(i64::MAX);
         let removed = i64::try_from(removed).unwrap_or(i64::MAX);
-        store.loc_net_saved = store
-            .loc_net_saved
-            .saturating_add(removed.saturating_sub(added));
+        let loc_net_saved = removed.saturating_sub(added);
+        store.loc_net_saved = store.loc_net_saved.saturating_add(loc_net_saved);
+        let record = current_day_record(store);
+        record.loc_net_saved = record.loc_net_saved.saturating_add(loc_net_saved);
     });
+}
+
+pub fn trend_7d() -> Vec<(String, u64, i64)> {
+    let store = store()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut records = store.daily_records.clone();
+    records.sort_unstable_by(|left, right| left.date.cmp(&right.date));
+    let mut trend: Vec<_> = records
+        .into_iter()
+        .rev()
+        .take(7)
+        .map(|record| (record.date, record.decisions, record.loc_net_saved))
+        .collect();
+    trend.reverse();
+    trend
 }
 
 pub fn record_output_tokens(baseline: u64, actual: u64) {

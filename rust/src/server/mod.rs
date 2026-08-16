@@ -279,7 +279,7 @@ mod tests {
     fn test_registry_tool_count_ssot() {
         assert_eq!(
             crate::server::registry::tool_count(),
-            83,
+            84,
             "Official MCP tool count drift! Update this test AND all docs when adding/removing tools."
         );
     }

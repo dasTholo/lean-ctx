@@ -448,6 +448,19 @@ Skillify miner: distill recurring session diary + knowledge patterns into rules
 - `min_recurrence` (u32, default `2`) — Minimum reinforcements (confirmations / repeated mentions) before a sub-threshold-confidence pattern is codified.
 - `scope` (enum: project | global, default `project`) — Where generated rules are written: project (<repo>/.cursor/rules, git-committable) or global (~/.cursor/rules).
 
+## `[solution]`
+
+Solution Intelligence guidance and decision tracking
+
+- `enabled` (bool, default `true`) — Enable solution-efficiency guidance
+- `inject_in_compose` (bool, default `true`) — Inject solution-efficiency guidance into composed context
+- `inject_in_instructions` (bool, default `true`) — Inject solution-efficiency guidance into MCP instructions
+- `inject_in_subagents` (bool, default `true`) — Inject solution-efficiency guidance into subagent prompts
+- `intensity` (enum: off | minimal | balanced | aggressive, default `balanced`) — How strongly solution-efficiency guidance is applied
+- `platform_hints` (bool, default `true`) — Include platform-native solution hints
+- `track_decisions` (bool, default `true`) — Track solution decisions for efficiency guidance
+- `track_loc` (bool, default `true`) — Track lines of code changed for solution-efficiency guidance
+
 ## `[summaries]`
 
 AI session summaries: periodic, semantically-recallable session digests

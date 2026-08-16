@@ -4,7 +4,7 @@
 
 Source of truth: `rust/src/server/registry.rs` and the tool definitions it registers.
 
-lean-ctx registers **83 MCP tools** (granular profile). Each entry below lists the tool name, what it does, and its parameters (`*` marks required).
+lean-ctx registers **84 MCP tools** (granular profile). Each entry below lists the tool name, what it does, and its parameters (`*` marks required).
 
 ## `ctx_agent`
 
@@ -401,6 +401,14 @@ arg (not in their own schema) to target a registered root by
 alias instead of the project root — list_roots shows the aliases.
 
 Parameters: `action`*, `alias`, `max_results`, `mode`, `path`, `query`, `roots`
+
+## `ctx_optimize`
+
+Solution Intelligence — review code for optimizations, record decisions, get session report.
+Actions: ladder (show optimization ladder), decide (record a decision), report (session summary),
+review (analyze a file), suggest (simplify a snippet), fingerprint (predict solution rung), policy-check (validate team policy).
+
+Parameters: `action`*, `category`, `decision`, `path`
 
 ## `ctx_outline`
 

@@ -28,6 +28,7 @@ var EVENT_COLORS = {
   other: 'var(--yellow)',
   cache: 'var(--purple)',
   compression: 'var(--blue)',
+  solution: 'var(--yellow)',
   agent: 'var(--yellow)',
   knowledge: 'var(--purple)',
   threshold: 'var(--blue)',
@@ -47,6 +48,7 @@ var EVENT_ICONS = {
   other: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>',
   cache: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 002 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>',
   compression: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><rect x="4" y="4" width="16" height="16" rx="2"/><line x1="4" y1="10" x2="20" y2="10"/><line x1="10" y1="4" x2="10" y2="20"/></svg>',
+  solution: '<span aria-hidden="true" style="font-size:16px;line-height:1">⚡</span>',
   agent: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>',
   knowledge: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>',
   threshold: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>',
@@ -66,6 +68,7 @@ var FILTER_LABELS = {
   shell: 'Shell',
   search: 'Search',
   cache: 'Cache',
+  solution: '⚡ Solution',
 };
 
 // Per-call cost sorting (#426): surface which calls are expensive vs cheap.
@@ -96,6 +99,14 @@ function classifyTool(name) {
   return 'other';
 }
 
+function isSolutionDecision(kind) {
+  var type = String(kind.type || '').toLowerCase();
+  if (type === 'solutiondecision' || type === 'solutiondecisionrecorded' || type === 'solutiondecisiontracked') return true;
+  if (String(kind.tool || '').toLowerCase() !== 'ctx_optimize') return false;
+  var mode = String(kind.mode || kind.action || '').toLowerCase();
+  return mode === 'decide' || mode === 'decision' || kind.solution_decision != null;
+}
+
 function flattenEvent(ev) {
   var kind = ev.kind || {};
   var t = kind.type || '';
@@ -104,24 +115,41 @@ function flattenEvent(ev) {
 
   switch (t) {
     case 'ToolCall': {
-      var cat = classifyTool(kind.tool);
+      var cat = isSolutionDecision(kind) ? 'solution' : classifyTool(kind.tool);
       return {
         type: t,
         id: evId,
         category: cat,
         color: EVENT_COLORS[cat] || EVENT_COLORS.other,
         icon: EVENT_ICONS[cat] || EVENT_ICONS.other,
-        title: kind.tool || 'tool call',
+        title: cat === 'solution' ? 'solution decision' : (kind.tool || 'tool call'),
         saved: kind.tokens_saved || 0,
         original: kind.tokens_original || 0,
-        detail: buildToolDetail(kind),
-        expandedDetail: buildExpandedToolDetail(kind),
-        explanation: eventExplanation(t),
+        detail: cat === 'solution' ? buildSolutionDetail(kind) : buildToolDetail(kind),
+        expandedDetail: cat === 'solution' ? buildExpandedSolutionDetail(kind) : buildExpandedToolDetail(kind),
+        explanation: eventExplanation(cat === 'solution' ? 'SolutionDecision' : t),
         ts: ts,
         path: kind.path || null,
         mode: kind.mode || null,
       };
     }
+    case 'SolutionDecision':
+    case 'SolutionDecisionRecorded':
+    case 'SolutionDecisionTracked':
+      return {
+        type: t,
+        id: evId,
+        category: 'solution',
+        color: EVENT_COLORS.solution,
+        icon: EVENT_ICONS.solution,
+        title: 'solution decision',
+        saved: 0,
+        original: 0,
+        detail: buildSolutionDetail(kind),
+        expandedDetail: buildExpandedSolutionDetail(kind),
+        explanation: eventExplanation('SolutionDecision'),
+        ts: ts,
+      };
     case 'CacheHit':
       return {
         type: t,
@@ -292,6 +320,7 @@ function matchesEventFilter(flat, filter) {
   if (filter === 'reads') return flat.category === 'read';
   if (filter === 'shell') return flat.category === 'shell';
   if (filter === 'search') return flat.category === 'search';
+  if (filter === 'solution') return flat.category === 'solution';
   return true;
 }
 
@@ -301,6 +330,7 @@ var EVENT_EXPLANATIONS = {
   ToolCall: 'A tool was called by the AI agent. Payload-bearing calls are classified as optimized or passthrough; control calls have no compressible token payload.',
   CacheHit: 'A previously computed context view was reused. The paired ToolCall owns the token savings, so the live total does not count this event twice.',
   Compression: 'lean-ctx applied a compression strategy to reduce token usage. The numbers show lines before → after compression. This is normal optimization — no action needed.',
+  SolutionDecision: 'Solution Intelligence recorded an implementation decision. These are control-plane events and do not represent token compression.',
   AgentAction: 'An AI agent performed an action tracked by the Context OS. Informational only.',
   KnowledgeUpdate: 'The persistent knowledge base was updated with new information. This improves future sessions.',
   ThresholdShift: 'Adaptive compression thresholds were recalibrated based on observed data patterns. This self-tuning is automatic — no action needed.',
@@ -353,6 +383,21 @@ function buildCompressionDetail(kind) {
     parts.push('-' + kind.removed_line_count + ' removed');
   }
   return parts.join(' · ');
+}
+
+function buildSolutionDetail(kind) {
+  var parts = [];
+  if (kind.category) parts.push(String(kind.category));
+  if (kind.decision) parts.push(String(kind.decision));
+  return parts.join(' · ');
+}
+
+function buildExpandedSolutionDetail(kind) {
+  var rows = [];
+  if (kind.category) rows.push(['Category', String(kind.category)]);
+  if (kind.decision) rows.push(['Decision', String(kind.decision)]);
+  if (kind.rationale) rows.push(['Rationale', String(kind.rationale)]);
+  return rows;
 }
 
 function buildSloDetail(kind) {
@@ -884,7 +929,7 @@ class CockpitLive extends HTMLElement {
   }
 
   _renderFilterRow(esc) {
-    var cats = ['token', 'operations', 'all', 'reads', 'shell', 'search', 'cache'];
+    var cats = ['token', 'operations', 'solution', 'all', 'reads', 'shell', 'search', 'cache'];
 
     var btns = '';
     for (var i = 0; i < cats.length; i++) {
@@ -983,7 +1028,7 @@ class CockpitLive extends HTMLElement {
       '<h3 style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.18em;font-weight:600;margin-bottom:10px;display:flex;align-items:center;gap:8px">' +
       'Event Feed <span class="badge">' + esc(String(count)) + '</span></h3>' +
       '<p class="hs" style="margin:-4px 0 10px;font-size:11px;opacity:.7">' +
-      'Token Flow contains payload-bearing calls only. Intelligence contains knowledge, policy, budget and agent-control events; those do not represent uncompressed payloads.</p>' +
+      'Token Flow contains payload-bearing calls only. Intelligence contains solution, knowledge, policy, budget and agent-control events; those do not represent uncompressed payloads.</p>' +
       '<div id="ckl-event-list" style="display:flex;flex-direction:column;gap:6px">' +
       rendered +
       '</div></div>'
@@ -1132,11 +1177,12 @@ class CockpitLive extends HTMLElement {
       '<strong>Optimization Coverage</strong> separates optimized payload calls from passthroughs; knowledge, policy and agent events are control-plane activity, not failed compression.<br><br>' +
       'The <strong>MCP vs Hook split</strong> shows how savings distribute between MCP tool calls ' +
       '(prefixed <code>ctx_</code>) and shell hook interceptions. ' +
-      'Filter the feed by event category to focus on reads, shell commands, searches, or cache hits.<br><br>' +
+      'Filter the feed by event category to focus on solution decisions, reads, shell commands, searches, or cache hits.<br><br>' +
       '<strong>Event Types:</strong><br>' +
       '• <strong style="color:var(--green)">Tool Call</strong> — an AI agent invoked a lean-ctx tool (read, shell, search, etc.)<br>' +
       '• <strong style="color:var(--purple)">Cache Hit</strong> — file served from memory instead of disk (saves a re-read)<br>' +
       '• <strong style="color:var(--blue)">Compression</strong> — lean-ctx compressed output to save tokens (e.g. entropy_adaptive, map, signatures)<br>' +
+      '• <strong style="color:var(--yellow)">⚡ Solution Decision</strong> — Solution Intelligence recorded an implementation choice<br>' +
       '• <strong style="color:var(--blue)">Threshold Shift</strong> — adaptive compression thresholds were recalibrated<br>' +
       '• <strong style="color:var(--yellow)">Verification Warning</strong> — output quality check flagged a potential issue<br>' +
       '• <strong style="color:var(--red)">SLO Violation</strong> — an internal quality metric was breached (e.g. CompressionRatio). Occasional violations are normal; no user action needed unless frequent<br>' +
