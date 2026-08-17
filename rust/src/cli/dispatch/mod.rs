@@ -411,6 +411,9 @@ pub fn run() {
             "import" => {
                 crate::cli::import_cmd::cmd_import(&rest);
             }
+            "checkpoints" => {
+                crate::cli::checkpoint_cmd::cmd_checkpoints(&rest);
+            }
             "knowledge" => {
                 super::cmd_knowledge(&rest);
                 return;
@@ -646,6 +649,7 @@ pub fn run() {
                     "deny" => hook_handlers::handle_deny(),
                     "read-dedup" => hook_handlers::handle_read_dedup(),
                     "observe" => hook_handlers::handle_observe(),
+                    "post-commit" => hook_handlers::handle_post_commit(),
                     "copilot" => hook_handlers::handle_copilot(),
                     "codex-pretooluse" => hook_handlers::handle_codex_pretooluse(),
                     "codex-session-start" => hook_handlers::handle_codex_session_start(),
@@ -653,7 +657,7 @@ pub fn run() {
                     "vibe-pre-tool" => hook_handlers::handle_vibe_pre_tool(),
                     _ => {
                         eprintln!(
-                            "Usage: lean-ctx hook <rewrite|redirect|deny|read-dedup|observe|copilot|codex-pretooluse|codex-session-start|rewrite-inline|vibe-pre-tool>"
+                            "Usage: lean-ctx hook <rewrite|redirect|deny|read-dedup|observe|post-commit|copilot|codex-pretooluse|codex-session-start|rewrite-inline|vibe-pre-tool>"
                         );
                         eprintln!(
                             "  Internal commands used by agent hooks (Claude, Cursor, Copilot, etc.)"

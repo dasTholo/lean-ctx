@@ -5,16 +5,16 @@ const RECENT_COMPRESSION_MINUTES: i64 = 30;
 const LAST_CHECKED: &str = "on_request";
 
 #[derive(Serialize)]
-struct WorkspaceHealth {
-    overall_status: &'static str,
-    checks: Vec<WorkspaceHealthCheck>,
+pub(crate) struct WorkspaceHealth {
+    pub(crate) overall_status: &'static str,
+    pub(crate) checks: Vec<WorkspaceHealthCheck>,
 }
 
 #[derive(Serialize)]
-struct WorkspaceHealthCheck {
-    name: &'static str,
-    status: &'static str,
-    message: String,
+pub(crate) struct WorkspaceHealthCheck {
+    pub(crate) name: &'static str,
+    pub(crate) status: &'static str,
+    pub(crate) message: String,
     last_checked: &'static str,
 }
 
@@ -39,7 +39,7 @@ pub(super) fn handle(
     }
 }
 
-fn workspace_health() -> WorkspaceHealth {
+pub(crate) fn workspace_health() -> WorkspaceHealth {
     let daemon_running = crate::daemon::is_daemon_running();
     let (doctor_pass, doctor_total) = crate::doctor::compact_score();
     let doctor_healthy = doctor_total == 0 || doctor_pass > doctor_total / 2;

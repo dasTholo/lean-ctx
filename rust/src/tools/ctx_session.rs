@@ -19,6 +19,10 @@ pub fn handle(
     session_id: Option<&str>,
     opts: SessionToolOptions<'_>,
 ) -> String {
+    if action == "handoff" {
+        return handle_handoff(session);
+    }
+
     match action {
         "status" | "show" => handle_status(session),
         "load" => handle_load(session, session_id),
@@ -50,6 +54,26 @@ pub fn handle(
 
 fn handle_status(session: &mut SessionState) -> String {
     session.format_compact()
+}
+
+fn handle_handoff(session: &SessionState) -> String {
+    if session.handoff_context.is_empty() {
+        return "Handoff context: no recent cross-session decisions.".to_string();
+    }
+
+    let mut output = format!(
+        "Handoff context ({} recent cross-session decisions):",
+        session.handoff_context.len()
+    );
+    for fact in &session.handoff_context {
+        output.push_str(&format!(
+            "\n  [{}] {} (confidence: {:.0}%)",
+            fact.category,
+            fact.value,
+            fact.confidence * 100.0
+        ));
+    }
+    output
 }
 
 fn handle_load(session: &mut SessionState, session_id: Option<&str>) -> String {
@@ -885,7 +909,7 @@ fn handle_procedures(session: &mut SessionState, value: Option<&str>) -> String 
 
 fn handle_unknown(action: &str) -> String {
     format!(
-        "Unknown action: {action}. Use: status, load, save, task, finding, decision, reset, list, cleanup, snapshot, restore, resume, configure, profile, role, budget, slo, diff, output_stats, verify, export, import, episodes, procedures"
+        "Unknown action: {action}. Use: status, handoff, load, save, task, finding, decision, reset, list, cleanup, snapshot, restore, resume, configure, profile, role, budget, slo, diff, output_stats, verify, export, import, episodes, procedures"
     )
 }
 

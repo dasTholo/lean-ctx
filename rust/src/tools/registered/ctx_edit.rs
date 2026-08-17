@@ -1,6 +1,8 @@
 use rmcp::ErrorData;
 use rmcp::model::Tool;
 use serde_json::{Map, Value, json};
+use similar::{ChangeTag, TextDiff};
+use std::path::Path;
 
 use crate::server::tool_trait::{
     McpTool, ToolContext, ToolOutput, get_bool, get_int, get_str, require_resolved_path,
@@ -121,7 +123,13 @@ impl McpTool for CtxEditTool {
                 };
 
             // Heavy disk I/O — no global cache lock held here.
+            let before = std::fs::read(&path).unwrap_or_default();
             let (output, effect) = crate::tools::ctx_edit::run_io(&edit_params, &last_mode);
+
+            if matches!(effect, crate::tools::ctx_edit::CacheEffect::Invalidate) {
+                let after = std::fs::read(&path).unwrap_or_default();
+                observe_mcp_edit(ctx, &path, "ctx_edit", &before, &after);
+            }
 
             // Quality loop (#494): feed success/old_string-miss back into
             // per-(ext × mode) stats and the one-shot read escalation.
@@ -162,4 +170,80 @@ impl McpTool for CtxEditTool {
             })
         }
     }
+}
+
+pub(crate) fn observe_mcp_edit(
+    ctx: &ToolContext,
+    path: &str,
+    tool: &str,
+    before: &[u8],
+    after: &[u8],
+) {
+    let config = crate::core::config::Config::load();
+    if !config.provenance.enabled || !config.provenance.capture_mcp_edits || before == after {
+        return;
+    }
+
+    let root = ctx.project_root.as_str();
+    if root.is_empty() {
+        return;
+    }
+
+    let before_text = String::from_utf8_lossy(before);
+    let after_text = String::from_utf8_lossy(after);
+    let (lines_added, lines_removed) = TextDiff::from_lines(&before_text, &after_text)
+        .iter_all_changes()
+        .fold((0_u64, 0_u64), |(added, removed), change| {
+            match change.tag() {
+                ChangeTag::Insert => (added.saturating_add(1), removed),
+                ChangeTag::Delete => (added, removed.saturating_add(1)),
+                ChangeTag::Equal => (added, removed),
+            }
+        });
+    let tracked_path = Path::new(path)
+        .strip_prefix(root)
+        .ok()
+        .filter(|relative| !relative.as_os_str().is_empty())
+        .map(|relative| relative.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_owned());
+    let session_id = ctx
+        .session
+        .as_ref()
+        .and_then(|session| {
+            crate::server::bounded_lock::read(session, "provenance session read")
+                .map(|session| session.id.clone())
+        })
+        .unwrap_or_else(|| "mcp".to_owned());
+    let agent_id = ctx
+        .agent_id
+        .as_ref()
+        .and_then(|agent_id| {
+            crate::server::bounded_lock::read(agent_id, "provenance agent read")
+                .and_then(|agent_id| (*agent_id).clone())
+        })
+        .unwrap_or_else(|| "mcp".to_owned());
+
+    let _ = crate::core::provenance::ProvenanceTracker::new(root).and_then(|tracker| {
+        tracker.observe_edit(
+            tracked_path,
+            tool,
+            sha256_hex(before),
+            sha256_hex(after),
+            lines_added,
+            lines_removed,
+            session_id,
+            agent_id,
+        )
+    });
+}
+
+fn sha256_hex(data: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let hash = Sha256::digest(data);
+    let mut hex = String::with_capacity(64);
+    for b in &hash {
+        use std::fmt::Write;
+        let _ = write!(hex, "{b:02x}");
+    }
+    hex
 }
