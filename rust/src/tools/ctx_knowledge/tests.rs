@@ -251,7 +251,7 @@ fn consolidation_loads_session_for_requested_project_root() {
 
     let mut target_session = SessionState::new();
     target_session.project_root = Some(target_root.clone());
-    target_session.add_finding(None, None, "target project finding");
+    target_session.add_finding(None, None, "target project error: assertion failed in auth");
     target_session.save().unwrap();
 
     let _cwd = CurrentDirGuard::enter(cwd_project.path());
@@ -268,7 +268,7 @@ fn consolidation_loads_session_for_requested_project_root() {
         knowledge
             .facts
             .iter()
-            .any(|f| f.value == "target project finding")
+            .any(|f| f.value == "target project error: assertion failed in auth")
     );
     assert!(
         !knowledge
