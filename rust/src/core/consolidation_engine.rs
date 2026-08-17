@@ -16,7 +16,7 @@ use chrono::{DateTime, Utc};
 
 use crate::core::knowledge::ProjectKnowledge;
 use crate::core::memory_policy::MemoryPolicy;
-use crate::core::session::{Finding, SessionState};
+use crate::core::session::{Finding, SessionState, extract_session_facts};
 
 /// Promotion budgets for the scheduled (post-dispatch / cognition) pass.
 #[derive(Debug, Clone, Copy)]
@@ -214,6 +214,12 @@ pub fn import_session_into(
         finding_count += 1;
     }
 
+    if opts.import_session {
+        for fact in extract_session_facts(session) {
+            knowledge.add_fact(fact);
+        }
+    }
+
     ImportCounts {
         decisions: decision_count,
         findings: finding_count,
@@ -241,6 +247,7 @@ pub fn consolidate_latest(
     let opts = ConsolidateOptions::scheduled(budgets);
     let report =
         crate::tools::ctx_knowledge::consolidate_project_knowledge_with(project_root, &opts)?;
+
     Ok(ConsolidationOutcome {
         promoted: (report.imported_decisions + report.imported_findings) as u32,
         promoted_decisions: report.imported_decisions as u32,

@@ -85,6 +85,37 @@ fn write_json_atomic(dir: &Path, path: &Path, json: &str) -> Result<(), String> 
 
 impl ProjectKnowledge {
     /// Return the most recent active decision-like facts for session handoff.
+    /// Adds a pre-built fact, coalescing repeated observations into confirmations.
+    pub fn add_fact(&mut self, mut fact: KnowledgeFact) -> bool {
+        let trimmed_cat = fact.category.trim().to_string();
+        fact.category = trimmed_cat;
+        let trimmed_val = fact.value.trim().to_string();
+        fact.value = trimmed_val;
+        if fact.category.is_empty() || fact.value.is_empty() {
+            return false;
+        }
+
+        if let Some(existing) = self
+            .facts
+            .iter_mut()
+            .find(|existing| existing.category == fact.category && existing.value == fact.value)
+        {
+            if fact.last_confirmed > existing.last_confirmed {
+                existing.last_confirmed = fact.last_confirmed;
+            }
+            existing.confidence = existing.confidence.max(fact.confidence);
+            existing.confirmation_count = existing.confirmation_count.saturating_add(1);
+            existing.update_fidelity();
+        } else {
+            fact.update_fidelity();
+            self.facts.push(fact);
+            self.rebuild_index();
+        }
+
+        self.updated_at = Utc::now();
+        true
+    }
+
     pub fn recent_decisions(&self, limit: usize) -> Vec<KnowledgeFact> {
         let mut decisions: Vec<KnowledgeFact> = self
             .facts

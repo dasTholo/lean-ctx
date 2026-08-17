@@ -31,6 +31,8 @@ const COCKPIT_COMPONENT_ARCHITECTURE_JS: &str =
     include_str!("static/components/cockpit-architecture.js");
 const COCKPIT_COMPONENT_EXPLORER_JS: &str = include_str!("static/components/cockpit-explorer.js");
 const COCKPIT_COMPONENT_HEALTH_JS: &str = include_str!("static/components/cockpit-health.js");
+const COCKPIT_COMPONENT_PROVENANCE_JS: &str =
+    include_str!("static/components/cockpit-provenance.js");
 const COCKPIT_COMPONENT_REMAINING_JS: &str = include_str!("static/components/cockpit-remaining.js");
 const COCKPIT_COMPONENT_COMMANDER_JS: &str = include_str!("static/components/cockpit-commander.js");
 const COCKPIT_COMPONENT_PALETTE_JS: &str = include_str!("static/components/cockpit-palette.js");
