@@ -77,13 +77,14 @@ pub struct ConsolidateOptions {
 
 impl ConsolidateOptions {
     /// Explicit CLI / MCP `consolidate`: import everything, full lifecycle and a
-    /// lossless reclaim of every store.
+    /// lossless reclaim of every store. Applies a salience floor to keep
+    /// low-signal auto-findings ("Read file.txt") out of knowledge.
     pub fn manual() -> Self {
         Self {
             import_session: true,
             decision_budget: None,
             finding_budget: None,
-            finding_salience_floor: None,
+            finding_salience_floor: Some(45),
             decision_confidence: 0.85,
             finding_confidence: 0.7,
             incremental: false,
@@ -118,7 +119,7 @@ impl ConsolidateOptions {
             import_session: true,
             decision_budget: None,
             finding_budget: None,
-            finding_salience_floor: None,
+            finding_salience_floor: Some(45),
             decision_confidence: 0.85,
             finding_confidence: 0.7,
             incremental: true,

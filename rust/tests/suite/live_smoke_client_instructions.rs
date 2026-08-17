@@ -303,7 +303,13 @@ fn codex_covered_client_gets_anchor() {
         !has_skeleton(&instructions),
         "codex instructions must NOT repeat the full skeleton.\n{instructions}"
     );
-    assert_lazy_core_surface(&tools, "codex");
+    // Codex with hooks → transparent shadow mode: only ctx_call is
+    // advertised, hooks handle native tool redirection at runtime.
+    assert_eq!(
+        tools,
+        vec!["ctx_call"],
+        "codex in shadow mode must expose only ctx_call: {tools:?}"
+    );
 }
 
 /// Zero-config golden path: the FIRST MCP session on a fresh machine must
