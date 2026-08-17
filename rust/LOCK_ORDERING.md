@@ -133,6 +133,8 @@ All `std::sync::Mutex` unless noted otherwise.
 
 | # | Lock | File | Purpose |
 |---|------|------|---------|
+| S1 | `RECENT_EDITS` | `hook_handlers/solution_capture.rs:35` | `Mutex<RecentEdits>` deduplication cache for recent native edit observations |
+| S2 | `TRACKER_LOCK` | `core/config/solution_tests.rs:4` | `Mutex<()>` serialize solution-config integration tests |
 | E2 | `ENV_LOCK` | `core/dense_backend.rs:412` | Serialize env-var access in dense-backend tests |
 | E3 | `ENV_LOCK` | `core/workspace_config.rs:101` | Serialize env-var access in workspace-config tests |
 | E4 | `LOCK` | `core/data_dir.rs:50` | Serialize data-dir creation |

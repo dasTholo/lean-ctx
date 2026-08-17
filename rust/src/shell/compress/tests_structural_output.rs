@@ -100,15 +100,15 @@ fn non_structural_git_commands() {
 }
 
 #[test]
-fn git_write_commands_are_verbatim() {
-    assert!(has_structural_output("git commit -m 'fix'"));
-    assert!(has_structural_output("git push"));
-    assert!(has_structural_output("git pull"));
-    assert!(has_structural_output("git merge feature"));
-    assert!(has_structural_output("git rebase main"));
-    assert!(has_structural_output("git cherry-pick abc1234"));
-    assert!(has_structural_output("git tag v1.0"));
-    assert!(has_structural_output("git reset --hard HEAD~1"));
+fn git_write_commands_are_passthrough_not_structural() {
+    assert!(!has_structural_output("git commit -m 'fix'"));
+    assert!(!has_structural_output("git push"));
+    assert!(!has_structural_output("git pull"));
+    assert!(!has_structural_output("git merge feature"));
+    assert!(!has_structural_output("git rebase main"));
+    assert!(!has_structural_output("git cherry-pick abc1234"));
+    assert!(!has_structural_output("git tag v1.0"));
+    assert!(!has_structural_output("git reset --hard HEAD~1"));
 }
 
 #[test]
