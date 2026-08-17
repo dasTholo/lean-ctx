@@ -1126,6 +1126,55 @@ pub(super) fn build(sections: &mut BTreeMap<String, SectionSchema>) {
             keys: provenance,
         },
     );
+    let mut cross_agent = BTreeMap::new();
+    cross_agent.insert(
+        "cross_agent_sync".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.cross_agent.cross_agent_sync),
+            "Share knowledge facts across agent sessions",
+        ),
+    );
+    cross_agent.insert(
+        "auto_extract".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.cross_agent.auto_extract),
+            "Auto-extract decisions from completed sessions",
+        ),
+    );
+    cross_agent.insert(
+        "semantic_search".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.cross_agent.semantic_search),
+            "Enable embedding-based knowledge retrieval (requires model download)",
+        ),
+    );
+    cross_agent.insert(
+        "embedding_model".into(),
+        key(
+            "string",
+            serde_json::json!(cfg.cross_agent.embedding_model),
+            "On-device embedding model for semantic retrieval",
+        ),
+    );
+    cross_agent.insert(
+        "max_facts_per_session".into(),
+        key(
+            "usize",
+            serde_json::json!(cfg.cross_agent.max_facts_per_session),
+            "Maximum knowledge facts extracted per session",
+        ),
+    );
+    sections.insert(
+        "cross_agent".into(),
+        SectionSchema {
+            description: "Cross-agent memory sharing and semantic retrieval (Atlas adaptation)"
+                .into(),
+            keys: cross_agent,
+        },
+    );
 
     let mut skillify = BTreeMap::new();
     skillify.insert(

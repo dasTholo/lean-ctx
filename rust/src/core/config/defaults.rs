@@ -197,6 +197,7 @@ impl Default for Config {
             setup: SetupConfig::default(),
             solution: super::solution::SolutionConfig::default(),
             provenance: super::provenance::ProvenanceConfig::default(),
+            cross_agent: super::provenance::CrossAgentConfig::default(),
         }
     }
 }

@@ -137,6 +137,39 @@ impl ProjectKnowledge {
         decisions.truncate(limit);
         decisions
     }
+    /// Keyword-based knowledge search across all facts.
+    /// Serves as the API surface for semantic retrieval; currently falls back
+    /// to substring matching. When the embedding model is loaded, this will
+    /// use HNSW vector search instead.
+    pub fn search_semantic(&self, query: &str, limit: usize) -> Vec<KnowledgeFact> {
+        let query_lower = query.to_lowercase();
+        let terms: Vec<&str> = query_lower.split_whitespace().collect();
+        if terms.is_empty() {
+            return Vec::new();
+        }
+        let mut scored: Vec<(usize, &KnowledgeFact)> = self
+            .facts
+            .iter()
+            .filter(|f| f.valid_until.is_none_or(|t| t > chrono::Utc::now()))
+            .map(|fact| {
+                let haystack = format!(
+                    "{} {} {}",
+                    fact.category.to_lowercase(),
+                    fact.value.to_lowercase(),
+                    fact.key.to_lowercase(),
+                );
+                let score = terms.iter().filter(|t| haystack.contains(*t)).count();
+                (score, fact)
+            })
+            .filter(|(score, _)| *score > 0)
+            .collect();
+        scored.sort_by_key(|a| std::cmp::Reverse(a.0));
+        scored
+            .into_iter()
+            .take(limit)
+            .map(|(_, f)| f.clone())
+            .collect()
+    }
 
     pub fn list_project_roots() -> Result<Vec<String>, String> {
         let base = crate::core::data_dir::lean_ctx_data_dir()?.join("knowledge");

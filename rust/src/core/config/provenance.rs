@@ -277,3 +277,43 @@ mod tests {
         );
     }
 }
+
+/// Cross-agent memory sharing configuration (Atlas adaptation).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CrossAgentConfig {
+    /// Share knowledge facts across agent sessions.
+    #[serde(default = "default_true")]
+    pub cross_agent_sync: bool,
+    /// Automatically extract decisions/patterns from completed sessions.
+    #[serde(default = "default_true")]
+    pub auto_extract: bool,
+    /// Enable semantic (embedding-based) knowledge retrieval.
+    /// Off by default; requires embedding model download.
+    #[serde(default)]
+    pub semantic_search: bool,
+    /// On-device embedding model for semantic retrieval.
+    #[serde(default = "default_embedding_model")]
+    pub embedding_model: String,
+    /// Maximum knowledge facts extracted per session.
+    #[serde(default = "default_max_facts")]
+    pub max_facts_per_session: usize,
+}
+
+impl Default for CrossAgentConfig {
+    fn default() -> Self {
+        Self {
+            cross_agent_sync: true,
+            auto_extract: true,
+            semantic_search: false,
+            embedding_model: default_embedding_model(),
+            max_facts_per_session: default_max_facts(),
+        }
+    }
+}
+
+fn default_embedding_model() -> String {
+    "minilm-l6".to_owned()
+}
+fn default_max_facts() -> usize {
+    50
+}

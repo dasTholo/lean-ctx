@@ -20,6 +20,10 @@ pub(crate) fn cmd_health(args: &[String]) -> i32 {
         return cmd_workspace_health();
     }
 
+    if args.iter().any(|a| a == "--watch") {
+        return cmd_workspace_health_watch();
+    }
+
     if args.first().is_some_and(|arg| arg == "workspace") {
         return cmd_workspace_health();
     }
@@ -28,6 +32,22 @@ pub(crate) fn cmd_health(args: &[String]) -> i32 {
 }
 
 fn cmd_workspace_health() -> i32 {
+    print_workspace_health();
+    0
+}
+
+fn cmd_workspace_health_watch() -> i32 {
+    loop {
+        print!("\x1b[2J\x1b[H");
+        let now = chrono::Local::now().format("%H:%M:%S");
+        println!("lean-ctx health --watch  [{now}]\n");
+        print_workspace_health();
+        println!("\nRefreshing every 10s — Ctrl+C to stop");
+        std::thread::sleep(std::time::Duration::from_secs(10));
+    }
+}
+
+fn print_workspace_health() {
     let health = crate::dashboard::routes::health::workspace_health();
 
     println!("Workspace health: {}", health.overall_status.to_uppercase());
@@ -39,8 +59,6 @@ fn cmd_workspace_health() -> i32 {
         };
         println!("[{status}] {:<18} {}", check.name, check.message);
     }
-
-    0
 }
 
 fn cmd_code_health(args: &[String]) -> i32 {
