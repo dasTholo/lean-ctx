@@ -414,15 +414,18 @@ fn auto_capture_ignores_existing_imports_and_ordinary_comments() {
 
 #[test]
 fn native_edit_via_observe_hook_triggers_solution_capture() {
+    let tmp = std::env::temp_dir().join("native_capture_test");
+    let tmp_str = tmp.to_string_lossy().replace('\\', "/");
+    let path = format!("{tmp_str}/src/main.rs");
     // Simulate a Cursor StrReplace PostToolUse payload with a stdlib import addition
     let payload = json!({
         "tool_name": "str_replace_editor",
         "tool_input": {
-            "path": "/tmp/native_capture_test/src/main.rs",
+            "path": path,
             "old_string": "use serde::Deserialize;",
             "new_string": "use serde::Deserialize;\nuse std::collections::BTreeMap;"
         },
-        "cwd": "/tmp/native_capture_test"
+        "cwd": tmp_str
     });
 
     // Call the solution_capture hook directly
@@ -442,13 +445,16 @@ fn native_edit_via_observe_hook_triggers_solution_capture() {
 
 #[test]
 fn native_write_tool_records_loc_addition() {
+    let tmp = std::env::temp_dir().join("native_write_test");
+    let tmp_str = tmp.to_string_lossy().replace('\\', "/");
+    let path = format!("{tmp_str}/new_file.rs");
     let payload = json!({
         "tool_name": "Write",
         "tool_input": {
-            "path": "/tmp/native_write_test/new_file.rs",
+            "path": path,
             "contents": "fn main() {\n    println!(\"hello\");\n}\n"
         },
-        "cwd": "/tmp/native_write_test"
+        "cwd": tmp_str
     });
 
     lean_ctx::hook_handlers::solution_capture::maybe_capture(&payload.to_string());
@@ -463,14 +469,17 @@ fn native_write_tool_records_loc_addition() {
 
 #[test]
 fn native_edit_ctx_tools_are_skipped_no_double_count() {
+    let tmp = std::env::temp_dir().join("skip_test");
+    let tmp_str = tmp.to_string_lossy().replace('\\', "/");
+    let path = format!("{tmp_str}/foo.rs");
     let payload = json!({
         "tool_name": "ctx_edit",
         "tool_input": {
-            "path": "/tmp/skip_test/foo.rs",
+            "path": path.clone(),
             "old_string": "let x = 1;",
             "new_string": "let x = 2;"
         },
-        "cwd": "/tmp/skip_test"
+        "cwd": tmp_str.clone()
     });
 
     // ctx_edit should be skipped entirely — verify it does not panic
@@ -480,11 +489,11 @@ fn native_edit_ctx_tools_are_skipped_no_double_count() {
     let payload2 = json!({
         "tool_name": "mcp__lean-ctx__ctx_edit",
         "tool_input": {
-            "path": "/tmp/skip_test/foo.rs",
+            "path": path,
             "old_string": "let x = 1;",
             "new_string": "let x = 2;"
         },
-        "cwd": "/tmp/skip_test"
+        "cwd": tmp_str
     });
     lean_ctx::hook_handlers::solution_capture::maybe_capture(&payload2.to_string());
 }
