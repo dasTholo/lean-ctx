@@ -270,50 +270,53 @@ mod tests {
     // --- Regression: daviddatu_ git command rewriting bug ---
 
     #[test]
-    fn git_commit_is_verbatim() {
+    fn git_commit_is_passthrough() {
         assert_eq!(
             classify("git commit -m \"feat: add feature\"", &[]),
-            OutputPolicy::Verbatim
+            OutputPolicy::Passthrough
         );
     }
 
     #[test]
-    fn git_push_is_verbatim() {
+    fn git_push_is_passthrough() {
         assert_eq!(
             classify("git push origin main", &[]),
-            OutputPolicy::Verbatim
+            OutputPolicy::Passthrough
         );
     }
 
     #[test]
-    fn git_pull_is_verbatim() {
-        assert_eq!(classify("git pull --rebase", &[]), OutputPolicy::Verbatim);
+    fn git_pull_is_passthrough() {
+        assert_eq!(
+            classify("git pull --rebase", &[]),
+            OutputPolicy::Passthrough
+        );
     }
 
     #[test]
-    fn git_merge_is_verbatim() {
+    fn git_merge_is_passthrough() {
         assert_eq!(
             classify("git merge feature-branch", &[]),
-            OutputPolicy::Verbatim
+            OutputPolicy::Passthrough
         );
     }
 
     #[test]
-    fn git_rebase_is_verbatim() {
-        assert_eq!(classify("git rebase main", &[]), OutputPolicy::Verbatim);
+    fn git_rebase_is_passthrough() {
+        assert_eq!(classify("git rebase main", &[]), OutputPolicy::Passthrough);
     }
 
     #[test]
-    fn git_cherry_pick_is_verbatim() {
+    fn git_cherry_pick_is_passthrough() {
         assert_eq!(
             classify("git cherry-pick abc1234", &[]),
-            OutputPolicy::Verbatim
+            OutputPolicy::Passthrough
         );
     }
 
     #[test]
-    fn git_tag_is_verbatim() {
-        assert_eq!(classify("git tag v1.0.0", &[]), OutputPolicy::Verbatim);
+    fn git_tag_is_passthrough() {
+        assert_eq!(classify("git tag v1.0.0", &[]), OutputPolicy::Passthrough);
     }
 
     #[test]
