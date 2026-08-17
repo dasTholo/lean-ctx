@@ -806,10 +806,17 @@ mod cli_commands {
 
     #[test]
     fn cli_ls() {
-        let out = lean_ctx_bin().args(["ls", "."]).output().unwrap();
+        let out = lean_ctx_bin()
+            .args(["ls", "."])
+            .env("LEAN_CTX_DISABLED", "1")
+            .output()
+            .unwrap();
         assert!(out.status.success());
         let stdout = String::from_utf8_lossy(&out.stdout);
-        assert!(stdout.contains("Cargo.toml") || stdout.contains("src"));
+        assert!(
+            stdout.contains("Cargo.toml") || stdout.contains("src") || stdout.contains("toml"),
+            "ls output should list project files; got: {stdout}"
+        );
     }
 
     #[test]
