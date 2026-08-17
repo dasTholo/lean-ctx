@@ -40,6 +40,7 @@ const COCKPIT_AREAS = [
     job: 'guards what your agents touch',
     tabs: [
       { tab: 'guards', view: 'health', label: 'Guards' },
+      { tab: 'provenance', view: 'provenance', label: 'Provenance' },
       { tab: 'risk', view: 'protection', label: 'Risk & Policies' },
     ],
   },
@@ -108,6 +109,7 @@ const KNOWN_ROUTES = [
   'compression',
   'routes',
   'health',
+  'provenance',
   'protection',
   'deps',
   'symbols',
@@ -141,6 +143,7 @@ const ROUTE_LABELS = {
   architecture: 'Architecture',
   explorer: 'Explorer',
   health: 'Guards',
+  provenance: 'Provenance',
   protection: 'Risk & Policies',
   settings: 'Settings',
 };
@@ -170,6 +173,7 @@ const ROUTE_DESCRIPTIONS = {
   architecture: 'A generated report on your project structure.',
   explorer: 'Browse files and symbols as a tree.',
   health: 'Reliability, verification, anomalies and gotcha guards.',
+  provenance: 'Checkpoint timeline and attributed file-touch evidence.',
   protection: 'Context risk warnings and the OWASP agentic-risk coverage map.',
   settings: 'Flip compression, tool profile, structure-first and terse from the UI.',
 };
@@ -390,6 +394,7 @@ function initRouter() {
     architecture: 'architectureView',
     explorer: 'explorerView',
     health: 'healthView',
+    provenance: 'provenanceView',
     protection: 'protectionView',
     settings: 'settingsView',
   };

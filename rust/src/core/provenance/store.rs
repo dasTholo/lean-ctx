@@ -114,6 +114,22 @@ impl ProvenanceStore {
             .collect()
     }
 
+    /// Returns the most recently observed file touches, newest first.
+    pub fn query_recent_file_touches(&self, limit: usize) -> Vec<ProvenanceRecord> {
+        let mut records = self
+            .read_records()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|entry| match entry {
+                StoredRecord::FileTouch(record) => Some(record),
+                StoredRecord::Checkpoint(_) => None,
+            })
+            .collect::<Vec<_>>();
+        records.sort_by_key(|r| std::cmp::Reverse(r.observed_at));
+        records.truncate(limit);
+        records
+    }
+
     pub fn query_checkpoints(&self, session_id: Option<&str>) -> Vec<CheckpointRecord> {
         self.read_records()
             .unwrap_or_default()

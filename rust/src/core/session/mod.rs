@@ -4,6 +4,7 @@ mod paths;
 mod persistence;
 pub mod playbook;
 mod state;
+pub(crate) use state::extract_session_facts;
 mod types;
 
 pub use playbook::{DeltaOutcome, EntryKind, Playbook, PlaybookEntry};

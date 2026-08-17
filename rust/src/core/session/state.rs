@@ -22,6 +22,130 @@ pub(crate) const SESSION_FLUSH_INTERVAL: std::time::Duration = std::time::Durati
 static FILE_TRAJECTORY: LazyLock<Mutex<FileTrajectory>> =
     LazyLock::new(|| Mutex::new(FileTrajectory::new(100)));
 
+/// Converts durable session signals into cross-session knowledge facts.
+pub(crate) fn extract_session_facts(
+    session: &SessionState,
+) -> Vec<crate::core::knowledge::KnowledgeFact> {
+    let mut facts = Vec::new();
+
+    facts.extend(session.decisions.iter().filter_map(|decision| {
+        let summary = decision.summary.trim();
+        if summary.is_empty() {
+            return None;
+        }
+        let value = decision
+            .rationale
+            .as_deref()
+            .filter(|rationale| !rationale.trim().is_empty())
+            .map_or_else(
+                || summary.to_owned(),
+                |rationale| format!("{summary} — {rationale}"),
+            );
+        Some(auto_session_fact(
+            "auto:decision",
+            value,
+            session,
+            decision.timestamp,
+            0.9,
+        ))
+    }));
+
+    facts.extend(
+        session
+            .files_touched
+            .iter()
+            .filter(|file| file.modified)
+            .map(|file| {
+                let summary = file
+                    .summary
+                    .as_deref()
+                    .filter(|summary| !summary.trim().is_empty())
+                    .map_or_else(String::new, |summary| format!("; {summary}"));
+                auto_session_fact(
+                    "auto:pattern",
+                    format!(
+                        "Modified {} (mode: {}, reads: {}){summary}",
+                        file.path, file.last_mode, file.read_count
+                    ),
+                    session,
+                    session.updated_at,
+                    0.8,
+                )
+            }),
+    );
+
+    facts.extend(session.findings.iter().filter_map(|finding| {
+        let summary = finding.summary.trim();
+        if summary.is_empty() {
+            return None;
+        }
+        let normalized = summary.to_ascii_lowercase();
+        let label = if ["resolved", "fixed", "solved", "unblocked", "passed"]
+            .iter()
+            .any(|keyword| normalized.contains(keyword))
+        {
+            "Resolution"
+        } else if [
+            "block", "fail", "error", "unable", "cannot", "missing", "timeout", "denied",
+        ]
+        .iter()
+        .any(|keyword| normalized.contains(keyword))
+        {
+            "Blocker"
+        } else {
+            "Finding"
+        };
+        let location = finding.file.as_deref().map_or_else(String::new, |file| {
+            finding
+                .line
+                .map_or_else(|| format!("{file}: "), |line| format!("{file}:{line}: "))
+        });
+        Some(auto_session_fact(
+            "auto:blocker",
+            format!("{label}: {location}{summary}"),
+            session,
+            finding.timestamp,
+            0.75,
+        ))
+    }));
+
+    facts
+}
+
+fn auto_session_fact(
+    category: &str,
+    value: String,
+    session: &SessionState,
+    timestamp: chrono::DateTime<Utc>,
+    confidence: f32,
+) -> crate::core::knowledge::KnowledgeFact {
+    let key = value.clone();
+    crate::core::knowledge::KnowledgeFact {
+        category: category.to_owned(),
+        key,
+        value,
+        source_session: session.id.clone(),
+        confidence,
+        created_at: timestamp,
+        last_confirmed: timestamp,
+        retrieval_count: 0,
+        last_retrieved: None,
+        valid_from: None,
+        valid_until: None,
+        supersedes: None,
+        confirmation_count: 1,
+        feedback_up: 0,
+        feedback_down: 0,
+        last_feedback: None,
+        privacy: Default::default(),
+        sensitivity: Default::default(),
+        imported_from: None,
+        archetype: Default::default(),
+        fidelity: None,
+        revision_count: 0,
+    }
+}
+
 impl Default for SessionState {
     fn default() -> Self {
         Self::new()
