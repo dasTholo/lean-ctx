@@ -139,7 +139,7 @@ class CockpitLearning extends HTMLElement {
       '<span>' + fmt2(todayCalls) + ' calls</span></div></div>' +
       '<div class="card card-interactive"><div class="card-header"><h3>Net savings rate' + tip('compression_trend') + '</h3>' +
       '<span class="badge badge-accent" style="font-size:11px">verified · ledger-signed</span></div>' +
-      '<p class="hs" style="margin:2px 0 0;font-size:11px;opacity:.5">saved ÷ original tokens per day (only compressible tool calls)</p>' +
+      '<p class="hs" style="margin:2px 0 0;font-size:11px;opacity:.5">verified net savings ÷ all input tokens per day</p>' +
       '<canvas id="ckle-compression" height="200"></canvas>' +
       '<div class="chart-footer"><span>Hover to explore daily rates</span>' +
       '<span>Baseline ÷ Delivered</span></div></div>' +
@@ -354,24 +354,21 @@ class CockpitLearning extends HTMLElement {
       volume.push(Number(d.count || d.commands || d.calls || 0));
     }
 
-    // Honest compression rate: verified savings (ledger) / total input (stats).
-    // Ledger savings are hash-chained and signed; stats input is the total
-    // token volume processed by lean-ctx (all tool calls + proxy observations).
+    // Honest compression rate: verified savings (ledger) / daily input tokens (stats).
+    // Uses the same formula as the Overview hero: verified_net / total_input.
     var roiTrend = this._roi && this._roi.trend ? this._roi.trend : [];
     if (roiTrend.length > 0) {
       var savedMap = {};
-      var rawMap = {};
       for (var j = 0; j < roiTrend.length; j++) {
         var tDay = String(roiTrend[j][0] || '');
         savedMap[tDay] = Number(roiTrend[j][1] || 0);
-        rawMap[tDay] = Number(roiTrend[j][3] || 0);
       }
       for (var k = 0; k < labels.length; k++) {
         var fullDate = (daily[k] && (daily[k].date || daily[k].day)) || '';
         var verifiedSaved = savedMap[fullDate];
-        var verifiedRaw = rawMap[fullDate];
-        if (verifiedSaved !== undefined && verifiedRaw > 0) {
-          compression[k] = Math.min(100, Math.round((verifiedSaved / verifiedRaw) * 100));
+        var dayInp = daily[k] ? Number(daily[k].input_tokens || daily[k].total_input || 0) : 0;
+        if (verifiedSaved !== undefined && dayInp > 0) {
+          compression[k] = Math.min(100, Math.round((verifiedSaved / dayInp) * 100));
         }
       }
     }
