@@ -212,11 +212,13 @@ class CockpitOverview extends HTMLElement {
     var body = '';
     body += this._renderTimeFilter(esc);
     body += this._renderHero(esc, ff, fmt, fu, pc);
+    body += this._workspaceHealthCard(esc);
     body += this._renderBuddy(esc);
     body += this._renderStatusStrip(esc);
     body += this._renderWorkspaces(esc, fmt);
     body += this._renderTrendRow();
     body += this._renderCommandTable(esc, ff, fmt, pc);
+    body += this._renderAgentTable(esc, ff);
 
     this.innerHTML = body;
     this._bind();
@@ -375,14 +377,32 @@ class CockpitOverview extends HTMLElement {
     var solution = this._data && this._data.solution;
     if (!solution) return '';
     var output = solution.output_savings || {};
-    var reduction = Math.max(0, Math.min(100, Math.round(Number(output.reduction_pct) || 0)));
-    return (
-      '<div class="hc">' +
-      '<span class="hl">Solution: -' + esc(String(reduction)) + '% output</span>' +
-      '<div class="hv" style="color:var(--green)">-' + esc(String(reduction)) + '%</div>' +
-      '<p class="hs">Solution Intelligence</p>' +
-      '</div>'
-    );
+    var loc = solution.loc || {};
+    var decisions = solution.decisions || {};
+    var tokenReduction = Math.max(0, Math.min(100, Math.round(Number(output.reduction_pct) || 0)));
+    var totalDecisions = Number(decisions.total) || 0;
+    var netReduced = Number(loc.net_reduced) || 0;
+
+    if (tokenReduction > 0) {
+      return (
+        '<div class="hc">' +
+        '<span class="hl">Solution: -' + esc(String(tokenReduction)) + '% output</span>' +
+        '<div class="hv" style="color:var(--green)">-' + esc(String(tokenReduction)) + '%</div>' +
+        '<p class="hs">Solution Intelligence</p>' +
+        '</div>'
+      );
+    }
+    if (totalDecisions > 0 || netReduced !== 0) {
+      var sign = netReduced >= 0 ? '+' : '';
+      return (
+        '<div class="hc">' +
+        '<span class="hl">Solution: ' + esc(String(totalDecisions)) + ' decisions</span>' +
+        '<div class="hv" style="color:var(--green)">' + esc(sign + String(netReduced)) + ' LOC</div>' +
+        '<p class="hs">Solution Intelligence</p>' +
+        '</div>'
+      );
+    }
+    return '';
   }
 
   /* ── Verified-ledger bridge line (estimated ⇄ signed, links to ROI) ── */
@@ -803,6 +823,51 @@ class CockpitOverview extends HTMLElement {
   }
 
   /* ── Chart rendering (runs after DOM exists) ───────── */
+
+  _renderAgentTable(esc, ff) {
+    var stats = this._data && this._data.stats ? this._data.stats : null;
+    var agents = stats && stats.per_agent ? stats.per_agent : {};
+    var rows = Object.keys(agents).map(function (name) {
+      var agent = agents[name] || {};
+      return {
+        name: name,
+        calls: Number(agent.tool_calls || 0),
+        saved: Number(agent.tokens_saved || 0)
+      };
+    });
+    if (!rows.length) return '';
+    rows.sort(function (a, b) { return b.saved - a.saved || b.calls - a.calls || a.name.localeCompare(b.name); });
+    var trs = '';
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      trs += '<tr><td>' + esc(row.name) + '</td><td>' + ff(row.calls) + '</td><td>' + ff(row.saved) + '</td></tr>';
+    }
+    return '<div class="cko-agent-table">' +
+      '<h3>Agents</h3>' +
+      '<div class="table-scroll"><table><thead><tr><th>Agent</th><th>Calls</th><th>Tokens saved</th></tr></thead>' +
+      '<tbody>' + trs + '</tbody></table></div></div>';
+  }
+
+  _workspaceHealthCard(esc) {
+    var health = this._workspaceHealth;
+    if (!health && !this._workspaceHealthLoading && fetchJson) {
+      var self = this;
+      this._workspaceHealthLoading = true;
+      fetchJson('/api/health', { timeoutMs: 8000 }).then(function (data) {
+        if (data && !data.__error) {
+          self._workspaceHealth = data;
+          self.render();
+        }
+      }).catch(function () {}).then(function () {
+        self._workspaceHealthLoading = false;
+      });
+    }
+    var status = health && health.overall_status ? health.overall_status : 'Checking';
+    var color = status === 'OK' ? 'var(--accent)' : (status === 'Stopped' ? 'var(--red)' : 'var(--yellow)');
+    return '<div id="cko-workspace-health" class="cko-workspace-health" style="display:inline-flex;align-items:center;gap:7px;margin:8px 0 16px;color:var(--muted);font-size:12px">' +
+      '<span aria-hidden="true" style="width:8px;height:8px;border-radius:50%;background:' + color + ';display:inline-block"></span>' +
+      '<span>Workspace health: <strong style="color:var(--text)">' + esc(status) + '</strong></span></div>';
+  }
 
   _renderAllCharts() {
     var self = this;

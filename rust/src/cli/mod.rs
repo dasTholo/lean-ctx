@@ -108,6 +108,7 @@ pub(crate) use evidence_export::cmd_evidence_export;
 pub(crate) use index_cmd::cmd_index;
 pub(crate) use init_cmd::quiet_enabled;
 pub use init_cmd::{cmd_init, cmd_init_quiet};
+pub mod import_cmd;
 pub(crate) use instructions_cmd::cmd_instructions;
 pub(crate) use introspect_cmd::cmd_introspect;
 pub(crate) use knowledge_cmd::cmd_knowledge;

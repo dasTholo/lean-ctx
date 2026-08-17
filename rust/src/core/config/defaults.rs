@@ -196,6 +196,7 @@ impl Default for Config {
             shell_allow_inline_scripts: false,
             setup: SetupConfig::default(),
             solution: super::solution::SolutionConfig::default(),
+            provenance: super::provenance::ProvenanceConfig::default(),
         }
     }
 }

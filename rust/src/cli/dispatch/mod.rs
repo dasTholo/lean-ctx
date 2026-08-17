@@ -408,6 +408,9 @@ pub fn run() {
                 super::cmd_compile(&rest);
                 return;
             }
+            "import" => {
+                crate::cli::import_cmd::cmd_import(&rest);
+            }
             "knowledge" => {
                 super::cmd_knowledge(&rest);
                 return;

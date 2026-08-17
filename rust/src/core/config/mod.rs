@@ -12,7 +12,7 @@ mod logic;
 mod memory;
 mod merge;
 mod model;
-mod provenance;
+pub mod provenance;
 mod proxy;
 mod read_dedup;
 pub(crate) mod read_redirect;

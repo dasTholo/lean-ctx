@@ -19,7 +19,40 @@
 
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
+
 use super::Config;
+
+/// Controls capture and retention of edit provenance records.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(default)]
+pub struct ProvenanceConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    pub retention_days: u64,
+    #[serde(default = "default_true")]
+    pub capture_native_edits: bool,
+    #[serde(default = "default_true")]
+    pub capture_mcp_edits: bool,
+    #[serde(default = "default_true")]
+    pub checkpoint_on_commit: bool,
+}
+
+const fn default_true() -> bool {
+    true
+}
+
+impl Default for ProvenanceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            retention_days: 90,
+            capture_native_edits: true,
+            capture_mcp_edits: true,
+            checkpoint_on_commit: true,
+        }
+    }
+}
 
 /// Editable quick-settings a project-local `.lean-ctx.toml` can override via
 /// [`Config::merge_local`]. `structure_first` is intentionally absent: the local

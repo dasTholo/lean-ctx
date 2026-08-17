@@ -4,6 +4,7 @@ mod agents;
 mod context;
 mod doctor;
 mod graph;
+mod health;
 pub mod helpers;
 mod kernel;
 mod knowledge;
@@ -184,7 +185,8 @@ pub fn route_response(
         .or_else(|| settings::handle(path, query_str, method, body))
         .or_else(|| kernel::handle(path, query_str, method, body))
         .or_else(|| doctor::handle(path, query_str, method, body))
-        .or_else(|| leaderboard::handle(path, query_str, method, body));
+        .or_else(|| leaderboard::handle(path, query_str, method, body))
+        .or_else(|| health::handle(path, query_str, method, body));
     #[cfg(feature = "enterprise")]
     let response = response.or_else(|| usage_breakdown::handle(path, query_str, method, body));
     response

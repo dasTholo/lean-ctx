@@ -727,4 +727,6 @@ pub struct Config {
     pub setup: SetupConfig,
     #[serde(default)]
     pub solution: super::solution::SolutionConfig,
+    #[serde(default)]
+    pub provenance: super::provenance::ProvenanceConfig,
 }

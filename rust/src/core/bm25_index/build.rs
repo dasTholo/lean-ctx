@@ -152,8 +152,10 @@ fn prepare_file(
     } else if let Some(cached) = content_hint.get(rel) {
         std::borrow::Cow::Borrowed(cached.as_str())
     } else if let Some(arc) = crate::core::content_cache::get(&abs, cache_state) {
+        crate::core::cache::record_search_content_read(true);
         std::borrow::Cow::Owned(arc.to_string())
     } else {
+        crate::core::cache::record_search_content_read(false);
         match std::fs::read_to_string(&abs) {
             Ok(c) => {
                 crate::core::content_cache::insert(
@@ -384,9 +386,11 @@ impl BM25Index {
                 cache_hits += 1;
                 std::borrow::Cow::Borrowed(cached.as_str())
             } else if let Some(arc) = crate::core::content_cache::get(&abs, cache_state) {
+                crate::core::cache::record_search_content_read(true);
                 cache_hits += 1;
                 std::borrow::Cow::Owned(arc.to_string())
             } else {
+                crate::core::cache::record_search_content_read(false);
                 match std::fs::read_to_string(&abs) {
                     Ok(c) => {
                         crate::core::content_cache::insert(

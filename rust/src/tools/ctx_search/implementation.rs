@@ -310,8 +310,12 @@ pub fn handle_filtered(
         // verify against stale bytes.
         let content: std::sync::Arc<str> =
             if let Some(cached) = state.and_then(|s| crate::core::content_cache::get(path, s)) {
+                crate::core::cache::record_search_content_read(true);
                 cached
             } else {
+                if state.is_some() {
+                    crate::core::cache::record_search_content_read(false);
+                }
                 let Ok(text) = std::fs::read_to_string(path) else {
                     files_skipped_encoding += 1;
                     continue;
