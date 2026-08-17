@@ -67,6 +67,18 @@ fn store() -> &'static Mutex<SolutionStore> {
     })
 }
 
+/// Reload the store from disk. Called by `snapshot()` so the dashboard
+/// daemon sees changes written by short-lived `hook observe` processes.
+fn reload_from_disk() {
+    if let Ok(bytes) = std::fs::read(store_path()) {
+        if let Ok(fresh) = serde_json::from_slice::<SolutionStore>(&bytes) {
+            if let Ok(mut guard) = store().lock() {
+                *guard = fresh;
+            }
+        }
+    }
+}
+
 fn flush(store: &SolutionStore) {
     let path = store_path();
     let Some(parent) = path.parent() else {
@@ -145,6 +157,7 @@ pub fn record_loc_change(added: u64, removed: u64) {
 }
 
 pub fn trend_7d() -> Vec<(String, u64, i64)> {
+    reload_from_disk();
     let store = store()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -168,6 +181,7 @@ pub fn record_output_tokens(baseline: u64, actual: u64) {
 }
 
 pub fn snapshot() -> SolutionSnapshot {
+    reload_from_disk();
     let store = store()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);

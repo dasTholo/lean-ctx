@@ -220,6 +220,12 @@ pub(super) fn rewrite_candidate(cmd: &str, binary: &str) -> Option<String> {
         return None;
     }
 
+    // Package-manager install commands produce interactive progress output
+    // and can hang when wrapped. Always pass through.
+    if is_package_manager_install(cmd) {
+        return None;
+    }
+
     // Heredocs cannot survive the quoting round-trip through `lean-ctx -c '...'`.
     // Newlines get escaped, breaking the heredoc syntax entirely (GitHub #140).
     if cmd.contains("<<") {
@@ -515,6 +521,53 @@ pub(super) fn build_rewrite_compound(cmd: &str, binary: &str) -> Option<String> 
     }
 }
 
+/// Package-manager install/add/remove commands produce interactive progress
+/// output that is not useful to compress, and wrapping them in `lean-ctx -c`
+/// can cause hangs when the daemon is unhealthy. Always pass through.
+pub(super) fn is_package_manager_install(cmd: &str) -> bool {
+    let tokens: Vec<&str> = cmd.split_whitespace().collect();
+    let base = tokens
+        .first()
+        .map(|t| t.rsplit('/').next().unwrap_or(t))
+        .unwrap_or("");
+    let is_pm = matches!(
+        base,
+        "npm"
+            | "npx"
+            | "yarn"
+            | "pnpm"
+            | "bun"
+            | "pip"
+            | "pip3"
+            | "cargo"
+            | "brew"
+            | "apt"
+            | "apt-get"
+            | "dnf"
+            | "pacman"
+            | "winget"
+            | "choco"
+            | "scoop"
+    );
+    if !is_pm {
+        return false;
+    }
+    let sub = tokens.get(1).copied().unwrap_or("");
+    matches!(
+        sub,
+        "install"
+            | "i"
+            | "add"
+            | "remove"
+            | "uninstall"
+            | "rm"
+            | "update"
+            | "upgrade"
+            | "ci"
+            | "create"
+    )
+}
+
 /// GH #1420: detect package-manager commands targeting the lean-ctx package.
 /// Rewriting these through `lean-ctx -c` locks the binary and prevents
 /// npm/cargo from replacing it (EBUSY on Windows, hang on all platforms).
@@ -626,17 +679,37 @@ mod tests {
     }
 
     #[test]
-    fn npm_install_other_package_still_rewrites() {
+    fn npm_install_other_package_not_rewritten() {
         let binary = "/Users/test/.local/bin/lean-ctx";
-        // npm install of unrelated packages should still be rewritten
-        // (npm is in the default allowlist, rewrite wraps for compression)
-        let _result = rewrite_candidate("npm install express", binary);
-        // npm install doesn't match file-read patterns, so it won't be
-        // rewritten anyway — but it must NOT be blocked by self-install check
         assert!(
-            !super::is_self_install_command("npm install express"),
-            "unrelated npm install must not trigger self-install skip"
+            rewrite_candidate("npm install express", binary).is_none(),
+            "npm install must skip rewrite (package-manager passthrough)"
         );
+    }
+
+    #[test]
+    fn package_manager_install_detected() {
+        assert!(super::is_package_manager_install("npm install"));
+        assert!(super::is_package_manager_install("npm i express"));
+        assert!(super::is_package_manager_install("yarn add lodash"));
+        assert!(super::is_package_manager_install("pnpm install"));
+        assert!(super::is_package_manager_install("bun install"));
+        assert!(super::is_package_manager_install("pip install requests"));
+        assert!(super::is_package_manager_install("cargo install serde"));
+        assert!(super::is_package_manager_install("npm ci"));
+        assert!(super::is_package_manager_install("npm uninstall express"));
+        assert!(super::is_package_manager_install("npm create vite@latest"));
+    }
+
+    #[test]
+    fn package_manager_non_install_not_detected() {
+        assert!(!super::is_package_manager_install("npm run build"));
+        assert!(!super::is_package_manager_install("npm test"));
+        assert!(!super::is_package_manager_install("npm start"));
+        assert!(!super::is_package_manager_install("yarn dev"));
+        assert!(!super::is_package_manager_install("cargo build"));
+        assert!(!super::is_package_manager_install("cargo test"));
+        assert!(!super::is_package_manager_install("git status"));
     }
 
     #[test]

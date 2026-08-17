@@ -149,7 +149,7 @@ fn acquire_file_lock(lock_path: &std::path::Path) -> Option<FileLockGuard> {
     None
 }
 
-pub(super) fn apply_deltas(
+pub(crate) fn apply_deltas(
     disk: &StatsStore,
     current: &StatsStore,
     baseline: &StatsStore,

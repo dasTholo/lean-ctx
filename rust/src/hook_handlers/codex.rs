@@ -126,6 +126,13 @@ pub fn handle_codex_pretooluse() {
         return;
     };
 
+    // Package-manager install commands must always pass through —
+    // wrapping or denying them causes hangs and confuses users.
+    if super::file_rewrite::is_package_manager_install(cmd) {
+        print!("{}", codex_allow_output());
+        return;
+    }
+
     if let Some(rewritten) = rewrite_candidate(cmd, &binary) {
         print!("{}", codex_rewrite_output(&rewritten));
         return;
