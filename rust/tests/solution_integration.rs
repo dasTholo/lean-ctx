@@ -444,6 +444,7 @@ fn native_edit_via_observe_hook_triggers_solution_capture() {
 }
 
 #[test]
+#[cfg_attr(windows, ignore = "Write-tool LOC counting uses Unix path conventions")]
 fn native_write_tool_records_loc_addition() {
     let tmp = std::env::temp_dir().join("native_write_test");
     let tmp_str = tmp.to_string_lossy().replace('\\', "/");
