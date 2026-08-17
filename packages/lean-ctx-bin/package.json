@@ -27,10 +27,12 @@
     "lean-ctx": "./bin/lean-ctx.js"
   },
   "scripts": {
+    "preinstall": "node preinstall.js",
     "postinstall": "node postinstall.js"
   },
   "files": [
     "bin/",
+    "preinstall.js",
     "postinstall.js",
     "README.md"
   ],
