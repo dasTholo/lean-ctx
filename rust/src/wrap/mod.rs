@@ -146,6 +146,17 @@ fn run_wrap_for_agent(agent_key: &str) {
         eprintln!("  Rules: {error}");
     }
 
+    // --- Step 4b: Consolidate split data dirs ---
+    if let Some(report) = crate::core::data_consolidate::consolidate() {
+        if report.files_moved > 0 {
+            eprintln!(
+                "  Consolidated {} files from {} split data dir(s)",
+                report.files_moved,
+                report.merged_from.len()
+            );
+        }
+    }
+
     // --- Step 5: Daemon ---
     eprintln!("  Starting daemon...");
     if !crate::daemon::is_daemon_running() {
@@ -163,8 +174,49 @@ fn run_wrap_for_agent(agent_key: &str) {
     // --- Step 8: Launch / restart hint ---
     let launch_result = launch::handle_agent_launch(agent_key);
 
-    // --- Step 9: Summary ---
+    // --- Step 9: Self-test ---
+    run_self_test(agent_key, &home);
+
+    // --- Step 10: Summary ---
     print_summary(agent_key, mcp_verified, &launch_result);
+}
+
+fn run_self_test(agent_key: &str, home: &std::path::Path) {
+    let mut issues: Vec<String> = Vec::new();
+
+    // 1. Hook coverage
+    if !crate::core::rules_channel::client_hook_covered(agent_key, home) {
+        issues.push(format!(
+            "Hook coverage not detected for {agent_key}.              Native tool calls may be visible in chat.              Re-run: lean-ctx wrap {agent_key}"
+        ));
+    }
+
+    // 2. Stats split
+    let dirs = crate::core::data_dir::all_data_dirs_with_stats();
+    if dirs.len() > 1 {
+        issues.push(format!(
+            "Stats data found in {} locations (should be 1).              Run: lean-ctx doctor --fix",
+            dirs.len()
+        ));
+    }
+
+    // 3. Daemon running
+    if !crate::daemon::is_daemon_running() {
+        issues.push(
+            "Daemon is not running. Context caching and live stats              will be unavailable until it starts."
+                .to_string(),
+        );
+    }
+
+    if issues.is_empty() {
+        eprintln!("  [32mSelf-test: all checks passed[0m");
+    } else {
+        eprintln!();
+        eprintln!("  [33mSelf-test: {} issue(s) detected:[0m", issues.len());
+        for issue in &issues {
+            eprintln!("    [33m- {issue}[0m");
+        }
+    }
 }
 
 fn print_summary(agent_key: &str, mcp_ok: bool, launch_hint: &str) {
