@@ -178,6 +178,16 @@ Model declaration for measured-vs-estimated cost reporting
 - `default_model` (string?, default `null`) — Fallback pricing model for MCP-only IDEs whose real model lean-ctx cannot observe (Cursor, Copilot, Windsurf, …). Unset → blended heuristic. Per-IDE overrides live in [cost.models]
 - `prices` (table?, default `[]`) — Operator price overrides per model, USD per million tokens: [cost.prices."<model>"] with input_per_m / output_per_m / cache_write_per_m / cache_read_per_m. For negotiated enterprise rates (committed-use discounts, Azure PTU, zero-rated internal models); overrides embedded and live catalog rows, only a provider-measured bill beats it
 
+## `[cross_agent]`
+
+Cross-agent memory sharing and semantic retrieval (Atlas adaptation)
+
+- `auto_extract` (bool, default `true`) — Auto-extract decisions from completed sessions
+- `cross_agent_sync` (bool, default `true`) — Share knowledge facts across agent sessions
+- `embedding_model` (string, default `minilm-l6`) — On-device embedding model for semantic retrieval
+- `max_facts_per_session` (usize, default `50`) — Maximum knowledge facts extracted per session
+- `semantic_search` (bool, default `false`) — Enable embedding-based knowledge retrieval (requires model download)
+
 ## `[custom_aliases]`
 
 Custom command aliases (array of {command, alias} entries). Note: field names are 'command' and 'alias' (not 'name')

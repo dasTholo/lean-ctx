@@ -729,4 +729,5 @@ pub struct Config {
     pub solution: super::solution::SolutionConfig,
     #[serde(default)]
     pub provenance: super::provenance::ProvenanceConfig,
+    pub cross_agent: super::provenance::CrossAgentConfig,
 }

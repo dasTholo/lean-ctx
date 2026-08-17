@@ -850,10 +850,10 @@ class CockpitOverview extends HTMLElement {
 
   _workspaceHealthCard(esc) {
     var health = this._workspaceHealth;
-    if (!health && !this._workspaceHealthLoading && fetchJson) {
+    var _fetchFn = api(); if (!health && !this._workspaceHealthLoading && _fetchFn) {
       var self = this;
       this._workspaceHealthLoading = true;
-      fetchJson('/api/health', { timeoutMs: 8000 }).then(function (data) {
+      _fetchFn('/api/workspace-health', { timeoutMs: 8000 }).then(function (data) {
         if (data && !data.__error) {
           self._workspaceHealth = data;
           self.render();

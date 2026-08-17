@@ -294,10 +294,11 @@ fn codex_session_briefing_hook_covered() -> String {
     format!(
         r#"lean-ctx SESSION BRIEFING
 
-lean-ctx is active — hooks compress native tool output transparently.
-Use native Read, Grep, Glob, and Shell normally; lean-ctx optimizes context automatically.
+lean-ctx is active — Shell commands are compressed by hooks automatically.
+File tools (Read/Grep/Glob) are redirected to lean-ctx MCP equivalents by hooks.
+Use ctx_read for reading, ctx_search for searching, ctx_glob/ctx_tree for finding files.
 
-Advanced tools (no native equivalent): ctx_compose (understand code, call first),
+Exclusive tools (no native equivalent): ctx_compose (understand code, call first),
 ctx_search(action=symbol), ctx_search(action=semantic), ctx_callgraph, ctx_knowledge, ctx_session.
 
 {intent}
@@ -422,10 +423,12 @@ mod tests {
     }
 
     #[test]
-    fn session_briefing_hook_covered_uses_transparent_wording() {
+    fn session_briefing_hook_covered_uses_correct_wording() {
         let briefing = codex_session_briefing_hook_covered();
-        assert!(briefing.contains("hooks compress native tool output transparently"));
-        assert!(!briefing.contains("instead of Read"));
+        assert!(briefing.contains("Shell commands are compressed by hooks automatically"));
+        assert!(briefing.contains("redirected to lean-ctx MCP equivalents"));
+        assert!(!briefing.contains("Use native Read, Grep, Glob"));
         assert!(briefing.contains("ctx_compose"));
+        assert!(briefing.contains("ctx_read"));
     }
 }

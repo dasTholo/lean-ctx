@@ -19,6 +19,9 @@ pub enum ContextEventKindV1 {
     ArtifactStored,
     GraphBuilt,
     ProofAdded,
+    ProvenanceCheckpoint,
+    ProvenanceEdit,
+    HealthChanged,
 }
 
 impl ContextEventKindV1 {
@@ -30,6 +33,9 @@ impl ContextEventKindV1 {
             Self::ArtifactStored => "artifact_stored",
             Self::GraphBuilt => "graph_built",
             Self::ProofAdded => "proof_added",
+            Self::ProvenanceCheckpoint => "provenance_checkpoint",
+            Self::ProvenanceEdit => "provenance_edit",
+            Self::HealthChanged => "health_changed",
         }
     }
 
@@ -58,8 +64,13 @@ impl ContextEventKindV1 {
     pub fn consistency_level(&self) -> ConsistencyLevel {
         match self {
             Self::ToolCallRecorded | Self::GraphBuilt => ConsistencyLevel::Local,
-            Self::KnowledgeRemembered | Self::ArtifactStored => ConsistencyLevel::Eventual,
-            Self::SessionMutated | Self::ProofAdded => ConsistencyLevel::Strong,
+            Self::KnowledgeRemembered
+            | Self::ArtifactStored
+            | Self::ProvenanceEdit
+            | Self::HealthChanged => ConsistencyLevel::Eventual,
+            Self::SessionMutated | Self::ProofAdded | Self::ProvenanceCheckpoint => {
+                ConsistencyLevel::Strong
+            }
         }
     }
 }
