@@ -300,6 +300,8 @@ fn resolve_inner(ctx: &AutoModeContext) -> ResolvedMode {
 }
 
 /// The opt-in adaptive block (#683): bounce/path memory plus the predictor /
+// OSS: adaptive read-mode selection. Not related to commercial
+// Adaptive Intensity (Solution Intelligence Section 8).
 /// bandit / heatmap / adaptive-policy learning loop. Returns `Some` when a
 /// learning signal decides the mode, `None` to fall through to the deterministic
 /// heuristic. Only invoked when `auto_mode_learning` is enabled, so its disk I/O

@@ -6,6 +6,7 @@ pub(crate) fn install_jetbrains_hook() {
     if !super::super::should_register_mcp() {
         return;
     }
+    install_jetbrains_solution_rules();
     let binary = resolve_binary_path();
     let home = crate::core::home::resolve_home_dir().unwrap_or_default();
     let config_path = home.join(".jb-mcp.json");
@@ -53,6 +54,60 @@ pub(crate) fn install_jetbrains_hook() {
     } else {
         tracing::error!("Failed to configure JetBrains");
     }
+}
+
+fn install_jetbrains_solution_rules() {
+    let Some(home) = crate::core::home::resolve_home_dir() else {
+        return;
+    };
+    let rules_path = home.join(".jb-rules/lean-ctx.md");
+    let Some(parent) = rules_path.parent() else {
+        return;
+    };
+    if std::fs::create_dir_all(parent).is_err() {
+        return;
+    }
+
+    let block = solution_aware_rules_block(crate::rules_inject::rules_dedicated_markdown());
+    upsert_solution_rules(&rules_path, &block);
+}
+
+#[allow(clippy::needless_pass_by_value)]
+fn solution_aware_rules_block(base_block: String) -> String {
+    let solution_block = crate::core::rules_canonical::enabled_solution_rules_block();
+    let base_block = crate::marked_block::remove_content(
+        &base_block,
+        crate::core::rules_canonical::SOLUTION_BLOCK_START,
+        crate::core::rules_canonical::SOLUTION_BLOCK_END,
+    );
+    if solution_block.is_empty() {
+        return base_block;
+    }
+
+    base_block.replacen(
+        crate::core::rules_canonical::END_MARK,
+        &format!(
+            "{solution_block}\n{}",
+            crate::core::rules_canonical::END_MARK
+        ),
+        1,
+    )
+}
+
+fn upsert_solution_rules(path: &std::path::Path, block: &str) {
+    let existing = std::fs::read_to_string(path).unwrap_or_default();
+    if existing.trim_end() == block.trim_end() {
+        return;
+    }
+
+    crate::marked_block::upsert(
+        path,
+        crate::core::rules_canonical::START_MARK,
+        crate::core::rules_canonical::END_MARK,
+        block,
+        true,
+        "JetBrains rules",
+    );
 }
 
 /// JetBrains AI Assistant does not auto-load `~/.jb-mcp.json`. The snippet must

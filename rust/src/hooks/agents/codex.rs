@@ -14,6 +14,7 @@ pub fn install_codex_hook() {
     }
 
     let hook_config_changed = install_codex_hook_config(&codex_dir);
+    let solution_rules_changed = install_codex_solution_rules(&codex_dir);
     let installed_docs = install_codex_instruction_docs(&codex_dir);
 
     if !mcp_server_quiet_mode() {
@@ -23,12 +24,57 @@ pub fn install_codex_hook() {
                 codex_dir.display()
             );
         }
-        if installed_docs {
+        if installed_docs || solution_rules_changed {
             eprintln!("Installed Codex instructions at {}", codex_dir.display());
         } else {
             eprintln!("Codex AGENTS.md already configured.");
         }
     }
+}
+
+fn install_codex_solution_rules(codex_dir: &std::path::Path) -> bool {
+    let rules_path = codex_dir.join("instructions.md");
+    let block = solution_aware_rules_block(crate::rules_inject::canonical_rules_block());
+    upsert_solution_rules(&rules_path, &block)
+}
+
+#[allow(clippy::needless_pass_by_value)]
+fn solution_aware_rules_block(base_block: String) -> String {
+    let solution_block = crate::core::rules_canonical::enabled_solution_rules_block();
+    let base_block = crate::marked_block::remove_content(
+        &base_block,
+        crate::core::rules_canonical::SOLUTION_BLOCK_START,
+        crate::core::rules_canonical::SOLUTION_BLOCK_END,
+    );
+    if solution_block.is_empty() {
+        return base_block;
+    }
+
+    base_block.replacen(
+        crate::core::rules_canonical::END_MARK,
+        &format!(
+            "{solution_block}\n{}",
+            crate::core::rules_canonical::END_MARK
+        ),
+        1,
+    )
+}
+
+fn upsert_solution_rules(path: &std::path::Path, block: &str) -> bool {
+    let existing = std::fs::read_to_string(path).unwrap_or_default();
+    if existing.trim_end() == block.trim_end() {
+        return false;
+    }
+
+    crate::marked_block::upsert(
+        path,
+        crate::core::rules_canonical::START_MARK,
+        crate::core::rules_canonical::END_MARK,
+        block,
+        true,
+        "Codex rules",
+    );
+    true
 }
 
 fn install_codex_hook_config(codex_dir: &std::path::Path) -> bool {

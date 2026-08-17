@@ -1,3 +1,8 @@
+//! A2A transport envelope signing for inter-agent communication.
+//! Uses HMAC for transport-level message integrity.
+//! Distinct from commercial Verified Attribution (Section 8)
+//! which provides billing CPAO credit with chain integrity.
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

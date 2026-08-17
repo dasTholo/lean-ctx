@@ -1,3 +1,7 @@
+//! Commercial Solution Intelligence API stubs.
+//! All functions return enterprise license errors in OSS builds.
+//! Full implementations live in lean-ctx-enterprise/crates/intelligence/.
+
 use serde::{Deserialize, Serialize};
 
 const ENTERPRISE_LICENSE_REQUIRED: &str = "requires enterprise license";

@@ -147,12 +147,15 @@ pub(crate) fn record_str_replace_miss() {
 }
 
 #[allow(dead_code)]
-pub(crate) fn record_loc_change(added: u64, removed: u64) {
+pub(crate) fn record_loc_change(path: Option<&str>, added: u64, removed: u64) {
     with_store(|s| {
         s.loc_added = s.loc_added.saturating_add(added);
         s.loc_removed = s.loc_removed.saturating_add(removed);
     });
     crate::core::solution_tracker::record_loc_change(added, removed);
+    if let Some(path) = path {
+        crate::core::savings_ledger::record_edit_event(path, added, removed);
+    }
 }
 
 /// Snapshot for `ctx_metrics` and the dashboard `/api/stats` payload.

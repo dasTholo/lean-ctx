@@ -64,6 +64,9 @@ pub enum EvidenceClass {
     Unclassified,
 }
 
+// OSS savings verification workflow states.
+// Distinct from commercial Solution Audit Trail (Section 8)
+// which provides compliance-grade decision logging with approvals.
 /// Customer disposition of a savings claim (P5 — settlement path).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
