@@ -361,6 +361,14 @@ pub(crate) fn is_noise_path(path: &str) -> bool {
         "build",
         "vendor",
         ".terraform",
+        ".worktrees",
+        "Library",
+        "ShipIt",
+        "SolutionPackages",
+        "agent-transcripts",
+        "terminals",
+        ".codex-worktrees",
+        ".cursor",
     ];
     // Match a noise directory anywhere in the path (leading, middle, or with a
     // leading slash). Splitting on components handles relative paths too.
