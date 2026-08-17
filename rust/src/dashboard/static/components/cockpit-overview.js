@@ -270,13 +270,10 @@ class CockpitOverview extends HTMLElement {
     var saved = totalIn - totalOut;
     var roiObj = this._data && this._data.roi && this._data.roi.roi;
     var verifiedSaved = roiObj ? roiObj.net_saved_tokens || 0 : 0;
-    var roiTrend = this._data && this._data.roi && this._data.roi.trend || [];
-    var totalRaw = 0;
-    for (var ti = 0; ti < roiTrend.length; ti++) { totalRaw += Number(roiTrend[ti][3] || 0); }
-    var compDenom = totalRaw > 0 ? totalRaw : totalIn;
-    var compRate = verifiedSaved > 0 && compDenom > 0
-      ? Math.min(100, pc(verifiedSaved, compDenom))
+    var compRate = verifiedSaved > 0 && totalIn > 0
+      ? Math.min(100, pc(verifiedSaved, totalIn))
       : (totalIn > 0 ? pc(saved, totalIn) : 0);
+
     var calls = stats ? stats.total_commands || 0 : 0;
     var energyWh = ewh(saved);
     var avoidedUsd = gain && gain.summary ? gain.summary.avoided_usd || 0 : 0;
@@ -328,7 +325,7 @@ class CockpitOverview extends HTMLElement {
       '<div class="hc">' +
       '<span class="hl">Net savings rate' + tip('compression_rate') + '</span>' +
       '<div class="hv">' + esc(String(compRate)) + '%</div>' +
-      '<p class="hs">verified savings / all tool-call tokens</p>' +
+      '<p class="hs">verified net savings / all input tokens</p>' +
       '</div>' +
 
       '<div class="hc">' +

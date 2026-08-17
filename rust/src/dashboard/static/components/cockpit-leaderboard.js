@@ -379,7 +379,7 @@ class CockpitLeaderboard extends HTMLElement {
       '<th style="' + th + ';text-align:left">Name</th>' +
       '<th style="' + th + ';text-align:right">Tokens saved</th>' +
       '<th style="' + th + ';text-align:right">Saved</th>' +
-      '<th style="' + th + ';text-align:right">Compr.</th>' +
+      '<th style="' + th + ';text-align:right">Net %</th>' +
       '</tr></thead><tbody>' +
       rows +
       '</tbody></table></div>'
