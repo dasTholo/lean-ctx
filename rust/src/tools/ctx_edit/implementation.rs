@@ -513,8 +513,7 @@ fn do_replace(
     let lines_removed = u64::try_from(args.old_str.lines().count())
         .unwrap_or(u64::MAX)
         .saturating_mul(replacements);
-    crate::core::edit_metering::record_loc_change(lines_added, lines_removed);
-    crate::core::savings_ledger::record_edit_event(&params.path, lines_added, lines_removed);
+    crate::core::edit_metering::record_loc_change(Some(&params.path), lines_added, lines_removed);
 
     if let Ok(mut bt) = crate::core::bounce_tracker::global().lock() {
         bt.record_edit(&params.path);
@@ -652,8 +651,7 @@ fn handle_create(file_path: &str, content: &str, params: &EditParams) -> (String
     let lines_removed = preimage.as_ref().map_or(0, |pre| {
         u64::try_from(pre.text.lines().count()).unwrap_or(u64::MAX)
     });
-    crate::core::edit_metering::record_loc_change(lines_added, lines_removed);
-    crate::core::savings_ledger::record_edit_event(file_path, lines_added, lines_removed);
+    crate::core::edit_metering::record_loc_change(Some(file_path), lines_added, lines_removed);
 
     let lines = content.lines().count();
     let tokens = count_tokens(content);

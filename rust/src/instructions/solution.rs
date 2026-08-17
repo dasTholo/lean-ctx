@@ -1,6 +1,10 @@
 use crate::core::config::solution::SolutionIntensity;
 
 /// Returns the active Solution Intelligence decision ladder.
+///
+/// The balanced wording intentionally extends the plan's Section 3.8 shorthand:
+/// `(active)` identifies injected guidance and `Before implementing` scopes when
+/// the unchanged "stop at the first level" rule applies.
 #[must_use]
 pub fn solution_ladder_text(intensity: &SolutionIntensity) -> &'static str {
     match intensity {

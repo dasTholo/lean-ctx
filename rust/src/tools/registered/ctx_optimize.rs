@@ -361,6 +361,7 @@ fn format_suggestions(
 
 fn format_session_report(ctx: &ToolContext, format: &str) -> String {
     let (decisions, debt) = session_data(ctx);
+    let decisions_summary = decision_summary(&crate::core::solution_tracker::snapshot());
     let knowledge = ProjectKnowledge::load(&ctx.project_root);
     let facts = knowledge.as_ref().map_or(0, |entry| entry.facts.len());
     let patterns = knowledge.as_ref().map_or(0, |entry| entry.patterns.len());
@@ -372,6 +373,7 @@ fn format_session_report(ctx: &ToolContext, format: &str) -> String {
             "tool": "ctx_optimize",
             "report": {
                 "decisions": decisions,
+                "decisions_summary": decisions_summary_json(&decisions_summary),
                 "savings": {
                     "knowledge_facts": facts,
                     "knowledge_patterns": patterns,
@@ -384,8 +386,9 @@ fn format_session_report(ctx: &ToolContext, format: &str) -> String {
     }
 
     let mut out = format!(
-        "Solution Intelligence session report\n\nDecisions: {}\n",
-        decisions.len()
+        "Solution Intelligence session report\n\n{}\n\nDecisions: {}\n",
+        format_decision_breakdown(&decisions_summary),
+        decisions.len(),
     );
     for decision in &decisions {
         out.push_str(&format!("- {decision}\n"));
@@ -402,6 +405,63 @@ fn format_session_report(ctx: &ToolContext, format: &str) -> String {
         crate::core::solution_tracker::gain_summary()
     ));
     out
+}
+
+struct DecisionSummary {
+    total: u64,
+    stdlib: u64,
+    native: u64,
+    reuse: u64,
+    yagni: u64,
+    oneline: u64,
+    debt: u64,
+}
+
+fn decision_summary(snapshot: &crate::core::solution_tracker::SolutionSnapshot) -> DecisionSummary {
+    let count = |kind| {
+        snapshot
+            .decisions_by_kind
+            .get(kind)
+            .copied()
+            .unwrap_or_default()
+    };
+
+    DecisionSummary {
+        total: snapshot.decisions_total,
+        stdlib: count("stdlib"),
+        native: count("native"),
+        reuse: count("reuse"),
+        yagni: count("yagni"),
+        oneline: count("oneline"),
+        debt: count("debt"),
+    }
+}
+
+fn decisions_summary_json(summary: &DecisionSummary) -> Value {
+    json!({
+        "total": summary.total,
+        "by_kind": {
+            "stdlib": summary.stdlib,
+            "native": summary.native,
+            "reuse": summary.reuse,
+            "yagni": summary.yagni,
+            "oneline": summary.oneline,
+            "debt": summary.debt,
+        }
+    })
+}
+
+fn format_decision_breakdown(summary: &DecisionSummary) -> String {
+    format!(
+        "Decision Breakdown\nTotal: {}\n- stdlib: {}\n- native: {}\n- reuse: {}\n- yagni: {}\n- oneline: {}\n- debt: {}",
+        summary.total,
+        summary.stdlib,
+        summary.native,
+        summary.reuse,
+        summary.yagni,
+        summary.oneline,
+        summary.debt,
+    )
 }
 
 fn format_decision_ladder(ctx: &ToolContext, format: &str) -> String {
@@ -475,4 +535,53 @@ fn session_data(ctx: &ToolContext) -> (Vec<String>, Vec<String>) {
         })
         .collect();
     (decisions, debt)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use serde_json::json;
+
+    use super::{decision_summary, decisions_summary_json, format_decision_breakdown};
+    use crate::core::solution_tracker::SolutionSnapshot;
+
+    #[test]
+    fn decision_summary_includes_total_and_every_kind() {
+        let mut decisions_by_kind = HashMap::new();
+        decisions_by_kind.insert("stdlib".to_owned(), 2);
+        decisions_by_kind.insert("reuse".to_owned(), 1);
+        decisions_by_kind.insert("debt".to_owned(), 1);
+        let snapshot = SolutionSnapshot {
+            decisions_total: 4,
+            decisions_by_kind,
+            loc_added: 0,
+            loc_removed: 0,
+            loc_net_saved: 0,
+            output_tokens_baseline: 0,
+            output_tokens_actual: 0,
+            output_reduction_pct: 0,
+        };
+
+        let summary = decision_summary(&snapshot);
+
+        assert_eq!(
+            decisions_summary_json(&summary),
+            json!({
+                "total": 4,
+                "by_kind": {
+                    "stdlib": 2,
+                    "native": 0,
+                    "reuse": 1,
+                    "yagni": 0,
+                    "oneline": 0,
+                    "debt": 1,
+                }
+            })
+        );
+        assert_eq!(
+            format_decision_breakdown(&summary),
+            "Decision Breakdown\nTotal: 4\n- stdlib: 2\n- native: 0\n- reuse: 1\n- yagni: 0\n- oneline: 0\n- debt: 1"
+        );
+    }
 }

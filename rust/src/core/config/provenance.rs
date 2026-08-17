@@ -7,7 +7,7 @@
 //!
 //!   - an environment variable (`LEAN_CTX_COMPRESSION`, …) — wins in `effective()`;
 //!   - a project-local `.lean-ctx.toml` — overrides `compression_level`,
-//!     `terse_agent` and `tool_profile` in [`Config::merge_local`];
+//!     `terse_agent` and `tool_profile` in `Config::merge_local`;
 //!   - a divergent *resolved config dir* (launchd vs. terminal env) — the
 //!     dashboard writes path X while the runtime reads path Y, so the global file
 //!     "does not exist" from the reader's view;
@@ -55,7 +55,7 @@ impl Default for ProvenanceConfig {
 }
 
 /// Editable quick-settings a project-local `.lean-ctx.toml` can override via
-/// [`Config::merge_local`]. `structure_first` is intentionally absent: the local
+/// `Config::merge_local`. `structure_first` is intentionally absent: the local
 /// merge never touches it.
 const LOCAL_OVERRIDABLE_KEYS: &[&str] = &["compression_level", "terse_agent", "tool_profile"];
 
@@ -172,7 +172,7 @@ impl Config {
 }
 
 /// Editable keys explicitly set in a project-local `.lean-ctx.toml`. Mirrors the
-/// keys [`Config::merge_local`] honors, detected via parsed top-level table keys
+/// keys `Config::merge_local` honors, detected via parsed top-level table keys
 /// (a comment that merely mentions the key does not count).
 fn local_override_keys(local_toml: &str) -> Vec<&'static str> {
     let Ok(table) = local_toml.parse::<toml::Table>() else {

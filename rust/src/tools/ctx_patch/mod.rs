@@ -229,8 +229,7 @@ pub fn run_io(params: &PatchParams, _last_mode: &str) -> (String, CacheEffect) {
         return (e, CacheEffect::None);
     }
 
-    crate::core::edit_metering::record_loc_change(lines_added, lines_removed);
-    crate::core::savings_ledger::record_edit_event(file_path, lines_added, lines_removed);
+    crate::core::edit_metering::record_loc_change(Some(file_path), lines_added, lines_removed);
 
     if let Ok(mut bt) = crate::core::bounce_tracker::global().lock() {
         bt.record_edit(file_path);
@@ -312,8 +311,7 @@ fn handle_create(params: &PatchParams, path: &Path, content: &str) -> (String, C
     }
 
     let lines_added = u64::try_from(content.lines().count()).unwrap_or(u64::MAX);
-    crate::core::edit_metering::record_loc_change(lines_added, 0);
-    crate::core::savings_ledger::record_edit_event(&params.path, lines_added, 0);
+    crate::core::edit_metering::record_loc_change(Some(&params.path), lines_added, 0);
 
     if let Ok(mut bt) = crate::core::bounce_tracker::global().lock() {
         bt.record_edit(&params.path);

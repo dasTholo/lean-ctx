@@ -179,8 +179,7 @@ fn handle_edit_tool(v: &Value, args: &Value, tool: &str, root: &str, capture_pro
         let added = new_lines.saturating_sub(old_lines);
         let removed = old_lines.saturating_sub(new_lines);
         if added > 0 || removed > 0 {
-            crate::core::edit_metering::record_loc_change(added, removed);
-            crate::core::savings_ledger::record_edit_event(&path, added, removed);
+            crate::core::edit_metering::record_loc_change(Some(&path), added, removed);
         }
 
         if capture_provenance {
@@ -211,7 +210,7 @@ fn handle_write_tool(v: &Value, args: &Value, tool: &str, root: &str, capture_pr
 
     let lines = content.lines().count() as u64;
     if lines > 0 {
-        crate::core::edit_metering::record_loc_change(lines, 0);
+        crate::core::edit_metering::record_loc_change(None, lines, 0);
         if let Some((_, ref fp)) =
             payload::resolve_path_field(Some(args), payload::READ_PATH_FIELDS)
         {
@@ -220,8 +219,8 @@ fn handle_write_tool(v: &Value, args: &Value, tool: &str, root: &str, capture_pr
         if let Some((_, file_path)) =
             payload::resolve_path_field(Some(args), payload::READ_PATH_FIELDS)
         {
-            crate::core::savings_ledger::record_edit_event(&file_path, lines, 0);
             if capture_provenance {
+                crate::core::savings_ledger::record_edit_event(&file_path, lines, 0);
                 observe_native_edit(v, root, &file_path, tool, "", content, lines, 0);
             }
         }
