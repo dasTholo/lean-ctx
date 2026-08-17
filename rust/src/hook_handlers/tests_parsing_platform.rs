@@ -307,10 +307,6 @@ fn codex_session_briefing_contains_full_tool_guidance() {
         "briefing must mention ctx_compose: {briefing}"
     );
     assert!(
-        briefing.contains("ctx_shell"),
-        "briefing must mention ctx_shell: {briefing}"
-    );
-    assert!(
         briefing.contains("ctx_session"),
         "briefing must mention ctx_session: {briefing}"
     );
@@ -322,10 +318,8 @@ fn codex_session_briefing_contains_full_tool_guidance() {
         briefing.contains("CHECKPOINT"),
         "briefing must include checkpoint rule: {briefing}"
     );
-    assert!(
-        briefing.contains("NEVER"),
-        "briefing must include NEVER rule: {briefing}"
-    );
+    // In hook_covered mode, native tools work transparently — NEVER and
+    // ctx_shell are only in the explicit fallback briefing.
     let json = session_start_additional_context_json(&briefing);
     let v: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
     let ctx = v["hookSpecificOutput"]["additionalContext"]

@@ -289,24 +289,18 @@ pub(crate) fn codex_session_briefing() -> String {
 }
 
 fn codex_session_briefing_hook_covered() -> String {
-    let intent = crate::core::rules_canonical::INTENT;
-    let never = crate::core::rules_canonical::NEVER;
-    format!(
-        r#"lean-ctx SESSION BRIEFING
+    r#"lean-ctx SESSION BRIEFING
 
-lean-ctx is active — Shell commands are compressed by hooks automatically.
-File tools (Read/Grep/Glob) are redirected to lean-ctx MCP equivalents by hooks.
-Use ctx_read for reading, ctx_search for searching, ctx_glob/ctx_tree for finding files.
+lean-ctx is active — hooks compress all native tool output transparently.
+Use native Read, Grep, Glob, and Shell normally; lean-ctx optimizes context automatically.
+Glob may fall back to ctx_glob if the hook cannot safely redirect.
 
-Exclusive tools (no native equivalent): ctx_compose (understand code, call first),
-ctx_search(action=symbol), ctx_search(action=semantic), ctx_callgraph, ctx_knowledge, ctx_session.
-
-{intent}
-
-{never}
+Exclusive tools (no native equivalent — call these via MCP):
+  ctx_compose (understand code, call FIRST), ctx_callgraph (callers/impact),
+  ctx_search(action=symbol | semantic), ctx_knowledge, ctx_session.
 
 CHECKPOINT: after 20+ tool calls, document progress with ctx_session(action="task", value="<status>")."#
-    )
+        .to_string()
 }
 
 fn codex_session_briefing_explicit() -> String {
@@ -423,12 +417,12 @@ mod tests {
     }
 
     #[test]
-    fn session_briefing_hook_covered_uses_correct_wording() {
+    fn session_briefing_hook_covered_is_fully_transparent() {
         let briefing = codex_session_briefing_hook_covered();
-        assert!(briefing.contains("Shell commands are compressed by hooks automatically"));
-        assert!(briefing.contains("redirected to lean-ctx MCP equivalents"));
-        assert!(!briefing.contains("Use native Read, Grep, Glob"));
+        assert!(briefing.contains("hooks compress all native tool output transparently"));
+        assert!(briefing.contains("Use native Read, Grep, Glob, and Shell normally"));
         assert!(briefing.contains("ctx_compose"));
-        assert!(briefing.contains("ctx_read"));
+        assert!(!briefing.contains("instead of Read"));
+        assert!(!briefing.contains("NEVER use native"));
     }
 }
