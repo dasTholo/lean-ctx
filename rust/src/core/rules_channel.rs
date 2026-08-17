@@ -109,7 +109,9 @@ pub fn client_hook_covered(client_name: &str, home: &Path) -> bool {
 }
 
 /// Codex hooks cover native tools when `~/.codex/hooks.json` has lean-ctx
-/// `deny` (Read/Grep/Glob) and `codex-pretooluse` (Bash) in PreToolUse.
+/// `codex-pretooluse` in PreToolUse. The pretooluse handler provides
+/// deny/redirect/rewrite for all tool types at runtime (mode-aware);
+/// a separate `hook deny` entry is not installed or required.
 fn codex_hooks_cover_native_tools(home: &Path) -> bool {
     let hooks_json = home.join(".codex").join("hooks.json");
     let Ok(content) = std::fs::read_to_string(&hooks_json) else {
@@ -140,7 +142,9 @@ fn codex_hooks_cover_native_tools(home: &Path) -> bool {
             in_command || in_hooks_array
         })
     };
-    has_lean_ctx("hook deny") && has_lean_ctx("hook codex-pretooluse")
+    // codex-pretooluse handles deny/redirect/rewrite for all tool types
+    // at runtime (mode-aware). No separate "hook deny" entry needed (#codex-ux).
+    has_lean_ctx("hook codex-pretooluse")
 }
 
 /// Windsurf hooks cover native tools when
@@ -457,7 +461,7 @@ pub mod tests {
     }
 
     #[test]
-    fn codex_hook_coverage_requires_deny_and_pretooluse() {
+    fn codex_hook_coverage_requires_pretooluse() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path();
 
@@ -467,17 +471,26 @@ pub mod tests {
         std::fs::create_dir_all(&codex_dir).expect("create .codex dir");
         let hooks = codex_dir.join("hooks.json");
 
-        // deny only → NOT covered (need both deny + codex-pretooluse).
+        // No hooks → not covered.
+        std::fs::write(&hooks, r#"{"hooks":{"PreToolUse":[]}}"#).expect("write empty hooks");
+        assert!(!codex_hooks_cover_native_tools(home));
+
+        // codex-pretooluse alone is sufficient (it handles deny/redirect
+        // at runtime, no separate deny entry needed).
         std::fs::write(
             &hooks,
             r#"{"hooks":{"PreToolUse":[
-                {"command":"/usr/local/bin/lean-ctx hook deny","matcher":"Read|Grep|Glob"}
+                {"hooks":[{"command":"/usr/local/bin/lean-ctx hook codex-pretooluse","type":"command","timeout":15}],"matcher":"Bash|Read|Grep|Glob"}
             ]}}"#,
         )
-        .expect("write deny-only hooks");
-        assert!(!codex_hooks_cover_native_tools(home));
+        .expect("write pretooluse hooks");
+        assert!(codex_hooks_cover_native_tools(home));
+        assert!(client_hook_covered("codex-cli", home));
+        assert!(client_hook_covered("codex", home));
+        // Cursor must NOT match via Codex hooks.
+        assert!(!client_hook_covered("cursor", home));
 
-        // Both deny + codex-pretooluse → covered.
+        // Legacy setup with both deny + pretooluse also covered.
         std::fs::write(
             &hooks,
             r#"{"hooks":{"PreToolUse":[
@@ -485,12 +498,8 @@ pub mod tests {
                 {"hooks":[{"command":"/usr/local/bin/lean-ctx hook codex-pretooluse","type":"command","timeout":15}],"matcher":"Bash"}
             ]}}"#,
         )
-        .expect("write full hooks");
+        .expect("write legacy hooks");
         assert!(codex_hooks_cover_native_tools(home));
-        assert!(client_hook_covered("codex-cli", home));
-        assert!(client_hook_covered("codex", home));
-        // Cursor must NOT match via Codex hooks.
-        assert!(!client_hook_covered("cursor", home));
     }
 
     #[test]

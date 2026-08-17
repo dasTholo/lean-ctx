@@ -269,9 +269,39 @@ exact command the hook suggests.
 
 Rule of thumb: back every exact claim with `lean-ctx raw` output."#;
 
-/// Full session briefing injected at Codex SessionStart. Supersedes the
-/// shell-only recovery hint with a complete tool adoption guide (#1448).
+/// Full session briefing injected at Codex SessionStart. When hooks cover
+/// native tools, uses transparent wording so the model prefers native
+/// Read/Grep/Glob (hooks compress automatically). Otherwise falls back
+/// to explicit MCP tool guidance.
 pub(crate) fn codex_session_briefing() -> String {
+    let home = dirs::home_dir().unwrap_or_default();
+    if crate::core::rules_channel::client_hook_covered("codex", &home) {
+        return codex_session_briefing_hook_covered();
+    }
+    codex_session_briefing_explicit()
+}
+
+fn codex_session_briefing_hook_covered() -> String {
+    let intent = crate::core::rules_canonical::INTENT;
+    let never = crate::core::rules_canonical::NEVER;
+    format!(
+        r#"lean-ctx SESSION BRIEFING
+
+lean-ctx is active — hooks compress native tool output transparently.
+Use native Read, Grep, Glob, and Shell normally; lean-ctx optimizes context automatically.
+
+Advanced tools (no native equivalent): ctx_compose (understand code, call first),
+ctx_search(action=symbol), ctx_search(action=semantic), ctx_callgraph, ctx_knowledge, ctx_session.
+
+{intent}
+
+{never}
+
+CHECKPOINT: after 20+ tool calls, document progress with ctx_session(action="task", value="<status>")."#
+    )
+}
+
+fn codex_session_briefing_explicit() -> String {
     let intent = crate::core::rules_canonical::INTENT;
     let never = crate::core::rules_canonical::NEVER;
     format!(
@@ -377,10 +407,18 @@ mod tests {
     }
 
     #[test]
-    fn session_briefing_covers_native_file_tools() {
-        let briefing = codex_session_briefing();
+    fn session_briefing_explicit_covers_native_file_tools() {
+        let briefing = codex_session_briefing_explicit();
         assert!(briefing.contains("ctx_read` instead of Read"));
         assert!(briefing.contains("ctx_search` instead of Grep"));
         assert!(briefing.contains("ctx_glob`/`ctx_tree` instead of Glob"));
+    }
+
+    #[test]
+    fn session_briefing_hook_covered_uses_transparent_wording() {
+        let briefing = codex_session_briefing_hook_covered();
+        assert!(briefing.contains("hooks compress native tool output transparently"));
+        assert!(!briefing.contains("instead of Read"));
+        assert!(briefing.contains("ctx_compose"));
     }
 }
