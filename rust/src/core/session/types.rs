@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 use crate::core::intent_protocol::IntentRecord;
+use crate::core::knowledge::KnowledgeFact;
 
 /// Persistent session state tracking task, findings, files, decisions, and stats.
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -17,6 +18,8 @@ pub struct SessionState {
     pub task: Option<TaskInfo>,
     pub findings: Vec<Finding>,
     pub decisions: Vec<Decision>,
+    #[serde(default)]
+    pub handoff_context: Vec<KnowledgeFact>,
     pub files_touched: Vec<FileTouched>,
     pub test_results: Option<TestSnapshot>,
     pub progress: Vec<ProgressEntry>,

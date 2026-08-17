@@ -4,7 +4,7 @@ mod agents;
 mod context;
 mod doctor;
 mod graph;
-mod health;
+pub(crate) mod health;
 pub mod helpers;
 mod kernel;
 mod knowledge;

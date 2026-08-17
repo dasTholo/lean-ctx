@@ -190,6 +190,7 @@ mod tests {
             last_semantic_query: None,
             last_flush: None,
             live_zone: Default::default(),
+            handoff_context: Default::default(),
         }
     }
 

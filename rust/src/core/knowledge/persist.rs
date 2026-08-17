@@ -84,6 +84,29 @@ fn write_json_atomic(dir: &Path, path: &Path, json: &str) -> Result<(), String> 
 }
 
 impl ProjectKnowledge {
+    /// Return the most recent active decision-like facts for session handoff.
+    pub fn recent_decisions(&self, limit: usize) -> Vec<KnowledgeFact> {
+        let mut decisions: Vec<KnowledgeFact> = self
+            .facts
+            .iter()
+            .filter(|fact| {
+                let category = fact.category.to_ascii_lowercase();
+                fact.is_current()
+                    && (category.contains("decision")
+                        || category.contains("architecture")
+                        || category.contains("solution"))
+            })
+            .cloned()
+            .collect();
+        decisions.sort_by(|a, b| {
+            b.last_confirmed
+                .cmp(&a.last_confirmed)
+                .then_with(|| b.created_at.cmp(&a.created_at))
+        });
+        decisions.truncate(limit);
+        decisions
+    }
+
     pub fn list_project_roots() -> Result<Vec<String>, String> {
         let base = crate::core::data_dir::lean_ctx_data_dir()?.join("knowledge");
         if !base.exists() {

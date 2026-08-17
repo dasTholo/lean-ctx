@@ -137,6 +137,8 @@ impl ServerHandler for LeanCtxServer {
                     }
                 }
             }
+            session.refresh_handoff_context();
+
             if self.session_mode == crate::tools::SessionMode::Shared {
                 if let Some(ref root) = session.project_root
                     && let Some(ref rt) = self.context_os

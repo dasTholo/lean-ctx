@@ -7,9 +7,12 @@
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::path::Path;
+use std::process::Command;
 use std::sync::Mutex;
 
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 use super::payload;
 
@@ -85,11 +88,51 @@ pub fn maybe_capture(input: &str) {
         return;
     }
 
+    let provenance_config = crate::core::config::Config::load().provenance;
+    let capture_provenance = provenance_config.enabled && provenance_config.capture_native_edits;
+
     if is_edit_tool(&tool) {
-        handle_edit_tool(&v, &args, &tool, &root);
+        handle_edit_tool(&v, &args, &tool, &root, capture_provenance);
     } else if is_write_tool(&tool) {
-        handle_write_tool(&args);
+        handle_write_tool(&v, &args, &tool, &root, capture_provenance);
     }
+}
+
+/// Records a checkpoint for the commit that just completed.
+///
+/// Intended for a Git `post-commit` hook invoking `lean-ctx hook post-commit`.
+/// The tracker resolves and links the latest session for this project before it
+/// persists the checkpoint record.
+pub fn handle_post_commit() {
+    let config = crate::core::config::Config::load();
+    if !config.provenance.enabled || !config.provenance.checkpoint_on_commit {
+        return;
+    }
+
+    let Ok(root) = std::env::current_dir() else {
+        return;
+    };
+    let Ok(output) = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(&root)
+        .output()
+    else {
+        return;
+    };
+    if !output.status.success() {
+        return;
+    }
+    let commit_sha = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if commit_sha.is_empty() {
+        return;
+    }
+
+    let root = root.to_string_lossy().into_owned();
+    let session_id = crate::core::session::SessionState::load_latest_for_project_root(&root)
+        .map(|session| session.id)
+        .unwrap_or_else(|| "git-hook".to_owned());
+    let _ = crate::core::provenance::ProvenanceTracker::new(&root)
+        .and_then(|tracker| tracker.observe_commit(&commit_sha, &session_id));
 }
 
 fn is_edit_tool(tool: &str) -> bool {
@@ -101,7 +144,7 @@ fn is_write_tool(tool: &str) -> bool {
 }
 
 /// Handle StrReplace-style edits that carry old_string + new_string.
-fn handle_edit_tool(v: &Value, args: &Value, _tool: &str, root: &str) {
+fn handle_edit_tool(v: &Value, args: &Value, tool: &str, root: &str, capture_provenance: bool) {
     let Some((_field, path)) = payload::resolve_path_field(Some(args), payload::READ_PATH_FIELDS)
     else {
         return;
@@ -139,6 +182,12 @@ fn handle_edit_tool(v: &Value, args: &Value, _tool: &str, root: &str) {
             crate::core::edit_metering::record_loc_change(added, removed);
             crate::core::savings_ledger::record_edit_event(&path, added, removed);
         }
+
+        if capture_provenance {
+            observe_native_edit(
+                v, root, &path, tool, &edit.old, &edit.new, new_lines, old_lines,
+            );
+        }
     }
 
     // Also count via toolResult if available (for Copilot camelCase shape)
@@ -148,7 +197,7 @@ fn handle_edit_tool(v: &Value, args: &Value, _tool: &str, root: &str) {
 }
 
 /// Handle Write/create tools — no old_string, so LOC-only from new_content.
-fn handle_write_tool(args: &Value) {
+fn handle_write_tool(v: &Value, args: &Value, tool: &str, root: &str, capture_provenance: bool) {
     let content = args
         .get("contents")
         .or_else(|| args.get("content"))
@@ -167,8 +216,62 @@ fn handle_write_tool(args: &Value) {
             payload::resolve_path_field(Some(args), payload::READ_PATH_FIELDS)
         {
             crate::core::savings_ledger::record_edit_event(&file_path, lines, 0);
+            if capture_provenance {
+                observe_native_edit(v, root, &file_path, tool, "", content, lines, 0);
+            }
         }
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn observe_native_edit(
+    event: &Value,
+    root: &str,
+    path: &str,
+    tool: &str,
+    before: &str,
+    after: &str,
+    lines_added: u64,
+    lines_removed: u64,
+) {
+    let tracked_path = Path::new(path)
+        .strip_prefix(root)
+        .ok()
+        .filter(|relative| !relative.as_os_str().is_empty())
+        .map(|relative| relative.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_owned());
+    let session_id = event
+        .get("session_id")
+        .and_then(Value::as_str)
+        .unwrap_or("native-hook");
+    let agent_id = event
+        .get("agent_id")
+        .or_else(|| event.get("client_name"))
+        .and_then(Value::as_str)
+        .unwrap_or("native");
+
+    let _ = crate::core::provenance::ProvenanceTracker::new(root).and_then(|tracker| {
+        tracker.observe_edit(
+            tracked_path,
+            tool,
+            sha256_hex(before),
+            sha256_hex(after),
+            lines_added,
+            lines_removed,
+            session_id,
+            agent_id,
+        )
+    });
+}
+
+fn sha256_hex(content: &str) -> String {
+    let hash = Sha256::digest(content.as_bytes());
+    let mut hex = String::with_capacity(64);
+    for b in &hash {
+        use std::fmt::Write;
+        let _ = write!(hex, "{b:02x}");
+    }
+    hex
 }
 
 struct EditReplacement {

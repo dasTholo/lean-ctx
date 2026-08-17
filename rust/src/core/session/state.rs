@@ -42,6 +42,7 @@ impl SessionState {
             task: None,
             findings: Vec::new(),
             decisions: Vec::new(),
+            handoff_context: Vec::new(),
             files_touched: Vec::new(),
             test_results: None,
             progress: Vec::new(),
@@ -62,6 +63,24 @@ impl SessionState {
             last_flush: None,
         }
         .with_compression_from_config()
+    }
+
+    pub fn refresh_handoff_context(&mut self) {
+        let Some(project_root) = self.project_root.clone() else {
+            self.handoff_context.clear();
+            return;
+        };
+
+        let session_id = self.id.clone();
+        self.handoff_context = crate::core::knowledge::ProjectKnowledge::load(&project_root)
+            .map(|knowledge| {
+                knowledge
+                    .recent_decisions(10)
+                    .into_iter()
+                    .filter(|fact| fact.source_session != session_id)
+                    .collect()
+            })
+            .unwrap_or_default();
     }
 
     fn with_compression_from_config(mut self) -> Self {
