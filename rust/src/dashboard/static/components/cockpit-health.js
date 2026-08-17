@@ -679,7 +679,7 @@ CockpitHealth.prototype._loadWorkspaceHealth = async function () {
   var fetchJson = ckhApi().fetchJson;
   if (!fetchJson) return null;
   try {
-    var data = await fetchJson('/api/health', { timeoutMs: 8000 });
+    var data = await fetchJson('/api/workspace-health', { timeoutMs: 8000 });
     return data && !data.__error ? data : null;
   } catch (_) {
     return null;

@@ -25,12 +25,12 @@ pub(super) fn handle(
     _body: &str,
 ) -> Option<(&'static str, &'static str, String)> {
     match path {
-        "/api/health" if method.eq_ignore_ascii_case("GET") => {
+        "/api/workspace-health" if method.eq_ignore_ascii_case("GET") => {
             let body = serde_json::to_string(&workspace_health())
                 .unwrap_or_else(|_| "{\"overall_status\":\"Degraded\",\"checks\":[]}".to_string());
             Some(("200 OK", "application/json", body))
         }
-        "/api/health" => Some((
+        "/api/workspace-health" => Some((
             "405 Method Not Allowed",
             "application/json",
             "{\"error\":\"method not allowed\"}".to_string(),
@@ -125,7 +125,7 @@ mod tests {
 
     #[test]
     fn health_route_returns_expected_shape() {
-        let (_, _, body) = handle("/api/health", "", "GET", "").expect("health response");
+        let (_, _, body) = handle("/api/workspace-health", "", "GET", "").expect("health response");
         let value: serde_json::Value = serde_json::from_str(&body).expect("health JSON");
         assert!(matches!(
             value["overall_status"].as_str(),

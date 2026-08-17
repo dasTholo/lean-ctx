@@ -212,6 +212,11 @@ fn handle_write_tool(v: &Value, args: &Value, tool: &str, root: &str, capture_pr
     let lines = content.lines().count() as u64;
     if lines > 0 {
         crate::core::edit_metering::record_loc_change(lines, 0);
+        if let Some((_, ref fp)) =
+            payload::resolve_path_field(Some(args), payload::READ_PATH_FIELDS)
+        {
+            crate::core::solution_auto_capture::capture_edit_decisions(root, fp, "", content);
+        }
         if let Some((_, file_path)) =
             payload::resolve_path_field(Some(args), payload::READ_PATH_FIELDS)
         {
@@ -290,8 +295,16 @@ fn collect_edits(args: &Value) -> Vec<EditReplacement> {
 }
 
 fn replacement_from(obj: &Value) -> Option<EditReplacement> {
-    let old = obj.get("old_string").and_then(Value::as_str)?;
-    let new = obj.get("new_string").and_then(Value::as_str).unwrap_or("");
+    let old = obj
+        .get("old_string")
+        .or_else(|| obj.get("old_str"))
+        .and_then(Value::as_str)?;
+    let new = obj
+        .get("new_string")
+        .or_else(|| obj.get("new_str"))
+        .or_else(|| obj.get("code_edit"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
     Some(EditReplacement {
         old: old.to_string(),
         new: new.to_string(),
