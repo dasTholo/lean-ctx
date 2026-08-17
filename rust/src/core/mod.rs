@@ -29,6 +29,7 @@ pub mod fleet_analytics;
 pub mod html_crush;
 #[allow(unused_imports)]
 pub mod ib;
+pub mod import;
 pub mod information_bottleneck;
 pub mod integration_proof;
 pub mod json_crush;
@@ -438,6 +439,7 @@ pub(crate) mod profile_suggest;
 pub mod profiles;
 pub(crate) mod project_hash;
 pub mod protocol;
+pub mod provenance;
 pub mod provider_bandit;
 pub mod provider_cache;
 pub mod providers;

@@ -100,18 +100,20 @@ impl SessionState {
 
     /// Sets the active task and infers a structured intent from the description.
     pub fn set_task(&mut self, description: &str, intent: Option<&str>) {
+        let (description_clean, _) =
+            crate::core::secret_detection::scan_and_redact_from_config(description);
         self.task = Some(TaskInfo {
-            description: description.to_string(),
+            description: description_clean.clone(),
             intent: intent.map(std::string::ToString::to_string),
             progress_pct: None,
         });
 
         let touched: Vec<String> = self.files_touched.iter().map(|f| f.path.clone()).collect();
         let si = if touched.is_empty() {
-            crate::core::intent_engine::StructuredIntent::from_query(description)
+            crate::core::intent_engine::StructuredIntent::from_query(&description_clean)
         } else {
             crate::core::intent_engine::StructuredIntent::from_query_with_session(
-                description,
+                &description_clean,
                 &touched,
             )
         };

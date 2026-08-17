@@ -351,6 +351,16 @@ Per-model context-window overrides in tokens. Keys are model names (case-insensi
 
 _No sub-keys (presence of the section toggles the feature)._
 
+## `[provenance]`
+
+Edit provenance capture and retention
+
+- `capture_mcp_edits` (bool, default `true`) — Capture MCP edit tool changes in provenance
+- `capture_native_edits` (bool, default `true`) — Capture native editor changes in provenance
+- `checkpoint_on_commit` (bool, default `true`) — Create provenance checkpoints when commits are made
+- `enabled` (bool, default `true`) — Enable edit provenance capture
+- `retention_days` (u64, default `90`) — Days to retain edit provenance records
+
 ## `[providers]`
 
 External context providers (GitHub, GitLab, Jira, MCP bridges, etc.). Set tokens via env vars (GITHUB_TOKEN, GITLAB_TOKEN). MCP bridges connect external MCP servers as context sources.

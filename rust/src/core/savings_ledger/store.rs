@@ -184,6 +184,7 @@ fn append_locked(file: &mut fs::File, ev: &mut SavingsEvent) -> std::io::Result<
     ev.entry_hash = compute_hash(&prev, &ev.canonical_content());
     ev.prev_hash = prev;
     if let Ok(line) = serde_json::to_string(ev) {
+        let (line, _) = crate::core::secret_detection::scan_and_redact_from_config(&line);
         file.seek(SeekFrom::End(0))?;
         writeln!(file, "{line}")?;
     }

@@ -137,6 +137,7 @@ fn handle_edit_tool(v: &Value, args: &Value, _tool: &str, root: &str) {
         let removed = old_lines.saturating_sub(new_lines);
         if added > 0 || removed > 0 {
             crate::core::edit_metering::record_loc_change(added, removed);
+            crate::core::savings_ledger::record_edit_event(&path, added, removed);
         }
     }
 
@@ -162,6 +163,11 @@ fn handle_write_tool(args: &Value) {
     let lines = content.lines().count() as u64;
     if lines > 0 {
         crate::core::edit_metering::record_loc_change(lines, 0);
+        if let Some((_, file_path)) =
+            payload::resolve_path_field(Some(args), payload::READ_PATH_FIELDS)
+        {
+            crate::core::savings_ledger::record_edit_event(&file_path, lines, 0);
+        }
     }
 }
 
@@ -195,6 +201,49 @@ fn compute_edit_hash(path: &str, old: &str, new: &str) -> u64 {
     old.hash(&mut hasher);
     new.hash(&mut hasher);
     hasher.finish()
+}
+
+/// Escape raw control characters (\n, \r, \t) inside JSON string values.
+/// IDE hooks pipe payloads with literal newlines in `old_string`/`new_string`
+/// fields, which `serde_json` rejects as invalid JSON (RFC 8259 §7).
+pub(crate) fn sanitize_json_control_chars(input: &str) -> String {
+    let mut out = String::with_capacity(input.len() + 32);
+    let mut in_string = false;
+    let mut prev_backslash = false;
+    for ch in input.chars() {
+        if in_string {
+            if prev_backslash {
+                prev_backslash = false;
+                out.push(ch);
+                continue;
+            }
+            match ch {
+                '\\' => {
+                    prev_backslash = true;
+                    out.push(ch);
+                }
+                '"' => {
+                    in_string = false;
+                    out.push(ch);
+                }
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                c if c.is_control() => {
+                    let _ =
+                        std::fmt::Write::write_fmt(&mut out, format_args!("\\u{:04x}", c as u32));
+                }
+                _ => out.push(ch),
+            }
+        } else {
+            if ch == '"' && !prev_backslash {
+                in_string = true;
+            }
+            prev_backslash = ch == '\\';
+            out.push(ch);
+        }
+    }
+    out
 }
 
 fn resolve_root(v: &Value) -> String {

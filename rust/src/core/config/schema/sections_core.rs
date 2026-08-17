@@ -1078,6 +1078,55 @@ pub(super) fn build(sections: &mut BTreeMap<String, SectionSchema>) {
         },
     );
 
+    let mut provenance = BTreeMap::new();
+    provenance.insert(
+        "enabled".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.provenance.enabled),
+            "Enable edit provenance capture",
+        ),
+    );
+    provenance.insert(
+        "retention_days".into(),
+        key(
+            "u64",
+            serde_json::json!(cfg.provenance.retention_days),
+            "Days to retain edit provenance records",
+        ),
+    );
+    provenance.insert(
+        "capture_native_edits".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.provenance.capture_native_edits),
+            "Capture native editor changes in provenance",
+        ),
+    );
+    provenance.insert(
+        "capture_mcp_edits".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.provenance.capture_mcp_edits),
+            "Capture MCP edit tool changes in provenance",
+        ),
+    );
+    provenance.insert(
+        "checkpoint_on_commit".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.provenance.checkpoint_on_commit),
+            "Create provenance checkpoints when commits are made",
+        ),
+    );
+    sections.insert(
+        "provenance".into(),
+        SectionSchema {
+            description: "Edit provenance capture and retention".into(),
+            keys: provenance,
+        },
+    );
+
     let mut skillify = BTreeMap::new();
     skillify.insert(
         "enabled".into(),
