@@ -806,8 +806,9 @@ mod cli_commands {
 
     #[test]
     fn cli_ls() {
+        let manifest = env!("CARGO_MANIFEST_DIR");
         let out = lean_ctx_bin()
-            .args(["ls", "."])
+            .args(["ls", manifest])
             .env("LEAN_CTX_DISABLED", "1")
             .output()
             .unwrap();
