@@ -68,6 +68,27 @@ pub(in crate::cli::dispatch) fn cmd_gain(rest: &[String]) {
         crate::cli::wrapped_publish::unpublish(id);
         return;
     }
+    if rest.iter().any(|a| a == "--rejoin") {
+        let phrase = rest.iter().enumerate().find_map(|(i, a)| {
+            if let Some(v) = a.strip_prefix("--rejoin=") {
+                return Some(v.to_string());
+            }
+            if a == "--rejoin" {
+                let words: Vec<_> = rest[i + 1..]
+                    .iter()
+                    .take_while(|w| !w.starts_with("--"))
+                    .cloned()
+                    .collect();
+                if words.is_empty() {
+                    return None;
+                }
+                return Some(words.join(" "));
+            }
+            None
+        });
+        crate::cli::wrapped_publish::rejoin(phrase.as_deref());
+        return;
+    }
     if rest.iter().any(|a| a == "--publish") {
         let leaderboard = rest.iter().any(|a| a == "--leaderboard");
         crate::cli::wrapped_publish::publish(&period, name_arg(rest).as_deref(), leaderboard);

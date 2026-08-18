@@ -227,7 +227,9 @@ pub(crate) mod agent_runtime_env;
 pub(crate) mod agents;
 pub(crate) mod autonomy;
 pub mod autonomy_drivers;
+pub mod canonical;
 pub mod stigmergy;
+pub(crate) mod wordlist;
 
 // ---------------------------------------------------------------------------
 // Domain: Adaptive & Scoring
@@ -275,6 +277,7 @@ pub mod loop_detection;
 pub mod output_verification;
 pub mod quality;
 pub(crate) mod quality_lab;
+pub mod quality_scorecard;
 pub(crate) mod safety_needles;
 pub mod scorecard;
 pub mod setup_report;

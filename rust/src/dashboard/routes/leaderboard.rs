@@ -45,6 +45,9 @@ pub(super) fn handle(
             Some(post_link_complete(body))
         }
         "/api/leaderboard/link/complete" => Some(method_not_allowed("complete a machine link")),
+        "/api/leaderboard/phrase" => Some(get_phrase()),
+        "/api/leaderboard/rejoin" if method.eq_ignore_ascii_case("POST") => Some(post_rejoin(body)),
+        "/api/leaderboard/rejoin" => Some(method_not_allowed("rejoin with a recovery phrase")),
         _ => None,
     }
 }
@@ -57,6 +60,65 @@ fn method_not_allowed(action: &str) -> (&'static str, &'static str, String) {
         "application/json",
         json_err(&format!("use POST to {action}")),
     )
+}
+
+fn get_phrase() -> (&'static str, &'static str, String) {
+    let agent_id = crate::cli::wrapped_publish::publisher_agent_id_for_dashboard();
+    let phrase = crate::core::agent_identity::stored_recovery_phrase(&agent_id);
+    let json = serde_json::json!({
+        "has_phrase": phrase.is_some(),
+        "phrase": phrase,
+    });
+    ("200 OK", "application/json", json.to_string())
+}
+
+fn post_rejoin(body: &str) -> (&'static str, &'static str, String) {
+    #[derive(Deserialize)]
+    struct RejoinBody {
+        phrase: String,
+    }
+    let parsed: RejoinBody = match serde_json::from_str(body) {
+        Ok(p) => p,
+        Err(e) => {
+            return (
+                "400 Bad Request",
+                "application/json",
+                json_err(&format!("invalid body: {e}")),
+            );
+        }
+    };
+    let phrase = parsed.phrase.trim();
+    if phrase.is_empty() {
+        return (
+            "400 Bad Request",
+            "application/json",
+            json_err("phrase must not be empty"),
+        );
+    }
+    let word_count = phrase.split_whitespace().count();
+    if word_count < 4 {
+        return (
+            "400 Bad Request",
+            "application/json",
+            json_err(&format!("expected 4 words, got {word_count}")),
+        );
+    }
+    let agent_id = crate::cli::wrapped_publish::publisher_agent_id_for_dashboard();
+    match crate::core::agent_identity::import_phrase_identity(&agent_id, phrase) {
+        Ok(key) => {
+            let pub_hex = crate::core::agent_identity::hex_encode(&key.verifying_key().to_bytes());
+            let json = serde_json::json!({
+                "ok": true,
+                "publisher_id_prefix": &pub_hex[..16.min(pub_hex.len())],
+            });
+            ("200 OK", "application/json", json.to_string())
+        }
+        Err(e) => (
+            "500 Internal Server Error",
+            "application/json",
+            json_err(&e),
+        ),
+    }
 }
 
 /// Same-origin proxy for the public community board (`GET /api/leaderboard`).

@@ -356,6 +356,11 @@ fn publisher_agent_id() -> String {
         .unwrap_or_else(|_| "local".to_string())
 }
 
+/// Public accessor for dashboard routes that need the same identity resolution.
+pub(crate) fn publisher_agent_id_for_dashboard() -> String {
+    publisher_agent_id()
+}
+
 /// Builds the whitelisted payload, signs it with this machine's persistent Ed25519 key, and
 /// publishes it. The server derives a stable, login-less `publisher_id` from the public key and
 /// upserts the card, so re-publishing the same period refreshes one card instead of duplicating.
@@ -373,8 +378,18 @@ fn publish_report(
         serde_json::to_string(&payload).map_err(|e| format!("could not build payload: {e}"))?;
 
     let agent = publisher_agent_id();
-    let signing_key = agent_identity::get_or_create_keypair(&agent)
-        .map_err(|e| format!("could not load publisher key: {e}"))?;
+    let first_publish = agent_identity::stored_recovery_phrase(&agent).is_none()
+        && !crate::core::data_dir::lean_ctx_data_dir()
+            .map(|d| d.join("keys").join(format!("{agent}.phrase")).exists())
+            .unwrap_or(false);
+    let signing_key = if first_publish {
+        let phrase = agent_identity::generate_recovery_phrase();
+        agent_identity::import_phrase_identity(&agent, &phrase)
+            .map_err(|e| format!("could not create phrase-based identity: {e}"))?
+    } else {
+        agent_identity::get_or_create_keypair(&agent)
+            .map_err(|e| format!("could not load publisher key: {e}"))?
+    };
     let public_key = agent_identity::hex_encode(&signing_key.verifying_key().to_bytes());
     let signature = agent_identity::hex_encode(&agent_identity::sign_bytes_with(
         &signing_key,
@@ -516,6 +531,7 @@ pub(crate) fn publish(period: &str, name: Option<&str>, leaderboard: bool) {
         false,
     ) {
         Ok(card) => {
+            maybe_show_recovery_phrase(&publisher_agent_id());
             println!("Published: {}", card.url);
             println!("{}", shared_disclosure(effective_name.is_some()));
             if crate::core::share::copy_to_clipboard(&card.url) {
@@ -745,6 +761,68 @@ pub(crate) fn unpublish(id: Option<&str>) {
             eprintln!("Unpublish failed: {e}");
             std::process::exit(1);
         }
+    }
+}
+
+/// `lean-ctx gain --rejoin <phrase>` — restore identity from a recovery phrase.
+pub(crate) fn rejoin(phrase: Option<&str>) {
+    let phrase = match phrase {
+        Some(p) if !p.trim().is_empty() => p.trim().to_string(),
+        _ => {
+            eprintln!("Usage: lean-ctx gain --rejoin WORD1 WORD2 WORD3 WORD4");
+            eprintln!("Enter the 4-word recovery phrase you received on first publish.");
+            std::process::exit(1);
+        }
+    };
+
+    let agent_id = publisher_agent_id();
+    match crate::core::agent_identity::import_phrase_identity(&agent_id, &phrase) {
+        Ok(key) => {
+            let pub_hex = crate::core::agent_identity::hex_encode(&key.verifying_key().to_bytes());
+            let publisher_id = {
+                use sha2::{Digest, Sha256};
+                let hash = Sha256::digest(key.verifying_key().as_bytes());
+                let mut hex = String::new();
+                for b in &hash {
+                    use std::fmt::Write;
+                    let _ = write!(hex, "{b:02x}");
+                }
+                hex
+            };
+            println!();
+            println!("  Identity restored!");
+            println!("  Publisher ID: {}...", &publisher_id[..16]);
+            println!("  Public key:   {}...", &pub_hex[..16]);
+            println!();
+            println!("  Your leaderboard position is reconnected.");
+            println!("  Run: lean-ctx gain --publish --leaderboard");
+            println!();
+            println!("  \u{2139}  Have entries from a different key? Merge them:");
+            println!("     lean-ctx gain --link   (on the old machine)");
+            println!();
+        }
+        Err(e) => {
+            eprintln!("Failed to restore identity: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Show recovery phrase during first publish (when no key exists yet).
+pub(crate) fn maybe_show_recovery_phrase(agent_id: &str) {
+    use crate::core::agent_identity;
+    if let Some(phrase) = agent_identity::stored_recovery_phrase(agent_id) {
+        println!();
+        println!("  ┌─ Recovery Phrase (save this!) ─────────────────────────┐");
+        println!("  │                                                        │");
+        let upper = phrase.to_uppercase();
+        let padded = format!("{upper:<54}");
+        println!("  │  {padded}│");
+        println!("  │                                                        │");
+        println!("  │  Enter this on any machine to rejoin your position:    │");
+        println!("  │  lean-ctx gain --rejoin {upper:<30}│");
+        println!("  └────────────────────────────────────────────────────────┘");
+        println!();
     }
 }
 
