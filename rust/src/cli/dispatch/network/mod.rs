@@ -197,6 +197,7 @@ pub(super) fn cmd_dashboard(rest: &[String]) {
     // read another — so a saved quick-setting silently "reset" on the next read.
     crate::core::layout_pin::heal();
     super::spawn_proxy_if_needed();
+    core::runtime_flags::mark_dashboard_server();
     super::run_async(dashboard::start(
         port,
         host,

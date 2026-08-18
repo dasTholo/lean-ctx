@@ -178,6 +178,16 @@ Model declaration for measured-vs-estimated cost reporting
 - `default_model` (string?, default `null`) — Fallback pricing model for MCP-only IDEs whose real model lean-ctx cannot observe (Cursor, Copilot, Windsurf, …). Unset → blended heuristic. Per-IDE overrides live in [cost.models]
 - `prices` (table?, default `[]`) — Operator price overrides per model, USD per million tokens: [cost.prices."<model>"] with input_per_m / output_per_m / cache_write_per_m / cache_read_per_m. For negotiated enterprise rates (committed-use discounts, Azure PTU, zero-rated internal models); overrides embedded and live catalog rows, only a provider-measured bill beats it
 
+## `[cross_agent]`
+
+Cross-agent memory sharing and semantic retrieval (Atlas adaptation)
+
+- `auto_extract` (bool, default `true`) — Auto-extract decisions from completed sessions
+- `cross_agent_sync` (bool, default `true`) — Share knowledge facts across agent sessions
+- `embedding_model` (string, default `minilm-l6`) — On-device embedding model for semantic retrieval
+- `max_facts_per_session` (usize, default `50`) — Maximum knowledge facts extracted per session
+- `semantic_search` (bool, default `false`) — Enable embedding-based knowledge retrieval (requires model download)
+
 ## `[custom_aliases]`
 
 Custom command aliases (array of {command, alias} entries). Note: field names are 'command' and 'alias' (not 'name')
@@ -351,6 +361,16 @@ Per-model context-window overrides in tokens. Keys are model names (case-insensi
 
 _No sub-keys (presence of the section toggles the feature)._
 
+## `[provenance]`
+
+Edit provenance capture and retention
+
+- `capture_mcp_edits` (bool, default `true`) — Capture MCP edit tool changes in provenance
+- `capture_native_edits` (bool, default `true`) — Capture native editor changes in provenance
+- `checkpoint_on_commit` (bool, default `true`) — Create provenance checkpoints when commits are made
+- `enabled` (bool, default `true`) — Enable edit provenance capture
+- `retention_days` (u64, default `90`) — Days to retain edit provenance records
+
 ## `[providers]`
 
 External context providers (GitHub, GitLab, Jira, MCP bridges, etc.). Set tokens via env vars (GITHUB_TOKEN, GITLAB_TOKEN). MCP bridges connect external MCP servers as context sources.
@@ -447,6 +467,19 @@ Skillify miner: distill recurring session diary + knowledge patterns into rules
 - `min_confidence` (f32, default `0.699999988079071`) — Minimum confidence for a single curated knowledge fact to be codified without repetition (0.0..=1.0).
 - `min_recurrence` (u32, default `2`) — Minimum reinforcements (confirmations / repeated mentions) before a sub-threshold-confidence pattern is codified.
 - `scope` (enum: project | global, default `project`) — Where generated rules are written: project (<repo>/.cursor/rules, git-committable) or global (~/.cursor/rules).
+
+## `[solution]`
+
+Solution Intelligence guidance and decision tracking
+
+- `enabled` (bool, default `true`) — Enable solution-efficiency guidance
+- `inject_in_compose` (bool, default `true`) — Inject solution-efficiency guidance into composed context
+- `inject_in_instructions` (bool, default `true`) — Inject solution-efficiency guidance into MCP instructions
+- `inject_in_subagents` (bool, default `true`) — Inject solution-efficiency guidance into subagent prompts
+- `intensity` (enum: off | minimal | balanced | aggressive, default `balanced`) — How strongly solution-efficiency guidance is applied
+- `platform_hints` (bool, default `true`) — Include platform-native solution hints
+- `track_decisions` (bool, default `true`) — Track solution decisions for efficiency guidance
+- `track_loc` (bool, default `true`) — Track lines of code changed for solution-efficiency guidance
 
 ## `[summaries]`
 

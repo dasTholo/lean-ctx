@@ -110,18 +110,55 @@ fn merge_dir(src: &Path, dst: &Path, report: &mut ConsolidationReport) {
     }
 }
 
-/// Move `from` onto `to` when the destination is absent or older; otherwise drop
-/// the stale duplicate. Guarantees the newer copy is the one that survives.
+/// Move `from` onto `to`. For `stats.json`, performs an additive merge
+/// so no data is lost when both trees hold real history. Other files fall
+/// back to newer-mtime-wins.
 fn merge_file(from: &Path, to: &Path, report: &mut ConsolidationReport) {
-    if to.exists() && !source_is_newer(from, to) {
-        let _ = std::fs::remove_file(from);
-        report.files_superseded += 1;
-        return;
+    if to.exists() {
+        if is_stats_json(from) {
+            match merge_stats_additive(from, to) {
+                Ok(()) => {
+                    let _ = std::fs::remove_file(from);
+                    report.files_moved += 1;
+                    return;
+                }
+                Err(e) => {
+                    report.errors.push(format!("additive stats merge: {e}"));
+                }
+            }
+        }
+        if !source_is_newer(from, to) {
+            let _ = std::fs::remove_file(from);
+            report.files_superseded += 1;
+            return;
+        }
     }
     match move_overwrite(from, to) {
         Ok(()) => report.files_moved += 1,
         Err(e) => report.errors.push(format!("{}: {e}", from.display())),
     }
+}
+
+fn is_stats_json(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n == "stats.json")
+}
+
+/// Additively merge two stats.json files using the same logic as
+/// `load_for_display`: apply_deltas with a zero baseline adds counters.
+fn merge_stats_additive(from: &Path, to: &Path) -> Result<(), String> {
+    use crate::core::stats::StatsStore;
+
+    let read = |p: &Path| -> Result<StatsStore, String> {
+        let data = std::fs::read_to_string(p).map_err(|e| format!("{}: {e}", p.display()))?;
+        serde_json::from_str(&data).map_err(|e| format!("{}: {e}", p.display()))
+    };
+    let canonical = read(to)?;
+    let orphan = read(from)?;
+    let merged = crate::core::stats::merge_additive(&canonical, &orphan);
+    let json = serde_json::to_string_pretty(&merged).map_err(|e| format!("serialize: {e}"))?;
+    std::fs::write(to, json).map_err(|e| format!("{}: {e}", to.display()))
 }
 
 /// True when `from` has a strictly newer mtime than `to`. Unreadable mtimes are

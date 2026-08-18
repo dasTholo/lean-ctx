@@ -62,8 +62,11 @@ async function parseJsonBody(res) {
  * @param {string} path
  * @param {RequestInit & { timeoutMs?: number }} [opts]
  */
+var _firstSuccess = false;
+
 async function apiFetch(path, opts) {
-  const timeoutMs = opts && opts.timeoutMs != null ? opts.timeoutMs : 5000;
+  var defaultTimeout = _firstSuccess ? 5000 : 12000;
+  const timeoutMs = opts && opts.timeoutMs != null ? opts.timeoutMs : defaultTimeout;
   const token = getAuthToken();
   const ctrl = new AbortController();
   const t = setTimeout(function () {
@@ -96,10 +99,13 @@ async function apiFetch(path, opts) {
           : 'HTTP ' + res.status;
       throw { error: msg };
     }
+    _firstSuccess = true;
     return body;
   } catch (e) {
     if (e && e.error) throw e;
-    if (e && e.name === 'AbortError') throw { error: 'timeout' };
+    if (e && e.name === 'AbortError') {
+      throw { error: _firstSuccess ? 'timeout' : 'initializing' };
+    }
     const msg = e && e.message ? String(e.message) : String(e || 'request failed');
     throw { error: msg };
   } finally {

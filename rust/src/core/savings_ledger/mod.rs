@@ -160,6 +160,13 @@ fn new_event(tool: &str) -> SavingsEvent {
         request_id: None,
         session_id: None,
         trace_id: None,
+        solution_decision: None,
+        loc_added: None,
+        loc_removed: None,
+        path: None,
+        lines_added: None,
+        lines_removed: None,
+        net: None,
         quality_signal: None,
         attribution_group: None,
         attribution_id: None,
@@ -171,6 +178,31 @@ fn new_event(tool: &str) -> SavingsEvent {
         cache_read_per_m_usd: None,
         cache_write_per_m_usd: None,
     }
+}
+
+/// Best-effort append of an edit measurement. Unlike token-savings events, this
+/// deliberately records zero-net replacements: both sides of the LOC change are
+/// evidence needed by Solution Intelligence.
+pub fn record_edit_event(path: &str, lines_added: u64, lines_removed: u64) {
+    if path.is_empty() || !enabled() {
+        return;
+    }
+    let Some(ledger_path) = store::default_path() else {
+        return;
+    };
+
+    let added = i64::try_from(lines_added).unwrap_or(i64::MAX);
+    let removed = i64::try_from(lines_removed).unwrap_or(i64::MAX);
+    let mut event = new_event("edit");
+    event.path = Some(path.to_owned());
+    event.lines_added = Some(lines_added);
+    event.lines_removed = Some(lines_removed);
+    event.net = Some(removed.saturating_sub(added));
+    // Keep the established Solution Intelligence fields populated for consumers
+    // that predate the explicit edit-event schema.
+    event.loc_added = Some(lines_added);
+    event.loc_removed = Some(lines_removed);
+    append_with_unified(&ledger_path, event, None);
 }
 
 fn append_with_unified(path: &std::path::Path, event: SavingsEvent, efficiency_etpao: Option<u64>) {

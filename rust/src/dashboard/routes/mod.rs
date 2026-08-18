@@ -4,17 +4,20 @@ mod agents;
 mod context;
 mod doctor;
 mod graph;
+pub(crate) mod health;
 pub mod helpers;
 mod kernel;
 mod knowledge;
 mod leaderboard;
 mod learning;
 mod memory;
+mod provenance;
 mod risk;
 mod roi;
 mod settings;
 mod signals;
 mod snapshots;
+mod solution;
 mod stats;
 mod system;
 mod telemetry;
@@ -41,6 +44,7 @@ fn match_component_path(path: &str) -> Option<String> {
         "/static/components/cockpit-architecture.js" => super::COCKPIT_COMPONENT_ARCHITECTURE_JS,
         "/static/components/cockpit-explorer.js" => super::COCKPIT_COMPONENT_EXPLORER_JS,
         "/static/components/cockpit-health.js" => super::COCKPIT_COMPONENT_HEALTH_JS,
+        "/static/components/cockpit-provenance.js" => super::COCKPIT_COMPONENT_PROVENANCE_JS,
         "/static/components/cockpit-remaining.js" => super::COCKPIT_COMPONENT_REMAINING_JS,
         "/static/components/cockpit-commander.js" => super::COCKPIT_COMPONENT_COMMANDER_JS,
         "/static/components/cockpit-palette.js" => super::COCKPIT_COMPONENT_PALETTE_JS,
@@ -51,6 +55,8 @@ fn match_component_path(path: &str) -> Option<String> {
         "/static/components/cockpit-protection.js" => super::COCKPIT_COMPONENT_PROTECTION_JS,
         "/static/components/cockpit-settings.js" => super::COCKPIT_COMPONENT_SETTINGS_JS,
         "/static/components/cockpit-telemetry.js" => super::COCKPIT_COMPONENT_TELEMETRY_JS,
+        "/static/components/cockpit-adoption.js" => super::COCKPIT_COMPONENT_ADOPTION_JS,
+        "/static/components/cockpit-solution.js" => super::COCKPIT_COMPONENT_SOLUTION_JS,
         _ => return None,
     };
     Some(content.to_string())
@@ -181,10 +187,13 @@ pub fn route_response(
         .or_else(|| settings::handle(path, query_str, method, body))
         .or_else(|| kernel::handle(path, query_str, method, body))
         .or_else(|| doctor::handle(path, query_str, method, body))
-        .or_else(|| leaderboard::handle(path, query_str, method, body));
+        .or_else(|| leaderboard::handle(path, query_str, method, body))
+        .or_else(|| health::handle(path, query_str, method, body))
+        .or_else(|| provenance::handle(path, query_str, method, body));
     #[cfg(feature = "enterprise")]
     let response = response.or_else(|| usage_breakdown::handle(path, query_str, method, body));
     response
+        .or_else(|| solution::handle(path, query_str, method, body))
         .or_else(|| telemetry::handle(path, query_str, method, body))
         .or_else(|| system::handle(path, query_str, method, body))
         .unwrap_or_else(|| ("404 Not Found", "text/plain", "Not Found".to_string()))

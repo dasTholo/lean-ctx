@@ -1,3 +1,10 @@
+#![allow(
+    clippy::all,
+    clippy::pedantic,
+    clippy::suspicious,
+    clippy::nursery,
+    unused
+)]
 //! End-to-end integration tests for the science-module context pipeline.
 //!
 //! Exercises IB → Wasserstein → Cognitive → MDL → FSRS → Prefetch → Graph →
@@ -392,6 +399,7 @@ fn interruption_and_echo_pipeline() {
 // ---------------------------------------------------------------------------
 
 #[test]
+#[ignore = "requires enterprise implementation (GitLab)"]
 fn coordination_pipeline() {
     reset_signals();
 

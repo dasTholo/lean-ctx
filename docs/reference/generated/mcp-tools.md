@@ -4,7 +4,7 @@
 
 Source of truth: `rust/src/server/registry.rs` and the tool definitions it registers.
 
-lean-ctx registers **79 MCP tools** (granular profile). Each entry below lists the tool name, what it does, and its parameters (`*` marks required).
+lean-ctx registers **84 MCP tools** (granular profile). Each entry below lists the tool name, what it does, and its parameters (`*` marks required).
 
 ## `ctx_agent`
 
@@ -119,14 +119,9 @@ Parameters: `budget`, `mode`
 
 ## `ctx_compose`
 
-PRIMARY TOOL — call FIRST for understanding code (before editing/debugging/'how does X work').
-Returns ranked files with relevant symbol source inline grouped by file.
-Combines BM25 lexical+semantic+associative retrieval+submodular optimization.
-ANTIPATTERN: Do NOT chain search→read→symbol — one compose replaces the whole chain.
-ANTIPATTERN: Do NOT Read files whose source compose already returned — it IS the source.
-WORKFLOW: Fire parallel ctx_read or ctx_compose for different areas.
+First-pass context for one task; returns ranked files and inline source — use instead of search→read chains.
 
-Parameters: `path`, `task`*
+Parameters: `path`, `task`*, `task_aware`
 
 ## `ctx_compress`
 
@@ -166,6 +161,12 @@ Actions: report (summary), agent (per-agent), tools (per-tool), json (machine), 
 WORKFLOW: call report to find top cost drivers, then agent/tools for detail.
 
 Parameters: `action`, `agent_id`, `limit`
+
+## `ctx_crush`
+
+Compress JSON arrays, nested JSON objects, and logs while preserving schema, anomalies, and representative samples.
+
+Parameters: `content`*, `keep_anomalies`, `max_items`, `mode`
 
 ## `ctx_dedup`
 
@@ -356,6 +357,12 @@ Actions: status, reset, evict.
 
 Parameters: `action`*, `targets`
 
+## `ctx_live_zone`
+
+Manage context freeze zones for optimal provider cache utilization. Freeze stable prefix to guarantee provider KV-cache reuse.
+
+Parameters: `action`*
+
 ## `ctx_load_tools`
 
 Load/unload specialized tool categories to reduce surface area.
@@ -365,6 +372,12 @@ Actions: load|unload|list. Categories: arch, debug, memory, metrics, session.
 Core is always loaded.
 
 Parameters: `action`*, `category`
+
+## `ctx_memory`
+
+Store and retrieve durable cross-agent facts with BLAKE3 deduplication.
+
+Parameters: `action`*, `agent`, `category`, `content`, `limit`, `max_age_seconds`, `max_entries`, `query`
 
 ## `ctx_metrics`
 
@@ -388,6 +401,12 @@ arg (not in their own schema) to target a registered root by
 alias instead of the project root — list_roots shows the aliases.
 
 Parameters: `action`*, `alias`, `max_results`, `mode`, `path`, `query`, `roots`
+
+## `ctx_optimize`
+
+Review code for over-engineering and propose simplifications.
+
+Parameters: `action`*, `category`, `decision`, `format`, `path`, `scope`, `symbol`
 
 ## `ctx_outline`
 
@@ -435,6 +454,12 @@ Parameters: `action`, `description`, `path`
 Safe file edit. Anchored ops use line+hash from ctx_read(mode="anchored"); CONFLICT means re-read. replace_unique(path,old_text,new_text) is a no-read, exact unique replacement. replace_symbol/create/replace_all and cross-file ops[] (incl. replace_unique) supported.
 
 Parameters: `dry_run`, `end_hash`, `end_line`, `find`, `hash`, `line`, `name`, `new_text`, `old_text`, `op`, `ops`, `path`, `replace`, `start_hash`, `start_line`
+
+## `ctx_perf`
+
+Current-session proxy compression performance, agent budget, and triage profile.
+
+Parameters: _none_
 
 ## `ctx_plan`
 

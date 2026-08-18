@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use std::collections::BTreeMap;
+use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
@@ -127,6 +128,9 @@ impl KnowledgeArchetype {
             "workflow" | "workflows" => Self::Workflow,
             "preference" | "preferences" | "pref" => Self::Preference,
             "observation" | "finding" | "findings" => Self::Observation,
+            "solution-decision" | "solution_decision" | "solution-debt" | "solution_debt" => {
+                Self::Decision
+            }
             _ => Self::Fact,
         }
     }
@@ -147,6 +151,76 @@ impl Default for FidelityScore {
             computed_at: Utc::now(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SolutionDecisionMeta {
+    pub kind: SolutionDecisionKind,
+    pub chosen: String,
+    pub alternatives: Vec<String>,
+    pub rationale: Option<String>,
+    pub status: SolutionStatus,
+    pub scope: Vec<String>,
+    pub loc_impact: Option<i32>,
+    pub upgrade_condition: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SolutionDecisionKind {
+    StdlibChosen,
+    NativeUsed,
+    Reuse,
+    YagniSkip,
+    OneLineSolution,
+    DebtAccepted,
+}
+
+impl SolutionDecisionKind {
+    /// Convert a supported Solution Intelligence category into its decision kind.
+    pub fn from_category(category: &str) -> Option<Self> {
+        match category.trim().to_ascii_lowercase().as_str() {
+            "stdlib" | "standard-library" | "standard_library" => Some(Self::StdlibChosen),
+            "native" | "platform" => Some(Self::NativeUsed),
+            "reuse" => Some(Self::Reuse),
+            "yagni" => Some(Self::YagniSkip),
+            "one-line" | "one_line" | "oneline" => Some(Self::OneLineSolution),
+            "debt" | "solution-debt" | "solution_debt" => Some(Self::DebtAccepted),
+            _ => None,
+        }
+    }
+
+    /// Stable key used by the persisted Solution Intelligence tracker.
+    pub const fn tracker_key(&self) -> &'static str {
+        match self {
+            Self::StdlibChosen => "stdlib",
+            Self::NativeUsed => "native",
+            Self::Reuse => "reuse",
+            Self::YagniSkip => "yagni",
+            Self::OneLineSolution => "oneline",
+            Self::DebtAccepted => "debt",
+        }
+    }
+}
+
+impl fmt::Display for SolutionDecisionKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let label = match self {
+            Self::StdlibChosen => "stdlib chosen",
+            Self::NativeUsed => "native used",
+            Self::Reuse => "reuse",
+            Self::YagniSkip => "YAGNI skip",
+            Self::OneLineSolution => "one-line solution",
+            Self::DebtAccepted => "debt accepted",
+        };
+        f.write_str(label)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SolutionStatus {
+    Accepted,
+    Deferred,
+    Resolved,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -296,6 +370,22 @@ mod archetype_tests {
             KnowledgeArchetype::infer_from_category("random"),
             KnowledgeArchetype::Fact
         );
+    }
+
+    #[test]
+    fn solution_categories_infer_decision_archetype() {
+        for category in [
+            "solution-decision",
+            "solution_decision",
+            "solution-debt",
+            "solution_debt",
+        ] {
+            assert_eq!(
+                KnowledgeArchetype::infer_from_category(category),
+                KnowledgeArchetype::Decision,
+                "category {category}"
+            );
+        }
     }
 
     #[test]

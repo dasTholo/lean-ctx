@@ -8,6 +8,7 @@ static QUIET: AtomicBool = AtomicBool::new(false);
 static MCP_SERVER: AtomicBool = AtomicBool::new(false);
 static HOOK_CHILD: AtomicBool = AtomicBool::new(false);
 static DASHBOARD_PROJECT: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+static DASHBOARD_SERVER: AtomicBool = AtomicBool::new(false);
 static ALLOW_PATHS: OnceLock<Mutex<Vec<PathBuf>>> = OnceLock::new();
 
 pub(crate) struct FlagGuard {
@@ -36,6 +37,14 @@ pub(crate) fn enable_compress() {
 
 pub(crate) fn enable_mcp_server() {
     MCP_SERVER.store(true, Ordering::Relaxed);
+}
+
+pub(crate) fn mark_dashboard_server() {
+    DASHBOARD_SERVER.store(true, Ordering::Relaxed);
+}
+
+pub(crate) fn is_dashboard_server() -> bool {
+    DASHBOARD_SERVER.load(Ordering::Relaxed)
 }
 
 pub(crate) fn mark_hook_child() {

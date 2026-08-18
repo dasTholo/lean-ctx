@@ -120,7 +120,7 @@ impl FrameAccumulator {
                 if let Ok(value) = serde_json::from_slice(line) {
                     out.push(value);
                 }
-                self.buf.drain(..nl + 1);
+                self.buf.drain(..=nl);
             } else {
                 break;
             }
@@ -288,7 +288,7 @@ fn discover_gets_32601_then_initialize_succeeds_json_line() {
     assert!(
         tools["result"]["tools"]
             .as_array()
-            .map_or(false, |t| !t.is_empty()),
+            .is_some_and(|t| !t.is_empty()),
         "tools/list after fallback must work; got: {tools}"
     );
 

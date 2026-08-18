@@ -91,7 +91,9 @@ impl LeanCtxServer {
                 let session = crate::core::session::SessionState::load_latest().unwrap_or_default();
                 let predictions = session.prefetch_predictions(3);
                 if !predictions.is_empty() {
-                    crate::core::context_prefetch::warm_predictions(&predictions, None);
+                    crate::core::context_prefetch::warm_predictions::<
+                        std::sync::RwLock<crate::core::session::SessionState>,
+                    >(&predictions, None);
                 }
             });
         }

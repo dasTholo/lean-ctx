@@ -22,6 +22,130 @@ pub(crate) const SESSION_FLUSH_INTERVAL: std::time::Duration = std::time::Durati
 static FILE_TRAJECTORY: LazyLock<Mutex<FileTrajectory>> =
     LazyLock::new(|| Mutex::new(FileTrajectory::new(100)));
 
+/// Converts durable session signals into cross-session knowledge facts.
+pub(crate) fn extract_session_facts(
+    session: &SessionState,
+) -> Vec<crate::core::knowledge::KnowledgeFact> {
+    let mut facts = Vec::new();
+
+    facts.extend(session.decisions.iter().filter_map(|decision| {
+        let summary = decision.summary.trim();
+        if summary.is_empty() {
+            return None;
+        }
+        let value = decision
+            .rationale
+            .as_deref()
+            .filter(|rationale| !rationale.trim().is_empty())
+            .map_or_else(
+                || summary.to_owned(),
+                |rationale| format!("{summary} — {rationale}"),
+            );
+        Some(auto_session_fact(
+            "auto:decision",
+            value,
+            session,
+            decision.timestamp,
+            0.9,
+        ))
+    }));
+
+    facts.extend(
+        session
+            .files_touched
+            .iter()
+            .filter(|file| file.modified)
+            .map(|file| {
+                let summary = file
+                    .summary
+                    .as_deref()
+                    .filter(|summary| !summary.trim().is_empty())
+                    .map_or_else(String::new, |summary| format!("; {summary}"));
+                auto_session_fact(
+                    "auto:pattern",
+                    format!(
+                        "Modified {} (mode: {}, reads: {}){summary}",
+                        file.path, file.last_mode, file.read_count
+                    ),
+                    session,
+                    session.updated_at,
+                    0.8,
+                )
+            }),
+    );
+
+    facts.extend(session.findings.iter().filter_map(|finding| {
+        let summary = finding.summary.trim();
+        if summary.is_empty() {
+            return None;
+        }
+        let normalized = summary.to_ascii_lowercase();
+        let label = if ["resolved", "fixed", "solved", "unblocked", "passed"]
+            .iter()
+            .any(|keyword| normalized.contains(keyword))
+        {
+            "Resolution"
+        } else if [
+            "block", "fail", "error", "unable", "cannot", "missing", "timeout", "denied",
+        ]
+        .iter()
+        .any(|keyword| normalized.contains(keyword))
+        {
+            "Blocker"
+        } else {
+            "Finding"
+        };
+        let location = finding.file.as_deref().map_or_else(String::new, |file| {
+            finding
+                .line
+                .map_or_else(|| format!("{file}: "), |line| format!("{file}:{line}: "))
+        });
+        Some(auto_session_fact(
+            "auto:blocker",
+            format!("{label}: {location}{summary}"),
+            session,
+            finding.timestamp,
+            0.75,
+        ))
+    }));
+
+    facts
+}
+
+fn auto_session_fact(
+    category: &str,
+    value: String,
+    session: &SessionState,
+    timestamp: chrono::DateTime<Utc>,
+    confidence: f32,
+) -> crate::core::knowledge::KnowledgeFact {
+    let key = value.clone();
+    crate::core::knowledge::KnowledgeFact {
+        category: category.to_owned(),
+        key,
+        value,
+        source_session: session.id.clone(),
+        confidence,
+        created_at: timestamp,
+        last_confirmed: timestamp,
+        retrieval_count: 0,
+        last_retrieved: None,
+        valid_from: None,
+        valid_until: None,
+        supersedes: None,
+        confirmation_count: 1,
+        feedback_up: 0,
+        feedback_down: 0,
+        last_feedback: None,
+        privacy: Default::default(),
+        sensitivity: Default::default(),
+        imported_from: None,
+        archetype: Default::default(),
+        fidelity: None,
+        revision_count: 0,
+    }
+}
+
 impl Default for SessionState {
     fn default() -> Self {
         Self::new()
@@ -42,6 +166,7 @@ impl SessionState {
             task: None,
             findings: Vec::new(),
             decisions: Vec::new(),
+            handoff_context: Vec::new(),
             files_touched: Vec::new(),
             test_results: None,
             progress: Vec::new(),
@@ -55,12 +180,31 @@ impl SessionState {
             last_consolidate_ts: None,
             last_aaak_hash: None,
             extra_roots: Vec::new(),
+            live_zone: super::types::LiveZoneSessionState::default(),
             wakeup_manifest: Vec::new(),
             playbook: super::playbook::Playbook::default(),
             last_semantic_query: None,
             last_flush: None,
         }
         .with_compression_from_config()
+    }
+
+    pub fn refresh_handoff_context(&mut self) {
+        let Some(project_root) = self.project_root.clone() else {
+            self.handoff_context.clear();
+            return;
+        };
+
+        let session_id = self.id.clone();
+        self.handoff_context = crate::core::knowledge::ProjectKnowledge::load(&project_root)
+            .map(|knowledge| {
+                knowledge
+                    .recent_decisions(10)
+                    .into_iter()
+                    .filter(|fact| fact.source_session != session_id)
+                    .collect()
+            })
+            .unwrap_or_default();
     }
 
     fn with_compression_from_config(mut self) -> Self {
@@ -99,18 +243,20 @@ impl SessionState {
 
     /// Sets the active task and infers a structured intent from the description.
     pub fn set_task(&mut self, description: &str, intent: Option<&str>) {
+        let (description_clean, _) =
+            crate::core::secret_detection::scan_and_redact_from_config(description);
         self.task = Some(TaskInfo {
-            description: description.to_string(),
+            description: description_clean.clone(),
             intent: intent.map(std::string::ToString::to_string),
             progress_pct: None,
         });
 
         let touched: Vec<String> = self.files_touched.iter().map(|f| f.path.clone()).collect();
         let si = if touched.is_empty() {
-            crate::core::intent_engine::StructuredIntent::from_query(description)
+            crate::core::intent_engine::StructuredIntent::from_query(&description_clean)
         } else {
             crate::core::intent_engine::StructuredIntent::from_query_with_session(
-                description,
+                &description_clean,
                 &touched,
             )
         };

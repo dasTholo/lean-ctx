@@ -130,6 +130,7 @@ class CockpitOverview extends HTMLElement {
       '/api/spend',
       '/api/workspaces',
       '/api/kernel',
+      '/api/solution',
     ];
 
     var cached = window.LctxApi && window.LctxApi.cachedFetch ? window.LctxApi.cachedFetch : fetchJson;
@@ -165,6 +166,7 @@ class CockpitOverview extends HTMLElement {
       spend: ok(results[8]),
       workspaces: ok(results[9]),
       kernel: ok(results[10]),
+      solution: ok(results[11]),
     };
     // De-hardcode the estimated cost model's blended rate from the server.
     var Fp = fmtLib();
@@ -210,11 +212,13 @@ class CockpitOverview extends HTMLElement {
     var body = '';
     body += this._renderTimeFilter(esc);
     body += this._renderHero(esc, ff, fmt, fu, pc);
+    body += this._workspaceHealthCard(esc);
     body += this._renderBuddy(esc);
     body += this._renderStatusStrip(esc);
     body += this._renderWorkspaces(esc, fmt);
     body += this._renderTrendRow();
     body += this._renderCommandTable(esc, ff, fmt, pc);
+    body += this._renderAgentTable(esc, ff);
 
     this.innerHTML = body;
     this._bind();
@@ -269,6 +273,7 @@ class CockpitOverview extends HTMLElement {
     var compRate = verifiedSaved > 0 && totalIn > 0
       ? Math.min(100, pc(verifiedSaved, totalIn))
       : (totalIn > 0 ? pc(saved, totalIn) : 0);
+
     var calls = stats ? stats.total_commands || 0 : 0;
     var energyWh = ewh(saved);
     var avoidedUsd = gain && gain.summary ? gain.summary.avoided_usd || 0 : 0;
@@ -307,6 +312,8 @@ class CockpitOverview extends HTMLElement {
       '<p class="hs">estimated input cost avoided</p>' +
       '</div>' +
 
+      this._solutionHeroCard(esc) +
+
       this._measuredSpendCard(esc, fu) +
 
       '<div class="hc">' +
@@ -318,7 +325,7 @@ class CockpitOverview extends HTMLElement {
       '<div class="hc">' +
       '<span class="hl">Net savings rate' + tip('compression_rate') + '</span>' +
       '<div class="hv">' + esc(String(compRate)) + '%</div>' +
-      '<p class="hs">verified savings / all tool-call tokens</p>' +
+      '<p class="hs">verified net savings / all input tokens</p>' +
       '</div>' +
 
       '<div class="hc">' +
@@ -361,6 +368,38 @@ class CockpitOverview extends HTMLElement {
       '<p class="hs">real provider bill (proxy-routed)</p>' +
       '</div>'
     );
+  }
+
+  _solutionHeroCard(esc) {
+    var solution = this._data && this._data.solution;
+    if (!solution) return '';
+    var output = solution.output_savings || {};
+    var loc = solution.loc || {};
+    var decisions = solution.decisions || {};
+    var tokenReduction = Math.max(0, Math.min(100, Math.round(Number(output.reduction_pct) || 0)));
+    var totalDecisions = Number(decisions.total) || 0;
+    var netReduced = Number(loc.net_reduced) || 0;
+
+    if (tokenReduction > 0) {
+      return (
+        '<div class="hc">' +
+        '<span class="hl">Solution: -' + esc(String(tokenReduction)) + '% output</span>' +
+        '<div class="hv" style="color:var(--green)">-' + esc(String(tokenReduction)) + '%</div>' +
+        '<p class="hs">Solution Intelligence</p>' +
+        '</div>'
+      );
+    }
+    if (totalDecisions > 0 || netReduced !== 0) {
+      var sign = netReduced >= 0 ? '+' : '';
+      return (
+        '<div class="hc">' +
+        '<span class="hl">Solution: ' + esc(String(totalDecisions)) + ' decisions</span>' +
+        '<div class="hv" style="color:var(--green)">' + esc(sign + String(netReduced)) + ' LOC</div>' +
+        '<p class="hs">Solution Intelligence</p>' +
+        '</div>'
+      );
+    }
+    return '';
   }
 
   /* ── Verified-ledger bridge line (estimated ⇄ signed, links to ROI) ── */
@@ -781,6 +820,51 @@ class CockpitOverview extends HTMLElement {
   }
 
   /* ── Chart rendering (runs after DOM exists) ───────── */
+
+  _renderAgentTable(esc, ff) {
+    var stats = this._data && this._data.stats ? this._data.stats : null;
+    var agents = stats && stats.per_agent ? stats.per_agent : {};
+    var rows = Object.keys(agents).map(function (name) {
+      var agent = agents[name] || {};
+      return {
+        name: name,
+        calls: Number(agent.tool_calls || 0),
+        saved: Number(agent.tokens_saved || 0)
+      };
+    });
+    if (!rows.length) return '';
+    rows.sort(function (a, b) { return b.saved - a.saved || b.calls - a.calls || a.name.localeCompare(b.name); });
+    var trs = '';
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      trs += '<tr><td>' + esc(row.name) + '</td><td>' + ff(row.calls) + '</td><td>' + ff(row.saved) + '</td></tr>';
+    }
+    return '<div class="cko-agent-table">' +
+      '<h3>Agents</h3>' +
+      '<div class="table-scroll"><table><thead><tr><th>Agent</th><th>Calls</th><th>Tokens saved</th></tr></thead>' +
+      '<tbody>' + trs + '</tbody></table></div></div>';
+  }
+
+  _workspaceHealthCard(esc) {
+    var health = this._workspaceHealth;
+    var _fetchFn = api(); if (!health && !this._workspaceHealthLoading && _fetchFn) {
+      var self = this;
+      this._workspaceHealthLoading = true;
+      _fetchFn('/api/workspace-health', { timeoutMs: 8000 }).then(function (data) {
+        if (data && !data.__error) {
+          self._workspaceHealth = data;
+          self.render();
+        }
+      }).catch(function () {}).then(function () {
+        self._workspaceHealthLoading = false;
+      });
+    }
+    var status = health && health.overall_status ? health.overall_status : 'Checking';
+    var color = status === 'OK' ? 'var(--accent)' : (status === 'Stopped' ? 'var(--red)' : 'var(--yellow)');
+    return '<div id="cko-workspace-health" class="cko-workspace-health" style="display:inline-flex;align-items:center;gap:7px;margin:8px 0 16px;color:var(--muted);font-size:12px">' +
+      '<span aria-hidden="true" style="width:8px;height:8px;border-radius:50%;background:' + color + ';display:inline-block"></span>' +
+      '<span>Workspace health: <strong style="color:var(--text)">' + esc(status) + '</strong></span></div>';
+  }
 
   _renderAllCharts() {
     var self = this;

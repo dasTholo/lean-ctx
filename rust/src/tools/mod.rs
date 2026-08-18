@@ -39,6 +39,7 @@ pub mod ctx_knowledge_relations;
 pub mod ctx_metrics;
 pub mod ctx_multi_read;
 pub mod ctx_multi_repo;
+pub mod ctx_optimize;
 pub mod ctx_outline;
 pub mod ctx_overview;
 pub mod ctx_pack;

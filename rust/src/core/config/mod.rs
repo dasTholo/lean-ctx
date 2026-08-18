@@ -12,7 +12,7 @@ mod logic;
 mod memory;
 mod merge;
 mod model;
-mod provenance;
+pub mod provenance;
 mod proxy;
 mod read_dedup;
 pub(crate) mod read_redirect;
@@ -24,6 +24,7 @@ mod sections;
 mod serde_defaults;
 pub mod setter;
 mod shell_activation;
+pub mod solution;
 
 /// Cache payload for [`Config::load_arc`]: the shared config alongside the
 /// content hashes of the global and project-local files plus the environment-
@@ -52,10 +53,11 @@ pub use memory::{
 };
 pub use provenance::{ConfigProvenance, EnvOverride};
 pub use proxy::{
-    BaselineConfig, DEFAULT_LOCAL_SHADOW_RATE_PER_MTOK, HistoryMode, ProseRanker, ProseRole,
-    ProviderEntry, ProxyConfig, ProxyMode, ProxyProvider, ResolvedProvider, RoleAggressiveness,
-    RoutingRules, UpstreamDrift, Upstreams, WireShape, diagnose_drift, env_upstream_override,
-    is_local_proxy_url, normalize_url, normalize_url_opt, parse_route_target,
+    BaselineConfig, DEFAULT_LOCAL_SHADOW_RATE_PER_MTOK, HistoryMode, PipelineConfig, ProseRanker,
+    ProseRole, ProviderEntry, ProxyConfig, ProxyMode, ProxyProvider, ReasoningBudgetConfig,
+    ResolvedProvider, RoleAggressiveness, RoutingRules, UpstreamDrift, Upstreams, WireShape,
+    diagnose_drift, env_upstream_override, is_local_proxy_url, normalize_url, normalize_url_opt,
+    parse_route_target,
 };
 pub use read_dedup::ReadDedup;
 pub use read_redirect::ReadRedirect;
@@ -65,6 +67,8 @@ pub use response_shaping::{
 };
 pub use shell_activation::ShellActivation;
 
+#[cfg(test)]
+mod solution_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

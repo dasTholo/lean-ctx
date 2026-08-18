@@ -131,10 +131,12 @@ fn oneshot_ctx(project_root: String, resolved_paths: HashMap<String, String>) ->
     ToolContext {
         project_root,
         resolved_paths,
-        // Give tools a real (empty) resident BM25 cache, as the MCP server does.
-        // Without it, cache-aware tools (e.g. ctx_compose's specificity ranking)
-        // silently take their cold-start fallback and CLI `call` stops mirroring
-        // the server path it exists to reproduce.
+        // Give tools a real (empty) resident cache, as the MCP server does.
+        // Without it, cache-aware tools (ctx_edit, ctx_compose) fail with
+        // "cache not available" when invoked via `lean-ctx call`.
+        cache: Some(std::sync::Arc::new(tokio::sync::RwLock::new(
+            crate::core::cache::SessionCache::default(),
+        ))),
         bm25_cache: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
         ..Default::default()
     }

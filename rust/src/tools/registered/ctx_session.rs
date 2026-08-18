@@ -23,7 +23,7 @@ impl McpTool for CtxSessionTool {
                 "properties": {
                     "action": {
                         "type": "string",
-                        "description": "status|load|save|task|finding|decision|list|… (invalid action lists all)"
+                        "description": "status|handoff|load|save|task|finding|decision|list|… (invalid action lists all)"
                     },
                     "value": { "type": "string" },
                     "session_id": { "type": "string", "description": "Omit for latest" }

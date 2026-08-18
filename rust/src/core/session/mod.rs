@@ -4,12 +4,14 @@ mod paths;
 mod persistence;
 pub mod playbook;
 mod state;
+pub(crate) use state::extract_session_facts;
 mod types;
 
 pub use playbook::{DeltaOutcome, EntryKind, Playbook, PlaybookEntry};
 pub use types::{
-    Decision, EvidenceKind, EvidenceRecord, FileTouched, Finding, ManifestEntry, PreparedSave,
-    ProgressEntry, SessionState, SessionStats, SessionSummary, TaskInfo, TestSnapshot,
+    Decision, EvidenceKind, EvidenceRecord, FileTouched, Finding, LiveZoneSessionState,
+    ManifestEntry, PreparedSave, ProgressEntry, SessionState, SessionStats, SessionSummary,
+    TaskInfo, TestSnapshot,
 };
 
 #[cfg(test)]

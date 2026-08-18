@@ -27,6 +27,16 @@ use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+#[allow(dead_code)]
+pub struct EditMetrics {
+    pub lines_added: u64,
+    pub lines_removed: u64,
+    pub net_loc_delta: i64,
+    pub edits_count: u32,
+    pub files_touched: u32,
+}
+
 const STORE_FILE: &str = "edit_metering.json";
 const FLUSH_EVERY: usize = 5;
 
@@ -54,6 +64,10 @@ pub(crate) struct EditMeteringStore {
     pub str_replace_old_string_tokens: u64,
     /// `old_string`-not-found responses (blind retry round-trips).
     pub str_replace_misses: u64,
+    /// Lines added across all edit operations.
+    pub loc_added: u64,
+    /// Lines removed across all edit operations.
+    pub loc_removed: u64,
     #[serde(skip)]
     dirty: bool,
 }
@@ -132,6 +146,18 @@ pub(crate) fn record_str_replace_miss() {
     with_store(|s| s.str_replace_misses = s.str_replace_misses.saturating_add(1));
 }
 
+#[allow(dead_code)]
+pub(crate) fn record_loc_change(path: Option<&str>, added: u64, removed: u64) {
+    with_store(|s| {
+        s.loc_added = s.loc_added.saturating_add(added);
+        s.loc_removed = s.loc_removed.saturating_add(removed);
+    });
+    crate::core::solution_tracker::record_loc_change(added, removed);
+    if let Some(path) = path {
+        crate::core::savings_ledger::record_edit_event(path, added, removed);
+    }
+}
+
 /// Snapshot for `ctx_metrics` and the dashboard `/api/stats` payload.
 pub(crate) fn metrics_snapshot() -> serde_json::Value {
     let Ok(store) = global().lock() else {
@@ -145,6 +171,8 @@ pub(crate) fn metrics_snapshot() -> serde_json::Value {
         "str_replace_calls": store.str_replace_calls,
         "str_replace_old_string_tokens": store.str_replace_old_string_tokens,
         "str_replace_misses": store.str_replace_misses,
+        "loc_added": store.loc_added,
+        "loc_removed": store.loc_removed,
     })
 }
 
@@ -178,6 +206,8 @@ mod tests {
             str_replace_calls: 2,
             str_replace_old_string_tokens: 260,
             str_replace_misses: 4,
+            loc_added: 15,
+            loc_removed: 9,
             dirty: false,
         };
         let json = serde_json::to_string(&s).unwrap();
@@ -185,6 +215,8 @@ mod tests {
         assert_eq!(back.anchored_ops, 7);
         assert_eq!(back.anchored_avoided_output_tokens, 412);
         assert_eq!(back.str_replace_misses, 4);
+        assert_eq!(back.loc_added, 15);
+        assert_eq!(back.loc_removed, 9);
     }
 
     #[test]
@@ -192,5 +224,7 @@ mod tests {
         let s: EditMeteringStore = serde_json::from_str("{}").unwrap();
         assert_eq!(s.anchored_calls, 0);
         assert_eq!(s.str_replace_old_string_tokens, 0);
+        assert_eq!(s.loc_added, 0);
+        assert_eq!(s.loc_removed, 0);
     }
 }

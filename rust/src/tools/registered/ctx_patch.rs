@@ -504,7 +504,13 @@ fn apply_one(
         };
 
         // Heavy disk I/O — no global cache lock held here.
+        let before = std::fs::read(&path).unwrap_or_default();
         let (output, effect) = crate::tools::ctx_patch::run_io(params, &last_mode);
+
+        if matches!(effect, crate::tools::ctx_edit::CacheEffect::Invalidate) {
+            let after = std::fs::read(&path).unwrap_or_default();
+            super::ctx_edit::observe_mcp_edit(ctx, &path, "ctx_patch", &before, &after);
+        }
 
         crate::tools::ctx_patch::record_outcome(params, &last_mode, &output, &effect);
 
@@ -645,6 +651,13 @@ fn handle_replace_all(
     let new_content = content.replace(find.as_str(), &replace);
     crate::config_io::write_atomic(std::path::Path::new(&path), &new_content)
         .map_err(|e| ErrorData::internal_error(format!("write failed: {e}"), None))?;
+    super::ctx_edit::observe_mcp_edit(
+        ctx,
+        &path,
+        "ctx_patch",
+        content.as_bytes(),
+        new_content.as_bytes(),
+    );
 
     if let Some(cache) = ctx.cache.as_ref() {
         if let Some(mut c) =

@@ -7,7 +7,7 @@
 //!
 //!   - an environment variable (`LEAN_CTX_COMPRESSION`, …) — wins in `effective()`;
 //!   - a project-local `.lean-ctx.toml` — overrides `compression_level`,
-//!     `terse_agent` and `tool_profile` in [`Config::merge_local`];
+//!     `terse_agent` and `tool_profile` in `Config::merge_local`;
 //!   - a divergent *resolved config dir* (launchd vs. terminal env) — the
 //!     dashboard writes path X while the runtime reads path Y, so the global file
 //!     "does not exist" from the reader's view;
@@ -19,10 +19,43 @@
 
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
+
 use super::Config;
 
+/// Controls capture and retention of edit provenance records.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(default)]
+pub struct ProvenanceConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    pub retention_days: u64,
+    #[serde(default = "default_true")]
+    pub capture_native_edits: bool,
+    #[serde(default = "default_true")]
+    pub capture_mcp_edits: bool,
+    #[serde(default = "default_true")]
+    pub checkpoint_on_commit: bool,
+}
+
+const fn default_true() -> bool {
+    true
+}
+
+impl Default for ProvenanceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            retention_days: 90,
+            capture_native_edits: true,
+            capture_mcp_edits: true,
+            checkpoint_on_commit: true,
+        }
+    }
+}
+
 /// Editable quick-settings a project-local `.lean-ctx.toml` can override via
-/// [`Config::merge_local`]. `structure_first` is intentionally absent: the local
+/// `Config::merge_local`. `structure_first` is intentionally absent: the local
 /// merge never touches it.
 const LOCAL_OVERRIDABLE_KEYS: &[&str] = &["compression_level", "terse_agent", "tool_profile"];
 
@@ -139,7 +172,7 @@ impl Config {
 }
 
 /// Editable keys explicitly set in a project-local `.lean-ctx.toml`. Mirrors the
-/// keys [`Config::merge_local`] honors, detected via parsed top-level table keys
+/// keys `Config::merge_local` honors, detected via parsed top-level table keys
 /// (a comment that merely mentions the key does not count).
 fn local_override_keys(local_toml: &str) -> Vec<&'static str> {
     let Ok(table) = local_toml.parse::<toml::Table>() else {
@@ -243,4 +276,44 @@ mod tests {
             "expected LEAN_CTX_COMPRESSION to be reported as an env override"
         );
     }
+}
+
+/// Cross-agent memory sharing configuration (Atlas adaptation).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CrossAgentConfig {
+    /// Share knowledge facts across agent sessions.
+    #[serde(default = "default_true")]
+    pub cross_agent_sync: bool,
+    /// Automatically extract decisions/patterns from completed sessions.
+    #[serde(default = "default_true")]
+    pub auto_extract: bool,
+    /// Enable semantic (embedding-based) knowledge retrieval.
+    /// Off by default; requires embedding model download.
+    #[serde(default)]
+    pub semantic_search: bool,
+    /// On-device embedding model for semantic retrieval.
+    #[serde(default = "default_embedding_model")]
+    pub embedding_model: String,
+    /// Maximum knowledge facts extracted per session.
+    #[serde(default = "default_max_facts")]
+    pub max_facts_per_session: usize,
+}
+
+impl Default for CrossAgentConfig {
+    fn default() -> Self {
+        Self {
+            cross_agent_sync: true,
+            auto_extract: true,
+            semantic_search: false,
+            embedding_model: default_embedding_model(),
+            max_facts_per_session: default_max_facts(),
+        }
+    }
+}
+
+fn default_embedding_model() -> String {
+    "minilm-l6".to_owned()
+}
+fn default_max_facts() -> usize {
+    50
 }

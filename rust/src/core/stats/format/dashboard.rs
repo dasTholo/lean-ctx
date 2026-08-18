@@ -87,7 +87,7 @@ pub fn format_gain_hero_themed(t: &Theme) -> String {
     let ul3 = theme::pad_right(&t.kpi_underline(usd_val.len(), &t.accent), kw);
     out.push(box_line(&format!("  {ul1}{ul2}{ul3}")));
 
-    let l1 = theme::pad_right(&format!("{dim}tokens saved{rst}"), kw);
+    let l1 = theme::pad_right(&format!("{dim}input tokens saved{rst}"), kw);
     let l2 = theme::pad_right(&format!("{dim}compression{rst}"), kw);
     let l3 = theme::pad_right(&format!("{dim}USD saved{rst}"), kw);
     out.push(box_line(&format!("  {l1}{l2}{l3}")));
@@ -380,7 +380,7 @@ fn render_gain_dashboard_for_store(
     let ul4 = theme::pad_right(&t.kpi_underline(usd_val.len(), &t.accent), kw);
     out.push(box_line(&format!("     {ul1}{ul2}{ul3}{ul4}")));
 
-    let l1 = theme::pad_right(&format!("{dim}tokens saved{rst}"), kw);
+    let l1 = theme::pad_right(&format!("{dim}input tokens saved{rst}"), kw);
     let l2 = theme::pad_right(&format!("{dim}compression{rst}"), kw);
     let l3 = theme::pad_right(&format!("{dim}commands{rst}"), kw);
     let l4 = theme::pad_right(&format!("{dim}USD saved{rst}"), kw);
@@ -654,6 +654,20 @@ fn append_gain_footer(out: &mut Vec<String>, t: &Theme, store: &StatsStore) {
                 ));
                 out.push(String::new());
             }
+        }
+    }
+
+    {
+        let snap = crate::core::solution_tracker::snapshot();
+        if snap.decisions_total > 0 {
+            let a = t.accent.fg();
+            let m = t.muted.fg();
+            out.push(format!("    {a}{bold}⚡ Solution Intelligence{rst}"));
+            out.push(format!(
+                "    {m}   Decisions: {}  |  LOC saved: {}  |  Output reduction: {}%{rst}",
+                snap.decisions_total, snap.loc_net_saved, snap.output_reduction_pct,
+            ));
+            out.push(String::new());
         }
     }
 

@@ -8,6 +8,11 @@ const BINARY_EXTENSIONS: &[&str] = &[
     "mkv", "so", "dylib", "dll", "exe", "bin", "o", "a", "class", "pyc", "wasm",
 ];
 
+/// Returns `true` when the lean-ctx daemon is reachable.
+pub(super) fn is_mcp_healthy() -> bool {
+    is_mcp_server_reachable()
+}
+
 /// Handle the `lean-ctx hook deny` subcommand.
 ///
 /// Called by PreToolUse hooks in Replace mode. Denies native Read/Grep/Glob/Shell
@@ -48,6 +53,8 @@ pub fn handle_deny() {
             print_deny_compression_markers(&tool_name, &stdin_payload);
             return;
         }
+        // Writes pass through — lean-ctx only handles reads (AGENTS.md).
+        // The compression marker check above is the only write-path gate.
         print_allow();
         return;
     }
@@ -368,6 +375,17 @@ fn detect_marker_source(payload: &str) -> MarkerSource {
         (false, false) => MarkerSource::Content,
     }
 }
+fn print_smart_deny(tool_name: &str, payload: &str) {
+    let msg = smart_deny_message(tool_name, payload);
+    let output = serde_json::json!({
+        "decision": "deny",
+        "reason": msg,
+        "permission": "deny",
+        "user_message": msg
+    });
+    println!("{output}");
+    std::process::exit(2);
+}
 
 /// Build a smart deny message that includes the exact ctx_* call with mapped arguments.
 /// This reduces cognitive load for the LLM and prevents instruction drift.
@@ -487,19 +505,6 @@ fn build_ctx_shell_hint(args: &serde_json::Map<String, serde_json::Value>) -> St
     format!(
         "[DENIED] Native Shell blocked. Use: ctx_shell(command=\"{short_cmd}\") — lean-ctx replace mode is active."
     )
-}
-
-fn print_smart_deny(tool_name: &str, payload: &str) {
-    let msg = smart_deny_message(tool_name, payload);
-    let output = serde_json::json!({
-        // Grok PreToolUse decision field.
-        "decision": "deny",
-        "reason": msg,
-        "permission": "deny",
-        "user_message": msg
-    });
-    println!("{output}");
-    std::process::exit(2);
 }
 
 fn print_allow() {
@@ -756,5 +761,11 @@ mod tests {
             detect_marker_source(payload),
             MarkerSource::Content
         ));
+    }
+
+    #[test]
+    fn is_write_tool_does_not_match_ctx_edit() {
+        assert!(!is_write_tool("ctx_edit"));
+        assert!(!is_write_tool("ctx_patch"));
     }
 }

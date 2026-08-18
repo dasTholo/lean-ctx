@@ -14,21 +14,67 @@ pub fn install_codex_hook() {
     }
 
     let hook_config_changed = install_codex_hook_config(&codex_dir);
+    let solution_rules_changed = install_codex_solution_rules(&codex_dir);
     let installed_docs = install_codex_instruction_docs(&codex_dir);
 
     if !mcp_server_quiet_mode() {
         if hook_config_changed {
             eprintln!(
-                "Installed Codex-compatible SessionStart/PreToolUse hooks at {}",
+                "Installed Codex SessionStart/PreToolUse hooks (Bash/Read/Grep/Glob) at {}",
                 codex_dir.display()
             );
         }
-        if installed_docs {
+        if installed_docs || solution_rules_changed {
             eprintln!("Installed Codex instructions at {}", codex_dir.display());
         } else {
             eprintln!("Codex AGENTS.md already configured.");
         }
     }
+}
+
+fn install_codex_solution_rules(codex_dir: &std::path::Path) -> bool {
+    let rules_path = codex_dir.join("instructions.md");
+    let block = solution_aware_rules_block(crate::rules_inject::canonical_rules_block());
+    upsert_solution_rules(&rules_path, &block)
+}
+
+#[allow(clippy::needless_pass_by_value)]
+fn solution_aware_rules_block(base_block: String) -> String {
+    let solution_block = crate::core::rules_canonical::enabled_solution_rules_block();
+    let base_block = crate::marked_block::remove_content(
+        &base_block,
+        crate::core::rules_canonical::SOLUTION_BLOCK_START,
+        crate::core::rules_canonical::SOLUTION_BLOCK_END,
+    );
+    if solution_block.is_empty() {
+        return base_block;
+    }
+
+    base_block.replacen(
+        crate::core::rules_canonical::END_MARK,
+        &format!(
+            "{solution_block}\n{}",
+            crate::core::rules_canonical::END_MARK
+        ),
+        1,
+    )
+}
+
+fn upsert_solution_rules(path: &std::path::Path, block: &str) -> bool {
+    let existing = std::fs::read_to_string(path).unwrap_or_default();
+    if existing.trim_end() == block.trim_end() {
+        return false;
+    }
+
+    crate::marked_block::upsert(
+        path,
+        crate::core::rules_canonical::START_MARK,
+        crate::core::rules_canonical::END_MARK,
+        block,
+        true,
+        "Codex rules",
+    );
+    true
 }
 
 fn install_codex_hook_config(codex_dir: &std::path::Path) -> bool {
@@ -302,8 +348,9 @@ fn ensure_codex_hooks_enabled(config_content: &str) -> Option<String> {
 }
 
 // Codex deny is handled mode-aware by the codex-pretooluse handler at runtime:
-// non-rewritable Bash calls are denied in Replace mode, rewritten in Hybrid.
-// A separate deny hook is not needed (Codex PreToolUse only fires for Bash).
+// Bash is rewritten when possible, and registered Read/Grep/Glob calls use the
+// safe redirect pipeline or an MCP suggestion in Replace mode. A separate deny
+// hook is not needed because PreToolUse provides the decision point for all.
 
 #[cfg(test)]
 mod tests {
@@ -385,6 +432,11 @@ mod tests {
         assert_eq!(
             pre_tool_use[1]["hooks"][0]["command"].as_str(),
             Some("lean-ctx hook codex-pretooluse")
+        );
+        assert_eq!(
+            pre_tool_use[1]["matcher"].as_str(),
+            Some("Bash|Read|Grep|Glob"),
+            "the Codex installer must register native file tool coverage"
         );
         assert_eq!(
             input["hooks"]["SessionStart"][0]["hooks"][0]["command"].as_str(),

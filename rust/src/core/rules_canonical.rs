@@ -65,6 +65,28 @@ pub const COMPRESSION_BLOCK_START: &str = "<!-- lean-ctx-compression -->";
 /// [`COMPRESSION_BLOCK_START`]).
 pub const COMPRESSION_BLOCK_END: &str = "<!-- /lean-ctx-compression -->";
 
+/// Opening marker of the solution-intelligence block.
+pub const SOLUTION_BLOCK_START: &str = "<!-- lean-ctx-solution -->";
+
+/// Closing marker of the solution-intelligence block.
+pub const SOLUTION_BLOCK_END: &str = "<!-- /lean-ctx-solution -->";
+
+/// The solution-efficiency guidance shared by rule-file generators that do not
+/// use [`render`] directly.
+pub fn enabled_solution_rules_block() -> String {
+    if !crate::core::config::Config::load().solution.enabled {
+        return String::new();
+    }
+
+    format!(
+        "{SOLUTION_BLOCK_START}\n\
+SOLUTION EFFICIENCY: stop at first level that applies:\n\
+skip (YAGNI) → reuse codebase → stdlib → native platform → installed dep → one-line → minimum code.\n\
+Never skip: validation, security, error handling.\n\
+{SOLUTION_BLOCK_END}"
+    )
+}
+
 /// Current rules version (monotonically increasing integer).  Embedded as
 /// `<!-- version: {RULES_VERSION} -->` right after `START_MARK` so the
 /// injection layer can parse it and decide whether a file is up-to-date.
@@ -189,6 +211,12 @@ pub const RECOVER: &str = "RECOVER: compressed output is reversible — never re
 /// Must keep the `(no MCP)` clause (asserted in tests).
 pub const RECOVER_COMPACT: &str = "RECOVER: compression is reversible — read the shown path \
     (no MCP) or ctx_read(raw=true), never re-read line-by-line.";
+
+/// Root restriction hint (#1465). Paths outside project roots and configured
+/// `allow_paths`/`extra_roots` are refused by ctx_* tools. Without this hint
+/// the model discovers the restriction only from a surprise error.
+pub const ROOT_RESTRICTION: &str = "ROOTS: ctx_* refuses paths outside project root + allow_paths. \
+    Use native Read for out-of-root; `lean-ctx doctor` shows effective roots.";
 
 /// Context Engineering Protocol version reference.
 pub const CEP: &str = "CEP v1: 1.ACT FIRST 2.DELTA ONLY (Fn refs) 3.STRUCTURED (+/-/~) \
@@ -318,6 +346,7 @@ fn longform_non_shadow_sections(p: &super::tool_profiles::ToolProfile) -> Vec<St
         s(PARALLEL),
         s(AUTO),
         s(RECOVER),
+        s(ROOT_RESTRICTION),
         s(CEP),
         rs::litm_end_section(p),
     ];
@@ -339,6 +368,7 @@ fn full_non_shadow_sections(p: &super::tool_profiles::ToolProfile) -> Vec<String
         s(PARALLEL),
         s(AUTO),
         s(RECOVER_COMPACT),
+        s(ROOT_RESTRICTION),
         rs::litm_end_section(p),
     ];
     if let Some(fb) = rs::ctx_call_fallback(p) {
@@ -359,6 +389,7 @@ fn hook_covered_non_shadow_sections(p: &super::tool_profiles::ToolProfile) -> Ve
         rs::hook_covered_tools_section(p),
         s(PARALLEL),
         s(RECOVER_COMPACT),
+        s(ROOT_RESTRICTION),
     ];
     if let Some(fb) = rs::ctx_call_fallback(p) {
         v.push(fb);
@@ -376,6 +407,7 @@ fn compact_non_shadow_sections(p: &super::tool_profiles::ToolProfile) -> Vec<Str
         rs::anti_section(p),
         s(PARALLEL),
         s(RECOVER_COMPACT),
+        s(ROOT_RESTRICTION),
     ];
     if let Some(fb) = rs::ctx_call_fallback(p) {
         v.push(fb);
@@ -475,6 +507,27 @@ pub fn render(
             body.push_str(compression);
             body.push('\n');
             body.push_str(COMPRESSION_BLOCK_END);
+        }
+    }
+
+    // Solution Intelligence block: inject efficiency ladder when enabled
+    {
+        let cfg = crate::core::config::Config::load();
+        if cfg.solution.enabled {
+            let ladder = cfg.solution.ladder_text();
+            if !ladder.is_empty() {
+                body.push('\n');
+                if matches!(wrapper, Wrapper::Bare) {
+                    body.push_str(ladder);
+                } else {
+                    body.push_str(SOLUTION_BLOCK_START);
+                    body.push('\n');
+                    body.push_str("SOLUTION EFFICIENCY: stop at first level that applies:\n");
+                    body.push_str("skip (YAGNI) → reuse codebase → stdlib → native platform → installed dep → one-line → minimum code.\n");
+                    body.push_str("Never skip: validation, security, error handling.\n");
+                    body.push_str(SOLUTION_BLOCK_END);
+                }
+            }
         }
     }
 

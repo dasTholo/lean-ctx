@@ -428,6 +428,13 @@ fn rewrite_codex_hooks_line(line: &str) -> String {
     }
 }
 
+/// Native local tools Codex exposes through the same `PreToolUse` hook path.
+///
+/// Codex matches the regex against the tool name. Keeping these in the managed
+/// installer entry means current clients redirect their native file surface,
+/// while older Bash-only clients simply never invoke the additional alternatives.
+pub(super) const CODEX_PRE_TOOL_USE_MATCHER: &str = "Bash|Read|Grep|Glob";
+
 pub(super) fn upsert_lean_ctx_codex_hook_entries(
     root: &mut serde_json::Value,
     session_start_cmd: &str,
@@ -451,7 +458,12 @@ pub(super) fn upsert_lean_ctx_codex_hook_entries(
     remove_lean_ctx_codex_managed_entries(hooks_obj, "PreToolUse");
     remove_lean_ctx_codex_managed_entries(hooks_obj, "SessionStart");
 
-    push_codex_hook_entry(hooks_obj, "PreToolUse", "Bash", pre_tool_use_cmd);
+    push_codex_hook_entry(
+        hooks_obj,
+        "PreToolUse",
+        CODEX_PRE_TOOL_USE_MATCHER,
+        pre_tool_use_cmd,
+    );
     push_codex_hook_entry(
         hooks_obj,
         "SessionStart",
@@ -514,6 +526,19 @@ pub(super) fn is_lean_ctx_codex_managed_entry(event_name: &str, entry: &serde_js
         return false;
     };
 
+    // Legacy flat-format entries (no "hooks" array): detect and remove
+    // stale "hook deny" / "hook rewrite" entries left by older lean-ctx
+    // versions. These block the transparent redirect in codex-pretooluse.
+    if event_name == "PreToolUse" {
+        if let Some(cmd) = entry_obj.get("command").and_then(|v| v.as_str()) {
+            if cmd.contains("lean-ctx")
+                && (cmd.contains("hook deny") || cmd.contains("hook rewrite"))
+            {
+                return true;
+            }
+        }
+    }
+
     let Some(hooks) = entry_obj.get("hooks").and_then(|value| value.as_array()) else {
         return false;
     };
@@ -524,8 +549,10 @@ pub(super) fn is_lean_ctx_codex_managed_entry(event_name: &str, entry: &serde_js
         };
         match event_name {
             "PreToolUse" => {
-                entry_obj.get("matcher").and_then(|value| value.as_str()) == Some("Bash")
-                    && command.contains("lean-ctx")
+                matches!(
+                    entry_obj.get("matcher").and_then(|value| value.as_str()),
+                    Some("Bash" | CODEX_PRE_TOOL_USE_MATCHER)
+                ) && command.contains("lean-ctx")
                     && (command.contains("hook rewrite")
                         || command.contains("hook codex-pretooluse"))
             }

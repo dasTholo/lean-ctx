@@ -64,6 +64,9 @@ pub enum EvidenceClass {
     Unclassified,
 }
 
+// OSS savings verification workflow states.
+// Distinct from commercial Solution Audit Trail (Section 8)
+// which provides compliance-grade decision logging with approvals.
 /// Customer disposition of a savings claim (P5 — settlement path).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -187,6 +190,33 @@ pub struct SavingsEvent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace_id: Option<String>,
 
+    // ── Solution Intelligence Fields ──
+    /// Decision selected by the solution workflow.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub solution_decision: Option<String>,
+    /// Lines added by the selected solution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loc_added: Option<u64>,
+    /// Lines removed by the selected solution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loc_removed: Option<u64>,
+
+    /// Path affected by an `edit` ledger event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+
+    /// Lines added by an `edit` ledger event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lines_added: Option<u64>,
+
+    /// Lines removed by an `edit` ledger event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lines_removed: Option<u64>,
+
+    /// Removed minus added for an `edit` ledger event; positive means a reduction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub net: Option<i64>,
+
     /// Quality signal from outcome tracking.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quality_signal: Option<String>,
@@ -228,6 +258,51 @@ impl SavingsEvent {
     /// (a sentinel that never appears in real values), so the hash is stable
     /// regardless of whether the field was populated.
     pub fn canonical_content(&self) -> String {
+        format!(
+            "v6|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+            self.ts,
+            self.tool,
+            self.mechanism,
+            self.model_id,
+            self.tokenizer,
+            self.baseline_tokens,
+            self.actual_tokens,
+            self.saved_tokens,
+            self.bounce_adjustment,
+            micro_usd(self.unit_price_per_m_usd),
+            micro_usd(self.saved_usd),
+            self.repo_hash,
+            self.agent_id,
+            self.version,
+            option_str(self.attribution_id.as_ref()),
+            option_str(self.intent_tag.as_ref()),
+            option_str(self.model_routed.as_ref()),
+            self.measurement_method.as_ref().map_or("_", |m| match m {
+                MeasurementMethod::DirectCount => "direct_count",
+                MeasurementMethod::Holdout => "holdout",
+                MeasurementMethod::BaselineEstimate => "baseline_estimate",
+                MeasurementMethod::ProviderReconciled => "provider_reconciled",
+                MeasurementMethod::Unknown => "unknown",
+            }),
+            self.evidence_class.as_ref().map_or("_", |e| match e {
+                EvidenceClass::Measured => "measured",
+                EvidenceClass::Approximated => "approximated",
+                EvidenceClass::Statistical => "statistical",
+                EvidenceClass::Declared => "declared",
+                EvidenceClass::Unclassified => "unclassified",
+            }),
+            option_str(self.path.as_ref()),
+            self.lines_added
+                .map_or_else(|| "_".to_string(), |value| value.to_string()),
+            self.lines_removed
+                .map_or_else(|| "_".to_string(), |value| value.to_string()),
+            self.net
+                .map_or_else(|| "_".to_string(), |value| value.to_string()),
+        )
+    }
+
+    /// v5 canonical: retained so v5-written ledgers verify after the edit event upgrade.
+    pub fn canonical_content_v5(&self) -> String {
         format!(
             "v5|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
             self.ts,
@@ -348,12 +423,13 @@ impl SavingsEvent {
         )
     }
 
-    /// True if `entry_hash` matches the current (v4) canonical hash, the v3 hash, the v2
-    /// hash, or the legacy v1 hash. Accepting all four lets `verify` validate ledgers
+    /// True if `entry_hash` matches the current canonical hash or a prior schema version.
+    /// Accepting all versions lets `verify` validate ledgers
     /// written under any scheme without forcing a migration (clean old ledgers stay
     /// valid; broken-by-bug ones are repaired by `rechain`, which re-hashes under v4).
     pub fn hash_matches(&self, prev_hash: &str) -> bool {
         self.entry_hash == compute_hash(prev_hash, &self.canonical_content())
+            || self.entry_hash == compute_hash(prev_hash, &self.canonical_content_v5())
             || self.entry_hash == compute_hash(prev_hash, &self.canonical_content_v4())
             || self.entry_hash == compute_hash(prev_hash, &self.canonical_content_v3())
             || self.entry_hash == compute_hash(prev_hash, &self.canonical_content_v2())
@@ -427,6 +503,13 @@ mod tests {
             request_id: None,
             session_id: None,
             trace_id: None,
+            solution_decision: None,
+            loc_added: None,
+            loc_removed: None,
+            path: None,
+            lines_added: None,
+            lines_removed: None,
+            net: None,
             quality_signal: None,
             attribution_group: None,
             attribution_id: None,
@@ -476,7 +559,7 @@ mod tests {
         e.unit_price_per_m_usd = 2.5;
         e.saved_usd = 9423.0 * 2.5 / 1_000_000.0; // = 0.0235575, a {:.6} tie
         e.prev_hash = "genesis".into();
-        e.entry_hash = compute_hash(&e.prev_hash, &e.canonical_content());
+        e.entry_hash = compute_hash(&e.prev_hash, &e.canonical_content_v4());
 
         let json = serde_json::to_string(&e).unwrap();
         let parsed: SavingsEvent = serde_json::from_str(&json).unwrap();
@@ -499,7 +582,7 @@ mod tests {
         // Same order as `record_read_event`: divide first, then multiply.
         e.saved_usd = e.saved_tokens as f64 / 1_000_000.0 * e.unit_price_per_m_usd;
         e.prev_hash = "genesis".into();
-        e.entry_hash = compute_hash(&e.prev_hash, &e.canonical_content());
+        e.entry_hash = compute_hash(&e.prev_hash, &e.canonical_content_v5());
 
         let json = serde_json::to_string(&e).unwrap();
         let parsed: SavingsEvent = serde_json::from_str(&json).unwrap();
@@ -578,7 +661,7 @@ mod tests {
         let mut v4 = ev();
         v4.version = "3.8.18".into();
         v4.prev_hash = "genesis".into();
-        v4.entry_hash = compute_hash(&v4.prev_hash, &v4.canonical_content());
+        v4.entry_hash = compute_hash(&v4.prev_hash, &v4.canonical_content_v4());
         assert!(v4.hash_matches(&v4.prev_hash));
         let mut forged = v4.clone();
         forged.version = "3.9.0".into();
@@ -616,7 +699,7 @@ mod tests {
         e.measurement_method = Some(MeasurementMethod::DirectCount);
         e.evidence_class = Some(EvidenceClass::Measured);
         e.prev_hash = "genesis".into();
-        e.entry_hash = compute_hash(&e.prev_hash, &e.canonical_content());
+        e.entry_hash = compute_hash(&e.prev_hash, &e.canonical_content_v5());
         assert!(e.hash_matches(&e.prev_hash));
 
         let mut forged = e.clone();
@@ -624,6 +707,25 @@ mod tests {
         assert!(
             !forged.hash_matches(&forged.prev_hash),
             "rewriting attribution_id must be tamper-evident"
+        );
+    }
+
+    #[test]
+    fn v6_commits_edit_fields() {
+        let mut e = ev();
+        e.path = Some("rust/src/core/edit_metering.rs".into());
+        e.lines_added = Some(2);
+        e.lines_removed = Some(5);
+        e.net = Some(3);
+        e.prev_hash = "genesis".into();
+        e.entry_hash = compute_hash(&e.prev_hash, &e.canonical_content());
+        assert!(e.hash_matches(&e.prev_hash));
+
+        let mut forged = e.clone();
+        forged.net = Some(2);
+        assert!(
+            !forged.hash_matches(&forged.prev_hash),
+            "rewriting edit LOC must be tamper-evident"
         );
     }
 

@@ -149,6 +149,12 @@ impl TriageEngine {
     }
 }
 
+impl Default for TriageEngine {
+    fn default() -> Self {
+        Self::with_rules()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -226,11 +232,5 @@ mod tests {
         ]);
         engine.analyze(&TaskAnalysisInput::default()).unwrap();
         assert!(!data.path().join("triage_shadow.jsonl").exists());
-    }
-}
-
-impl Default for TriageEngine {
-    fn default() -> Self {
-        Self::with_rules()
     }
 }

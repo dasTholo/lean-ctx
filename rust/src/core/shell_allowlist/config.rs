@@ -104,3 +104,85 @@ pub(super) fn allowlist_block_message(base: &str) -> String {
 pub fn effective_allowlist_pub() -> Vec<String> {
     effective_allowlist()
 }
+
+/// GH #1466: Check whether the user has explicitly allowed an interpreter for
+/// inline/heredoc use in Claude Code's own permission system.
+///
+/// Reads `permissions.allow` from both global (`~/.claude/settings.json`) and
+/// project-local (`.claude/settings.local.json`) settings. Entries like
+/// `Bash(python3:*)` or `Bash(python3:)` grant the interpreter `python3`
+/// inline-execution rights, bypassing the heredoc/eval-flag block.
+///
+/// Cached per-process to avoid re-reading settings on every shell invocation.
+pub(super) fn claude_allows_interpreter_inline(interpreter: &str) -> bool {
+    use std::sync::OnceLock;
+
+    static CACHE: OnceLock<Vec<String>> = OnceLock::new();
+
+    let allowed = CACHE.get_or_init(|| {
+        let mut interpreters = Vec::new();
+        collect_claude_bash_permissions(&mut interpreters);
+        interpreters
+    });
+
+    allowed.iter().any(|a| a == interpreter)
+}
+
+/// Parse `Bash(<cmd>:...)` entries from Claude's `permissions.allow` arrays.
+fn collect_claude_bash_permissions(out: &mut Vec<String>) {
+    let paths = claude_settings_paths();
+    for path in &paths {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            if let Ok(json) = crate::core::jsonc::parse_jsonc(&content) {
+                extract_bash_interpreters(&json, out);
+            }
+        }
+    }
+}
+
+/// Returns candidate Claude settings paths (global + project-local).
+fn claude_settings_paths() -> Vec<std::path::PathBuf> {
+    let mut paths = Vec::with_capacity(2);
+
+    if let Some(home) = crate::core::home::resolve_home_dir() {
+        paths.push(home.join(".claude").join("settings.json"));
+    }
+
+    if let Ok(cwd) = std::env::current_dir() {
+        paths.push(cwd.join(".claude").join("settings.local.json"));
+    }
+
+    paths
+}
+
+/// Extract interpreter names from `Bash(<interpreter>:...)` permission entries.
+pub(super) fn extract_bash_interpreters(json: &serde_json::Value, out: &mut Vec<String>) {
+    let allow = json
+        .pointer("/permissions/allow")
+        .and_then(|v| v.as_array());
+
+    let Some(arr) = allow else { return };
+
+    for entry in arr {
+        let Some(s) = entry.as_str() else { continue };
+        if let Some(inner) = parse_bash_permission(s) {
+            if !inner.is_empty() && !out.contains(&inner) {
+                out.push(inner);
+            }
+        }
+    }
+}
+
+/// Parse a Claude permission entry like `Bash(python3:*)` → `Some("python3")`.
+/// Accepted formats: `Bash(cmd:)`, `Bash(cmd:*)`, `Bash(cmd:<anything>)`.
+pub(super) fn parse_bash_permission(entry: &str) -> Option<String> {
+    let rest = entry.strip_prefix("Bash(")?;
+    let rest = rest.strip_suffix(')')?;
+    let colon_pos = rest.find(':')?;
+    let cmd = &rest[..colon_pos];
+    if cmd.is_empty() {
+        return None;
+    }
+    let base = cmd.rsplit('/').next().unwrap_or(cmd);
+    Some(base.to_string())
+}

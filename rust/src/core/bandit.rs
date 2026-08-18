@@ -1,3 +1,8 @@
+//! Bandit-based read-mode selection for ctx_read auto-mode.
+//! This is core OSS infrastructure for optimizing read modes,
+//! distinct from the commercial Adaptive Intensity feature
+//! (Section 8) which governs Solution Intelligence intensity levels.
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
