@@ -1452,3 +1452,50 @@ fn export_path_allowed_bare_inline_path_still_blocked() {
         "must be inline-env block, not allowlist: {bare_err}"
     );
 }
+
+/// GH #1466: `parse_bash_permission` extracts interpreter names from Claude entries.
+#[test]
+fn parse_bash_permission_formats() {
+    use super::config::parse_bash_permission;
+    assert_eq!(
+        parse_bash_permission("Bash(python3:)"),
+        Some("python3".to_string())
+    );
+    assert_eq!(
+        parse_bash_permission("Bash(python3:*)"),
+        Some("python3".to_string())
+    );
+    assert_eq!(
+        parse_bash_permission("Bash(python:anything here)"),
+        Some("python".to_string())
+    );
+    assert_eq!(
+        parse_bash_permission("Bash(/usr/bin/python3:)"),
+        Some("python3".to_string()),
+        "must strip path prefix"
+    );
+    assert_eq!(parse_bash_permission("Read"), None);
+    assert_eq!(parse_bash_permission("Bash()"), None);
+    assert_eq!(parse_bash_permission("Bash(python3)"), None, "no colon");
+    assert_eq!(parse_bash_permission("Bash(:)"), None, "empty cmd");
+}
+
+/// GH #1466: `extract_bash_interpreters` reads all `Bash(cmd:…)` entries.
+#[test]
+fn extract_bash_interpreters_from_json() {
+    use super::config::extract_bash_interpreters;
+    let json = serde_json::json!({
+        "permissions": {
+            "allow": [
+                "Bash(python3:)",
+                "Bash(node:*)",
+                "Read",
+                "Bash(ruby:run stuff)",
+                "mcplean-ctxctx_shell"
+            ]
+        }
+    });
+    let mut out = Vec::new();
+    extract_bash_interpreters(&json, &mut out);
+    assert_eq!(out, vec!["python3", "node", "ruby"]);
+}
