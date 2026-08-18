@@ -413,6 +413,10 @@ fn auto_capture_ignores_existing_imports_and_ordinary_comments() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Edit-tool path resolution uses Unix path conventions"
+)]
 fn native_edit_via_observe_hook_triggers_solution_capture() {
     let tmp = std::env::temp_dir().join("native_capture_test");
     let tmp_str = tmp.to_string_lossy().replace('\\', "/");
