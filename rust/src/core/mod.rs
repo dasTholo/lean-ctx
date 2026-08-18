@@ -382,6 +382,7 @@ pub mod edit_metering;
 pub(crate) mod edit_quality;
 pub(crate) mod efficacy;
 pub mod evidence_bundle;
+pub mod evidence_flow;
 pub mod grammar_usage;
 pub(crate) mod graph_cache;
 pub(crate) mod http_client;

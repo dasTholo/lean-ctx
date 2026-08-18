@@ -7,6 +7,7 @@ mod finops;
 mod gain;
 mod graph;
 mod learning;
+pub mod provider_run;
 mod savings;
 mod spend;
 

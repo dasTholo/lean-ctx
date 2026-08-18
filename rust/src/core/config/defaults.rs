@@ -39,7 +39,8 @@ pub const EDIT_TOOL_NAMES: &[&str] = &["ctx_edit", "ctx_patch"];
 pub(crate) fn default_shell_write_allow_paths() -> Vec<String> {
     #[allow(unused_mut)]
     let mut paths = vec![std::env::temp_dir().to_string_lossy().into_owned()];
-    #[cfg(unix)]
+    // Always include Unix scratch paths — agents generate `/tmp` redirects
+    // even on Windows (Git Bash, WSL, cross-platform scripts).  (#1467)
     for path in ["/tmp", "/private/tmp", "/var/tmp"] {
         if !paths.iter().any(|existing| existing == path) {
             paths.push(path.to_string());

@@ -209,8 +209,27 @@ class CockpitCommander extends HTMLElement {
 
     const dg = sig.diagnostics || {};
     if (dg.errors > 0) {
-      tiles += tile('\u2716', 'Build errors', dg.errors + ' active',
-        'Files with active compiler/linter errors: ' + (dg.files || []).join(', ') + ' \u2014 forced to full reads + ranked up.', 'warn');
+      const details = dg.details || [];
+      const errorRows = details
+        .filter(d => d.severity === 'error')
+        .map(d => '<div style="display:flex;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);font-size:12px">'
+          + '<span style="color:var(--red);flex-shrink:0">' + esc(d.tool) + '</span>'
+          + '<span style="color:var(--muted);flex-shrink:0;min-width:60px">' + esc(d.file) + (d.line ? ':' + d.line : '') + '</span>'
+          + '<span style="color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(d.message) + '</span>'
+          + '</div>')
+        .join('');
+      const panelId = 'build-error-panel';
+      tiles += '<div class="cmdr-stat-cell" style="min-width:130px;cursor:pointer" '
+        + "onclick=\"var p=document.getElementById('" + panelId + "');if(p)p.style.display=p.style.display==='none'?'block':'none'\""
+        + '>'
+        + '<div class="cmdr-stat-label">\u2716 Build errors</div>'
+        + '<div class="cmdr-stat-value" style="font-size:14px;color:var(--red)">' + dg.errors + ' active \u25be</div>'
+        + '</div>';
+      tiles += '<div id="' + panelId + '" style="display:none;grid-column:1/-1;background:var(--card);border:1px solid var(--red);border-radius:6px;padding:10px 12px;margin-top:4px">'
+        + '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">'
+        + 'Fix the errors and re-run the build to clear. Auto-expires after 15 min.</div>'
+        + errorRows
+        + '</div>';
     } else {
       tiles += tile('\u2713', 'Build errors', 'none',
         'Failing cargo/tsc/eslint runs mark their files as context priority; passing runs clear them.', 'off');
