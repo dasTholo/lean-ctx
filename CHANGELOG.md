@@ -3,6 +3,67 @@
 All notable changes to lean-ctx are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [3.9.19] — 2026-08-18
+
+### Added
+- **OSS Intelligence Layer (Class A/B/C)** — full control-plane for open-source
+  intelligence features with tiered classification: provenance tracking,
+  cross-agent memory sync, workspace health monitoring, and per-agent analytics.
+- **Solution Intelligence** — complete implementation of solution decision
+  tracking, LOC metering, native edit auto-capture, and gain CLI integration.
+  10-agent verification pass confirms all pipelines functional.
+- **Atlas Adaptation (Waves 1–4)** — provenance pipeline with checkpoint/git
+  integration, session import engine (Claude Code, Codex, Cursor), dashboard
+  provenance and health panels, cross-agent memory extraction, additive stats
+  merge, and package-manager bypass for shell hooks.
+- **Transparent Codex shadow mode** — Codex agents now operate in shadow mode
+  with only `ctx_call` advertised; hooks handle native tool redirection at
+  runtime, eliminating legacy hook deny logic.
+- **`lean-ctx checkpoints` CLI** — list, filter by session/commit, find orphaned
+  checkpoints.
+- **`lean-ctx health --watch` CLI** — continuous terminal refresh (10s interval)
+  for workspace health monitoring.
+- **`lean-ctx import` CLI** — import session histories from Claude Code, Codex,
+  and Cursor.
+- **Semantic search foundation** — keyword-based fallback in knowledge store
+  with TODO placeholder for HNSW embedding search.
+- **`[cross_agent]` config section** — cross-agent sync, auto-extract, semantic
+  search, embedding model, max facts per session.
+- **Event bus extensions** — `ProvenanceCheckpoint`, `ProvenanceEdit`,
+  `HealthChanged` event kinds added to context bus.
+- **Dashboard workspace health panel** — traffic-light cards showing daemon,
+  doctor, compression, and config status.
+- **Dashboard provenance panel** — checkpoint timeline and file touch
+  visualization.
+- **Per-agent usage analytics** — token stats broken down by `clientInfo.name`
+  in stats API and dashboard.
+- **84th MCP tool** — `ctx_memory` for cross-agent memory operations.
+
+### Fixed
+- **MCP pre-init handshake (#1454)** — reply -32601 to unknown pre-init
+  requests (e.g. `server/discover`) and re-enter handshake loop, allowing
+  dual-era clients to fall back to `initialize`.
+- **CLI read cache process isolation (#1459)** — scope cache hits to current
+  process to prevent stale reads across restarts.
+- **Dashboard `rawMap` ReferenceError** — `cockpit-remaining.js` now defines
+  `rawMap` before use in trend charts.
+- **Shell command classification** — git write commands (push/pull/merge) now
+  classified as Passthrough instead of Verbatim.
+- **Compression corruption prevention (#1444)** — PostToolUse corruption guard
+  and pre-commit hook to catch lean-ctx marker leaks.
+- **Claude Bash permissions (#1466)** — respect `settings.json` Bash permissions
+  for interpreter heredoc execution.
+- **Root restriction rules** — `ctx_*` tools refuse paths outside project root
+  and `allow_paths`; `lean-ctx doctor` shows effective roots.
+- **Windows `npm install` EBUSY** — stop running processes before install.
+- **macOS CI benchmark tolerance** — proportional cache benchmark timing
+  tolerance for CI runners.
+
+### Changed
+- Shell allowlist tests expanded with Claude Bash permission parsing.
+- Lock ordering documentation updated with new static locks.
+- Tool count updated across all documentation (83 → 84 MCP tools).
+
 ## [Unreleased] — Sprint R35 (2026-08-12)
 
 ### Added
