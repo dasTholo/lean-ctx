@@ -357,11 +357,13 @@ class CockpitLearning extends HTMLElement {
     // Honest compression rate: verified savings (ledger) / daily input tokens (stats).
     // Uses the same formula as the Overview hero: verified_net / total_input.
     var roiTrend = this._roi && this._roi.trend ? this._roi.trend : [];
+    var rawMap = {};
     if (roiTrend.length > 0) {
       var savedMap = {};
       for (var j = 0; j < roiTrend.length; j++) {
         var tDay = String(roiTrend[j][0] || '');
         savedMap[tDay] = Number(roiTrend[j][1] || 0);
+        if (roiTrend[j][3] !== undefined) rawMap[tDay] = Number(roiTrend[j][3]);
       }
       for (var k = 0; k < labels.length; k++) {
         var fullDate = (daily[k] && (daily[k].date || daily[k].day)) || '';
