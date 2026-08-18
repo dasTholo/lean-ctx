@@ -423,6 +423,22 @@ async function main() {
     fs.mkdirSync(BIN_DIR, { recursive: true });
 
     if (IS_WIN) {
+      // Stop processes that may hold the binary open (defense-in-depth; preinstall
+      // should have done this already, but npm doesn't guarantee hook ordering on
+      // every version and the user may run postinstall manually).
+      try { execSync(`"${BINARY_PATH}" stop`, { stdio: "ignore", timeout: 10000 }); } catch {}
+      try { execSync('taskkill /F /IM "lean-ctx.exe" /T', { stdio: "ignore", timeout: 5000 }); } catch {}
+      try { execSync("timeout /T 1 /NOBREAK >NUL 2>&1", { stdio: "ignore" }); } catch {}
+
+      // Clean up orphans from previous failed installs
+      try {
+        for (const f of fs.readdirSync(BIN_DIR)) {
+          if (f.endsWith(".old") || f.endsWith(".old.exe") || f.endsWith(".tmp")) {
+            try { fs.unlinkSync(path.join(BIN_DIR, f)); } catch {}
+          }
+        }
+      } catch {}
+
       const oldBin = BINARY_PATH + ".old";
       try { fs.unlinkSync(oldBin); } catch {}
       try { fs.renameSync(BINARY_PATH, oldBin); } catch {}

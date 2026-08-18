@@ -1005,6 +1005,177 @@ pub(super) fn build(sections: &mut BTreeMap<String, SectionSchema>) {
         },
     );
 
+    let mut solution = BTreeMap::new();
+    solution.insert(
+        "enabled".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.solution.enabled),
+            "Enable solution-efficiency guidance",
+        ),
+    );
+    solution.insert(
+        "intensity".into(),
+        key_enum(
+            &["off", "minimal", "balanced", "aggressive"],
+            cfg.solution.intensity.label(),
+            "How strongly solution-efficiency guidance is applied",
+        ),
+    );
+    solution.insert(
+        "inject_in_instructions".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.solution.inject_in_instructions),
+            "Inject solution-efficiency guidance into MCP instructions",
+        ),
+    );
+    solution.insert(
+        "inject_in_compose".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.solution.inject_in_compose),
+            "Inject solution-efficiency guidance into composed context",
+        ),
+    );
+    solution.insert(
+        "inject_in_subagents".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.solution.inject_in_subagents),
+            "Inject solution-efficiency guidance into subagent prompts",
+        ),
+    );
+    solution.insert(
+        "track_decisions".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.solution.track_decisions),
+            "Track solution decisions for efficiency guidance",
+        ),
+    );
+    solution.insert(
+        "track_loc".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.solution.track_loc),
+            "Track lines of code changed for solution-efficiency guidance",
+        ),
+    );
+    solution.insert(
+        "platform_hints".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.solution.platform_hints),
+            "Include platform-native solution hints",
+        ),
+    );
+    sections.insert(
+        "solution".into(),
+        SectionSchema {
+            description: "Solution Intelligence guidance and decision tracking".into(),
+            keys: solution,
+        },
+    );
+
+    let mut provenance = BTreeMap::new();
+    provenance.insert(
+        "enabled".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.provenance.enabled),
+            "Enable edit provenance capture",
+        ),
+    );
+    provenance.insert(
+        "retention_days".into(),
+        key(
+            "u64",
+            serde_json::json!(cfg.provenance.retention_days),
+            "Days to retain edit provenance records",
+        ),
+    );
+    provenance.insert(
+        "capture_native_edits".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.provenance.capture_native_edits),
+            "Capture native editor changes in provenance",
+        ),
+    );
+    provenance.insert(
+        "capture_mcp_edits".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.provenance.capture_mcp_edits),
+            "Capture MCP edit tool changes in provenance",
+        ),
+    );
+    provenance.insert(
+        "checkpoint_on_commit".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.provenance.checkpoint_on_commit),
+            "Create provenance checkpoints when commits are made",
+        ),
+    );
+    sections.insert(
+        "provenance".into(),
+        SectionSchema {
+            description: "Edit provenance capture and retention".into(),
+            keys: provenance,
+        },
+    );
+    let mut cross_agent = BTreeMap::new();
+    cross_agent.insert(
+        "cross_agent_sync".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.cross_agent.cross_agent_sync),
+            "Share knowledge facts across agent sessions",
+        ),
+    );
+    cross_agent.insert(
+        "auto_extract".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.cross_agent.auto_extract),
+            "Auto-extract decisions from completed sessions",
+        ),
+    );
+    cross_agent.insert(
+        "semantic_search".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.cross_agent.semantic_search),
+            "Enable embedding-based knowledge retrieval (requires model download)",
+        ),
+    );
+    cross_agent.insert(
+        "embedding_model".into(),
+        key(
+            "string",
+            serde_json::json!(cfg.cross_agent.embedding_model),
+            "On-device embedding model for semantic retrieval",
+        ),
+    );
+    cross_agent.insert(
+        "max_facts_per_session".into(),
+        key(
+            "usize",
+            serde_json::json!(cfg.cross_agent.max_facts_per_session),
+            "Maximum knowledge facts extracted per session",
+        ),
+    );
+    sections.insert(
+        "cross_agent".into(),
+        SectionSchema {
+            description: "Cross-agent memory sharing and semantic retrieval (Atlas adaptation)"
+                .into(),
+            keys: cross_agent,
+        },
+    );
+
     let mut skillify = BTreeMap::new();
     skillify.insert(
         "enabled".into(),

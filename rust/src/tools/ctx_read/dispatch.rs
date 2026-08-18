@@ -4,6 +4,20 @@ use super::{
 };
 const MAX_RELAY_CONTENT_BYTES: usize = 8192;
 
+/// Cursor writes terminal output to `.cursor/projects/*/terminals/*.txt` and
+/// polls these files every ~3s. Without special handling, each poll triggers a
+/// full re-read because the conversation gate blocks stubs under concurrency
+/// (#1040). Terminal files are system infrastructure — not conversation-scoped
+/// — so they safely bypass the gate while the content-hash check still
+/// guarantees correctness.
+fn is_terminal_poll_file(path: &str) -> bool {
+    (path.contains("/.cursor/") || path.contains("\\.cursor\\"))
+        && (path.contains("/terminals/") || path.contains("\\terminals\\"))
+        && std::path::Path::new(path)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("txt"))
+}
+
 /// Modes whose compressed output is useful for cross-agent relay.
 const RELAY_ELIGIBLE_MODES: &[&str] = &["map", "map:v2", "signatures", "signatures:v2"];
 
@@ -36,8 +50,29 @@ pub fn handle_with_task(
     crp_mode: CrpMode,
     task: Option<&str>,
 ) -> String {
-    let mut result = handle_with_options(cache, path, mode, false, crp_mode, task);
-    kernel::enrich_with_kernel(&mut result, task);
+    handle_with_task_result(cache, path, mode, crp_mode, task).content
+}
+
+/// Task-aware read with the structural cache-hit result retained for callers
+/// that need to account for each file in a batch independently.
+pub fn handle_with_task_result(
+    cache: &mut SessionCache,
+    path: &str,
+    mode: &str,
+    crp_mode: CrpMode,
+    task: Option<&str>,
+) -> ReadOutput {
+    let mut result = handle_with_options_resolved(
+        cache,
+        path,
+        mode,
+        false,
+        crp_mode,
+        task,
+        ReadTuning::resolve(None, &[]),
+    );
+    kernel::enrich_with_kernel(&mut result.content, task);
+    result.output_tokens = count_tokens(&result.content);
     result
 }
 
@@ -117,7 +152,26 @@ pub fn handle_fresh_with_task(
     crp_mode: CrpMode,
     task: Option<&str>,
 ) -> String {
-    handle_with_options(cache, path, mode, true, crp_mode, task)
+    handle_fresh_with_task_result(cache, path, mode, crp_mode, task).content
+}
+
+/// Fresh task-aware read with the structural cache-hit result retained.
+pub fn handle_fresh_with_task_result(
+    cache: &mut SessionCache,
+    path: &str,
+    mode: &str,
+    crp_mode: CrpMode,
+    task: Option<&str>,
+) -> ReadOutput {
+    handle_with_options_resolved(
+        cache,
+        path,
+        mode,
+        true,
+        crp_mode,
+        task,
+        ReadTuning::resolve(None, &[]),
+    )
 }
 
 /// Fresh read with task-aware filtering, also returns the resolved mode name and pre-counted tokens.
@@ -548,15 +602,17 @@ pub(crate) fn try_stub_hit_readonly_scoped(
         {
             return None;
         }
-        // Conversation scoping (#954): only stub when THIS conversation received
-        // the content. A different (or unknown) conversation re-delivers in full
-        // rather than emit a misleading stub. `current == None` (hooks absent)
-        // preserves legacy process-scoped behavior, so single-chat hit rates are
-        // unchanged.
-        if !crate::core::conversation::conversation_allows_stub(
-            current_conversation,
-            delivered_conv.as_deref(),
-        ) {
+        // Terminal poll files bypass the conversation gate: they are system
+        // infrastructure, not conversation-scoped content. The content-hash
+        // verification above already guarantees the file is unchanged.
+        let is_terminal_poll = is_terminal_poll_file(path);
+
+        if !is_terminal_poll
+            && !crate::core::conversation::conversation_allows_stub(
+                current_conversation,
+                delivered_conv.as_deref(),
+            )
+        {
             crate::core::cache_telemetry::record_conversation_mismatch();
             return None;
         }
@@ -576,10 +632,12 @@ pub(crate) fn try_stub_hit_readonly_scoped(
     if crate::core::cache::is_cache_entry_stale_verified(path, rec.stored_mtime(), &rec.hash) {
         return None;
     }
-    if !crate::core::conversation::conversation_allows_cold_stub(
-        current_conversation,
-        rec.delivered_conversation.as_deref(),
-    ) {
+    if !is_terminal_poll_file(path)
+        && !crate::core::conversation::conversation_allows_cold_stub(
+            current_conversation,
+            rec.delivered_conversation.as_deref(),
+        )
+    {
         crate::core::cache_telemetry::record_conversation_mismatch();
         return None;
     }
@@ -824,7 +882,8 @@ pub(crate) fn record_cross_agent_delivery(
 #[cfg(test)]
 mod tests {
     use super::{
-        SessionCache, effective_fresh_flags, try_cross_agent_stub, try_stub_hit_readonly_scoped,
+        SessionCache, effective_fresh_flags, is_terminal_poll_file, try_cross_agent_stub,
+        try_stub_hit_readonly_scoped,
     };
     use std::sync::atomic::Ordering;
 
@@ -908,6 +967,63 @@ mod tests {
                 .map(|e| e.compressed_outputs.contains_key("cross-agent-relay")),
             Some(false),
             "cross-agent-relay must not exist in session cache"
+        );
+    }
+    #[test]
+    fn is_terminal_poll_file_matches_cursor_terminal_paths() {
+        assert!(is_terminal_poll_file(
+            "/Users/me/.cursor/projects/Users-me-proj/terminals/12345.txt"
+        ));
+        assert!(is_terminal_poll_file(
+            "/home/dev/.cursor/projects/foo/terminals/857272.txt"
+        ));
+        assert!(!is_terminal_poll_file("/Users/me/project/src/main.rs"));
+        assert!(!is_terminal_poll_file(
+            "/Users/me/.cursor/projects/foo/agent-transcripts/abc.jsonl"
+        ));
+        assert!(!is_terminal_poll_file("/Users/me/.cursor/terminals.log"));
+    }
+
+    #[test]
+    fn terminal_poll_file_stub_bypasses_conversation_gate() {
+        let dir = tempfile::tempdir().unwrap();
+        let terminals_dir = dir.path().join(".cursor").join("proj").join("terminals");
+        std::fs::create_dir_all(&terminals_dir).unwrap();
+        let file = terminals_dir.join("252028.txt");
+        std::fs::write(&file, "---\npid: 1234\n---\nterminal output\n").unwrap();
+        let path = file.to_string_lossy().to_string();
+
+        let mut cache = SessionCache::new();
+        cache.store(&path, "---\npid: 1234\n---\nterminal output\n");
+        cache.mark_full_delivered(&path);
+
+        // Mismatched conversation normally blocks stub — but terminal files bypass
+        let output = try_stub_hit_readonly_scoped(&cache, &path, Some("different-conv"));
+        assert!(
+            output.is_some(),
+            "terminal poll file must bypass conversation gate and serve stub"
+        );
+    }
+
+    #[test]
+    fn non_terminal_file_respects_conversation_gate() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("main.rs");
+        std::fs::write(&file, "fn main() {}\n").unwrap();
+        let path = file.to_string_lossy().to_string();
+
+        let mut cache = SessionCache::new();
+        cache.store(&path, "fn main() {}\n");
+        cache.mark_full_delivered(&path);
+        if let Some(entry) = cache.get_mut(&path) {
+            entry.delivered_conversation = Some("conv-A".to_string());
+        }
+
+        // Mismatched conversation on regular file must block stub
+        let output = try_stub_hit_readonly_scoped(&cache, &path, Some("conv-B"));
+        assert!(
+            output.is_none(),
+            "regular file must respect conversation gate"
         );
     }
 }

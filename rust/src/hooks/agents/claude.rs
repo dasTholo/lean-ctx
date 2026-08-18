@@ -272,19 +272,28 @@ fn install_claude_global_claude_md_for_mode(home: &std::path::Path, mode: HookMo
     }
 
     let existing = std::fs::read_to_string(&claude_md_path).unwrap_or_default();
-    let block = match mode {
+    let base_block = match mode {
         HookMode::Replace => CLAUDE_MD_BLOCK_CONTENT_REPLACE,
         HookMode::Mcp | HookMode::Hybrid => CLAUDE_MD_BLOCK_CONTENT_MCP,
     };
-    let block_version = CLAUDE_MD_BLOCK_VERSION;
 
     // A single up-to-date block needs no rewrite. Check both version tag AND
     // mode-specific content — the Replace and MCP blocks share the version tag
     // but have different instructions (GH #1250 follow-up).
+    let solution_block = crate::core::rules_canonical::enabled_solution_rules_block();
+    let block = if solution_block.is_empty() {
+        base_block.to_owned()
+    } else {
+        format!("{base_block}\n\n{solution_block}")
+    };
     let block_count = existing.matches(CLAUDE_MD_BLOCK_START).count();
     let is_replace_block = existing.contains("denied by policy");
     let mode_matches = matches!(mode, HookMode::Replace) == is_replace_block;
-    if block_count == 1 && existing.contains(block_version) && mode_matches {
+    if block_count == 1
+        && existing.contains(CLAUDE_MD_BLOCK_VERSION)
+        && existing.contains(&block)
+        && mode_matches
+    {
         return;
     }
     let cleaned = remove_all_blocks(&existing, CLAUDE_MD_BLOCK_START, CLAUDE_MD_BLOCK_END);

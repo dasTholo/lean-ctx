@@ -28,6 +28,7 @@ var EVENT_COLORS = {
   other: 'var(--yellow)',
   cache: 'var(--purple)',
   compression: 'var(--blue)',
+  solution: 'var(--yellow)',
   agent: 'var(--yellow)',
   knowledge: 'var(--purple)',
   threshold: 'var(--blue)',
@@ -47,6 +48,7 @@ var EVENT_ICONS = {
   other: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>',
   cache: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 002 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>',
   compression: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><rect x="4" y="4" width="16" height="16" rx="2"/><line x1="4" y1="10" x2="20" y2="10"/><line x1="10" y1="4" x2="10" y2="20"/></svg>',
+  solution: '<span aria-hidden="true" style="font-size:16px;line-height:1">⚡</span>',
   agent: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>',
   knowledge: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>',
   threshold: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>',
@@ -66,6 +68,7 @@ var FILTER_LABELS = {
   shell: 'Shell',
   search: 'Search',
   cache: 'Cache',
+  solution: '⚡ Solution',
 };
 
 // Per-call cost sorting (#426): surface which calls are expensive vs cheap.
@@ -96,6 +99,14 @@ function classifyTool(name) {
   return 'other';
 }
 
+function isSolutionDecision(kind) {
+  var type = String(kind.type || '').toLowerCase();
+  if (type === 'solutiondecision' || type === 'solutiondecisionrecorded' || type === 'solutiondecisiontracked') return true;
+  if (String(kind.tool || '').toLowerCase() !== 'ctx_optimize') return false;
+  var mode = String(kind.mode || kind.action || '').toLowerCase();
+  return mode === 'decide' || mode === 'decision' || kind.solution_decision != null;
+}
+
 function flattenEvent(ev) {
   var kind = ev.kind || {};
   var t = kind.type || '';
@@ -104,24 +115,41 @@ function flattenEvent(ev) {
 
   switch (t) {
     case 'ToolCall': {
-      var cat = classifyTool(kind.tool);
+      var cat = isSolutionDecision(kind) ? 'solution' : classifyTool(kind.tool);
       return {
         type: t,
         id: evId,
         category: cat,
         color: EVENT_COLORS[cat] || EVENT_COLORS.other,
         icon: EVENT_ICONS[cat] || EVENT_ICONS.other,
-        title: kind.tool || 'tool call',
+        title: cat === 'solution' ? 'solution decision' : (kind.tool || 'tool call'),
         saved: kind.tokens_saved || 0,
         original: kind.tokens_original || 0,
-        detail: buildToolDetail(kind),
-        expandedDetail: buildExpandedToolDetail(kind),
-        explanation: eventExplanation(t),
+        detail: cat === 'solution' ? buildSolutionDetail(kind) : buildToolDetail(kind),
+        expandedDetail: cat === 'solution' ? buildExpandedSolutionDetail(kind) : buildExpandedToolDetail(kind),
+        explanation: eventExplanation(cat === 'solution' ? 'SolutionDecision' : t),
         ts: ts,
         path: kind.path || null,
         mode: kind.mode || null,
       };
     }
+    case 'SolutionDecision':
+    case 'SolutionDecisionRecorded':
+    case 'SolutionDecisionTracked':
+      return {
+        type: t,
+        id: evId,
+        category: 'solution',
+        color: EVENT_COLORS.solution,
+        icon: EVENT_ICONS.solution,
+        title: 'solution decision',
+        saved: 0,
+        original: 0,
+        detail: buildSolutionDetail(kind),
+        expandedDetail: buildExpandedSolutionDetail(kind),
+        explanation: eventExplanation('SolutionDecision'),
+        ts: ts,
+      };
     case 'CacheHit':
       return {
         type: t,
@@ -292,6 +320,7 @@ function matchesEventFilter(flat, filter) {
   if (filter === 'reads') return flat.category === 'read';
   if (filter === 'shell') return flat.category === 'shell';
   if (filter === 'search') return flat.category === 'search';
+  if (filter === 'solution') return flat.category === 'solution';
   return true;
 }
 
@@ -301,6 +330,7 @@ var EVENT_EXPLANATIONS = {
   ToolCall: 'A tool was called by the AI agent. Payload-bearing calls are classified as optimized or passthrough; control calls have no compressible token payload.',
   CacheHit: 'A previously computed context view was reused. The paired ToolCall owns the token savings, so the live total does not count this event twice.',
   Compression: 'lean-ctx applied a compression strategy to reduce token usage. The numbers show lines before → after compression. This is normal optimization — no action needed.',
+  SolutionDecision: 'Solution Intelligence recorded an implementation decision. These are control-plane events and do not represent token compression.',
   AgentAction: 'An AI agent performed an action tracked by the Context OS. Informational only.',
   KnowledgeUpdate: 'The persistent knowledge base was updated with new information. This improves future sessions.',
   ThresholdShift: 'Adaptive compression thresholds were recalibrated based on observed data patterns. This self-tuning is automatic — no action needed.',
@@ -328,7 +358,7 @@ function buildToolDetail(kind) {
       var pct = Math.round((saved / orig) * 100);
       parts.push(fmtTokShort(orig) + ' \u2192 ' + fmtTokShort(sent) + ' tok (\u2212' + pct + '%)');
     } else {
-      parts.push(fmtTokShort(orig) + ' tok (full delivery)');
+      parts.push(fmtTokShort(orig) + ' tok (unreduced payload)');
     }
   } else if (saved != null && saved > 0) {
     parts.push('saved ' + fmtTokShort(saved) + ' tok');
@@ -353,6 +383,21 @@ function buildCompressionDetail(kind) {
     parts.push('-' + kind.removed_line_count + ' removed');
   }
   return parts.join(' · ');
+}
+
+function buildSolutionDetail(kind) {
+  var parts = [];
+  if (kind.category) parts.push(String(kind.category));
+  if (kind.decision) parts.push(String(kind.decision));
+  return parts.join(' · ');
+}
+
+function buildExpandedSolutionDetail(kind) {
+  var rows = [];
+  if (kind.category) rows.push(['Category', String(kind.category)]);
+  if (kind.decision) rows.push(['Decision', String(kind.decision)]);
+  if (kind.rationale) rows.push(['Rationale', String(kind.rationale)]);
+  return rows;
 }
 
 function buildSloDetail(kind) {
@@ -642,12 +687,18 @@ class CockpitLive extends HTMLElement {
     var stats = this._data.stats;
     var windowStats = computeTokenWindow(events);
 
-    // Prefer cumulative session stats over the event-feed window (which only
-    // holds the latest ~50 events and vastly understates savings).
+    // Use compression_session (real savings_tracker data) from /api/session.
+    // Falls back to session_stats or event-window if unavailable.
     var ses = this._data.session;
-    var sesStats = ses ? (ses.session_stats || ses.stats || null) : null;
-    var sessionSaved = sesStats ? Number(sesStats.total_tokens_saved || 0) : windowStats.saved;
-    var sessionOrig = sesStats ? Number(sesStats.total_tokens_input || 0) : windowStats.original;
+    var comp = ses ? ses.compression_session : null;
+    var sessionSaved, sessionOrig;
+    if (comp) {
+      sessionSaved = Number(comp.savings_tokens || 0);
+      sessionOrig = Number(comp.total_raw || 0);
+    } else {
+      sessionSaved = windowStats.saved;
+      sessionOrig = windowStats.original;
+    }
 
     var allTimeSaved = 0;
     if (stats) {
@@ -657,17 +708,20 @@ class CockpitLive extends HTMLElement {
     }
 
     var runtimeCache = stats && stats.cache_runtime ? stats.cache_runtime : null;
-    var cep = stats && stats.cep ? stats.cep : {};
-    var cacheHits = runtimeCache
-      ? Number(runtimeCache.effective_cache_hits || runtimeCache.cache_hits || 0)
-      : Number(cep.total_cache_hits || 0);
-    var cacheReads = runtimeCache
-      ? Number(runtimeCache.effective_cache_reads || runtimeCache.total_reads || 0)
-      : Number(cep.total_cache_reads || 0);
-    var cacheRate = cacheReads > 0 ? Math.round((cacheHits / cacheReads) * 100) : 0;
+    var readReuse = runtimeCache && runtimeCache.read_reuse ? runtimeCache.read_reuse : {};
+    var diskReuse = runtimeCache && runtimeCache.disk_reuse ? runtimeCache.disk_reuse : {};
+    var providerReuse = runtimeCache && runtimeCache.provider_reuse ? runtimeCache.provider_reuse : {};
+    var readReuseRate = runtimeCache ? Math.round(Number(runtimeCache.read_reuse_rate || 0)) : 0;
+    var diskReuseRate = runtimeCache ? Math.round(Number(runtimeCache.disk_reuse_rate || 0)) : 0;
+    var providerReuseRate = runtimeCache ? Math.round(Number(runtimeCache.provider_reuse_rate || 0)) : 0;
+    var reusedRenderings = Number(readReuse.reused_renderings || 0);
+    var eligibleCtxReads = Number(readReuse.eligible_ctx_reads || 0);
+    var diskContentHits = Number(diskReuse.content_cache_hits || 0);
+    var eligibleSearchReads = Number(diskReuse.eligible_search_reads || 0);
+    var warmReuses = Number(providerReuse.warm_reuses || 0);
+    var eligibleProviderRequests = Number(providerReuse.eligible_requests || 0);
     var compressedCacheHits = runtimeCache ? Number(runtimeCache.compressed_cache_hits || 0) : 0;
     var degradationCycles = runtimeCache ? Number(runtimeCache.full_delivery_degraded || 0) : 0;
-    var dedupHits = runtimeCache ? Number(runtimeCache.dedup_hits || 0) : 0;
     var optimizedRate = windowStats.calls > 0
       ? Math.round((windowStats.optimizedCalls / windowStats.calls) * 100)
       : 0;
@@ -676,13 +730,13 @@ class CockpitLive extends HTMLElement {
     return (
       '<div class="hero" style="grid-template-columns:1fr 1fr;margin-bottom:14px">' +
       '<div class="hc">' +
-      '<span class="hl">Session Tokens Saved' + tip('session_tokens_saved') + '</span>' +
+      '<span class="hl">Today\'s Token Savings' + tip('session_tokens_saved') + '</span>' +
       '<div class="token-counter" id="ckl-session-saved" data-live="1">' +
       esc(ff(sessionSaved)) +
       '</div>' +
       (sessionOrig > 0
         ? '<p class="hs">of ' + esc(ff(sessionOrig)) + ' original tokens</p>'
-        : '<p class="hs">cumulative this session</p>') +
+        : '<p class="hs">verified savings today</p>') +
       '</div>' +
       '<div class="hc">' +
       '<span class="hl">All-Time Tokens Saved' + tip('all_time_saved') + '</span>' +
@@ -692,18 +746,32 @@ class CockpitLive extends HTMLElement {
       '<p class="hs">across all sessions</p>' +
       '</div>' +
       '<div class="hc">' +
-      '<span class="hl">Context Cache Reuse</span>' +
-      '<div class="token-counter" data-live="1">' + esc(String(cacheRate)) + '%</div>' +
-      '<p class="hs">' + esc(ff(cacheHits)) + ' hits / ' + esc(ff(cacheReads)) +
-      ' reads' + (dedupHits > 0 ? ' (dedup ' + esc(ff(dedupHits)) + ')' : '') +
-      (cacheReads > 0 && cacheReads < 20 && cacheHits === 0 ? ' · cache warming' : '') +
+      '<span class="hl">Read Rendering Reuse</span>' +
+      '<div class="token-counter" data-live="1">' + esc(String(readReuseRate)) + '%</div>' +
+      '<p class="hs">' + esc(ff(reusedRenderings)) + ' reused / ' + esc(ff(eligibleCtxReads)) +
+      ' eligible ctx_reads' +
+      (eligibleCtxReads > 0 && eligibleCtxReads < 20 && reusedRenderings === 0 ? ' · cache warming' : '') +
       '</p>' +
       '</div>' +
       '<div class="hc">' +
-      '<span class="hl">Optimization Coverage</span>' +
+      '<span class="hl">payload calls with measured reduction</span>' +
       '<div class="token-counter" data-live="1">' + esc(String(optimizedRate)) + '%</div>' +
       '<p class="hs">' + esc(String(savingsRate)) + '% token reduction · ' +
-      esc(ff(windowStats.passthroughCalls || 0)) + ' control calls · ' + esc(ff(windowStats.fullDeliveryCalls || 0)) + ' full deliveries</p>' +
+      esc(ff(windowStats.passthroughCalls || 0)) + ' passthrough calls · ' + esc(ff(windowStats.fullDeliveryCalls || 0)) + ' unreduced payloads</p>' +
+      '</div>' +
+      '</div>' +
+      '<div class="hero" style="grid-template-columns:1fr 1fr;margin-top:6px">' +
+      '<div class="hc">' +
+      '<span class="hl">Disk Content Reuse</span>' +
+      '<div class="token-counter" data-live="1">' + esc(String(diskReuseRate)) + '%</div>' +
+      '<p class="hs">' + esc(ff(diskContentHits)) + ' content-cache hits / ' +
+      esc(ff(eligibleSearchReads)) + ' eligible search reads</p>' +
+      '</div>' +
+      '<div class="hc">' +
+      '<span class="hl">Provider Prompt Reuse</span>' +
+      '<div class="token-counter" data-live="1">' + esc(String(providerReuseRate)) + '%</div>' +
+      '<p class="hs">' + esc(ff(warmReuses)) + ' warm reuses / ' +
+      esc(ff(eligibleProviderRequests)) + ' comparable requests</p>' +
       '</div>' +
       '</div>' +
       (compressedCacheHits > 0 || degradationCycles > 0
@@ -861,7 +929,7 @@ class CockpitLive extends HTMLElement {
   }
 
   _renderFilterRow(esc) {
-    var cats = ['token', 'operations', 'all', 'reads', 'shell', 'search', 'cache'];
+    var cats = ['token', 'operations', 'solution', 'all', 'reads', 'shell', 'search', 'cache'];
 
     var btns = '';
     for (var i = 0; i < cats.length; i++) {
@@ -960,7 +1028,7 @@ class CockpitLive extends HTMLElement {
       '<h3 style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.18em;font-weight:600;margin-bottom:10px;display:flex;align-items:center;gap:8px">' +
       'Event Feed <span class="badge">' + esc(String(count)) + '</span></h3>' +
       '<p class="hs" style="margin:-4px 0 10px;font-size:11px;opacity:.7">' +
-      'Token Flow contains payload-bearing calls only. Intelligence contains knowledge, policy, budget and agent-control events; those do not represent uncompressed payloads.</p>' +
+      'Token Flow contains payload-bearing calls only. Intelligence contains solution, knowledge, policy, budget and agent-control events; those do not represent uncompressed payloads.</p>' +
       '<div id="ckl-event-list" style="display:flex;flex-direction:column;gap:6px">' +
       rendered +
       '</div></div>'
@@ -987,7 +1055,7 @@ class CockpitLive extends HTMLElement {
         ' tok</span>';
     } else if (eventFlow(flat) === 'full_delivery') {
       savedBadge =
-        '<span class="tag" style="margin-left:8px;color:var(--blue);border-color:var(--blue);opacity:.7">full delivery</span>';
+      '<span class="tag" style="margin-left:8px;color:var(--blue);border-color:var(--blue);opacity:.7">unreduced payload</span>';
     } else if (eventFlow(flat) === 'passthrough') {
       savedBadge =
         '<span class="tag" style="margin-left:8px;opacity:.45">control</span>';
@@ -1105,15 +1173,16 @@ class CockpitLive extends HTMLElement {
       'as a structured event and streamed here. Click the <strong>?</strong> icon on any event for a detailed explanation.<br><br>' +
       '<strong>Session counters</strong> use payload-bearing ToolCall events only; cache diagnostics are not double-counted. ' +
       '<strong>All-time counters</strong> accumulate across all sessions from the persistent stats store.<br><br>' +
-      '<strong>Context Cache Reuse</strong> shows current MCP-runtime hits/reads. ' +
+      '<strong>Reuse rates</strong> separate ctx_read rendering reuse, search content-cache reuse, and provider prompt reuse. ' +
       '<strong>Optimization Coverage</strong> separates optimized payload calls from passthroughs; knowledge, policy and agent events are control-plane activity, not failed compression.<br><br>' +
       'The <strong>MCP vs Hook split</strong> shows how savings distribute between MCP tool calls ' +
       '(prefixed <code>ctx_</code>) and shell hook interceptions. ' +
-      'Filter the feed by event category to focus on reads, shell commands, searches, or cache hits.<br><br>' +
+      'Filter the feed by event category to focus on solution decisions, reads, shell commands, searches, or cache hits.<br><br>' +
       '<strong>Event Types:</strong><br>' +
       '• <strong style="color:var(--green)">Tool Call</strong> — an AI agent invoked a lean-ctx tool (read, shell, search, etc.)<br>' +
       '• <strong style="color:var(--purple)">Cache Hit</strong> — file served from memory instead of disk (saves a re-read)<br>' +
       '• <strong style="color:var(--blue)">Compression</strong> — lean-ctx compressed output to save tokens (e.g. entropy_adaptive, map, signatures)<br>' +
+      '• <strong style="color:var(--yellow)">⚡ Solution Decision</strong> — Solution Intelligence recorded an implementation choice<br>' +
       '• <strong style="color:var(--blue)">Threshold Shift</strong> — adaptive compression thresholds were recalibrated<br>' +
       '• <strong style="color:var(--yellow)">Verification Warning</strong> — output quality check flagged a potential issue<br>' +
       '• <strong style="color:var(--red)">SLO Violation</strong> — an internal quality metric was breached (e.g. CompressionRatio). Occasional violations are normal; no user action needed unless frequent<br>' +

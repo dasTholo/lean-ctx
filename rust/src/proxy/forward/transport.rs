@@ -164,6 +164,12 @@ pub(crate) async fn build_response(
 
     let resp_bytes =
         if let Some(shaped) = crate::proxy::shaping_hook::shape_response_if_enabled(&resp_bytes) {
+            let actual_output_tokens = measured_output_tokens
+                .saturating_sub(u64::try_from(shaped.tokens_saved).unwrap_or(u64::MAX));
+            crate::core::solution_tracker::record_output_tokens(
+                measured_output_tokens,
+                actual_output_tokens,
+            );
             tracing::debug!(tokens_saved = shaped.tokens_saved, "response shaped");
             shaped.bytes
         } else {

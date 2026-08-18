@@ -84,6 +84,93 @@ fn write_json_atomic(dir: &Path, path: &Path, json: &str) -> Result<(), String> 
 }
 
 impl ProjectKnowledge {
+    /// Return the most recent active decision-like facts for session handoff.
+    /// Adds a pre-built fact, coalescing repeated observations into confirmations.
+    pub fn add_fact(&mut self, mut fact: KnowledgeFact) -> bool {
+        let trimmed_cat = fact.category.trim().to_string();
+        fact.category = trimmed_cat;
+        let trimmed_val = fact.value.trim().to_string();
+        fact.value = trimmed_val;
+        if fact.category.is_empty() || fact.value.is_empty() {
+            return false;
+        }
+
+        if let Some(existing) = self
+            .facts
+            .iter_mut()
+            .find(|existing| existing.category == fact.category && existing.value == fact.value)
+        {
+            if fact.last_confirmed > existing.last_confirmed {
+                existing.last_confirmed = fact.last_confirmed;
+            }
+            existing.confidence = existing.confidence.max(fact.confidence);
+            existing.confirmation_count = existing.confirmation_count.saturating_add(1);
+            existing.update_fidelity();
+        } else {
+            fact.update_fidelity();
+            self.facts.push(fact);
+            self.rebuild_index();
+        }
+
+        self.updated_at = Utc::now();
+        true
+    }
+
+    pub fn recent_decisions(&self, limit: usize) -> Vec<KnowledgeFact> {
+        let mut decisions: Vec<KnowledgeFact> = self
+            .facts
+            .iter()
+            .filter(|fact| {
+                let category = fact.category.to_ascii_lowercase();
+                fact.is_current()
+                    && (category.contains("decision")
+                        || category.contains("architecture")
+                        || category.contains("solution"))
+            })
+            .cloned()
+            .collect();
+        decisions.sort_by(|a, b| {
+            b.last_confirmed
+                .cmp(&a.last_confirmed)
+                .then_with(|| b.created_at.cmp(&a.created_at))
+        });
+        decisions.truncate(limit);
+        decisions
+    }
+    /// Keyword-based knowledge search across all facts.
+    /// Serves as the API surface for semantic retrieval; currently falls back
+    /// to substring matching. When the embedding model is loaded, this will
+    /// use HNSW vector search instead.
+    pub fn search_semantic(&self, query: &str, limit: usize) -> Vec<KnowledgeFact> {
+        let query_lower = query.to_lowercase();
+        let terms: Vec<&str> = query_lower.split_whitespace().collect();
+        if terms.is_empty() {
+            return Vec::new();
+        }
+        let mut scored: Vec<(usize, &KnowledgeFact)> = self
+            .facts
+            .iter()
+            .filter(|f| f.valid_until.is_none_or(|t| t > chrono::Utc::now()))
+            .map(|fact| {
+                let haystack = format!(
+                    "{} {} {}",
+                    fact.category.to_lowercase(),
+                    fact.value.to_lowercase(),
+                    fact.key.to_lowercase(),
+                );
+                let score = terms.iter().filter(|t| haystack.contains(*t)).count();
+                (score, fact)
+            })
+            .filter(|(score, _)| *score > 0)
+            .collect();
+        scored.sort_by_key(|a| std::cmp::Reverse(a.0));
+        scored
+            .into_iter()
+            .take(limit)
+            .map(|(_, f)| f.clone())
+            .collect()
+    }
+
     pub fn list_project_roots() -> Result<Vec<String>, String> {
         let base = crate::core::data_dir::lean_ctx_data_dir()?.join("knowledge");
         if !base.exists() {

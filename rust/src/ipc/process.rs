@@ -348,7 +348,81 @@ fn find_mcp_server_pids(name: &str) -> Vec<u32> {
         .collect()
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn find_mcp_server_pids(name: &str) -> Vec<u32> {
+    find_pids_by_name(name)
+        .into_iter()
+        .filter(|&pid| is_mcp_stdio_process_win(pid))
+        .collect()
+}
+
+#[cfg(windows)]
+fn is_mcp_stdio_process_win(pid: u32) -> bool {
+    // On Windows, check if the parent process is an IDE (Cursor, VS Code).
+    // Uses `wmic` which is available on all supported Windows versions.
+    let Ok(output) = std::process::Command::new("wmic")
+        .args([
+            "process",
+            "where",
+            &format!("ProcessId={pid}"),
+            "get",
+            "ParentProcessId,CommandLine",
+            "/FORMAT:CSV",
+        ])
+        .output()
+    else {
+        return false;
+    };
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    for line in text.lines() {
+        let parts: Vec<&str> = line.split(',').collect();
+        if parts.len() < 3 {
+            continue;
+        }
+        let cmd_line = parts[1].to_lowercase();
+        let ppid_str = parts.last().unwrap_or(&"").trim();
+
+        // Direct child of IDE
+        if cmd_line.contains("cursor") || cmd_line.contains("code.exe") {
+            return true;
+        }
+
+        // Check parent process name
+        if let Ok(ppid) = ppid_str.parse::<u32>() {
+            if let Ok(pp_out) = std::process::Command::new("wmic")
+                .args([
+                    "process",
+                    "where",
+                    &format!("ProcessId={ppid}"),
+                    "get",
+                    "Name",
+                    "/FORMAT:CSV",
+                ])
+                .output()
+            {
+                let pp_text = String::from_utf8_lossy(&pp_out.stdout).to_lowercase();
+                if pp_text.contains("cursor") || pp_text.contains("code.exe") {
+                    return true;
+                }
+            }
+        }
+
+        // MCP stdio server heuristic: lean-ctx.exe with no subcommand
+        if (cmd_line.ends_with("lean-ctx.exe") || cmd_line.ends_with("lean-ctx.exe\""))
+            && !cmd_line.contains("proxy")
+            && !cmd_line.contains("dashboard")
+            && !cmd_line.contains("daemon")
+            && !cmd_line.contains("stop")
+            && !cmd_line.contains("hook")
+        {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(not(any(unix, windows)))]
 fn find_mcp_server_pids(_name: &str) -> Vec<u32> {
     Vec::new()
 }

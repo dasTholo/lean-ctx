@@ -38,7 +38,7 @@ fn test_on_tool_start() {
 
 #[test]
 fn test_on_tool_end_success() {
-    let runtime = DecisionLoopRuntime::get_or_init();
+    let runtime = DecisionLoopRuntime::with_triage(TriageEngine::default());
     let context = runtime.on_tool_start("ctx_read", "read", "runtime-test", "agent");
     runtime.on_tool_end(&context, 1, 1, "gpt-4o", true);
     assert_eq!(runtime.latest_assessment_accepted(), Some(true));
@@ -46,7 +46,7 @@ fn test_on_tool_end_success() {
 
 #[test]
 fn test_on_tool_end_failure() {
-    let runtime = DecisionLoopRuntime::get_or_init();
+    let runtime = DecisionLoopRuntime::with_triage(TriageEngine::default());
     let context = runtime.on_tool_start("ctx_read", "read", "runtime-test", "agent");
     runtime.on_tool_end(&context, 1, 1, "gpt-4o", false);
     assert_eq!(runtime.latest_assessment_accepted(), Some(false));

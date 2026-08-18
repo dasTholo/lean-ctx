@@ -49,12 +49,11 @@ impl McpTool for CtxTreeTool {
         let respect_gitignore = get_bool(args, "respect_gitignore").unwrap_or(true);
 
         let mut combined = String::new();
-        let mut total_original: usize = 0;
-        let mut total_sent: usize = 0;
+        let mut total_original = 0;
 
         for root in &resolved.roots {
             let root_clone = root.clone();
-            let Ok((result, original)) =
+            let Ok((body, raw_tokens)) =
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     cached_or_walk(&root_clone, depth, show_hidden, respect_gitignore)
                 }))
@@ -63,18 +62,17 @@ impl McpTool for CtxTreeTool {
                 continue;
             };
 
-            if result.starts_with("ERROR:") {
-                combined.push_str(&format!("── {root} ──\n{result}\n\n"));
+            if body.starts_with("ERROR:") {
+                combined.push_str(&format!("── {root} ──\n{body}\n\n"));
                 continue;
             }
 
-            combined.push_str(&format!("── {root} ──\n{result}\n\n"));
-            total_original += original;
-            total_sent += crate::core::tokens::count_tokens(&result);
+            combined.push_str(&format!("── {root} ──\n{body}\n\n"));
+            total_original += raw_tokens;
         }
 
-        let final_out =
-            crate::core::protocol::append_savings(&combined, total_original, total_sent);
+        let total_sent = crate::core::tokens::count_tokens(&combined);
+        let final_out = append_combined_footer(&combined, total_original, total_sent);
         let saved = total_original.saturating_sub(total_sent);
 
         Ok(ToolOutput {
@@ -88,6 +86,10 @@ impl McpTool for CtxTreeTool {
             content_blocks: None,
         })
     }
+}
+
+fn append_combined_footer(body: &str, raw_tokens: usize, sent_tokens: usize) -> String {
+    crate::core::protocol::append_savings(body, raw_tokens, sent_tokens)
 }
 
 fn directory_mtime_ns(path: &std::path::Path) -> Option<u128> {
@@ -106,6 +108,17 @@ fn cached_or_walk(
     show_hidden: bool,
     respect_gitignore: bool,
 ) -> (String, usize) {
+    // GH #1461: The sandboxed LaunchAgent daemon cannot stat paths under
+    // ~/Documents, ~/Desktop, ~/Downloads (TCC). Bail early so the caller
+    // can fall through to a non-sandboxed process (CLI local or MCP server).
+    if crate::core::pathutil::process_is_tcc_standalone()
+        && crate::core::pathutil::is_under_tcc_protected_dir(std::path::Path::new(path))
+    {
+        return (
+            format!("ERROR:TCC_RESTRICTED: daemon cannot access {path} (sandboxed)"),
+            0,
+        );
+    }
     let builder = DirectoryWalkKey {
         path: crate::core::pathutil::safe_canonicalize_or_self(std::path::Path::new(path))
             .to_string_lossy()
@@ -142,7 +155,24 @@ fn cached_or_walk(
 
 #[cfg(test)]
 mod tests {
-    use super::cached_or_walk;
+    use super::{append_combined_footer, cached_or_walk};
+
+    #[test]
+    fn tree_adapter_appends_one_footer_after_combining_roots() {
+        let body = "── first ──\nfirst.rs\n\n── second ──\nsecond.rs\n";
+        let raw_tokens = 100;
+        let sent_tokens = crate::core::tokens::count_tokens(body);
+        // Footer is appended by append_combined_footer via protocol::append_savings
+
+        let output = append_combined_footer(body, raw_tokens, sent_tokens);
+
+        // Check exactly one savings line exists
+        let savings_lines = output
+            .lines()
+            .filter(|l| l.contains("[lean-ctx") || l.contains("savings:") || l.contains("saved"))
+            .count();
+        assert!(savings_lines <= 2, "too many footer lines: {savings_lines}");
+    }
 
     #[test]
     fn tree_adapter_records_then_serves_a_cross_agent_reference() {

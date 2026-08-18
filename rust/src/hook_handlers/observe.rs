@@ -16,9 +16,10 @@ pub fn handle_observe() {
     if is_disabled() {
         return;
     }
-    let Some(input) = read_stdin_with_timeout(HOOK_STDIN_TIMEOUT) else {
+    let Some(raw_input) = read_stdin_with_timeout(HOOK_STDIN_TIMEOUT) else {
         return;
     };
+    let input = super::solution_capture::sanitize_json_control_chars(&raw_input);
     // Dedicated rules-injection mode (#343): a Claude/Codex/CodeBuddy `SessionStart` hook
     // injects the compact lean-ctx summary as `additionalContext` — the
     // non-polluting stand-in for the (skipped) CLAUDE.md/CODEBUDDY.md/AGENTS.md block. All
@@ -30,6 +31,7 @@ pub fn handle_observe() {
     // host's native Edit/MultiEdit tools (bypassing ctx_edit's gate), surface an
     // advisory complexity-regression notice via PostToolUse additionalContext.
     super::edit_health::maybe_emit(&input);
+    super::solution_capture::maybe_capture(&input);
 
     let Some(event) = parse_observe_event(&input) else {
         return;

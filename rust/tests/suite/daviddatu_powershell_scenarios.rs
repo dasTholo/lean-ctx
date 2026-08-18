@@ -12,6 +12,7 @@
 use lean_ctx::core::terse::dictionaries::{DictLevel, GIT, apply_dictionaries};
 use lean_ctx::shell::compress::{has_structural_output, is_verbatim_output};
 use lean_ctx::shell::join_command_for;
+use lean_ctx::shell::{OutputPolicy, classify_output};
 
 // ---------------------------------------------------------------------------
 // Scenario 1: Terse dictionary must never abbreviate git subcommands
@@ -96,70 +97,78 @@ fn scenario_git_dictionary_contains_no_subcommands() {
 }
 
 // ---------------------------------------------------------------------------
-// Scenario 2: Git write-commands must be verbatim (never compressed)
+// Scenario 2: Git write-commands must be passthrough (excluded from hook processing)
 // ---------------------------------------------------------------------------
 
 #[test]
-fn scenario_git_commit_is_verbatim() {
-    assert!(
-        is_verbatim_output("git commit -m \"feat(result-sheets): add new sheet\""),
-        "git commit must be classified as verbatim"
+fn scenario_git_commit_is_passthrough() {
+    assert_eq!(
+        classify_output("git commit -m \"feat(result-sheets): add new sheet\"", &[]),
+        OutputPolicy::Passthrough,
+        "git commit must be classified as passthrough"
     );
 }
 
 #[test]
-fn scenario_git_push_is_verbatim() {
-    assert!(
-        is_verbatim_output("git push origin feature/result-sheets"),
-        "git push must be classified as verbatim"
+fn scenario_git_push_is_passthrough() {
+    assert_eq!(
+        classify_output("git push origin feature/result-sheets", &[]),
+        OutputPolicy::Passthrough,
+        "git push must be classified as passthrough"
     );
 }
 
 #[test]
-fn scenario_git_pull_is_verbatim() {
-    assert!(
-        is_verbatim_output("git pull --rebase origin main"),
-        "git pull must be classified as verbatim"
+fn scenario_git_pull_is_passthrough() {
+    assert_eq!(
+        classify_output("git pull --rebase origin main", &[]),
+        OutputPolicy::Passthrough,
+        "git pull must be classified as passthrough"
     );
 }
 
 #[test]
-fn scenario_git_merge_is_verbatim() {
-    assert!(
-        is_verbatim_output("git merge --no-ff feature/result-sheets"),
-        "git merge must be classified as verbatim"
+fn scenario_git_merge_is_passthrough() {
+    assert_eq!(
+        classify_output("git merge --no-ff feature/result-sheets", &[]),
+        OutputPolicy::Passthrough,
+        "git merge must be classified as passthrough"
     );
 }
 
 #[test]
-fn scenario_git_rebase_is_verbatim() {
-    assert!(
-        is_verbatim_output("git rebase -i HEAD~3"),
-        "git rebase must be classified as verbatim"
+fn scenario_git_rebase_is_passthrough() {
+    assert_eq!(
+        classify_output("git rebase -i HEAD~3", &[]),
+        OutputPolicy::Passthrough,
+        "git rebase must be classified as passthrough"
     );
 }
 
 #[test]
-fn scenario_git_cherry_pick_is_verbatim() {
-    assert!(
-        is_verbatim_output("git cherry-pick abc1234"),
-        "git cherry-pick must be classified as verbatim"
+fn scenario_git_cherry_pick_is_passthrough() {
+    assert_eq!(
+        classify_output("git cherry-pick abc1234", &[]),
+        OutputPolicy::Passthrough,
+        "git cherry-pick must be classified as passthrough"
     );
 }
 
 #[test]
-fn scenario_git_tag_is_verbatim() {
-    assert!(
-        is_verbatim_output("git tag -a v3.6.10 -m \"release\""),
-        "git tag must be classified as verbatim"
+fn scenario_git_tag_is_passthrough() {
+    assert_eq!(
+        classify_output("git tag -a v3.6.10 -m \"release\"", &[]),
+        OutputPolicy::Passthrough,
+        "git tag must be classified as passthrough"
     );
 }
 
 #[test]
-fn scenario_git_reset_is_verbatim() {
-    assert!(
-        is_verbatim_output("git reset --hard HEAD~1"),
-        "git reset must be classified as verbatim"
+fn scenario_git_reset_is_passthrough() {
+    assert_eq!(
+        classify_output("git reset --hard HEAD~1", &[]),
+        OutputPolicy::Passthrough,
+        "git reset must be classified as passthrough"
     );
 }
 

@@ -21,6 +21,7 @@ pub(crate) fn install_copilot_hook(global: bool) {
         if update_mcp {
             write_copilot_cli_home_mcp();
         }
+        install_copilot_solution_rules(true);
 
         let mcp_path = crate::core::editor_registry::vscode_mcp_path();
         if mcp_path.as_os_str() == "/nonexistent" {
@@ -47,7 +48,71 @@ pub(crate) fn install_copilot_hook(global: bool) {
         }
 
         install_copilot_pretooluse_hook(false);
+        install_copilot_solution_rules(false);
     }
+}
+
+fn install_copilot_solution_rules(global: bool) {
+    let Some(path) = (if global {
+        crate::core::home::resolve_home_dir().map(|home| home.join(".copilot/instructions.md"))
+    } else {
+        std::env::current_dir()
+            .ok()
+            .map(|cwd| cwd.join(".github/copilot-instructions.md"))
+    }) else {
+        return;
+    };
+    let Some(parent) = path.parent() else {
+        return;
+    };
+    if std::fs::create_dir_all(parent).is_err() {
+        return;
+    }
+
+    let block = solution_aware_rules_block(if global {
+        crate::rules_inject::canonical_rules_block()
+    } else {
+        crate::rules_inject::rules_dedicated_markdown()
+    });
+    upsert_solution_rules(&path, &block);
+}
+
+#[allow(clippy::needless_pass_by_value)]
+fn solution_aware_rules_block(base_block: String) -> String {
+    let solution_block = crate::core::rules_canonical::enabled_solution_rules_block();
+    let base_block = crate::marked_block::remove_content(
+        &base_block,
+        crate::core::rules_canonical::SOLUTION_BLOCK_START,
+        crate::core::rules_canonical::SOLUTION_BLOCK_END,
+    );
+    if solution_block.is_empty() {
+        return base_block;
+    }
+
+    base_block.replacen(
+        crate::core::rules_canonical::END_MARK,
+        &format!(
+            "{solution_block}\n{}",
+            crate::core::rules_canonical::END_MARK
+        ),
+        1,
+    )
+}
+
+fn upsert_solution_rules(path: &std::path::Path, block: &str) {
+    let existing = std::fs::read_to_string(path).unwrap_or_default();
+    if existing.trim_end() == block.trim_end() {
+        return;
+    }
+
+    crate::marked_block::upsert(
+        path,
+        crate::core::rules_canonical::START_MARK,
+        crate::core::rules_canonical::END_MARK,
+        block,
+        true,
+        "Copilot rules",
+    );
 }
 
 /// Register lean-ctx in the Copilot CLI's global MCP config at

@@ -269,6 +269,7 @@
 <script type="module" src="/static/components/cockpit-architecture.js"></script>
 <script type="module" src="/static/components/cockpit-explorer.js"></script>
 <script type="module" src="/static/components/cockpit-health.js"></script>
+<script type="module" src="/static/components/cockpit-provenance.js"></script>
 <script type="module" src="/static/components/cockpit-remaining.js"></script>
 <script type="module" src="/static/components/cockpit-commander.js"></script>
 <script type="module" src="/static/components/cockpit-palette.js"></script>
@@ -279,6 +280,8 @@
 <script type="module" src="/static/components/cockpit-protection.js"></script>
 <script type="module" src="/static/components/cockpit-settings.js"></script>
 <script type="module" src="/static/components/cockpit-telemetry.js"></script>
+<script type="module" src="/static/components/cockpit-adoption.js"></script>
+<script type="module" src="/static/components/cockpit-solution.js"></script>
 </head>
 <body class="cockpit-shell-styles">
 <div class="support-bar" id="supportBar" role="region" aria-label="Support lean-ctx">
@@ -431,9 +434,11 @@
     </section>
     <section id="view-telemetry" class="view">
       <cockpit-telemetry id="telemetryView"></cockpit-telemetry>
+      <cockpit-adoption id="adoptionView"></cockpit-adoption>
     </section>
     <section id="view-roi" class="view">
       <cockpit-roi id="roiView"></cockpit-roi>
+      <cockpit-solution id="solutionView"></cockpit-solution>
     </section>
     <section id="view-replay" class="view">
       <cockpit-replay id="replayView"></cockpit-replay>
@@ -468,6 +473,10 @@
     <section id="view-explorer" class="view">
       <cockpit-explorer id="explorerView"></cockpit-explorer>
     </section>
+    <section id="view-provenance" class="view">
+      <cockpit-provenance id="provenanceView"></cockpit-provenance>
+    </section>
+
     <section id="view-health" class="view">
       <cockpit-health id="healthView"></cockpit-health>
     </section>

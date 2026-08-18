@@ -97,38 +97,34 @@ pub fn detect_project_root_for_dashboard() -> String {
         return promote_to_git_root(&explicit);
     }
 
-    if let Some(session) = crate::core::session::SessionState::load_latest() {
-        if let Some(root) = session.project_root.as_deref()
-            && !root.trim().is_empty()
-            && Path::new(root).is_dir()
+    // Try cwd-scoped session first (works when dashboard runs inside a project).
+    if let Some(root) =
+        try_session_project_root(crate::core::session::SessionState::load_latest().as_ref())
+    {
+        return root;
+    }
+
+    // Dashboard often runs as a LaunchAgent with cwd=/ or HOME — load_latest()
+    // returns None for broad roots. Fall back to the global latest-pointer
+    // which tracks the most recently active session across all projects.
+    if let Some(root) = try_session_project_root(
+        crate::core::session::SessionState::load_global_latest_pointer().as_ref(),
+    ) {
+        return root;
+    }
+
+    // Last resort: scan recent sessions for the newest one with a real project.
+    let sessions = crate::core::session::SessionState::list_sessions();
+    for summary in sessions.iter().take(10) {
+        if let Some(ref pr) = summary.project_root
+            && !pr.trim().is_empty()
+            && !crate::core::pathutil::is_broad_or_unsafe_root(Path::new(pr))
         {
-            if let Some(git_root) = git_root_for(root) {
+            if let Some(git_root) = git_root_for(pr) {
                 return git_root;
             }
-            if is_real_project(root) {
-                return root.to_string();
-            }
-            tracing::debug!(
-                "[dashboard] session root '{root}' is not a recognized project, skipping"
-            );
-        }
-        if let Some(cwd) = session.shell_cwd.as_deref()
-            && !cwd.trim().is_empty()
-            && Path::new(cwd).is_dir()
-        {
-            let r = crate::core::protocol::detect_project_root_or_cwd(cwd);
-            return promote_to_git_root(&r);
-        }
-        if let Some(last) = session.files_touched.last()
-            && !last.path.trim().is_empty()
-        {
-            let p_path = Path::new(&last.path);
-            if let Some(parent) = p_path.parent()
-                && parent.is_dir()
-            {
-                let p = parent.to_string_lossy().to_string();
-                let r = crate::core::protocol::detect_project_root_or_cwd(&p);
-                return promote_to_git_root(&r);
+            if is_real_project(pr) {
+                return pr.clone();
             }
         }
     }
@@ -137,6 +133,52 @@ pub fn detect_project_root_for_dashboard() -> String {
         .map_or_else(|_| ".".to_string(), |p| p.to_string_lossy().to_string());
     let r = crate::core::protocol::detect_project_root_or_cwd(&cwd);
     promote_to_git_root(&r)
+}
+
+/// Extracts a validated project root from a session, trying project_root,
+/// shell_cwd, and last touched file in order. Returns None if the session
+/// is None or contains no usable project root.
+fn try_session_project_root(
+    session: Option<&crate::core::session::SessionState>,
+) -> Option<String> {
+    let session = session?;
+    if let Some(root) = session.project_root.as_deref()
+        && !root.trim().is_empty()
+        && !crate::core::pathutil::is_broad_or_unsafe_root(Path::new(root))
+    {
+        if let Some(git_root) = git_root_for(root) {
+            return Some(git_root);
+        }
+        if is_real_project(root) {
+            return Some(root.to_string());
+        }
+    }
+    if let Some(cwd) = session.shell_cwd.as_deref()
+        && !cwd.trim().is_empty()
+        && !crate::core::pathutil::is_broad_or_unsafe_root(Path::new(cwd))
+        && Path::new(cwd).is_dir()
+    {
+        let r = crate::core::protocol::detect_project_root_or_cwd(cwd);
+        if !crate::core::pathutil::is_broad_or_unsafe_root(Path::new(&r)) {
+            return Some(promote_to_git_root(&r));
+        }
+    }
+    if let Some(last) = session.files_touched.last()
+        && !last.path.trim().is_empty()
+    {
+        let p_path = Path::new(&last.path);
+        if let Some(parent) = p_path.parent()
+            && parent.is_dir()
+            && !crate::core::pathutil::is_broad_or_unsafe_root(parent)
+        {
+            let p = parent.to_string_lossy().to_string();
+            let r = crate::core::protocol::detect_project_root_or_cwd(&p);
+            if !crate::core::pathutil::is_broad_or_unsafe_root(Path::new(&r)) {
+                return Some(promote_to_git_root(&r));
+            }
+        }
+    }
+    None
 }
 
 fn is_real_project(path: &str) -> bool {

@@ -655,4 +655,88 @@ customElements.define('cockpit-health', CockpitHealth);
   else document.addEventListener('DOMContentLoaded', doRegister);
 })();
 
+// Keep the existing guard detail view while surfacing the workspace health contract
+// used by the dashboard header and CLI. This endpoint is intentionally polled on
+// its own cadence so the expensive guard feeds are not refreshed every 30 seconds.
+var ckhBaseLoadData = CockpitHealth.prototype.loadData;
+var ckhBaseConnected = CockpitHealth.prototype.connectedCallback;
+var ckhBaseDisconnected = CockpitHealth.prototype.disconnectedCallback;
+
+function ckhStatusColor(status) {
+  var value = String(status || '').toLowerCase();
+  if (value === 'ok' || value === 'healthy' || value === 'green') return 'var(--green)';
+  if (value === 'degraded' || value === 'warning' || value === 'yellow') return 'var(--yellow)';
+  return 'var(--red)';
+}
+
+function ckhEsc(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, function (ch) {
+    return '&#' + ch.charCodeAt(0) + ';';
+  });
+}
+
+CockpitHealth.prototype._loadWorkspaceHealth = async function () {
+  var fetchJson = ckhApi().fetchJson;
+  if (!fetchJson) return null;
+  try {
+    var data = await fetchJson('/api/workspace-health', { timeoutMs: 8000 });
+    return data && !data.__error ? data : null;
+  } catch (_) {
+    return null;
+  }
+};
+
+CockpitHealth.prototype._renderWorkspaceHealthSummary = function () {
+  var data = this._workspaceHealth;
+  if (!data || !Array.isArray(data.checks)) return;
+  var host = this.querySelector('[data-ckh-workspace-health]');
+  if (!host) {
+    host = document.createElement('section');
+    host.setAttribute('data-ckh-workspace-health', '');
+    var first = this.firstElementChild;
+    if (first) this.insertBefore(host, first);
+    else this.appendChild(host);
+  }
+  var esc = ckhEsc;
+  var cards = data.checks.map(function (check) {
+    var color = ckhStatusColor(check.status);
+    return '<article style="border:1px solid var(--border);border-left:4px solid ' + color + ';border-radius:8px;padding:11px 12px;background:var(--surface);min-width:170px;flex:1">' +
+      '<div style="display:flex;align-items:center;gap:7px;color:var(--text-bright);font-size:13px;font-weight:600">' +
+      '<span aria-hidden="true" style="width:9px;height:9px;border-radius:50%;background:' + color + ';display:inline-block"></span>' + esc(check.name) + '</div>' +
+      '<div style="color:' + color + ';font-size:11px;font-weight:700;margin:6px 0 3px">' + esc(check.status) + '</div>' +
+      '<div style="color:var(--muted);font-size:12px;line-height:1.35">' + esc(check.message) + '</div></article>';
+  }).join('');
+  host.innerHTML = '<div style="margin:0 0 16px;padding:14px;border:1px solid var(--border);border-radius:10px;background:var(--surface)">' +
+    '<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;margin-bottom:10px"><div style="font-weight:700;color:var(--text-bright)">Workspace health</div>' +
+    '<div style="font-size:11px;color:var(--muted)">Auto-refreshes every 30 seconds · ' + esc(data.overall_status || 'Unknown') + '</div></div>' +
+    '<div style="display:flex;flex-wrap:wrap;gap:10px">' + cards + '</div></div>';
+};
+
+CockpitHealth.prototype.loadData = async function () {
+  var workspaceRequest = this._loadWorkspaceHealth();
+  await ckhBaseLoadData.call(this);
+  this._workspaceHealth = await workspaceRequest;
+  this._renderWorkspaceHealthSummary();
+};
+
+CockpitHealth.prototype.connectedCallback = function () {
+  ckhBaseConnected.call(this);
+  var self = this;
+  this._workspaceHealthTimer = setInterval(function () {
+    self._loadWorkspaceHealth().then(function (data) {
+      if (!data) return;
+      self._workspaceHealth = data;
+      self._renderWorkspaceHealthSummary();
+    });
+  }, 30000);
+};
+
+CockpitHealth.prototype.disconnectedCallback = function () {
+  if (this._workspaceHealthTimer) {
+    clearInterval(this._workspaceHealthTimer);
+    this._workspaceHealthTimer = null;
+  }
+  ckhBaseDisconnected.call(this);
+};
+
 export { CockpitHealth };

@@ -79,6 +79,13 @@ pub fn save(store: &StatsStore) {
     io::locked_write(store);
 }
 
+/// Additively merge two stores (used by data consolidation to combine
+/// split stats.json files without losing data from either side).
+pub fn merge_additive(base: &StatsStore, other: &StatsStore) -> StatsStore {
+    let zero = StatsStore::default();
+    io::apply_deltas(base, other, &zero)
+}
+
 fn maybe_flush(store: &mut StatsStore, baseline: &mut StatsStore, last_flush: &mut Instant) {
     if last_flush.elapsed().as_secs() >= FLUSH_INTERVAL_SECS
         && let Some(merged) = io::merge_and_save(store, baseline)

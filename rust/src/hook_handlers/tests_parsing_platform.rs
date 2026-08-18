@@ -298,3 +298,32 @@ fn shell_tokenize_unquoted_backslash_still_escapes() {
     let result = shell_tokenize(r"echo hello\ world");
     assert_eq!(result, vec!["echo", "hello world"]);
 }
+
+#[test]
+fn codex_session_briefing_contains_full_tool_guidance() {
+    let briefing = super::codex::codex_session_briefing();
+    assert!(
+        briefing.contains("ctx_compose"),
+        "briefing must mention ctx_compose: {briefing}"
+    );
+    assert!(
+        briefing.contains("ctx_session"),
+        "briefing must mention ctx_session: {briefing}"
+    );
+    assert!(
+        briefing.contains("ctx_knowledge"),
+        "briefing must mention ctx_knowledge: {briefing}"
+    );
+    assert!(
+        briefing.contains("CHECKPOINT"),
+        "briefing must include checkpoint rule: {briefing}"
+    );
+    // In hook_covered mode, native tools work transparently — NEVER and
+    // ctx_shell are only in the explicit fallback briefing.
+    let json = session_start_additional_context_json(&briefing);
+    let v: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+    let ctx = v["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(ctx.contains("lean-ctx SESSION BRIEFING"));
+}

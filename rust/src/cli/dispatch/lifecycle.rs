@@ -11,7 +11,11 @@ pub(super) fn cmd_stop() {
 
     crate::proxy_autostart::stop();
     crate::daemon_autostart::stop();
-    eprintln!("  Unloaded autostart (LaunchAgent/systemd).");
+    if cfg!(target_os = "macos") {
+        eprintln!("  Unloaded autostart (LaunchAgent).");
+    } else if cfg!(target_os = "linux") {
+        eprintln!("  Unloaded autostart (systemd).");
+    }
 
     // 2. Stop daemon via IPC
     if let Err(e) = daemon::stop_daemon() {
@@ -47,6 +51,7 @@ pub(super) fn cmd_stop() {
             final_check.len(),
             final_check
         );
+        #[cfg(unix)]
         eprintln!(
             "    Try: sudo kill -9 {}",
             final_check
@@ -54,6 +59,15 @@ pub(super) fn cmd_stop() {
                 .map(std::string::ToString::to_string)
                 .collect::<Vec<_>>()
                 .join(" ")
+        );
+        #[cfg(windows)]
+        eprintln!(
+            "    Try: taskkill /F /PID {}",
+            final_check
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(" /PID ")
         );
         std::process::exit(1);
     }

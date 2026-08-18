@@ -23,9 +23,9 @@ pub(crate) struct ResolvedEdit {
     /// 0-based index where existing lines are replaced / new lines inserted.
     start_idx: usize,
     /// Number of existing lines removed (0 for a pure insert).
-    remove_count: usize,
+    pub(crate) remove_count: usize,
     /// Replacement lines (logical, no separators); empty = deletion.
-    new_lines: Vec<String>,
+    pub(crate) new_lines: Vec<String>,
     /// 1-based inclusive span the op depends on, for overlap detection.
     lo: usize,
     hi: usize,

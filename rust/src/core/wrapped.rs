@@ -89,8 +89,15 @@ impl WrappedReport {
         top_commands.sort_by_key(|x| std::cmp::Reverse(x.1));
         top_commands.truncate(5);
 
+        let agent_id = crate::core::agent_identity::current_agent_id();
+        let verified_net = crate::core::savings_ledger::roi_report(agent_id).net_saved_tokens;
         let compression_rate_pct = if tokens_input > 0 {
-            tokens_saved as f64 / tokens_input as f64 * 100.0
+            let v = verified_net as f64 / tokens_input as f64 * 100.0;
+            if v > 0.0 {
+                v
+            } else {
+                tokens_saved as f64 / tokens_input as f64 * 100.0
+            }
         } else {
             0.0
         };

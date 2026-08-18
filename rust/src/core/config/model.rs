@@ -725,4 +725,9 @@ pub struct Config {
     /// Setup behavior: controls what gets injected during setup and updates.
     #[serde(default)]
     pub setup: SetupConfig,
+    #[serde(default)]
+    pub solution: super::solution::SolutionConfig,
+    #[serde(default)]
+    pub provenance: super::provenance::ProvenanceConfig,
+    pub cross_agent: super::provenance::CrossAgentConfig,
 }

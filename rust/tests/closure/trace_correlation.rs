@@ -64,6 +64,13 @@ fn savings_event_with_trace(
         is_first_inject: None,
         cache_read_per_m_usd: None,
         cache_write_per_m_usd: None,
+        solution_decision: None,
+        loc_added: None,
+        loc_removed: None,
+        path: None,
+        lines_added: None,
+        lines_removed: None,
+        net: None,
     }
 }
 

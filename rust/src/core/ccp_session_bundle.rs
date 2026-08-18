@@ -265,6 +265,7 @@ pub(crate) fn import_bundle_v1_into_session(
     }
 
     *session = SessionState {
+        handoff_context: Vec::new(),
         id: imported.id.clone(),
         version: imported.version,
         started_at: imported.started_at,
@@ -291,6 +292,7 @@ pub(crate) fn import_bundle_v1_into_session(
         playbook: crate::core::session::Playbook::default(),
         last_semantic_query: None,
         last_flush: None,
+        live_zone: Default::default(),
     };
 
     ImportReportV1 {

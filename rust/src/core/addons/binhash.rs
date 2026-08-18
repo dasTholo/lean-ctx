@@ -47,9 +47,22 @@ pub fn resolve_on_path(command: &str) -> Option<PathBuf> {
         return p.is_file().then_some(p);
     }
     let path_var = std::env::var_os("PATH")?;
-    std::env::split_paths(&path_var)
-        .map(|dir| dir.join(cmd))
-        .find(|candidate| candidate.is_file())
+    for dir in std::env::split_paths(&path_var) {
+        let candidate = dir.join(cmd);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+        // GH #1449: Windows implicit extensions
+        if cfg!(windows) {
+            for ext in &[".exe", ".cmd", ".bat"] {
+                let with_ext = dir.join(format!("{cmd}{ext}"));
+                if with_ext.is_file() {
+                    return Some(with_ext);
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Verify that `command` resolves to a binary whose SHA-256 equals

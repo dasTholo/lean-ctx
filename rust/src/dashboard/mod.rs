@@ -31,6 +31,8 @@ const COCKPIT_COMPONENT_ARCHITECTURE_JS: &str =
     include_str!("static/components/cockpit-architecture.js");
 const COCKPIT_COMPONENT_EXPLORER_JS: &str = include_str!("static/components/cockpit-explorer.js");
 const COCKPIT_COMPONENT_HEALTH_JS: &str = include_str!("static/components/cockpit-health.js");
+const COCKPIT_COMPONENT_PROVENANCE_JS: &str =
+    include_str!("static/components/cockpit-provenance.js");
 const COCKPIT_COMPONENT_REMAINING_JS: &str = include_str!("static/components/cockpit-remaining.js");
 const COCKPIT_COMPONENT_COMMANDER_JS: &str = include_str!("static/components/cockpit-commander.js");
 const COCKPIT_COMPONENT_PALETTE_JS: &str = include_str!("static/components/cockpit-palette.js");
@@ -43,6 +45,8 @@ const COCKPIT_COMPONENT_PROTECTION_JS: &str =
     include_str!("static/components/cockpit-protection.js");
 const COCKPIT_COMPONENT_SETTINGS_JS: &str = include_str!("static/components/cockpit-settings.js");
 const COCKPIT_COMPONENT_TELEMETRY_JS: &str = include_str!("static/components/cockpit-telemetry.js");
+const COCKPIT_COMPONENT_ADOPTION_JS: &str = include_str!("static/components/cockpit-adoption.js");
+const COCKPIT_COMPONENT_SOLUTION_JS: &str = include_str!("static/components/cockpit-solution.js");
 
 // Vendored third-party libraries — embedded so the dashboard works fully offline
 // (no external CDN). Served as text via the standard route pipeline.
@@ -937,7 +941,7 @@ async fn handle_request(
     // Observability: a slow light endpoint is exactly the #431 symptom, so make
     // any handler that crosses 1s visible in the logs for future diagnosis.
     let route_elapsed = route_started.elapsed();
-    if route_elapsed >= std::time::Duration::from_secs(1) {
+    if route_elapsed >= std::time::Duration::from_secs(3) {
         tracing::warn!(
             target: "lean_ctx::dashboard",
             "slow dashboard route {route_label} took {} ms",

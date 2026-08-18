@@ -3,11 +3,14 @@ mod addon_deps;
 mod agent_cmd;
 mod allow_cmd;
 pub mod audit_report;
+#[allow(warnings)]
+pub mod badge_cmd;
 mod benchmark_cmd;
 mod benchmark_study_cmd;
 mod benchmark_tasks_cmd;
 mod call_cmd;
 mod cheatsheet_cmd;
+mod checkpoint_cmd;
 pub mod cloud;
 #[allow(dead_code, unreachable_pub)]
 pub(crate) mod cognitive;
@@ -17,6 +20,7 @@ mod compliance_cmd;
 mod compress_cmd;
 mod config_cmd;
 mod context_cmd;
+pub(crate) mod dashboard_cmd;
 mod debug_log_cmd;
 mod demo_cmd;
 mod discover_cmd;
@@ -34,9 +38,12 @@ mod init_cmd;
 mod instructions_cmd;
 mod introspect_cmd;
 mod knowledge_cmd;
+#[allow(warnings)]
 mod learn_cmd;
 mod ledger_cmd;
 mod measurement_cmd;
+#[allow(dead_code)]
+pub(crate) mod migrate_cmd;
 mod model_cmd;
 pub mod ocla_cmd;
 mod output_savings_cmd;
@@ -78,10 +85,13 @@ mod value_report;
 mod verify_cache_cmd;
 mod verify_cmd;
 mod visualize_cmd;
+pub(crate) mod wrap_cmd;
 pub(crate) mod wrapped_publish;
 
 pub(crate) use agent_cmd::cmd_agent;
 pub use allow_cmd::cmd_allow;
+#[allow(unused_imports)]
+pub(crate) use badge_cmd::cmd_badge;
 pub(crate) use benchmark_cmd::cmd_benchmark_real;
 pub(crate) use call_cmd::cmd_call;
 pub use cheatsheet_cmd::*;
@@ -99,6 +109,7 @@ pub(crate) use evidence_export::cmd_evidence_export;
 pub(crate) use index_cmd::cmd_index;
 pub(crate) use init_cmd::quiet_enabled;
 pub use init_cmd::{cmd_init, cmd_init_quiet};
+pub mod import_cmd;
 pub(crate) use instructions_cmd::cmd_instructions;
 pub(crate) use introspect_cmd::cmd_introspect;
 pub(crate) use knowledge_cmd::cmd_knowledge;

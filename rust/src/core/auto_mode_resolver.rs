@@ -220,12 +220,21 @@ fn resolve_inner(ctx: &AutoModeContext) -> ResolvedMode {
     // (e.g. "fix the version sort in versioncmp.c"), so the agent is about to
     // inspect it for the defect. Keep the full body it needs to localize and
     // edit, ahead of any task-type intent default that might compress it.
-    if task_names_file(ctx.task, ctx.path) {
+    if task_names_file(ctx.task, ctx.path)
+        && intent_recommended_mode(ctx.task).as_deref() == Some("full")
+    {
         return resolved("full", "task_suspect_file");
     }
 
     if let Some(mode) = intent_recommended_mode(ctx.task) {
-        return resolved(&mode, "intent");
+        // "full" is intentionally skipped here: only the `task_suspect_file`
+        // guard above is allowed to force full mode for a specific file. The
+        // general intent should never broadcast "full" to every file in the
+        // session — that kills compression for the 90%+ of reads that are
+        // context-gathering, not editing.
+        if mode != "full" {
+            return resolved(&mode, "intent");
+        }
     }
 
     // Adaptive learning signals (predictor, bandit, heatmap, adaptive policy,
@@ -291,6 +300,8 @@ fn resolve_inner(ctx: &AutoModeContext) -> ResolvedMode {
 }
 
 /// The opt-in adaptive block (#683): bounce/path memory plus the predictor /
+// OSS: adaptive read-mode selection. Not related to commercial
+// Adaptive Intensity (Solution Intelligence Section 8).
 /// bandit / heatmap / adaptive-policy learning loop. Returns `Some` when a
 /// learning signal decides the mode, `None` to fall through to the deterministic
 /// heuristic. Only invoked when `auto_mode_learning` is enabled, so its disk I/O
@@ -482,6 +493,12 @@ fn heuristic_mode(ext: &str, token_count: usize, structure_first: bool) -> Strin
     }
     if token_count > 2000 && is_prose(ext) {
         return "aggressive".to_string();
+    }
+    if token_count > 500 && is_prose(ext) {
+        return "map".to_string();
+    }
+    if token_count > 500 && !is_code(ext) && !is_prose(ext) {
+        return "map".to_string();
     }
     // Large code files need an overview rather than an API-only surface.
     if token_count > 6000 && is_code(ext) {
@@ -894,6 +911,32 @@ mod tests {
     }
 
     #[test]
+    fn intent_full_skipped_for_non_suspect_files() {
+        // A coding task (e.g. "fix the bug in parser.rs") should NOT force
+        // `full` mode on unrelated files. Only the named file (parser.rs)
+        // gets `full` via `task_suspect_file`; other files fall through to
+        // compressed modes so the 90%+ context-gathering reads still save
+        // tokens.
+        let _iso = crate::core::data_dir::isolated_data_dir();
+        let ctx = AutoModeContext {
+            path: "unrelated_module.rs",
+            token_count: 5000,
+            line_count: None,
+            task: Some("fix the bug in parser.rs"),
+            cache: None,
+        };
+        let result = resolve(&ctx);
+        assert_ne!(
+            result.mode, "full",
+            "non-suspect file must not get full mode from a coding task intent"
+        );
+        assert_ne!(
+            result.source, "intent",
+            "general intent must not force full on non-suspect files"
+        );
+    }
+
+    #[test]
     fn heuristic_medium_code_uses_signatures_by_default() {
         assert_eq!(heuristic_mode("rs", 1500, false), "signatures");
         assert_eq!(heuristic_mode("ts", 1000, false), "signatures");
@@ -912,9 +955,9 @@ mod tests {
         assert_eq!(heuristic_mode("rs", 400, true), "full");
         // Prose / markup now gets `aggressive` above 2000 tokens.
         assert_eq!(heuristic_mode("md", 4000, true), "aggressive");
-        assert_eq!(heuristic_mode("md", 1500, true), "full");
+        assert_eq!(heuristic_mode("md", 1500, true), "map");
         assert_eq!(heuristic_mode("txt", 3000, true), "aggressive");
-        assert_eq!(heuristic_mode("txt", 1000, true), "full");
+        assert_eq!(heuristic_mode("txt", 1000, true), "map");
     }
 
     #[test]

@@ -39,6 +39,10 @@ pub(in crate::shell) fn is_excluded_command(command: &str, excluded: &[String]) 
         }
     }
 
+    if is_git_write_command(command) {
+        return true;
+    }
+
     if is_dev_script_runner(&cmd) {
         return true;
     }
@@ -150,7 +154,6 @@ fn is_verbatim_single(command: &str) -> bool {
         || is_archive_listing(command)
         || is_clipboard_tool(command)
         || is_git_data_command(command)
-        || is_git_write_command(command)
         || is_task_dry_run(command)
         || is_env_dump(command)
 }

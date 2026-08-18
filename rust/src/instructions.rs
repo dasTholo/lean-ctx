@@ -2,6 +2,9 @@ use crate::core::config::CompressionLevel;
 use crate::core::rules_canonical::{self as rc, Wrapper};
 use crate::tools::CrpMode;
 
+pub mod solution;
+pub use solution::solution_ladder_text;
+
 /// Universal instruction cap for all MCP clients (in tokens, not bytes).
 const INSTRUCTION_CAP_TOKENS: usize = 800;
 
@@ -17,9 +20,9 @@ const INSTRUCTION_CAP_TOKENS: usize = 800;
 /// get a one-line anchor instead of the skeleton (`client_loads_rules_from_file`)
 /// and land far below even this.
 #[cfg(test)]
-const STATIC_INSTRUCTION_BUDGET_TOKENS: usize = 545;
+const STATIC_INSTRUCTION_BUDGET_TOKENS: usize = 665;
 #[cfg(test)]
-const STATIC_INSTRUCTION_BUDGET_TDD_TOKENS: usize = 675;
+const STATIC_INSTRUCTION_BUDGET_TDD_TOKENS: usize = 795;
 /// Windows carries a one-line SHELL hint inside the skeleton.
 #[cfg(all(test, windows))]
 const STATIC_INSTRUCTION_SHELL_HINT_TOKENS: usize = 25;
@@ -392,6 +395,29 @@ fn build_full_instructions(
         format!("\n{persona_block}")
     };
 
+    // Solution Intelligence: inject the efficiency ladder when enabled
+    let solution_ladder = {
+        let loaded_config = crate::core::config::Config::load();
+        let sol_cfg = &loaded_config.solution;
+        let is_subagent = crate::tools::ctx_read::is_subagent_context();
+        let inject_solution = if is_subagent {
+            sol_cfg.inject_in_subagents
+        } else {
+            sol_cfg.inject_in_instructions
+        };
+        if sol_cfg.enabled && inject_solution {
+            let ladder =
+                crate::instructions::solution::solution_ladder_text(sol_cfg.effective_intensity());
+            if ladder.is_empty() {
+                String::new()
+            } else {
+                format!("\n{ladder}\n")
+            }
+        } else {
+            String::new()
+        }
+    };
+
     let base = format!(
         "{skeleton}\n\
         {persona_section}\
@@ -410,9 +436,10 @@ fn build_full_instructions(
         litm_end_block = litm_end_block
     );
 
-    // Guidance suffix: CRP mode.
-    // This is the operational contract — protected from truncation.
-    let guidance_suffix = crp_mode_suffix(crp_mode).to_string();
+    // Guidance suffix: CRP mode followed by the Solution Intelligence ladder.
+    // Both are operational contracts, so they are protected from truncation.
+    // Keep the ladder after the CRP block.
+    let guidance_suffix = format!("{}{}", crp_mode_suffix(crp_mode), solution_ladder);
 
     assemble_within_cap(&base, &guidance_suffix, INSTRUCTION_CAP_TOKENS)
 }

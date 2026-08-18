@@ -47,7 +47,11 @@ pub(crate) fn capture_finding(project_root: &str, finding: &AutoFinding) {
 
 fn classify_category(summary: &str) -> String {
     let s = summary.to_lowercase();
-    if s.contains("error") || s.contains("fail") || s.contains("panic") {
+    if s.contains("solution-debt") || s.contains("solution_debt") {
+        "solution-debt".to_string()
+    } else if s.contains("solution-decision") || s.contains("solution_decision") {
+        "solution-decision".to_string()
+    } else if s.contains("error") || s.contains("fail") || s.contains("panic") {
         "blocker".to_string()
     } else if s.contains("test") || s.contains("assert") {
         "pattern".to_string()
@@ -140,6 +144,18 @@ fn truncate(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn classify_solution_categories() {
+        assert_eq!(
+            classify_category("solution-decision: chose HashMap"),
+            "solution-decision"
+        );
+        assert_eq!(
+            classify_category("solution-debt: defer migration"),
+            "solution-debt"
+        );
+    }
 
     #[test]
     fn classify_error_category() {

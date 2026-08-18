@@ -69,6 +69,17 @@ fn inject_context_enabled() -> bool {
 /// `ctx_compose` call, and emit a ContextBus event so the dashboard shows the
 /// alert in real-time. Fire-and-forget: never blocks the hook, never panics.
 fn persist_notice_to_knowledge(notice: &str, payload: &Value, root: &str) {
+    // Skip noise paths (IDE caches, Library bundles, terminal artifacts) — these
+    // produce meaningless code_health facts from bundled vendor JS.
+    let file_check = super::payload::resolve_path_field(
+        super::payload::resolve_tool_args(payload).as_ref(),
+        super::payload::READ_PATH_FIELDS,
+    )
+    .map(|(_, p)| p)
+    .unwrap_or_default();
+    if crate::core::auto_findings::is_noise_path(&file_check) {
+        return;
+    }
     let session_id = payload
         .get("session_id")
         .and_then(|s| s.as_str())

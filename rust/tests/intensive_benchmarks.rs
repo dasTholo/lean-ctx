@@ -95,15 +95,16 @@ fn bench_system_instructions_token_count() {
     //
     // Budget history: 2048 → 2400 (#609), then the v5 rules diet (#578) folded
     // the loop/paradox guidance into INTENT and shrank the COMPACT/Bare channel
-    // the cold handshake renders. 2400 stays as the ceiling (upper bound only —
-    // it catches a runaway regression, shrinking is always fine).
+    // the cold handshake renders. Raised 2400 → 2900 for the balanced Solution
+    // Intelligence ladder (~400 chars; actual ~2800). Raised 2900 → 3100 for
+    // ROOT_RESTRICTION hint (#1465, ~40 chars per channel).
     let claude_code_instr = lean_ctx::server::build_claude_code_static_instructions_for_test();
     let claude_chars = claude_code_instr.len();
     let claude_tokens = count_tokens(&claude_code_instr);
     eprintln!("  Claude Code (static): {claude_tokens:>6} tokens ({claude_chars:>5} chars)");
     assert!(
-        claude_chars <= 2400,
-        "Claude Code static instructions MUST be <=2400 chars, got {claude_chars}"
+        claude_chars <= 3100,
+        "Claude Code static instructions MUST be <=3100 chars, got {claude_chars}"
     );
     assert!(
         compact_overhead.unsigned_abs() < 300,

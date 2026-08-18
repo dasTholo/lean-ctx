@@ -142,6 +142,17 @@ pub fn record_outcome(params: &EditParams, last_mode: &str, text: &str, effect: 
         || (matches!(effect, CacheEffect::None)
             && text.starts_with("ERROR: old_string not found")
             && !text.contains("already"));
+    if success {
+        if let Some(project_root) = crate::server::derive_project_root_from_cwd() {
+            crate::core::solution_auto_capture::capture_edit_decisions(
+                &project_root,
+                &params.path,
+                &params.old_string,
+                &params.new_string,
+            );
+        }
+    }
+
     if success || not_found_failure {
         crate::core::edit_quality::record_edit_outcome(&params.path, last_mode, success);
     }
@@ -490,6 +501,20 @@ fn do_replace(
         return (e, CacheEffect::None);
     }
 
+    let replacements = if args.replace_all {
+        args.occurrences
+    } else {
+        1
+    };
+    let replacements = u64::try_from(replacements).unwrap_or(u64::MAX);
+    let lines_added = u64::try_from(args.new_str.lines().count())
+        .unwrap_or(u64::MAX)
+        .saturating_mul(replacements);
+    let lines_removed = u64::try_from(args.old_str.lines().count())
+        .unwrap_or(u64::MAX)
+        .saturating_mul(replacements);
+    crate::core::edit_metering::record_loc_change(Some(&params.path), lines_added, lines_removed);
+
     if let Ok(mut bt) = crate::core::bounce_tracker::global().lock() {
         bt.record_edit(&params.path);
     }
@@ -622,6 +647,12 @@ fn handle_create(file_path: &str, content: &str, params: &EditParams) -> (String
         return (e, CacheEffect::None);
     }
 
+    let lines_added = u64::try_from(content.lines().count()).unwrap_or(u64::MAX);
+    let lines_removed = preimage.as_ref().map_or(0, |pre| {
+        u64::try_from(pre.text.lines().count()).unwrap_or(u64::MAX)
+    });
+    crate::core::edit_metering::record_loc_change(Some(file_path), lines_added, lines_removed);
+
     let lines = content.lines().count();
     let tokens = count_tokens(content);
     let short = path.file_name().map_or_else(
@@ -676,4 +707,52 @@ fn find_original_span(content: &str, normalized_needle: &str) -> Option<String> 
         return Some(content_lines[start..start + needle_lines.len()].join(sep));
     }
     None
+}
+
+pub fn captured_solution_decision_kinds(old_content: &str, new_content: &str) -> Vec<&'static str> {
+    let mut kinds = Vec::new();
+
+    if new_content.contains("use std::") && !old_content.contains("use std::") {
+        kinds.push("stdlib");
+    }
+
+    if new_content.contains("// lean-ctx:") && !old_content.contains("// lean-ctx:") {
+        kinds.push("debt");
+    }
+
+    let old_deps = old_content
+        .lines()
+        .filter(|line| line.contains("[dependencies]") || line.contains("= \""))
+        .count();
+    let new_deps = new_content
+        .lines()
+        .filter(|line| line.contains("[dependencies]") || line.contains("= \""))
+        .count();
+    if new_deps < old_deps {
+        kinds.push("native");
+    }
+
+    let old_lines = old_content.lines().count();
+    let new_lines = new_content.lines().count();
+    if old_lines > 5 && new_lines < old_lines / 2 {
+        kinds.push("oneline");
+    }
+
+    kinds
+}
+
+#[cfg(test)]
+mod solution_auto_capture_tests {
+    use super::captured_solution_decision_kinds;
+
+    #[test]
+    fn classifies_decisions_from_completed_edit_content() {
+        let old = "use crate::core::Config;\n[dependencies]\nlegacy = \"1\"\nfn verbose() {\n    first();\n    second();\n    third();\n    fourth();\n    fifth();\n    sixth();\n}\n";
+        let new = "use crate::core::Config;\nuse std::collections::HashMap;\n[dependencies]\n// lean-ctx: replace legacy dependency\nfn concise() {}\n";
+
+        assert_eq!(
+            captured_solution_decision_kinds(old, new),
+            ["stdlib", "debt", "native"]
+        );
+    }
 }

@@ -115,11 +115,27 @@ All `std::sync::Mutex` unless noted otherwise.
 | L96 | `RECOMMENDED_LEVEL` | `core/verbosity/runtime.rs:16` | `LazyLock<Mutex<Option<CompressionLevel>>>` | Behavioral verbosity learning (F10): caches the recommended compression level derived from transcript analysis; locked briefly to read or update; independent leaf lock, never nested |
 | L97 | `SESSION_EVENTS` | `core/anti_interrupt/tracker.rs:51` | `Mutex<Vec<TimestampedEvent>>` | Anti-interruption score (F7): tracks timestamped file-access events to detect and penalize redundant reads/bounces; locked briefly to push or query; independent leaf lock, never nested |
 | L98 | `STIGMERGY_TEST_LOCK` | `core/science_benchmark.rs:24` | `Mutex<()>` | Serializes stigmergy benchmark tests to prevent concurrent signal-store mutations from interfering with each other; independent leaf lock, never nested |
+| L99 | `TURN_BUDGETS` | `core/agent_budget.rs:7` | `Mutex<Option<HashMap<String, TurnBudget>>>` | Per-agent per-turn budget tracking; independent leaf lock, never nested |
+| L100 | `STORE_LOCK` | `core/shared_context.rs:72` | `OnceLock<Mutex<()>>` | Serializes shared context store writes; independent leaf lock, never nested |
+| L101 | `PRELOADER` | `server/predictive_preload.rs:127` | `OnceLock<Mutex<PredictivePreloader>>` | Predictive file preloader state; independent leaf lock, never nested |
+| L102 | `SUMMARY_CACHE` | `core/savings_ledger/store.rs:381` | `Mutex<Option<(u64, LedgerSummary)>>` | Ledger summary cache keyed by file length; independent leaf lock, never nested |
+| L103 | `SUPPRESSION` | `core/pro_triggers.rs:70` | `OnceLock<Mutex<Option<DateTime<Utc>>>>` | Pro trigger suppression timestamp; independent leaf lock, never nested |
+| L104 | `SESSION_LINEAGES` | `core/task_spine.rs:18` | `OnceLock<Arc<Mutex<HashMap<String, String>>>>` | Maps session IDs to parent lineage; independent leaf lock, never nested |
+| L105 | `ROUTER` | `core/model_router.rs:9` | `LazyLock<Mutex<ModelRouter>>` | Thompson-sampling model router (OSS stub: first-candidate passthrough); independent leaf lock, never nested |
+| L106 | `EXPLICIT_FREEZE` | `proxy/live_zone.rs:42` | `OnceLock<Mutex<Option<ExplicitFreeze>>>` | Live-zone explicit freeze state; independent leaf lock, never nested |
+| L107 | `LATEST_CONTEXT` | `proxy/live_zone.rs:43` | `OnceLock<Mutex<Vec<Value>>>` | Latest context messages for live-zone management; independent leaf lock, never nested |
+| L108 | `PROXY_VALUE_METRICS` | `proxy/value_gate_proxy.rs:19` | `Mutex<ProxyValueMetrics>` | Proxy-level value gate metrics counters; independent leaf lock, never nested |
+| L109 | `PROXY_STARTED` | `proxy/web_app/dashboard.rs:10` | `LazyLock<Mutex<Option<Instant>>>` | Proxy start timestamp for uptime display; independent leaf lock, never nested |
+| L110 | `ROI_CACHE` | `dashboard/routes/roi.rs:23` | `Mutex<Option<(Instant, String)>>` | Cached ROI dashboard response; independent leaf lock, never nested |
+| L111 | `DOCTOR_CACHE` | `dashboard/routes/doctor.rs:17` | `Mutex<Option<(Instant, String)>>` | Cached doctor check response; independent leaf lock, never nested |
+| L112 | `POLL_CACHE` | `tools/ctx_read/terminal_compress.rs:35` | `Mutex<Option<HashMap<String, PollState>>>` | Terminal poll content hash cache for dedup; independent leaf lock, never nested |
 
 ### Test / Environment Locks (serialise env-var mutations)
 
 | # | Lock | File | Purpose |
 |---|------|------|---------|
+| S1 | `RECENT_EDITS` | `hook_handlers/solution_capture.rs:35` | `Mutex<RecentEdits>` deduplication cache for recent native edit observations |
+| S2 | `TRACKER_LOCK` | `core/config/solution_tests.rs:4` | `Mutex<()>` serialize solution-config integration tests |
 | E2 | `ENV_LOCK` | `core/dense_backend.rs:412` | Serialize env-var access in dense-backend tests |
 | E3 | `ENV_LOCK` | `core/workspace_config.rs:101` | Serialize env-var access in workspace-config tests |
 | E4 | `LOCK` | `core/data_dir.rs:50` | Serialize data-dir creation |

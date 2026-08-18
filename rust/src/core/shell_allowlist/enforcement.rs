@@ -191,7 +191,9 @@ fn check_interpreter_inner(
         .to_string();
 
     // Eval-flag / heredoc checks on interpreters (unless opted out via #814).
-    if INTERPRETER_COMMANDS.contains(&base.as_str()) && !inline_ok {
+    // GH #1466: also skip when Claude settings explicitly allow this interpreter.
+    let claude_ok = super::config::claude_allows_interpreter_inline(&base);
+    if INTERPRETER_COMMANDS.contains(&base.as_str()) && !inline_ok && !claude_ok {
         for tok in &tokens[1..] {
             if EVAL_FLAGS.contains(&tok.as_str()) {
                 return Err(format!(
