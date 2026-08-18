@@ -116,21 +116,47 @@ pub(super) fn run_mcp_server() -> Result<()> {
             crate::cli::wrapped_publish::maybe_auto_publish_background();
         });
 
-        let transport =
-            mcp_stdio::HybridStdioTransport::new_server(tokio::io::stdin(), tokio::io::stdout());
         let server_handle = server.clone();
-        let service = match server.serve(transport).await {
-            Ok(s) => s,
-            Err(e) => {
-                let msg = e.to_string();
-                if msg.contains("expect initialized")
-                    || msg.contains("context canceled")
-                    || msg.contains("broken pipe")
-                {
-                    tracing::debug!("Client disconnected before init: {msg}");
-                    return Ok(());
+
+        // GH #1454: the vendored rmcp handshake rejects ANY well-formed
+        // request that isn't `initialize` — its ClientRequest union has a
+        // CustomRequest catch-all, so unknown methods (e.g. `server/discover`
+        // from MCP Go SDK >= 1.7 clients like Antigravity) parse fine and
+        // never hit the #1434 deser-path handler in mcp_stdio.rs. The
+        // pre-init loop surfaces them as ExpectedInitializeRequest; before
+        // this fix the server treated that like a silent client disconnect
+        // (bare EOF), which breaks the client's fallback to initialize.
+        // Reply -32601 and RE-ENTER the handshake on the same stdio pair so
+        // the fallback initialize succeeds. Exit silently only for genuine
+        // disconnects ("context canceled" / "broken pipe" / "connection
+        // closed").
+        let service = loop {
+            let transport = mcp_stdio::HybridStdioTransport::new_server(
+                tokio::io::stdin(),
+                tokio::io::stdout(),
+            );
+            let wire_protocol = transport.protocol();
+            match server.clone().serve(transport).await {
+                Ok(s) => break s,
+                Err(e) => {
+                    let msg = e.to_string();
+                    if msg.contains("context canceled")
+                        || msg.contains("broken pipe")
+                        || msg.contains("connection closed")
+                    {
+                        tracing::debug!("Client disconnected before init: {msg}");
+                        return Ok(());
+                    }
+                    if let Some((id, method)) = extract_request_id_from_error(&e) {
+                        mcp_stdio::write_method_not_found_pre_init(&id, &method, &wire_protocol);
+                        tracing::debug!(
+                            "Replied -32601 for unrecognized pre-init request '{method}'"
+                        );
+                        // Client falls back to `initialize` on this connection.
+                        continue;
+                    }
+                    return Err(e.into());
                 }
-                return Err(e.into());
             }
         };
         // serve() resolves once the client's initialize/initialized handshake
@@ -200,6 +226,34 @@ pub(super) fn run_mcp_server() -> Result<()> {
 /// client-visible state at this point (transport closed, telemetry flushed).
 fn shutdown_runtime_bounded(rt: tokio::runtime::Runtime) {
     rt.shutdown_timeout(std::time::Duration::from_secs(2));
+}
+
+/// GH #1454: pull the request id and method out of rmcp's pre-init rejection
+/// (`ExpectedInitializeRequest`) so we can answer -32601 instead of exiting
+/// silently. Typed extraction (no error-string parsing), so id and method
+/// survive any Display-formatting change in the vendored rmcp.
+fn extract_request_id_from_error(
+    error: &rmcp::service::ServerInitializeError,
+) -> Option<(serde_json::Value, String)> {
+    match error {
+        rmcp::service::ServerInitializeError::ExpectedInitializeRequest(Some(message)) => {
+            extract_request_id_from_message(message)
+        }
+        _ => None,
+    }
+}
+
+fn extract_request_id_from_message(
+    message: &rmcp::model::ClientJsonRpcMessage,
+) -> Option<(serde_json::Value, String)> {
+    use rmcp::model::JsonRpcMessage;
+    let JsonRpcMessage::Request(request) = message else {
+        return None;
+    };
+    Some((
+        request.id.clone().into_json_value(),
+        request.request.method().to_string(),
+    ))
 }
 
 /// Kill orphan MCP server processes whose parent (IDE) has died.
@@ -372,6 +426,60 @@ mod tests {
         // zero-thread pool that rayon would reject.
         assert_eq!(herd_aware_index_threads(4, 32), 1);
         assert_eq!(herd_aware_index_threads(0, 0), 1);
+    }
+
+    /// GH #1454: an unrecognized pre-init request must yield its id + method
+    /// so the server can reply -32601 instead of dying silently.
+    #[test]
+    fn extract_request_id_recovers_numeric_id_and_method() {
+        use rmcp::model::{
+            ClientJsonRpcMessage, ClientRequest, CustomRequest, JsonRpcMessage, RequestId,
+        };
+
+        let request = ClientRequest::CustomRequest(CustomRequest::new(
+            "server/discover",
+            Some(serde_json::json!({})),
+        ));
+        let message: ClientJsonRpcMessage = JsonRpcMessage::request(request, RequestId::Number(7));
+
+        let (id, method) =
+            extract_request_id_from_message(&message).expect("request id extraction");
+        assert_eq!(id, serde_json::json!(7));
+        assert_eq!(method, "server/discover");
+    }
+
+    /// String ids are JSON-RPC-legal and must round-trip untouched.
+    #[test]
+    fn extract_request_id_recovers_string_id() {
+        use rmcp::model::{
+            ClientJsonRpcMessage, ClientRequest, CustomRequest, JsonRpcMessage, RequestId,
+        };
+        use std::sync::Arc;
+
+        let request = ClientRequest::CustomRequest(CustomRequest::new("foo/bar", None));
+        let message: ClientJsonRpcMessage =
+            JsonRpcMessage::request(request, RequestId::String(Arc::from("probe-42")));
+
+        let (id, method) =
+            extract_request_id_from_message(&message).expect("request id extraction");
+        assert_eq!(id, serde_json::json!("probe-42"));
+        assert_eq!(method, "foo/bar");
+    }
+
+    /// Notifications (no id) and non-request messages yield nothing, so the
+    /// caller falls through to its normal error path.
+    #[test]
+    fn extract_request_id_ignores_notifications() {
+        use rmcp::model::{
+            ClientJsonRpcMessage, ClientNotification, CustomNotification, JsonRpcMessage,
+        };
+
+        let message: ClientJsonRpcMessage =
+            JsonRpcMessage::notification(ClientNotification::CustomNotification(
+                CustomNotification::new("server/discover", Some(serde_json::json!({}))),
+            ));
+
+        assert!(extract_request_id_from_message(&message).is_none());
     }
 
     /// #733: after the transport closes, the server process must exit even if
