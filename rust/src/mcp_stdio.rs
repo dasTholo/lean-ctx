@@ -27,7 +27,7 @@ enum WireProtocol {
 }
 
 #[derive(Debug, Clone)]
-struct SharedProtocol(Arc<Mutex<Option<WireProtocol>>>);
+pub(crate) struct SharedProtocol(Arc<Mutex<Option<WireProtocol>>>);
 
 impl SharedProtocol {
     fn new() -> Self {
@@ -58,6 +58,8 @@ pub type TransportWriter<Role, W> =
 pub struct HybridStdioTransport<Role: ServiceRole, R: AsyncRead, W: AsyncWrite> {
     read: FramedRead<R, HybridJsonRpcMessageCodec<RxJsonRpcMessage<Role>>>,
     write: Arc<AsyncMutex<Option<TransportWriter<Role, W>>>>,
+    #[allow(dead_code)]
+    protocol: SharedProtocol,
 }
 
 impl<Role: ServiceRole, R, W> HybridStdioTransport<Role, R, W>
@@ -73,9 +75,20 @@ where
         );
         let write = Arc::new(AsyncMutex::new(Some(FramedWrite::new(
             write,
-            HybridJsonRpcMessageCodec::<TxJsonRpcMessage<Role>>::new(protocol),
+            HybridJsonRpcMessageCodec::<TxJsonRpcMessage<Role>>::new(protocol.clone()),
         ))));
-        Self { read, write }
+        Self {
+            read,
+            write,
+            protocol,
+        }
+    }
+
+    /// Clone of the framing-negotiation state (which wire protocol the client
+    /// used). Lets pre-init error replies mirror the client's framing.
+    #[allow(dead_code)]
+    pub(crate) fn protocol(&self) -> SharedProtocol {
+        self.protocol.clone()
     }
 }
 
@@ -140,6 +153,7 @@ pub struct HybridJsonRpcMessageCodec<T> {
     next_index: usize,
     max_length: usize,
     is_discarding: bool,
+    #[allow(dead_code)]
     protocol: SharedProtocol,
 }
 
@@ -240,6 +254,48 @@ fn write_method_not_found(id: &serde_json::Value, method: &str, protocol: Option
     };
     let _ = std::io::Write::flush(&mut out);
     tracing::debug!("Replied -32601 MethodNotFound for '{method}'");
+}
+
+/// GH #1454: a well-formed JSON-RPC request with an unrecognized method
+/// reached the pre-init handshake loop. rmcp's `ClientRequest` union has a
+/// `CustomRequest` catch-all, so the message deserialized fine — the #1434
+/// handler in `try_parse_with_compatibility` (deser-failure path) never
+/// fired — and the pre-init loop rejected it with
+/// `ServerInitializeError::ExpectedInitializeRequest`. Modern clients (MCP
+/// Go SDK >= 1.7, e.g. Antigravity) probe with `server/discover` first and
+/// fall back to the legacy `initialize` handshake ONLY after a spec-compliant
+/// -32601. Reply with the same framing the client established, and keep the
+/// process alive so the fallback `initialize` lands on this connection.
+///
+/// The message mirrors the legacy-handshake-only contract so dual-era
+/// clients can detect the server class and proceed.
+#[allow(dead_code)]
+pub(crate) fn write_method_not_found_pre_init(
+    id: &serde_json::Value,
+    method: &str,
+    protocol: &SharedProtocol,
+) {
+    let response = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": {
+            "code": -32601,
+            "message": concat!(
+                "Method not found. This server supports MCP protocol 2025-11-25 ",
+                "(legacy initialize handshake only)."
+            )
+        }
+    });
+    let body = serde_json::to_string(&response).unwrap_or_default();
+    let mut out = std::io::stdout().lock();
+    use std::io::Write;
+    let _ = if protocol.get() == Some(WireProtocol::ContentLength) {
+        write!(out, "Content-Length: {}\r\n\r\n{}", body.len(), body)
+    } else {
+        writeln!(out, "{body}")
+    };
+    let _ = std::io::Write::flush(&mut out);
+    tracing::debug!("Replied -32601 MethodNotFound for pre-init '{method}'");
 }
 
 fn try_parse_with_compatibility<T: DeserializeOwned>(
