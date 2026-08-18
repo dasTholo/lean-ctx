@@ -58,7 +58,6 @@ pub type TransportWriter<Role, W> =
 pub struct HybridStdioTransport<Role: ServiceRole, R: AsyncRead, W: AsyncWrite> {
     read: FramedRead<R, HybridJsonRpcMessageCodec<RxJsonRpcMessage<Role>>>,
     write: Arc<AsyncMutex<Option<TransportWriter<Role, W>>>>,
-    #[allow(dead_code)]
     protocol: SharedProtocol,
 }
 
@@ -86,7 +85,6 @@ where
 
     /// Clone of the framing-negotiation state (which wire protocol the client
     /// used). Lets pre-init error replies mirror the client's framing.
-    #[allow(dead_code)]
     pub(crate) fn protocol(&self) -> SharedProtocol {
         self.protocol.clone()
     }
@@ -153,7 +151,6 @@ pub struct HybridJsonRpcMessageCodec<T> {
     next_index: usize,
     max_length: usize,
     is_discarding: bool,
-    #[allow(dead_code)]
     protocol: SharedProtocol,
 }
 
@@ -269,7 +266,6 @@ fn write_method_not_found(id: &serde_json::Value, method: &str, protocol: Option
 ///
 /// The message mirrors the legacy-handshake-only contract so dual-era
 /// clients can detect the server class and proceed.
-#[allow(dead_code)]
 pub(crate) fn write_method_not_found_pre_init(
     id: &serde_json::Value,
     method: &str,

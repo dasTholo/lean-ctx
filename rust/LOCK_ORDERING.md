@@ -128,6 +128,7 @@ All `std::sync::Mutex` unless noted otherwise.
 | L109 | `PROXY_STARTED` | `proxy/web_app/dashboard.rs:10` | `LazyLock<Mutex<Option<Instant>>>` | Proxy start timestamp for uptime display; independent leaf lock, never nested |
 | L110 | `ROI_CACHE` | `dashboard/routes/roi.rs:23` | `Mutex<Option<(Instant, String)>>` | Cached ROI dashboard response; independent leaf lock, never nested |
 | L111 | `DOCTOR_CACHE` | `dashboard/routes/doctor.rs:17` | `Mutex<Option<(Instant, String)>>` | Cached doctor check response; independent leaf lock, never nested |
+| L112 | `POLL_CACHE` | `tools/ctx_read/terminal_compress.rs:35` | `Mutex<Option<HashMap<String, PollState>>>` | Terminal poll content hash cache for dedup; independent leaf lock, never nested |
 
 ### Test / Environment Locks (serialise env-var mutations)
 
