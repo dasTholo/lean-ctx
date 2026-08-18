@@ -48,6 +48,13 @@ class CockpitLeaderboard extends HTMLElement {
     this._linkInput = '';
     this._linkBusy = null; // 'start' | 'complete'
     this._linkNotice = null;
+    // Recovery phrase state
+    this._phrase = null;
+    this._phraseVisible = false;
+    this._phraseLoaded = false;
+    this._rejoinInput = '';
+    this._rejoinBusy = false;
+    this._rejoinNotice = null;
   }
 
   connectedCallback() {
@@ -78,6 +85,7 @@ class CockpitLeaderboard extends HTMLElement {
     }
     this._loading = !this._status;
     this._error = null;
+    if (!this._phraseLoaded) this._loadPhrase();
     if (this._loading) this.render();
     try {
       var resp = await fetchJson('/api/leaderboard/status', { timeoutMs: 8000 });
@@ -214,6 +222,7 @@ class CockpitLeaderboard extends HTMLElement {
       this._renderStanding(esc) +
       this._renderBoard(esc) +
       this._renderLink(esc) +
+      this._renderRecovery(esc) +
       this._renderSubmit(esc) +
       this._renderAuto(esc) +
       '</div>' +
@@ -583,7 +592,90 @@ class CockpitLeaderboard extends HTMLElement {
     );
   }
 
-  _renderFooter(S) {
+  _renderRecovery(esc) {
+    var html = '<div class="card" style="border:1px solid var(--border);border-radius:8px;padding:16px">';
+    html += '<h4 style="margin:0 0 10px">\u{1F511} Recovery Phrase</h4>';
+    html += '<p class="hs" style="font-size:12px;color:var(--muted);margin:0 0 12px">';
+    html += 'Save your recovery phrase to rejoin the leaderboard after a reinstall or on another machine.</p>';
+
+    if (this._phrase) {
+      if (this._phraseVisible) {
+        html += '<div style="background:var(--bg);border:1px solid var(--accent);border-radius:6px;padding:12px 16px;margin:0 0 10px;font-family:monospace;font-size:16px;letter-spacing:2px;text-align:center">';
+        html += esc(this._phrase.toUpperCase());
+        html += '</div>';
+        html += '<p class="hs" style="font-size:11px;color:var(--muted);margin:0 0 8px">';
+        html += 'Rejoin: <code>lean-ctx gain --rejoin ' + esc(this._phrase.toUpperCase()) + '</code></p>';
+        html += '<button id="lbHidePhrase" style="font-size:12px;padding:4px 12px;cursor:pointer">Hide</button>';
+      } else {
+        html += '<button id="lbShowPhrase" style="font-size:12px;padding:6px 14px;cursor:pointer">Show recovery phrase</button>';
+      }
+    } else if (this._phraseLoaded) {
+      html += '<p class="hs" style="font-size:12px;color:var(--muted);margin:0 0 10px">';
+      html += 'No recovery phrase stored. Submit to the leaderboard to generate one, ';
+      html += 'or enter an existing phrase below to rejoin.</p>';
+    }
+
+    html += '<div style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px">';
+    html += '<p class="hs" style="font-size:12px;font-weight:600;margin:0 0 8px">Rejoin with existing phrase</p>';
+    html += '<div style="display:flex;gap:8px;align-items:center">';
+    html += '<input id="lbRejoinInput" type="text" placeholder="WORD1 WORD2 WORD3 WORD4" ';
+    html += 'value="' + esc(this._rejoinInput) + '" ';
+    html += 'style="flex:1;padding:6px 10px;font-family:monospace;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--fg)" />';
+    html += '<button id="lbRejoinBtn" ' + (this._rejoinBusy ? 'disabled' : '') + ' ';
+    html += 'style="padding:6px 14px;cursor:pointer;font-size:12px;white-space:nowrap">';
+    html += this._rejoinBusy ? 'Restoring\u2026' : 'Rejoin';
+    html += '</button>';
+    html += '</div>';
+    html += this._renderInlineNotice(esc, this._rejoinNotice);
+    html += '</div>';
+
+    html += '</div>';
+    return html;
+  }
+
+  async _loadPhrase() {
+    var fetchJson = api();
+    if (!fetchJson) return;
+    try {
+      var data = await fetchJson('/api/leaderboard/phrase');
+      this._phrase = data.phrase || null;
+      this._phraseLoaded = true;
+      this.render();
+    } catch (e) {
+      this._phraseLoaded = true;
+    }
+  }
+
+  async _rejoin() {
+    var phrase = this._rejoinInput.trim();
+    if (!phrase) return;
+    var fetchJson = api();
+    if (!fetchJson) return;
+    this._rejoinBusy = true;
+    this._rejoinNotice = null;
+    this.render();
+    try {
+      var res = await fetchJson('/api/leaderboard/rejoin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phrase: phrase })
+      });
+      this._rejoinBusy = false;
+      this._rejoinNotice = {
+        kind: 'ok',
+        msg: 'Identity restored! Publisher: ' + (res.publisher_id_prefix || '') + '\u2026'
+      };
+      this._rejoinInput = '';
+      await this._loadPhrase();
+      this.loadData();
+    } catch (e) {
+      this._rejoinBusy = false;
+      this._rejoinNotice = { kind: 'err', msg: e.message || String(e) };
+      this.render();
+    }
+  }
+
+    _renderFooter(S) {
     if (!S.howItWorks) {
       return (
         '<p class="hs" style="margin-top:14px;font-size:11px;opacity:.7">' +
@@ -591,7 +683,10 @@ class CockpitLeaderboard extends HTMLElement {
         '<code>lean-ctx gain --unpublish</code>.</p>' +
         '<p class="hs" style="margin-top:6px;font-size:11px;opacity:.7">' +
         'Multiple machines? Use the \u201CLink machines\u201D card above or run ' +
-        '<code>lean-ctx gain --link</code> on each machine to combine them into one entry.</p>'
+        '<code>lean-ctx gain --link</code> on each machine to combine them into one entry.</p>' +
+        '<p class="hs" style="margin-top:6px;font-size:11px;opacity:.7">' +
+        'Reinstalled? Use <code>lean-ctx gain --rejoin WORD1 WORD2 WORD3 WORD4</code> to restore your ' +
+        'identity from your recovery phrase. Or use the Recovery Phrase card above.</p>'
       );
     }
     return S.howItWorks(
@@ -660,6 +755,31 @@ class CockpitLeaderboard extends HTMLElement {
     var linkCompleteBtn = this.querySelector('#lbLinkComplete');
     if (linkCompleteBtn && !linkCompleteBtn.disabled) {
       linkCompleteBtn.addEventListener('click', function () { self._linkComplete(); });
+    }
+    // Recovery phrase bindings
+    var showPhraseBtn = this.querySelector('#lbShowPhrase');
+    if (showPhraseBtn) {
+      showPhraseBtn.addEventListener('click', function () {
+        self._phraseVisible = true;
+        self.render();
+      });
+    }
+    var hidePhraseBtn = this.querySelector('#lbHidePhrase');
+    if (hidePhraseBtn) {
+      hidePhraseBtn.addEventListener('click', function () {
+        self._phraseVisible = false;
+        self.render();
+      });
+    }
+    var rejoinInput = this.querySelector('#lbRejoinInput');
+    if (rejoinInput) {
+      rejoinInput.addEventListener('input', function () {
+        self._rejoinInput = rejoinInput.value;
+      });
+    }
+    var rejoinBtn = this.querySelector('#lbRejoinBtn');
+    if (rejoinBtn && !rejoinBtn.disabled) {
+      rejoinBtn.addEventListener('click', function () { self._rejoin(); });
     }
     var S = shared();
     if (S.bindHowItWorks) S.bindHowItWorks(this);

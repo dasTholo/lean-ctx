@@ -346,6 +346,7 @@ yaml_serde = "0.10.4"
 semver = "1.0.28"
 dashmap = "6.2.1"
 async-trait = "0.1.91"
+argon2 = "0.5.3"
 
 [lints.rust]
 unreachable_pub = "warn"
