@@ -1479,7 +1479,6 @@ fn parse_bash_permission_formats() {
     assert_eq!(parse_bash_permission("Bash(python3)"), None, "no colon");
     assert_eq!(parse_bash_permission("Bash(:)"), None, "empty cmd");
 }
-
 /// GH #1466: `extract_bash_interpreters` reads all `Bash(cmd:…)` entries.
 #[test]
 fn extract_bash_interpreters_from_json() {
