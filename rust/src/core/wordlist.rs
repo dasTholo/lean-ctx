@@ -1,6 +1,6 @@
 //! BIP39 English wordlist (2048 words) for recovery phrase generation.
 //!
-//! Source: https://github.com/bitcoin/bips/blob/master/bip-0039/english.txt
+//! Source: <https://github.com/bitcoin/bips/blob/master/bip-0039/english.txt>
 //! Used to generate human-readable, memorable recovery codes for
 //! leaderboard identity persistence across reinstalls.
 

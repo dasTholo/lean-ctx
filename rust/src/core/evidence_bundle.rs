@@ -15,6 +15,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use super::audit_trail::AuditEntry;
+use super::canonical::{canonical_serialize, sign_manifest};
 
 const SIGNING_AGENT: &str = "lean-ctx";
 
@@ -39,11 +40,100 @@ pub struct BundleResult {
     pub files: Vec<String>,
 }
 
-/// Canonical JSON: object keys sorted (serde_json's default `Map` is a
-/// BTreeMap), compact separators. Structs round-trip through `Value` so
-/// field declaration order can never leak into the bytes.
-fn canonical_json(value: &Value) -> String {
-    serde_json::to_string(value).expect("canonical json")
+/// Build a signed evidence bundle from already-materialized run artifacts.
+///
+/// Unlike [`generate`], this does not infer an audit period or policy pack.
+/// It is for flows that have already captured their complete evidence set and
+/// need an offline-verifiable archive containing those exact bytes.
+pub fn generate_artifact_bundle(
+    out: &Path,
+    mut files: Vec<(String, Vec<u8>)>,
+    run_metadata: &Value,
+    signing_key: &super::canonical::AgentIdentity,
+) -> Result<BundleResult, String> {
+    if files.is_empty() {
+        return Err("evidence artifact bundle requires at least one file".to_string());
+    }
+
+    files.sort_by(|left, right| left.0.cmp(&right.0));
+    let mut seen_paths = std::collections::BTreeSet::new();
+    for (path, _) in &files {
+        if path == "manifest.json" || !safe_artifact_path(path) {
+            return Err(format!("unsafe evidence artifact path: {path}"));
+        }
+        if !seen_paths.insert(path) {
+            return Err(format!("duplicate evidence artifact path: {path}"));
+        }
+    }
+
+    let project = std::env::current_dir()
+        .ok()
+        .and_then(|dir| {
+            dir.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+        .unwrap_or_else(|| "unknown".to_string());
+    let file_hashes: Vec<Value> = files
+        .iter()
+        .map(|(path, bytes)| json!({ "path": path, "sha256": sha256_hex(bytes) }))
+        .collect();
+    let public_key =
+        crate::core::agent_identity::hex_encode(signing_key.verifying_key().as_bytes());
+    let mut manifest = json!({
+        "bundle": "evidence-bundle",
+        "version": 1,
+        "subject": { "agent_id": SIGNING_AGENT, "project": project },
+        "run": run_metadata,
+        "files": file_hashes,
+        "signing": {
+            "algorithm": "ed25519",
+            "public_key": public_key,
+            "signed_digest": "",
+            "signature": "",
+        },
+    });
+
+    // The offline verifier signs the canonical SHA-256 digest with both
+    // signing fields reset to empty strings.  Preserve that contract here.
+    let digest = sha256_hex(&canonical_serialize(&manifest));
+    manifest["signing"]["signed_digest"] = Value::String(digest.clone());
+    let signature = crate::core::agent_identity::hex_encode(
+        &crate::core::agent_identity::sign_bytes_with(signing_key, digest.as_bytes()),
+    );
+    manifest["signing"]["signature"] = Value::String(signature);
+
+    files.push(("manifest.json".to_string(), canonical_serialize(&manifest)));
+    files.sort_by(|left, right| left.0.cmp(&right.0));
+
+    let mut bytes = Vec::new();
+    {
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(&mut bytes));
+        let options: zip::write::SimpleFileOptions = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored)
+            .last_modified_time(zip::DateTime::default());
+        for (path, contents) in &files {
+            zip.start_file(path, options)
+                .map_err(|error| error.to_string())?;
+            zip.write_all(contents).map_err(|error| error.to_string())?;
+        }
+        zip.finish().map_err(|error| error.to_string())?;
+    }
+    std::fs::write(out, &bytes).map_err(|error| format!("write {}: {error}", out.display()))?;
+
+    Ok(BundleResult {
+        path: out.to_path_buf(),
+        sha256: sha256_hex(&bytes),
+        entries: files.len() - 1,
+        files: files.into_iter().map(|(path, _)| path).collect(),
+    })
+}
+
+fn safe_artifact_path(path: &str) -> bool {
+    let path = Path::new(path);
+    !path.is_absolute()
+        && !path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -162,7 +252,7 @@ pub fn generate(spec: &BundleSpec) -> Result<BundleResult, String> {
     let resolved_value = serde_json::to_value(&resolved).map_err(|e| e.to_string())?;
     let policy_file = (
         format!("policies/{}.resolved.json", resolved.name),
-        canonical_json(&resolved_value).into_bytes(),
+        canonical_serialize(&resolved_value),
     );
 
     // ── coverage reports ─────────────────────────────────────────────────
@@ -179,7 +269,7 @@ pub fn generate(spec: &BundleSpec) -> Result<BundleResult, String> {
         policy_file,
         (
             "coverage/cgb.json".to_string(),
-            canonical_json(&cgb_doc).into_bytes(),
+            canonical_serialize(&cgb_doc),
         ),
     ];
 
@@ -192,10 +282,7 @@ pub fn generate(spec: &BundleSpec) -> Result<BundleResult, String> {
         })?;
         let report = crate::core::compliance::report(mapping, Some(&resolved));
         let value = serde_json::to_value(&report).map_err(|e| e.to_string())?;
-        files.push((
-            format!("coverage/{fw}.json"),
-            canonical_json(&value).into_bytes(),
-        ));
+        files.push((format!("coverage/{fw}.json"), canonical_serialize(&value)));
     }
 
     files.sort_by(|a, b| a.0.cmp(&b.0));
@@ -212,7 +299,7 @@ pub fn generate(spec: &BundleSpec) -> Result<BundleResult, String> {
         .collect();
 
     // Resolve the keypair once: the public key goes into the manifest and the
-    // signature is computed over that manifest's digest — both must come from
+    // signature is computed over the canonical manifest — both must come from
     // the same key or the embedded key can never verify the signature.
     let signing_key = crate::core::agent_identity::get_or_create_keypair(SIGNING_AGENT)
         .map_err(|e| format!("signing identity: {e}"))?;
@@ -239,20 +326,16 @@ pub fn generate(spec: &BundleSpec) -> Result<BundleResult, String> {
         }
     });
 
-    let digest = sha256_hex(canonical_json(&manifest).as_bytes());
-    let signature = crate::core::agent_identity::hex_encode(
-        &crate::core::agent_identity::sign_bytes_with(&signing_key, digest.as_bytes()),
-    );
+    let digest = sha256_hex(&canonical_serialize(&manifest));
     manifest["signing"]["signed_digest"] = Value::String(digest);
+    let signature =
+        sign_manifest(&manifest, &signing_key).map_err(|e| format!("manifest signature: {e}"))?;
     manifest["signing"]["signature"] = Value::String(signature);
 
     // manifest.json sorts first lexicographically anyway, but be explicit.
     files.insert(
         0,
-        (
-            "manifest.json".to_string(),
-            canonical_json(&manifest).into_bytes(),
-        ),
+        ("manifest.json".to_string(), canonical_serialize(&manifest)),
     );
     files.sort_by(|a, b| a.0.cmp(&b.0));
 

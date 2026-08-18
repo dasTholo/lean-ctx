@@ -77,22 +77,34 @@ pub(crate) fn validate_command_with_write_allow_paths(
     None
 }
 
-/// Detects download/copy tools writing directly to files via their own flags
+/// Well-known Unix scratch prefixes that agents use on every platform.
+/// On Windows, `/tmp/foo` is not a real absolute path, but Git Bash, WSL,
+/// and agent-generated commands routinely target it.  (#1467)
+fn is_unix_scratch_prefix(path: &str) -> bool {
+    for prefix in ["/tmp", "/var/tmp", "/private/tmp", "/dev/null"] {
+        if path == prefix || path.starts_with(&format!("{prefix}/")) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Detects download/copy tools writing directly to files via their own flags.
 /// Returns true when a path targets a scratch/temp location outside the
 /// project, where file downloads are safe (#1021).
 fn is_scratch_path(path: &str) -> bool {
-    let p = std::path::Path::new(path);
-    if p.starts_with("/tmp")
-        || p.starts_with("/var/tmp")
-        || p.starts_with("/private/tmp")
-        || p.starts_with("/dev/null")
-    {
+    if is_unix_scratch_prefix(path) {
         return true;
     }
     if let Ok(tmpdir) = std::env::var("TMPDIR")
         && !tmpdir.is_empty()
-        && p.starts_with(tmpdir.as_str())
+        && std::path::Path::new(path).starts_with(tmpdir.as_str())
     {
+        return true;
+    }
+    // Windows: %TEMP% / std::env::temp_dir()
+    let tmp = std::env::temp_dir();
+    if std::path::Path::new(path).starts_with(&tmp) {
         return true;
     }
     false
@@ -222,6 +234,14 @@ fn is_write_allowed_redirect_target(
     let t = t.trim_matches(['"', '\'']);
     if t.starts_with('$') || t.starts_with("${") {
         // Preserve #989's escape hatch for harness-provided scratch paths.
+        return true;
+    }
+
+    // On Windows, agents often use Unix-style /tmp paths (Git Bash, WSL,
+    // or Claude generating Unix commands).  `/tmp/foo` is not absolute per
+    // std::path on Windows, so check well-known scratch prefixes before
+    // the is_absolute gate.  (#1467)
+    if is_unix_scratch_prefix(t) {
         return true;
     }
 
@@ -1031,11 +1051,10 @@ COMMIT_MSG"
 
     // --- GH #1142: literal scratch paths outside project root ---
 
-    // The literal scratch roots (/tmp, /private/tmp, /var/tmp) are only in
-    // `default_shell_write_allow_paths()` on Unix, so path-shaped assertions
-    // are Unix-only; the `$VAR` escape hatch is cross-platform.
+    // Since #1467, Unix scratch prefixes (/tmp, /private/tmp, /var/tmp) are
+    // recognised cross-platform — agents generate `/tmp` redirects even on
+    // Windows (Git Bash, WSL).
     #[test]
-    #[cfg(unix)]
     fn issue_1142_private_tmp_redirect_allowed() {
         // exact repro from the issue: capture test log under /private/tmp scratchpad
         assert!(
@@ -1073,7 +1092,6 @@ COMMIT_MSG"
     }
 
     #[test]
-    #[cfg(unix)]
     fn issue_1142_noclobber_to_scratch_allowed() {
         assert!(validate_command("cargo test >|/tmp/out.log").is_none());
         assert!(validate_command("echo x >|out.txt").is_some());
@@ -1085,6 +1103,32 @@ COMMIT_MSG"
         assert!(
             validate_command(cmd).is_some(),
             "redirect OUTSIDE heredoc body must still block"
+        );
+    }
+
+    // --- GH #1467: /tmp writes must be allowed on every platform ---
+
+    #[test]
+    fn issue_1467_tmp_redirect_cross_platform() {
+        assert!(
+            validate_command("wc -l /some/file > /tmp/result.txt").is_none(),
+            "/tmp redirect must be allowed on every platform"
+        );
+        assert!(
+            validate_command("grep pattern file.txt > /tmp/matches.log 2>&1").is_none(),
+            "/tmp redirect with stderr merge must be allowed"
+        );
+        assert!(
+            validate_command("cat large.csv > /var/tmp/subset.csv").is_none(),
+            "/var/tmp redirect must be allowed cross-platform"
+        );
+    }
+
+    #[test]
+    fn issue_1467_non_tmp_still_blocked() {
+        assert!(
+            validate_command("echo secret > /tmpfoo/leak.txt").is_some(),
+            "/tmpfoo is not /tmp — must be blocked"
         );
     }
 }

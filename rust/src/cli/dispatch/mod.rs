@@ -2,12 +2,14 @@ use crate::{
     core, doctor, heatmap, hook_handlers, report, setup, shell, status, token_report, uninstall,
 };
 
-mod analytics;
+pub mod analytics;
+mod evidence;
 mod help;
 mod lifecycle;
 mod network;
 mod server;
 pub(crate) mod suggest;
+pub mod verify;
 
 #[allow(clippy::wildcard_imports)]
 use analytics::*;
@@ -115,6 +117,13 @@ pub fn run() {
                 super::cmd_evidence_export(&rest);
                 return;
             }
+            "evidence" => {
+                let code = evidence::run(&rest);
+                if code != 0 {
+                    std::process::exit(code);
+                }
+                return;
+            }
             "shadow" => {
                 super::cmd_shadow(&rest);
                 return;
@@ -189,7 +198,14 @@ pub fn run() {
                 return;
             }
             "verify" => {
-                crate::cli::cmd_verify(&rest);
+                if verify::looks_like_bundle_command(&rest) {
+                    let code = verify::run(&rest);
+                    if code != 0 {
+                        std::process::exit(code);
+                    }
+                } else {
+                    crate::cli::cmd_verify(&rest);
+                }
                 return;
             }
             "eval" => {

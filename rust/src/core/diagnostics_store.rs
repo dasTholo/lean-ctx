@@ -205,6 +205,27 @@ pub fn snapshot() -> Vec<(String, Severity)> {
         .unwrap_or_default()
 }
 
+/// Full diagnostic details for the dashboard signals API.
+pub fn snapshot_detailed() -> Vec<(String, Option<u32>, Severity, String, String)> {
+    global()
+        .lock()
+        .map(|s| {
+            s.diagnostics
+                .iter()
+                .map(|d| {
+                    (
+                        d.path.clone(),
+                        d.line,
+                        d.severity,
+                        d.message.clone(),
+                        d.tool.clone(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Diagnostics for one path: `(line, severity, message)` triples.
 pub fn details_for(path: &str) -> Vec<(Option<u32>, Severity, String)> {
     global()

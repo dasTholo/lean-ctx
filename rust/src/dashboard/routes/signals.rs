@@ -41,17 +41,32 @@ pub(super) fn handle(
 
     // Active diagnostics (#499): TTL/pruning happens inside the store.
     let diagnostics = {
-        let snap = crate::core::diagnostics_store::snapshot();
+        let snap = crate::core::diagnostics_store::snapshot_detailed();
         let errors = snap
             .iter()
-            .filter(|(_, s)| *s == crate::core::diagnostics_store::Severity::Error)
+            .filter(|(_, _, s, _, _)| *s == crate::core::diagnostics_store::Severity::Error)
             .count();
         let warnings = snap.len() - errors;
-        let mut files: Vec<&str> = snap.iter().map(|(p, _)| p.as_str()).collect();
+        let mut files: Vec<&str> = snap.iter().map(|(p, _, _, _, _)| p.as_str()).collect();
         files.sort_unstable();
         files.dedup();
         files.truncate(8);
-        serde_json::json!({ "errors": errors, "warnings": warnings, "files": files })
+        let details: Vec<serde_json::Value> = snap
+            .iter()
+            .take(20)
+            .map(|(path, line, sev, msg, tool)| {
+                let short = path.rsplit('/').next().unwrap_or(path);
+                serde_json::json!({
+                    "file": short,
+                    "path": path,
+                    "line": line,
+                    "severity": if *sev == crate::core::diagnostics_store::Severity::Error { "error" } else { "warning" },
+                    "message": msg,
+                    "tool": tool,
+                })
+            })
+            .collect();
+        serde_json::json!({ "errors": errors, "warnings": warnings, "files": files, "details": details })
     };
 
     // Git working set (#497).
