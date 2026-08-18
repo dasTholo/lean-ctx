@@ -93,6 +93,7 @@ bench/lifecycle/runs/
 
 # Internal strategy docs (confidential)
 docs/internal/
+docs/archive/
 
 # Compiled binaries
 packages/lean-ctx-bin/bin/
