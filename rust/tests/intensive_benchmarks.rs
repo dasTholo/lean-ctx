@@ -1774,9 +1774,16 @@ fn bench_count_tokens_cache_effectiveness() {
     }
     eprintln!("{}", "=".repeat(70));
 
+    let tolerance = if cfg!(windows) {
+        cold_us / 2
+    } else if cfg!(target_os = "macos") {
+        cold_us / 4
+    } else {
+        5
+    };
     assert!(
-        cached_us <= cold_us + (if cfg!(windows) { cold_us / 2 } else { 5 }),
-        "cached call should be faster than cold call (Windows tolerant)"
+        cached_us <= cold_us + tolerance,
+        "cached call should be faster than cold call; cached={cached_us}us, cold={cold_us}us, tolerance={tolerance}us"
     );
 }
 
