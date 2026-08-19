@@ -131,7 +131,7 @@ class CockpitRoi extends HTMLElement {
       }
       // Echo learning trend (#507) from /api/signals; non-fatal if missing.
       try {
-        var signals = await fetchJson('/api/signals', { timeoutMs: 8000 });
+        var signals = await cached('/api/signals', { timeoutMs: 8000 });
         this._echoTrend = signals && Array.isArray(signals.echo_trend) ? signals.echo_trend : null;
       } catch (e3) {
         this._echoTrend = null;

@@ -11,6 +11,10 @@
 function ckpApi() {
   return window.LctxApi && window.LctxApi.apiFetch ? window.LctxApi.apiFetch : null;
 }
+function ckpCached(path, opts) {
+  var fn = window.LctxApi && window.LctxApi.cachedFetch ? window.LctxApi.cachedFetch : ckpApi();
+  return fn ? fn(path, opts) : Promise.reject({ error: "API not loaded" });
+}
 
 function ckpEsc(s) {
   if (window.LctxFmt && typeof window.LctxFmt.esc === 'function') {
@@ -67,7 +71,7 @@ class CockpitProtection extends HTMLElement {
     this.render();
 
     var results = await Promise.all([
-      fetchJson('/api/context-risk', { timeoutMs: 10000 }).catch(function (e) {
+      ckpCached('/api/context-risk', { timeoutMs: 8000 }).catch(function (e) {
         return { __error: e && e.error ? e.error : String(e || 'error') };
       }),
       fetchJson('/api/owasp', { timeoutMs: 10000 }).catch(function (e) {

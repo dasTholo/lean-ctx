@@ -6,6 +6,10 @@
 function api() {
   return window.LctxApi && window.LctxApi.apiFetch ? window.LctxApi.apiFetch : null;
 }
+function cached(path, opts) {
+  var fn = window.LctxApi && window.LctxApi.cachedFetch ? window.LctxApi.cachedFetch : api();
+  return fn ? fn(path, opts) : Promise.reject({ error: "API not loaded" });
+}
 function fmtLib() { return window.LctxFmt || {}; }
 function tip(k) { return window.LctxShared && window.LctxShared.tip ? window.LctxShared.tip(k) : ''; }
 function sparklineSvg(values, w, h) {
@@ -86,9 +90,9 @@ class CockpitCommander extends HTMLElement {
     this.render();
 
     const [triage, risk, signals] = await Promise.all([
-      fetchJson('/api/context-triage', { timeoutMs: 12000 }).catch(e => ({ __error: String(e?.error || e) })),
-      fetchJson('/api/context-risk', { timeoutMs: 12000 }).catch(e => ({ __error: String(e?.error || e) })),
-      fetchJson('/api/signals', { timeoutMs: 12000 }).catch(e => ({ __error: String(e?.error || e) })),
+      cached('/api/context-triage', { timeoutMs: 8000 }).catch(e => ({ __error: String(e?.error || e) })),
+      cached('/api/context-risk', { timeoutMs: 8000 }).catch(e => ({ __error: String(e?.error || e) })),
+      cached('/api/signals', { timeoutMs: 8000 }).catch(e => ({ __error: String(e?.error || e) })),
     ]);
 
     if (triage?.__error) this._error = triage.__error;

@@ -5,6 +5,10 @@
 function api() {
   return window.LctxApi && window.LctxApi.apiFetch ? window.LctxApi.apiFetch : null;
 }
+function cached(path, opts) {
+  var fn = window.LctxApi && window.LctxApi.cachedFetch ? window.LctxApi.cachedFetch : api();
+  return fn ? fn(path, opts) : Promise.reject({ error: "API not loaded" });
+}
 
 function fmtLib() {
   return window.LctxFmt || {};
@@ -449,7 +453,7 @@ class CockpitOverview extends HTMLElement {
       var self = this;
       var fetchJson = api();
       if (fetchJson) {
-        fetchJson('/api/context-triage', { timeoutMs: 8000 }).then(function (data) {
+        cached('/api/context-triage', { timeoutMs: 8000 }).then(function (data) {
           if (data && !data.__error) {
             self._triageData = data;
             var placeholder = document.getElementById('cko-healthCard');

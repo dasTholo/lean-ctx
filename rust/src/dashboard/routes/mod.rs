@@ -12,6 +12,7 @@ mod leaderboard;
 mod learning;
 mod memory;
 mod provenance;
+pub(crate) mod response_cache;
 mod risk;
 mod roi;
 mod settings;
@@ -171,6 +172,12 @@ pub fn route_response(
         return ("204 No Content", "text/plain", String::new());
     }
 
+    // Response cache: return cached response for expensive read-only routes.
+    if response_cache::is_cacheable(path, method) {
+        if let Some(cached) = response_cache::get(path) {
+            return cached;
+        }
+    }
     let response = stats::handle(path, query_str, method, body)
         .or_else(|| super::api::value_gate::handle(path, method))
         .or_else(|| signals::handle(path, query_str, method, body))
@@ -192,9 +199,15 @@ pub fn route_response(
         .or_else(|| provenance::handle(path, query_str, method, body));
     #[cfg(feature = "enterprise")]
     let response = response.or_else(|| usage_breakdown::handle(path, query_str, method, body));
-    response
+    let result = response
         .or_else(|| solution::handle(path, query_str, method, body))
         .or_else(|| telemetry::handle(path, query_str, method, body))
         .or_else(|| system::handle(path, query_str, method, body))
-        .unwrap_or_else(|| ("404 Not Found", "text/plain", "Not Found".to_string()))
+        .unwrap_or_else(|| ("404 Not Found", "text/plain", "Not Found".to_string()));
+
+    // Store in cache for subsequent requests within the TTL window.
+    if response_cache::is_cacheable(path, method) && result.0 == "200 OK" {
+        response_cache::put(path, result.1, &result.2);
+    }
+    result
 }
