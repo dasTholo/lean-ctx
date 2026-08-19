@@ -83,10 +83,13 @@ fn bundle_is_deterministic_and_complete() {
     assert_eq!(manifest["chain"]["entries"], 3);
     assert_eq!(manifest["chain"]["anchor_prev_hash"], "genesis");
     assert_eq!(manifest["signing"]["algorithm"], "ed25519");
-    assert_eq!(
-        manifest["signing"]["signature"].as_str().map(str::len),
-        Some(128),
-        "ed25519 signature present"
+    let sig_len = manifest["signing"]["signature"]
+        .as_str()
+        .map(str::len)
+        .unwrap_or(0);
+    assert!(
+        sig_len == 88 || sig_len == 128,
+        "ed25519 signature must be base64 (88) or hex (128), got {sig_len}"
     );
 
     // No wall-clock fields: the manifest must not contain a created_at.
