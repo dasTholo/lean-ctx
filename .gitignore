@@ -93,6 +93,9 @@ bench/lifecycle/runs/
 
 # Internal strategy docs (confidential)
 docs/internal/
+.codex/vision-input/
+.codex/vision-output/
+.cursor/skills/focus-contract/
 docs/archive/
 
 # Compiled binaries
