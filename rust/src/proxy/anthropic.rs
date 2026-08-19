@@ -23,18 +23,104 @@ pub(super) fn set_headroom_request(val: bool) {
 }
 use crate::core::config::{HistoryMode, ProseRole};
 
+/// GH #1472: Detect whether an Anthropic-wire-format request is actually
+/// GitHub Copilot Claude (same POST /v1/messages shape, but must route to
+/// Copilot hosts, not api.anthropic.com).
+///
+/// Detection signals (any one is sufficient):
+/// - `Editor-Version` header present (Copilot IDE integration)
+/// - `Copilot-Integration-Id` header present
+/// - `Authorization: Bearer` with Copilot session token shape (tid=…;exp=…)
+/// - Configured `openai_upstream` is a githubcopilot.com host
+fn is_copilot_request(req: &Request<Body>, openai_upstream: &str) -> bool {
+    let headers = req.headers();
+
+    // Signal 1: Copilot IDE headers
+    if headers.contains_key("editor-version") || headers.contains_key("copilot-integration-id") {
+        return true;
+    }
+
+    // Signal 2: Authorization bearer looks like a Copilot token
+    if let Some(auth) = headers.get("authorization").and_then(|v| v.to_str().ok()) {
+        let token = auth.strip_prefix("Bearer ").unwrap_or("");
+        if token.starts_with("ghu_")
+            || token.starts_with("gho_")
+            || token.contains("tid=")
+            || token.contains("proxy-ep=")
+        {
+            return true;
+        }
+    }
+
+    // Signal 3: Configured openai_upstream is a Copilot host
+    if is_copilot_host(openai_upstream) {
+        return true;
+    }
+
+    false
+}
+
+fn is_copilot_host(url: &str) -> bool {
+    let lower = url.to_lowercase();
+    lower.contains("githubcopilot.com")
+        || lower.contains("copilot-proxy")
+        || lower.contains("copilot-api")
+}
+
+/// Resolve the upstream for a Copilot-shaped Anthropic request.
+/// Prefers the token's `proxy-ep` field, falls back to the configured
+/// `openai_upstream` (which users set to their Copilot endpoint).
+fn resolve_copilot_upstream(req: &Request<Body>, openai_upstream: &str) -> String {
+    // Try extracting proxy-ep from the Authorization token
+    if let Some(auth) = req
+        .headers()
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+    {
+        let token = auth.strip_prefix("Bearer ").unwrap_or("");
+        if let Some(ep) = extract_proxy_ep(token) {
+            return format!("https://{ep}");
+        }
+    }
+    openai_upstream.to_string()
+}
+
+/// Extract `proxy-ep=host` from a Copilot session token.
+fn extract_proxy_ep(token: &str) -> Option<&str> {
+    for part in token.split(';') {
+        let trimmed = part.trim();
+        if let Some(val) = trimmed.strip_prefix("proxy-ep=") {
+            if !val.is_empty() {
+                return Some(val);
+            }
+        }
+    }
+    None
+}
+
 pub async fn handler(
     State(state): State<ProxyState>,
     req: Request<Body>,
 ) -> Result<Response, StatusCode> {
-    let upstream = state.anthropic_upstream();
+    let openai_up = state.openai_upstream();
+
+    let (upstream, provider_label) = if is_copilot_request(&req, &openai_up) {
+        let copilot_upstream = resolve_copilot_upstream(&req, &openai_up);
+        tracing::info!(
+            "Copilot Claude detected (Anthropic wire format), routing to {copilot_upstream}"
+        );
+        (copilot_upstream, "Copilot")
+    } else {
+        (state.anthropic_upstream(), "Anthropic")
+    };
+
     forward::forward_request(
         State(state),
         req,
         &upstream,
         "/v1/messages",
         compress_request_body,
-        "Anthropic",
+        provider_label,
         &[],
     )
     .await
@@ -1356,5 +1442,107 @@ mod tests {
             blocks[1].get("cache_control").is_none(),
             "no second breakpoint — the tail stays uncached"
         );
+    }
+
+    #[test]
+    fn copilot_detected_by_editor_version_header() {
+        let req = Request::builder()
+            .uri("/v1/messages")
+            .header("editor-version", "vscode/1.0")
+            .header("content-type", "application/json")
+            .body(Body::empty())
+            .unwrap();
+        assert!(super::is_copilot_request(&req, "https://api.openai.com"));
+    }
+
+    #[test]
+    fn copilot_detected_by_integration_id_header() {
+        let req = Request::builder()
+            .uri("/v1/messages")
+            .header("copilot-integration-id", "vscode-chat")
+            .body(Body::empty())
+            .unwrap();
+        assert!(super::is_copilot_request(&req, "https://api.openai.com"));
+    }
+
+    #[test]
+    fn copilot_detected_by_ghu_token() {
+        let req = Request::builder()
+            .uri("/v1/messages")
+            .header("authorization", "Bearer ghu_abc123")
+            .body(Body::empty())
+            .unwrap();
+        assert!(super::is_copilot_request(&req, "https://api.openai.com"));
+    }
+
+    #[test]
+    fn copilot_detected_by_upstream_host() {
+        let req = Request::builder()
+            .uri("/v1/messages")
+            .body(Body::empty())
+            .unwrap();
+        assert!(super::is_copilot_request(
+            &req,
+            "https://api.githubcopilot.com"
+        ));
+    }
+
+    #[test]
+    fn not_copilot_when_standard_anthropic() {
+        let req = Request::builder()
+            .uri("/v1/messages")
+            .header("x-api-key", "sk-ant-abc123")
+            .header("anthropic-version", "2023-06-01")
+            .body(Body::empty())
+            .unwrap();
+        assert!(!super::is_copilot_request(&req, "https://api.openai.com"));
+    }
+
+    #[test]
+    fn extract_proxy_ep_from_token() {
+        assert_eq!(
+            super::extract_proxy_ep("tid=abc;exp=123;proxy-ep=api.business.githubcopilot.com"),
+            Some("api.business.githubcopilot.com")
+        );
+        assert_eq!(super::extract_proxy_ep("ghu_abc123"), None);
+        assert_eq!(super::extract_proxy_ep(""), None);
+    }
+
+    #[test]
+    fn copilot_upstream_uses_proxy_ep() {
+        let req = Request::builder()
+            .uri("/v1/messages")
+            .header(
+                "authorization",
+                "Bearer tid=x;exp=9;proxy-ep=api.business.githubcopilot.com",
+            )
+            .body(Body::empty())
+            .unwrap();
+        let upstream = super::resolve_copilot_upstream(&req, "https://api.githubcopilot.com");
+        assert_eq!(upstream, "https://api.business.githubcopilot.com");
+    }
+
+    #[test]
+    fn copilot_upstream_falls_back_to_openai_upstream() {
+        let req = Request::builder()
+            .uri("/v1/messages")
+            .header("authorization", "Bearer ghu_simple_token")
+            .body(Body::empty())
+            .unwrap();
+        let upstream = super::resolve_copilot_upstream(&req, "https://api.githubcopilot.com");
+        assert_eq!(upstream, "https://api.githubcopilot.com");
+    }
+
+    #[test]
+    fn is_copilot_host_detects_variants() {
+        assert!(super::is_copilot_host("https://api.githubcopilot.com"));
+        assert!(super::is_copilot_host(
+            "https://api.business.githubcopilot.com"
+        ));
+        assert!(super::is_copilot_host(
+            "https://api.individual.githubcopilot.com"
+        ));
+        assert!(!super::is_copilot_host("https://api.anthropic.com"));
+        assert!(!super::is_copilot_host("https://api.openai.com"));
     }
 }
