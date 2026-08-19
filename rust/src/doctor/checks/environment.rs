@@ -670,6 +670,35 @@ pub(crate) fn cwd_looks_like_agent_dir(cwd_str: &str) -> bool {
     crate::core::pathutil::is_agent_config_dir(std::path::Path::new(cwd_str))
 }
 
+/// IDE-specific hint for doctor output when project root detection fails.
+fn detect_ide_hint() -> String {
+    if std::env::var("CURSOR_PROJECT_DIR").is_ok()
+        || std::env::var("WORKSPACE_FOLDER_PATHS").is_ok()
+    {
+        return "IDE: Cursor (env vars present, root should auto-resolve).".into();
+    }
+    if std::env::var("VSCODE_WORKSPACE_FOLDER").is_ok() {
+        return "IDE: VS Code (roots/list should resolve the project).".into();
+    }
+    if std::env::var("CLAUDE_PROJECT_DIR").is_ok() {
+        return "IDE: Claude Code.".into();
+    }
+    if std::env::var("WINDSURF_PROJECT_DIR").is_ok() {
+        return "IDE: Windsurf.".into();
+    }
+    if std::env::var("CODEX_SANDBOX_DIR").is_ok() {
+        return "IDE: Codex.".into();
+    }
+    if std::env::var("TRAE_PROJECT_DIR").is_ok() {
+        return "IDE: Trae.".into();
+    }
+    if std::env::var("KIRO_PROJECT_DIR").is_ok() {
+        return "IDE: Kiro.".into();
+    }
+    "No IDE env var detected. If issues persist: lean-ctx init --agent <your-ide> from project dir."
+        .into()
+}
+
 /// Warn if lean-ctx is running as an MCP server from a directory that lacks
 /// a project marker and looks like an IDE/agent tool directory (e.g. .lmstudio,
 /// .claude). This usually means the MCP client launched the process from the
@@ -703,18 +732,20 @@ pub(crate) fn mcp_server_cwd_outcome() -> Outcome {
             ),
         }
     } else if suspicious {
+        let ide_hint = detect_ide_hint();
         Outcome {
             ok: false,
             line: format!(
-                "{BOLD}MCP server CWD{RST}  {YELLOW}launched from an IDE/agent config dir{RST}  {DIM}lean-ctx was launched from {}, which is not a project root. It auto-corrects to your real project on the first absolute path (#580); for relative paths to resolve immediately, set `cwd` in your MCP client config to your project directory.{RST}",
+                "{BOLD}MCP server CWD{RST}  {YELLOW}launched from IDE config dir{RST}                   {DIM}cwd={} — lean-ctx auto-corrects to the real project on first                  file access (zero-config). {ide_hint}{RST}",
                 cwd.display()
             ),
         }
     } else {
+        let ide_hint = detect_ide_hint();
         Outcome {
             ok: false,
             line: format!(
-                "{BOLD}MCP server CWD{RST}  {YELLOW}no project marker found in CWD{RST}  {DIM}cwd={} — \"path escapes project root\" errors may occur for files outside this directory. Add `cwd` to your MCP client config or add `extra_roots` / `allow_paths` in config.toml{RST}",
+                "{BOLD}MCP server CWD{RST}  {YELLOW}no project marker in CWD{RST}                   {DIM}cwd={} — lean-ctx auto-corrects to the real project on first                  file access. {ide_hint}{RST}",
                 cwd.display()
             ),
         }
