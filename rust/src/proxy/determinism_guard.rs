@@ -60,9 +60,9 @@ impl DeterminismGuard {
 /// Verifies that `after` leaves the provider-cached prefix of `before` intact.
 ///
 /// Both slices are canonical JSON arrays. `frozen_bytes` is their common byte
-/// prefix. The proof hashes the full cached-message prefix when one exists. If
-/// the client did not disclose a cache breakpoint, the whole message list is
-/// frozen: this conservative default avoids guessing an automatic cache window.
+/// prefix. The proof hashes the cached-message prefix when one exists. Without
+/// explicit `cache_control` breakpoints, all messages except the last (the new
+/// user turn) are treated as the frozen prefix.
 #[must_use]
 pub fn verify_determinism(before: &[Value], after: &[Value]) -> DeterminismProof {
     let request_id = blake3::hash(&canonical_messages(before))
@@ -76,10 +76,14 @@ fn verify_with_request_id(request_id: &str, before: &[Value], after: &[Value]) -
     let after_bytes = canonical_messages(after);
     let frozen_bytes = common_prefix_len(&before_bytes, &after_bytes);
     let cached_messages = cache_breakpoint_len(before);
-    let proof_prefix_bytes = if cached_messages == 0 {
-        before_bytes.len()
-    } else {
+    let proof_prefix_bytes = if cached_messages > 0 {
         canonical_message_prefix_len(before, cached_messages)
+    } else if before.len() > 1 {
+        // No explicit cache_control breakpoints. Protect everything except the
+        // last message (the new user turn) — the only region compression may modify.
+        canonical_message_prefix_len(before, before.len() - 1)
+    } else {
+        0
     };
     let before_prefix = &before_bytes[..proof_prefix_bytes];
     let after_prefix = after_bytes
@@ -385,10 +389,39 @@ mod tests {
     }
 
     #[test]
-    fn modified_unanchored_prefix_is_conservatively_unstable() {
+    fn single_message_without_cache_control_allows_compression() {
         let before = vec![json!({"role": "user", "content": "frozen"})];
         let after = vec![json!({"role": "user", "content": "changed"})];
+        assert!(verify_determinism(&before, &after).is_stable);
+    }
 
+    #[test]
+    fn last_message_modification_without_cache_control_is_stable() {
+        let before = vec![
+            json!({"role": "system", "content": "rules"}),
+            json!({"role": "user", "content": "original"}),
+        ];
+        let after = vec![
+            json!({"role": "system", "content": "rules"}),
+            json!({"role": "user", "content": "compressed"}),
+        ];
+        assert!(verify_determinism(&before, &after).is_stable);
+    }
+
+    #[test]
+    fn earlier_message_modification_without_cache_control_is_unstable() {
+        let before = vec![
+            json!({"role": "system", "content": "rules"}),
+            json!({"role": "user", "content": "q1"}),
+            json!({"role": "assistant", "content": "a1"}),
+            json!({"role": "user", "content": "q2"}),
+        ];
+        let after = vec![
+            json!({"role": "system", "content": "MODIFIED"}),
+            json!({"role": "user", "content": "q1"}),
+            json!({"role": "assistant", "content": "a1"}),
+            json!({"role": "user", "content": "q2"}),
+        ];
         assert!(!verify_determinism(&before, &after).is_stable);
     }
 
