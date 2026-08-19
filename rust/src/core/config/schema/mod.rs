@@ -268,4 +268,36 @@ mod tests {
             "`lean-ctx config set proxy_require_token <bool>` must be accepted"
         );
     }
+
+    #[test]
+    fn dotted_section_keys_are_cli_settable() {
+        let schema = ConfigSchema::generate();
+        for key in [
+            "memory.lifecycle.stale_days",
+            "memory.knowledge.max_facts",
+            "memory.episodic.max_episodes",
+            "solution.commercial.fingerprints_enabled",
+            "solution.commercial.cross_project_patterns",
+            "solution.commercial.adaptive.enabled",
+            "solution.commercial.adaptive.learning_rate",
+            "solution.commercial.team_policy.enabled",
+            "solution.commercial.team_policy.min_intensity",
+            "proxy.role_aggressiveness.system",
+        ] {
+            assert!(
+                schema.lookup(key).is_some(),
+                "`lean-ctx config set {key} <v>` fails with \"Unknown config key\" — lookup must handle dotted section names"
+            );
+        }
+    }
+
+    #[test]
+    fn permission_inheritance_defaults_to_on() {
+        let cfg = super::super::Config::default();
+        assert_eq!(
+            cfg.permission_inheritance.as_deref(),
+            Some("on"),
+            "permission_inheritance must default to On so IDE permission rules are honored out of the box"
+        );
+    }
 }
