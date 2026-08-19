@@ -57,27 +57,72 @@ pub(super) struct Outcome {
 struct Scoreboard {
     passed: u32,
     total: u32,
+    json_mode: bool,
+    entries: Vec<JsonCheck>,
+}
+
+/// A single doctor check entry for JSON serialization (GH #1470).
+#[derive(Default, serde::Serialize)]
+struct JsonCheck {
+    ok: bool,
+    name: String,
+    scored: bool,
+}
+
+fn strip_ansi(s: &str) -> String {
+    // Strip ANSI escape sequences for machine-readable output
+    let mut result = String::with_capacity(s.len());
+    let mut in_escape = false;
+    for c in s.chars() {
+        if c == '\x1b' {
+            in_escape = true;
+        } else if in_escape {
+            if c.is_ascii_alphabetic() {
+                in_escape = false;
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    result
 }
 
 impl Scoreboard {
+    fn new(json_mode: bool) -> Self {
+        Self {
+            passed: 0,
+            total: 0,
+            json_mode,
+            entries: Vec::new(),
+        }
+    }
+
     /// A scored health check: render it and count it (pass iff `ok`).
     fn check(&mut self, outcome: &Outcome) {
         self.total += 1;
         if outcome.ok {
             self.passed += 1;
         }
-        print_check(outcome);
+        self.entries.push(JsonCheck {
+            ok: outcome.ok,
+            name: strip_ansi(&outcome.line),
+            scored: true,
+        });
+        if !self.json_mode {
+            print_check(outcome);
+        }
     }
 
-    /// An optional/advisory line: render it but never count it toward the score
-    /// (LSP servers, "no providers configured", MCP bridges, plan-mode presence).
-    ///
-    /// Deliberately a method (not a free function) so every rendered line flows
-    /// through the board and each call site has to choose `check` vs `info` — the
-    /// `&self` is unused by design, which is the whole point.
-    #[allow(clippy::unused_self)]
-    fn info(&self, outcome: &Outcome) {
-        print_check(outcome);
+    /// An optional/advisory line: render it but never count it toward the score.
+    fn info(&mut self, outcome: &Outcome) {
+        self.entries.push(JsonCheck {
+            ok: outcome.ok,
+            name: strip_ansi(&outcome.line),
+            scored: false,
+        });
+        if !self.json_mode {
+            print_check(outcome);
+        }
     }
 }
 
@@ -86,9 +131,20 @@ impl Scoreboard {
 /// attention, so `lean-ctx doctor` can exit non-zero when something is wrong
 /// (a health gate must fail loudly, not silently exit 0).
 pub fn run() -> u32 {
-    let mut board = Scoreboard::default();
+    run_inner(false)
+}
 
-    println!("{BOLD}{WHITE}lean-ctx doctor{RST}  {DIM}diagnostics{RST}\n");
+/// GH #1470: JSON output variant of `run()`.
+pub fn run_json() -> u32 {
+    run_inner(true)
+}
+
+fn run_inner(json: bool) -> u32 {
+    let mut board = Scoreboard::new(json);
+
+    if !json {
+        println!("{BOLD}{WHITE}lean-ctx doctor{RST}  {DIM}diagnostics{RST}\n");
+    }
 
     // 1) Binary on PATH
     let path_bin = resolve_lean_ctx_binary();
@@ -471,6 +527,12 @@ pub fn run() -> u32 {
         board.info(bridge_check);
     }
 
+    // GH #1470: Version-skew detection between CLI and agent bridges
+    let skew_outcomes = version_skew_outcomes();
+    for skew_check in &skew_outcomes {
+        board.check(&skew_check);
+    }
+
     // Plan mode (advisory)
     let plan_outcomes = plan_mode_outcomes();
     for plan_check in &plan_outcomes {
@@ -604,7 +666,9 @@ pub fn run() -> u32 {
     board.check(&mcp_cwd);
 
     // LSP servers (optional, informational)
-    println!("\n  {BOLD}{WHITE}LSP (optional — for ctx_refactor):{RST}");
+    if !json {
+        println!("\n  {BOLD}{WHITE}LSP (optional — for ctx_refactor):{RST}");
+    }
     let lsp_outcomes = lsp_server_outcomes();
     for lsp_check in &lsp_outcomes {
         board.info(lsp_check);
@@ -621,7 +685,9 @@ pub fn run() -> u32 {
             "{BOLD}Shadow mode{RST}  {DIM}disabled{RST}  {DIM}(default: on — explicitly disabled via config){RST}"
         )
     };
-    println!("  {shadow_line}");
+    if !json {
+        println!("  {shadow_line}");
+    }
 
     // Tool-schema footprint (informational, not scored). With no profile pinned
     // the server runs in lean mode — only the lazy core is advertised and every
@@ -640,7 +706,9 @@ pub fn run() -> u32 {
             "{BOLD}Tool profile{RST}  {WHITE}lean (default){RST}  {DIM}{lazy_count} lazy-core tools advertised + ctx_call gateway{RST}"
         )
     };
-    println!("  {tool_profile_line}");
+    if !json {
+        println!("  {tool_profile_line}");
+    }
 
     // Session cache health (#361): answer "is the cache actually engaging?"
     // without external instrumentation. CEP sessions + the cross-call hit ratio
@@ -651,36 +719,51 @@ pub fn run() -> u32 {
     } else {
         0.0
     };
-    println!(
-        "  {BOLD}Session cache{RST}  {WHITE}{} sessions{RST}  {DIM}{}/{} reads cached ({hit_ratio:.0}% hit) · prove: lean-ctx verify-cache{RST}",
-        cep.sessions, cep.total_cache_hits, cep.total_cache_reads
-    );
+    if !json {
+        println!(
+            "  {BOLD}Session cache{RST}  {WHITE}{} sessions{RST}  {DIM}{}/{} reads cached ({hit_ratio:.0}% hit) · prove: lean-ctx verify-cache{RST}",
+            cep.sessions, cep.total_cache_hits, cep.total_cache_reads
+        );
+    }
 
     // The board counted exactly what it rendered — the displayed ✓/✗ list and
     // this tally can no longer drift apart (#433).
     let passed = board.passed;
     let total = board.total;
     let needs_attention = total.saturating_sub(passed);
-    println!();
-    println!("  {BOLD}{WHITE}Summary:{RST}  {GREEN}{passed}{RST}{DIM}/{total}{RST} checks passed");
-    if needs_attention > 0 {
+
+    if json {
+        let output = serde_json::json!({
+            "version": env!("CARGO_PKG_VERSION"),
+            "passed": passed,
+            "total": total,
+            "needs_attention": needs_attention,
+            "checks": board.entries,
+        });
         println!(
-            "  {YELLOW}{needs_attention} check(s) need attention.{RST}  Auto-repair what's fixable:  {BOLD}lean-ctx doctor --fix{RST}"
+            "{}",
+            serde_json::to_string_pretty(&output).unwrap_or_default()
         );
     } else {
-        println!("  {GREEN}Everything looks good.{RST}");
-    }
-    println!("  {DIM}LSP servers are optional enhancements (not counted in score){RST}");
-    println!("  {DIM}{}{RST}", crate::core::integrity::origin_line());
-
-    // Refresh the cached latest-version in the background and, if the running
-    // binary is behind, nudge toward the fast self-updater right where a
-    // confused user looks when something seems off (the "stuck updating"
-    // report). Notify-only — never auto-installs.
-    crate::core::version_check::check_background();
-    if let Some(banner) = crate::core::version_check::get_update_banner() {
         println!();
-        println!("{banner}");
+        println!(
+            "  {BOLD}{WHITE}Summary:{RST}  {GREEN}{passed}{RST}{DIM}/{total}{RST} checks passed"
+        );
+        if needs_attention > 0 {
+            println!(
+                "  {YELLOW}{needs_attention} check(s) need attention.{RST}  Auto-repair what's fixable:  {BOLD}lean-ctx doctor --fix{RST}"
+            );
+        } else {
+            println!("  {GREEN}Everything looks good.{RST}");
+        }
+        println!("  {DIM}LSP servers are optional enhancements (not counted in score){RST}");
+        println!("  {DIM}{}{RST}", crate::core::integrity::origin_line());
+
+        crate::core::version_check::check_background();
+        if let Some(banner) = crate::core::version_check::get_update_banner() {
+            println!();
+            println!("{banner}");
+        }
     }
 
     needs_attention
@@ -742,7 +825,8 @@ pub fn run_cli(args: &[String]) -> i32 {
     if !fix {
         // Non-zero exit when checks need attention so `lean-ctx doctor` works
         // as a CI/health gate, not just a pretty printer.
-        return i32::from(run() > 0);
+        let needs = if json { run_json() } else { run() };
+        return i32::from(needs > 0);
     }
 
     match fix::run_fix(&fix::DoctorFixOptions { json }) {
