@@ -63,9 +63,10 @@ pub enum CandidateSet {
     /// Lean default: only `CORE_TOOL_NAMES` are advertised; everything else
     /// stays reachable through [`INVOKER`] (#575).
     LazyCore,
-    /// Hook-covered client: only the universal invoker (`ctx_call`) is
-    /// advertised. Native Read/Shell/Grep/Glob are compressed by installed
-    /// hooks; all other tools stay reachable through `ctx_call`.
+    /// Deprecated (GH #1474): was the hook-covered-only surface (just ctx_call).
+    /// Never returned by `candidate_set` anymore — kept only for exhaustive
+    /// match compatibility until fully removed.
+    #[allow(dead_code)]
     ShadowOnly,
 }
 
@@ -88,14 +89,16 @@ pub fn candidate_set(inp: &CandidateInputs) -> CandidateSet {
         CandidateSet::Unified
     } else if inp.explicit_profile {
         CandidateSet::ProfileAuthoritative
-    } else if inp.hook_covered && is_shadow_surface_enabled() {
-        CandidateSet::ShadowOnly
     } else {
+        // GH #1474: all MCP-connected clients (hook-covered or not) get the
+        // lazy-core surface. Shadow-only (ctx_call alone) caused agent confusion
+        // because they could not discover ctx_read/ctx_search/etc. by name.
         CandidateSet::LazyCore
     }
 }
 
 /// Whether the shadow-only tool surface is enabled (config or env).
+#[allow(dead_code)]
 fn is_shadow_surface_enabled() -> bool {
     if let Ok(v) = std::env::var("LEAN_CTX_TOOL_SURFACE") {
         return v.eq_ignore_ascii_case("shadow") || v.eq_ignore_ascii_case("auto");
@@ -222,11 +225,8 @@ pub fn advertised_tool_defs_default() -> Vec<rmcp::model::Tool> {
     let pool: Vec<rmcp::model::Tool> = match candidate {
         CandidateSet::Full | CandidateSet::ProfileAuthoritative => registry.tool_defs(),
         CandidateSet::Unified => crate::tool_defs::unified_tool_defs(),
-        CandidateSet::ShadowOnly => registry
-            .tool_defs()
-            .into_iter()
-            .filter(|t| t.name.as_ref() == INVOKER)
-            .collect(),
+        // GH #1474: ShadowOnly no longer returned; treat as LazyCore.
+        CandidateSet::ShadowOnly |
         CandidateSet::LazyCore => {
             let core = crate::tool_defs::core_tool_names();
             registry
@@ -664,18 +664,18 @@ mod tests {
         assert_ne!(resolved, ToolProfile::Auto);
     }
 
-    // ── Shadow-Only surface tests ──────────────────────────────
+    // ── Hook-covered clients get LazyCore (#1474) ──────────────
 
     #[test]
-    fn shadow_only_candidate_when_hook_covered() {
-        // hook_covered=true + default surface = ShadowOnly
+    fn hook_covered_gets_lazy_core_not_shadow_only() {
+        // GH #1474: hook_covered=true no longer restricts to ShadowOnly
         let c = candidate_set(&CandidateInputs {
             full_mode: false,
             unified_env: false,
             explicit_profile: false,
             hook_covered: true,
         });
-        assert_eq!(c, CandidateSet::ShadowOnly);
+        assert_eq!(c, CandidateSet::LazyCore);
     }
 
     #[test]
@@ -720,34 +720,6 @@ mod tests {
             c,
             CandidateSet::LazyCore,
             "non-hook client must get LazyCore"
-        );
-    }
-
-    #[test]
-    fn shadow_only_surface_stays_within_budget() {
-        const SHADOW_BUDGET: usize = 200;
-
-        let _guard = crate::core::data_dir::isolated_data_dir();
-        let defs: Vec<_> = crate::server::registry::build_registry()
-            .tool_defs()
-            .into_iter()
-            .filter(|t| t.name.as_ref() == INVOKER)
-            .collect();
-        assert_eq!(
-            defs.len(),
-            1,
-            "shadow-only pool must contain exactly ctx_call"
-        );
-        assert_eq!(defs[0].name.as_ref(), "ctx_call");
-
-        let desc = defs[0].description.as_deref().unwrap_or("");
-        let schema = serde_json::to_string(&defs[0].input_schema).unwrap_or_default();
-        let cost =
-            crate::core::tokens::count_tokens(desc) + crate::core::tokens::count_tokens(&schema);
-        eprintln!("SHADOW-ONLY: ctx_call = {cost} tok (budget {SHADOW_BUDGET})");
-        assert!(
-            cost <= SHADOW_BUDGET,
-            "ctx_call costs {cost} tok (shadow budget {SHADOW_BUDGET})"
         );
     }
 }
