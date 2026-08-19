@@ -4,6 +4,9 @@ use crate::{
 
 pub mod analytics;
 mod evidence;
+pub(crate) mod evidence_cost;
+pub(crate) mod evidence_realworld;
+pub(crate) mod evidence_workflow;
 mod help;
 mod lifecycle;
 mod network;
