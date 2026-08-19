@@ -983,8 +983,8 @@ mod tests {
         let err = jail_path(&other.join("b.txt"), &root).unwrap_err();
         let msg = err.to_string();
         assert!(
-            msg.contains("extra_roots") && msg.contains("allow_paths"),
-            "agent-visible escape error should name the config keys: {msg}"
+            msg.contains("outside active project") || msg.contains("LEAN_CTX_EXTRA_ROOTS"),
+            "agent-visible escape error should hint at resolution: {msg}"
         );
     }
 

@@ -363,12 +363,8 @@ fn verify_manifest_signature(
         ));
     }
 
-    let signature = match crate::core::agent_identity::hex_decode(signature_hex) {
-        Ok(signature) if signature.len() == 64 => signature,
-        Ok(_) => {
-            errors.push("manifest Ed25519 signature must contain 64 bytes".to_string());
-            return false;
-        }
+    let signature = match decode_signature(signature_hex) {
+        Ok(sig) => sig,
         Err(error) => {
             errors.push(format!("invalid manifest signature: {error}"));
             return false;
@@ -384,6 +380,24 @@ fn verify_manifest_signature(
     }
 
     digest_valid && cryptographically_valid
+}
+
+fn decode_signature(encoded: &str) -> Result<Vec<u8>, String> {
+    use base64::Engine;
+    if let Ok(bytes) = crate::core::agent_identity::hex_decode(encoded) {
+        if bytes.len() == 64 {
+            return Ok(bytes);
+        }
+    }
+    if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(encoded) {
+        if bytes.len() == 64 {
+            return Ok(bytes);
+        }
+    }
+    Err(format!(
+        "signature must be 64 bytes (hex or base64), got {} chars",
+        encoded.len()
+    ))
 }
 
 fn read_public_key(path: &Path) -> Result<Vec<u8>> {

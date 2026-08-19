@@ -720,3 +720,166 @@ pub(crate) fn mcp_server_cwd_outcome() -> Outcome {
         }
     }
 }
+
+/// GH #1470: Detect version skew between CLI binary and installed agent-bridge
+/// packages (pi-lean-ctx, Cursor extension, CodeBuddy extension).
+pub(crate) fn version_skew_outcomes() -> Vec<Outcome> {
+    let cli_version = env!("CARGO_PKG_VERSION");
+    let mut results = Vec::new();
+
+    // 1) pi-lean-ctx npm package version
+    if let Some(pi_ver) = detect_pi_lean_ctx_version() {
+        let ok = versions_compatible(cli_version, &pi_ver);
+        let status = if ok {
+            format!("{GREEN}{pi_ver}{RST}")
+        } else {
+            format!(
+                "{RED}{pi_ver} (CLI is {cli_version}){RST}  {DIM}update: pi install npm:pi-lean-ctx@latest{RST}"
+            )
+        };
+        results.push(Outcome {
+            ok,
+            line: format!("{BOLD}Bridge version: pi-lean-ctx{RST}  {status}"),
+        });
+    }
+
+    // 2) Cursor extension version (from package.json in known paths)
+    if let Some(ext_ver) = detect_cursor_extension_version() {
+        let ok = versions_compatible(cli_version, &ext_ver);
+        let status = if ok {
+            format!("{GREEN}{ext_ver}{RST}")
+        } else {
+            format!(
+                "{RED}{ext_ver} (CLI is {cli_version}){RST}  {DIM}update the lean-ctx extension in Cursor{RST}"
+            )
+        };
+        results.push(Outcome {
+            ok,
+            line: format!("{BOLD}Bridge version: Cursor extension{RST}  {status}"),
+        });
+    }
+
+    results
+}
+
+/// Two versions are "compatible" if their major.minor match.
+/// For pre-1.0 (0.x.y), major.minor.patch must match exactly.
+fn versions_compatible(cli: &str, bridge: &str) -> bool {
+    let cli_parts: Vec<&str> = cli.split('.').collect();
+    let bridge_parts: Vec<&str> = bridge.split('.').collect();
+
+    if cli_parts.len() < 2 || bridge_parts.len() < 2 {
+        return cli == bridge;
+    }
+
+    let cli_major = cli_parts[0];
+    let cli_minor = cli_parts[1];
+    let bridge_major = bridge_parts[0];
+    let bridge_minor = bridge_parts[1];
+
+    if cli_major == "0" || bridge_major == "0" {
+        cli == bridge
+    } else {
+        cli_major == bridge_major && cli_minor == bridge_minor
+    }
+}
+
+fn detect_pi_lean_ctx_version() -> Option<String> {
+    let output = std::process::Command::new("pi")
+        .args(["list", "--json"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        let text_output = std::process::Command::new("pi")
+            .args(["list"])
+            .output()
+            .ok()?;
+        if !text_output.status.success() {
+            return None;
+        }
+        let text = String::from_utf8_lossy(&text_output.stdout);
+        for line in text.lines() {
+            if line.contains("pi-lean-ctx") {
+                if let Some(at_pos) = line.rfind('@') {
+                    let ver = line[at_pos + 1..].trim();
+                    if !ver.is_empty() {
+                        return Some(ver.to_string());
+                    }
+                }
+            }
+        }
+        return None;
+    }
+
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    if let Some(packages) = json.as_array() {
+        for pkg in packages {
+            let name = pkg.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            if name == "pi-lean-ctx" || name.contains("pi-lean-ctx") {
+                if let Some(ver) = pkg.get("version").and_then(|v| v.as_str()) {
+                    return Some(ver.to_string());
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn detect_cursor_extension_version() -> Option<String> {
+    let home = dirs::home_dir()?;
+    let ext_dir = home.join(".cursor").join("extensions");
+    if !ext_dir.is_dir() {
+        return None;
+    }
+
+    let entries = std::fs::read_dir(&ext_dir).ok()?;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if name_str.contains("lean-ctx") || name_str.contains("leanctx") {
+            let pkg_json = entry.path().join("package.json");
+            if let Ok(content) = std::fs::read_to_string(&pkg_json) {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                    if let Some(ver) = json.get("version").and_then(|v| v.as_str()) {
+                        return Some(ver.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+#[cfg(test)]
+mod version_skew_tests {
+    use super::*;
+
+    #[test]
+    fn compatible_same_version() {
+        assert!(versions_compatible("3.9.18", "3.9.18"));
+    }
+
+    #[test]
+    fn compatible_same_major_minor() {
+        assert!(versions_compatible("3.9.18", "3.9.20"));
+    }
+
+    #[test]
+    fn incompatible_different_minor() {
+        assert!(!versions_compatible("3.9.18", "3.8.18"));
+    }
+
+    #[test]
+    fn incompatible_different_major() {
+        assert!(!versions_compatible("3.9.18", "4.9.18"));
+    }
+
+    #[test]
+    fn pre_1_0_requires_exact() {
+        assert!(!versions_compatible("0.9.1", "0.9.2"));
+        assert!(versions_compatible("0.9.1", "0.9.1"));
+    }
+}

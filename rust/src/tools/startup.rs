@@ -16,7 +16,8 @@ pub(super) fn has_project_marker(dir: &std::path::Path) -> bool {
 }
 
 pub(crate) fn is_suspicious_root(dir: &std::path::Path) -> bool {
-    crate::core::pathutil::is_agent_config_dir(dir)
+    crate::core::pathutil::is_broad_or_unsafe_root(dir)
+        || crate::core::pathutil::is_agent_config_dir(dir)
 }
 
 pub(super) fn canonicalize_path(path: &std::path::Path) -> String {

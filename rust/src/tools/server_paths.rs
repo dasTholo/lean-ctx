@@ -89,7 +89,7 @@ impl LeanCtxServer {
             &extra_roots,
         ) {
             Ok(p) => self
-                .maybe_reroot_for_absolute_path(&resolved, jail_root_path, &extra_roots, false)
+                .maybe_reroot_for_absolute_path(&resolved, jail_root_path, &extra_roots)
                 .await?
                 .unwrap_or(p),
             Err(e) => {
@@ -110,7 +110,7 @@ impl LeanCtxServer {
                     ));
                 }
                 if let Some(jailed) = self
-                    .maybe_reroot_for_absolute_path(&resolved, jail_root_path, &extra_roots, true)
+                    .maybe_reroot_for_absolute_path(&resolved, jail_root_path, &extra_roots)
                     .await?
                 {
                     jailed
@@ -132,7 +132,6 @@ impl LeanCtxServer {
         resolved: &std::path::Path,
         jail_root_path: &std::path::Path,
         extra_roots: &[String],
-        require_opt_in_for_real_jail: bool,
     ) -> Result<Option<std::path::PathBuf>, String> {
         if !resolved.is_absolute() {
             return Ok(None);
@@ -140,36 +139,24 @@ impl LeanCtxServer {
         let Some(new_root) = maybe_derive_project_root_from_absolute(resolved) else {
             return Ok(None);
         };
+        let jail_is_real_project =
+            has_project_marker(jail_root_path) && !is_suspicious_root(jail_root_path);
         let candidate_under_jail = resolved.starts_with(jail_root_path);
-        // #1437: never reroot to a child of the current jail. The current root
-        // already contains the resolved path — narrowing the daemon's scope
-        // would break all subsequent unscoped queries.
-        if new_root.starts_with(jail_root_path) && new_root != jail_root_path {
+        // #1437: never reroot to a child when jail is a real project. Skip when
+        // jail is suspicious (/, home, agent-config) — not a real boundary.
+        if jail_is_real_project
+            && new_root.starts_with(jail_root_path)
+            && new_root != jail_root_path
+        {
             return Ok(None);
         }
-        // #580/#649: when the MCP server was launched from an agent/IDE config
-        // dir (e.g. ~/.copilot) or a markerless client cwd (e.g. WSL VS Code
-        // starting in /mnt/c/Users), that jail is not a real project boundary.
-        // The derived root already carries a project marker, so correcting to it
-        // is a root fix, not a jail weakening.
-        let allow_reroot = if candidate_under_jail {
+        // Universal auto-reroot: when the jail root is not a real project
+        // (suspicious, None, or markerless), correct to derived project root.
+        // No IDE-specific logic — works for all IDEs and daemon.
+        let allow_reroot = if candidate_under_jail && jail_is_real_project {
             false
-        } else if is_suspicious_root(jail_root_path)
-            || (self.startup_project_root.is_none() && !has_project_marker(jail_root_path))
-        {
-            true
-        } else if require_opt_in_for_real_jail {
-            let cfg_allow = std::env::var("LEAN_CTX_ALLOW_REROOT").map_or_else(
-                |_| crate::core::config::Config::load().allow_auto_reroot,
-                |v| v == "1" || v == "true",
-            );
-            cfg_allow
-                && self
-                    .startup_project_root
-                    .as_ref()
-                    .is_some_and(|trusted_root| std::path::Path::new(trusted_root) == new_root)
         } else {
-            false
+            !jail_is_real_project || self.session.read().await.project_root.is_none()
         };
 
         if !allow_reroot {
