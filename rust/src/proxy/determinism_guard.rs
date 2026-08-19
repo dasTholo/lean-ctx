@@ -61,8 +61,9 @@ impl DeterminismGuard {
 ///
 /// Both slices are canonical JSON arrays. `frozen_bytes` is their common byte
 /// prefix. The proof hashes the cached-message prefix when one exists. Without
-/// explicit `cache_control` breakpoints, all messages except the last (the new
-/// user turn) are treated as the frozen prefix.
+/// explicit `cache_control` breakpoints the proof prefix is empty (stable by
+/// definition): the proxy cannot determine the provider's auto-cache boundary,
+/// so it allows compression of any message.
 #[must_use]
 pub fn verify_determinism(before: &[Value], after: &[Value]) -> DeterminismProof {
     let request_id = blake3::hash(&canonical_messages(before))
@@ -78,11 +79,12 @@ fn verify_with_request_id(request_id: &str, before: &[Value], after: &[Value]) -
     let cached_messages = cache_breakpoint_len(before);
     let proof_prefix_bytes = if cached_messages > 0 {
         canonical_message_prefix_len(before, cached_messages)
-    } else if before.len() > 1 {
-        // No explicit cache_control breakpoints. Protect everything except the
-        // last message (the new user turn) — the only region compression may modify.
-        canonical_message_prefix_len(before, before.len() - 1)
     } else {
+        // No explicit cache_control breakpoints — we cannot determine the
+        // provider's auto-cache boundary. Tool-result dedup and content dedup
+        // may legitimately modify any message, so there is no safe frozen region
+        // to verify. The guard only adds value when the client declares a
+        // cache boundary via cache_control.
         0
     };
     let before_prefix = &before_bytes[..proof_prefix_bytes];
@@ -409,7 +411,9 @@ mod tests {
     }
 
     #[test]
-    fn earlier_message_modification_without_cache_control_is_unstable() {
+    fn any_modification_without_cache_control_is_stable() {
+        // Without cache_control markers the proxy cannot know the auto-cache
+        // boundary, so all modifications (including earlier messages) are allowed.
         let before = vec![
             json!({"role": "system", "content": "rules"}),
             json!({"role": "user", "content": "q1"}),
@@ -421,6 +425,21 @@ mod tests {
             json!({"role": "user", "content": "q1"}),
             json!({"role": "assistant", "content": "a1"}),
             json!({"role": "user", "content": "q2"}),
+        ];
+        assert!(verify_determinism(&before, &after).is_stable);
+    }
+
+    #[test]
+    fn explicit_cache_control_still_catches_violations() {
+        // With explicit cache_control the guard MUST detect modifications
+        // within the cached region.
+        let before = vec![
+            json!({"role": "system", "content": [{"type": "text", "text": "rules", "cache_control": {}}]}),
+            json!({"role": "user", "content": "q1"}),
+        ];
+        let after = vec![
+            json!({"role": "system", "content": [{"type": "text", "text": "MODIFIED", "cache_control": {}}]}),
+            json!({"role": "user", "content": "q1"}),
         ];
         assert!(!verify_determinism(&before, &after).is_stable);
     }
