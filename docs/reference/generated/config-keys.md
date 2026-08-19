@@ -52,7 +52,7 @@ Top-level configuration keys
 - `output_density` (enum: normal | terse | ultra, default `normal` — env `LEAN_CTX_OUTPUT_DENSITY`) — Controls how dense/compact MCP tool output is formatted
 - `passthrough_urls` (string[], default `[]`) — URLs to pass through without proxy interception
 - `path_jail` (bool?, default `null`) — Filesystem path jail. null/true = enforced (tools confined to the project root + allow_paths). false = the blanket "any path" opt-out — every tool path is allowed (for containers/sandboxes where the boundary is external). Compression and secret redaction are unaffected. Flip both planes at once with `lean-ctx yolo` / `lean-ctx secure`
-- `permission_inheritance` (enum: off | on, default `off`) — Mirror the host IDE's permission rules onto lean-ctx tools (v1: OpenCode). When on, ctx_shell honors your bash/rm * rules instead of bypassing them. Override via LEAN_CTX_PERMISSION_INHERITANCE
+- `permission_inheritance` (enum: off | on, default `on` — env `LEAN_CTX_PERMISSION_INHERITANCE`) — Mirror the host IDE's permission rules onto lean-ctx tools (v1: OpenCode). When on, ctx_shell honors your bash/rm * rules instead of bypassing them
 - `persona` (string, default `coding` — env `LEAN_CTX_PERSONA`) — Active context persona (persona-spec-v1): selects the domain bundle — tool surface, read-mode/compressor/chunker defaults, intent taxonomy, sensitivity floor. Built-ins: coding (default), research, lead-gen, support, data-analysis; or a custom <name>.toml from the personas dir. Override via LEAN_CTX_PERSONA
 - `prefer_native_editor` (bool, default `false`) — Disable lean-ctx edit tools (ctx_edit, ctx_patch) so the host's native editor handles edits (#454)
 - `preserve_compact_formats` (string[], default `["toon"]`) — Already-compact output formats preserved verbatim instead of recompressed (e.g. ["toon"]). Set to [] to disable
@@ -480,6 +480,29 @@ Solution Intelligence guidance and decision tracking
 - `platform_hints` (bool, default `true`) — Include platform-native solution hints
 - `track_decisions` (bool, default `true`) — Track solution decisions for efficiency guidance
 - `track_loc` (bool, default `true`) — Track lines of code changed for solution-efficiency guidance
+
+## `[solution.commercial]`
+
+Commercial solution features (require enterprise license)
+
+- `cross_project_patterns` (bool, default `false`) — Enable cross-project pattern analysis (commercial)
+- `fingerprints_enabled` (bool, default `false`) — Enable solution fingerprint prediction (commercial)
+
+## `[solution.commercial.adaptive]`
+
+Adaptive intensity ML settings (commercial)
+
+- `enabled` (bool, default `false`) — Enable adaptive intensity ML model (commercial)
+- `learning_rate` (f64, default `0.1`) — Learning rate for adaptive intensity model
+- `min_observations` (u64, default `20`) — Minimum observations before adaptive recommendations
+
+## `[solution.commercial.team_policy]`
+
+Team-wide solution policy (commercial)
+
+- `enabled` (bool, default `false`) — Enable team-wide solution policy enforcement (commercial)
+- `min_intensity` (enum: off | minimal | balanced | aggressive, default `balanced`) — Minimum solution intensity enforced for team members
+- `require_decision_logging` (bool, default `false`) — Require decision logging for all team members
 
 ## `[summaries]`
 
