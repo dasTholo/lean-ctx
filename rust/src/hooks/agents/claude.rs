@@ -27,6 +27,13 @@ pub(crate) fn install_claude_hook_with_mode(global: bool, mode: HookMode) {
         install_claude_permissions_deny_replace(&home);
     }
 
+    // Auto-approve lean-ctx MCP tools so Claude Code's auto mode / classifier
+    // does not gate or skip them.  Without this, auto mode silently falls back
+    // to native Read (uncompressed) and the model avoids MCP calls.  (#1467)
+    if matches!(mode, HookMode::Hybrid | HookMode::Mcp | HookMode::Replace) {
+        install_claude_permissions_allow_mcp(&home);
+    }
+
     let scope = crate::core::config::Config::load().rules_scope_effective();
     if scope != crate::core::config::RulesScope::Project {
         remove_claude_rules_file(&home);
@@ -53,6 +60,8 @@ fn install_claude_mcp_server(home: &std::path::Path) {
 
     let existing = std::fs::read_to_string(&config_path).unwrap_or_default();
     if existing.contains("\"lean-ctx\"") && existing.contains("mcpServers") {
+        // Entry already exists — ensure autoApprove is set (#1467).
+        ensure_claude_mcp_auto_approve(&config_path, &existing);
         return;
     }
 
@@ -61,6 +70,8 @@ fn install_claude_mcp_server(home: &std::path::Path) {
     } else {
         crate::core::jsonc::parse_jsonc(&existing)
     };
+
+    let auto_approve = crate::core::editor_registry::writers::auto_approve_tools();
 
     if let Ok(mut root) = parsed
         && let Some(obj) = root.as_object_mut()
@@ -75,7 +86,8 @@ fn install_claude_mcp_server(home: &std::path::Path) {
                 "lean-ctx".to_string(),
                 serde_json::json!({
                     "command": binary,
-                    "args": []
+                    "args": [],
+                    "autoApprove": auto_approve
                 }),
             );
             write_file(
@@ -86,6 +98,27 @@ fn install_claude_mcp_server(home: &std::path::Path) {
                 eprintln!("Added lean-ctx MCP server to {}", config_path.display());
             }
         }
+    }
+}
+
+/// Backfill `autoApprove` on existing MCP entries that lack it.
+fn ensure_claude_mcp_auto_approve(config_path: &std::path::Path, content: &str) {
+    let Ok(mut root) = crate::core::jsonc::parse_jsonc(content) else {
+        return;
+    };
+    let Some(entry) = root
+        .pointer_mut("/mcpServers/lean-ctx")
+        .and_then(|v| v.as_object_mut())
+    else {
+        return;
+    };
+    if entry.contains_key("autoApprove") {
+        return;
+    }
+    let tools = crate::core::editor_registry::writers::auto_approve_tools();
+    entry.insert("autoApprove".to_string(), serde_json::json!(tools));
+    if let Ok(out) = serde_json::to_string_pretty(&root) {
+        write_file(config_path, &out);
     }
 }
 
@@ -158,6 +191,65 @@ pub(crate) fn install_claude_permissions_deny_replace(home: &std::path::Path) {
         if !mcp_server_quiet_mode() {
             eprintln!(
                 "  \x1b[32m✓\x1b[0m Claude Code: denied native Grep/Glob (Replace mode; Read kept for edit gate + auto memory)"
+            );
+        }
+    }
+}
+
+/// Auto-approve lean-ctx MCP tools in Claude Code's `permissions.allow` so
+/// auto mode and the classifier do not block or avoid them.  This is the
+/// `settings.json` counterpart to the `autoApprove` field in `~/.claude.json`.
+fn install_claude_permissions_allow_mcp(home: &std::path::Path) {
+    let settings_path = home.join(".claude").join("settings.json");
+
+    let mut json = if settings_path.exists() {
+        let content = std::fs::read_to_string(&settings_path).unwrap_or_default();
+        if content.trim().is_empty() {
+            serde_json::json!({})
+        } else {
+            crate::core::jsonc::parse_jsonc(&content).unwrap_or_else(|_| serde_json::json!({}))
+        }
+    } else {
+        let _ = std::fs::create_dir_all(home.join(".claude"));
+        serde_json::json!({})
+    };
+
+    let Some(obj) = json.as_object_mut() else {
+        return;
+    };
+
+    let permissions = obj
+        .entry("permissions")
+        .or_insert_with(|| serde_json::json!({}));
+    let Some(perm_obj) = permissions.as_object_mut() else {
+        return;
+    };
+    let allow = perm_obj
+        .entry("allow")
+        .or_insert_with(|| serde_json::json!([]));
+    let Some(arr) = allow.as_array_mut() else {
+        return;
+    };
+
+    let tools = crate::core::editor_registry::writers::auto_approve_tools();
+    let mut changed = false;
+    for tool in &tools {
+        let perm = format!("mcp__lean-ctx__{tool}");
+        let val = serde_json::Value::String(perm);
+        if !arr.iter().any(|v| v == &val) {
+            arr.push(val);
+            changed = true;
+        }
+    }
+
+    if changed {
+        if let Ok(out) = serde_json::to_string_pretty(&json) {
+            let _ = std::fs::write(&settings_path, out);
+        }
+        if !mcp_server_quiet_mode() {
+            eprintln!(
+                "  \x1b[32m\u{2713}\x1b[0m Claude Code: auto-approved {} lean-ctx MCP tools in permissions.allow",
+                tools.len()
             );
         }
     }
