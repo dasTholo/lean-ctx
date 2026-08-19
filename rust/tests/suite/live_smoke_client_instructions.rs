@@ -238,6 +238,7 @@ fn cursor_covered_client_gets_anchor_and_lazy_core() {
     // now get the full core tool surface.
     let core: Vec<String> = lean_ctx::tool_defs::CORE_TOOL_NAMES
         .iter()
+        .filter(|&&s| s != "ctx_patch")
         .map(|s| s.to_string())
         .collect();
     for tool in &core {
@@ -246,6 +247,10 @@ fn cursor_covered_client_gets_anchor_and_lazy_core() {
             "cursor lazy-core surface must include {tool}: {tools:?}"
         );
     }
+    assert!(
+        !tools.contains(&"ctx_patch".to_string()),
+        "cursor must NOT advertise ctx_patch (native editor quirk): {tools:?}"
+    );
 }
 
 #[test]
