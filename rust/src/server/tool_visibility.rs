@@ -226,8 +226,7 @@ pub fn advertised_tool_defs_default() -> Vec<rmcp::model::Tool> {
         CandidateSet::Full | CandidateSet::ProfileAuthoritative => registry.tool_defs(),
         CandidateSet::Unified => crate::tool_defs::unified_tool_defs(),
         // GH #1474: ShadowOnly no longer returned; treat as LazyCore.
-        CandidateSet::ShadowOnly |
-        CandidateSet::LazyCore => {
+        CandidateSet::ShadowOnly | CandidateSet::LazyCore => {
             let core = crate::tool_defs::core_tool_names();
             registry
                 .tool_defs()
