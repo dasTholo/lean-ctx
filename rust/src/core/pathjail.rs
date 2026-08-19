@@ -576,23 +576,26 @@ pub fn jail_path_with_roots(
         let allowed = path_allowed_by_jail(&base, &root, &allow);
 
         if !allowed {
-            let mut hint = if crate::core::protocol::meta_visible() {
-                let dir = candidate.parent().unwrap_or(candidate).display();
+            let dir = candidate.parent().unwrap_or(candidate).display();
+            let root_display = root.display();
+            let is_suspicious = crate::tools::startup::is_suspicious_root(&root);
+            let mut hint = if is_suspicious || root == std::path::Path::new("/") {
+                ". lean-ctx could not detect your project automatically. \
+                     This usually resolves on the next tool call. \
+                     If it persists: lean-ctx doctor --fix"
+                    .to_string()
+            } else if crate::core::protocol::meta_visible() {
                 format!(
-                    ". Hint: set LEAN_CTX_ALLOW_PATH={dir} for read-write access \
-                     (colon-separated for multiple: /path/a:/path/b), \
-                     LEAN_CTX_READ_ONLY_ROOTS={dir} for read-only, \
-                     or add entries to allow_paths = [\"{dir}\"] or extra_roots = [\"{dir}\"] \
-                     in ~/.config/lean-ctx/config.toml"
+                    ". {dir} is outside the active project ({root_display}). \
+                     To access other projects: open it in a new IDE window, \
+                     or run: lean-ctx config set extra_roots {dir}"
                 )
             } else {
-                // Agents otherwise get a bare rejection and shell out to work
-                // around the jail; name the config keys the same way the
-                // shell-allowlist block message names its key. The env-var and
-                // config-path detail above stays meta-gated (#540, #887).
-                ". Fix (additive): add the directory to extra_roots or allow_paths in \
-                 ~/.config/lean-ctx/config.toml — `lean-ctx doctor` shows the config in effect"
-                    .to_string()
+                format!(
+                    ". Access denied: outside active project ({root_display}). \
+                     To allow: open that project in a new window, \
+                     or: LEAN_CTX_EXTRA_ROOTS={dir}"
+                )
             };
             // An untrusted workspace's project-local `allow_paths` is silently
             // withheld; always surface that reason (the stderr warning is
