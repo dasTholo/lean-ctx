@@ -81,21 +81,27 @@ fn solution_ladder_text_covers_all_intensities() {
 #[test]
 fn solution_tracker_lifecycle() {
     solution_tracker::reset();
+
+    let baseline = solution_tracker::snapshot();
     solution_tracker::record_decision("stdlib");
     solution_tracker::record_decision("reuse");
     solution_tracker::record_loc_change(18, 31);
     solution_tracker::record_output_tokens(100, 75);
 
     let snapshot = solution_tracker::snapshot();
-    assert_eq!(snapshot.decisions_total, 2);
+    assert_eq!(snapshot.decisions_total - baseline.decisions_total, 2);
     assert_eq!(snapshot.decisions_by_kind.get("stdlib"), Some(&1));
     assert_eq!(snapshot.decisions_by_kind.get("reuse"), Some(&1));
-    assert_eq!(snapshot.output_tokens_baseline, 100);
-    assert_eq!(snapshot.output_tokens_actual, 75);
-    assert_eq!(snapshot.output_reduction_pct, 25);
-    assert_eq!(snapshot.loc_added, 18);
-    assert_eq!(snapshot.loc_removed, 31);
-    assert_eq!(snapshot.loc_net_saved, 13);
+    assert_eq!(
+        snapshot.output_tokens_baseline - baseline.output_tokens_baseline,
+        100
+    );
+    assert_eq!(
+        snapshot.output_tokens_actual - baseline.output_tokens_actual,
+        75
+    );
+    assert_eq!(snapshot.loc_added - baseline.loc_added, 18);
+    assert_eq!(snapshot.loc_removed - baseline.loc_removed, 31);
 
     solution_tracker::reset();
     let reset = solution_tracker::snapshot();

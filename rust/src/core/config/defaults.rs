@@ -169,6 +169,7 @@ impl Default for Config {
             ide_paths: HashMap::new(),
             model_context_windows: HashMap::new(),
             response_verbosity: ResponseVerbosity::default(),
+            active_kit: None,
             bypass_hints: None,
             cache_policy: None,
             cache_max_tokens: 0,

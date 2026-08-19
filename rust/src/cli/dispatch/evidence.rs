@@ -10,6 +10,7 @@ use std::{
 use zip::ZipArchive;
 
 use super::evidence_realworld;
+use super::evidence_report;
 use super::evidence_workflow::{self, ScenarioType, WorkflowArgs};
 
 /// Arguments for evidence-bundle operations.
@@ -32,6 +33,8 @@ enum EvidenceSubcommand {
     /// List an evidence bundle's files and display its manifest.
     /// Real-world multi-turn evidence: 5 sequential API calls per arm with provider cache tracking.
     Realworld(EvidenceRealworldCommand),
+    /// Render a customer-readable HTML report from real-world evidence JSON.
+    Report(EvidenceReportCommand),
     Inspect(EvidenceInspectCommand),
 }
 
@@ -91,6 +94,17 @@ struct EvidenceRealworldCommand {
     #[arg(long)]
     api_key: Option<String>,
 }
+
+#[derive(Debug, Args)]
+struct EvidenceReportCommand {
+    /// Path to a realworld-result.json file produced by `evidence realworld`.
+    #[arg(long, value_name = "JSON", value_hint = clap::ValueHint::FilePath)]
+    input: PathBuf,
+
+    /// Destination for the self-contained HTML report.
+    #[arg(long, value_name = "HTML", value_hint = clap::ValueHint::FilePath)]
+    output: PathBuf,
+}
 #[derive(Debug, Args)]
 struct EvidenceInspectCommand {
     /// Path to the evidence-bundle ZIP archive.
@@ -134,6 +148,18 @@ pub(crate) fn run(args: &[String]) -> i32 {
                 1
             }
         },
+        EvidenceSubcommand::Report(cmd) => {
+            match evidence_report::render_file(&cmd.input, &cmd.output) {
+                Ok(()) => {
+                    println!("Evidence report written to {}", cmd.output.display());
+                    0
+                }
+                Err(error) => {
+                    eprintln!("evidence report: {error:#}");
+                    1
+                }
+            }
+        }
         EvidenceSubcommand::Inspect(command) => match inspect(&command.bundle_path) {
             Ok(()) => 0,
             Err(error) => {
