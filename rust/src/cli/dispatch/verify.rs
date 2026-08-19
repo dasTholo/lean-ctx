@@ -370,11 +370,13 @@ fn verify_manifest_signature(
             return false;
         }
     };
-    let cryptographically_valid = crate::core::agent_identity::verify_signature(
-        &public_key,
-        computed_digest.as_bytes(),
-        &signature,
-    );
+    let cryptographically_valid =
+        crate::core::agent_identity::verify_signature(&public_key, &canonical_manifest, &signature)
+            || crate::core::agent_identity::verify_signature(
+                &public_key,
+                computed_digest.as_bytes(),
+                &signature,
+            );
     if !cryptographically_valid {
         errors.push("manifest signature verification failed".to_string());
     }
