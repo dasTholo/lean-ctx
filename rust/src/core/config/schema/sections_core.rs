@@ -219,12 +219,13 @@ pub(super) fn build(sections: &mut BTreeMap<String, SectionSchema>) {
     );
     root.insert(
         "permission_inheritance".into(),
-        key_enum(
+        key_enum_with_env(
             &["off", "on"],
-            "off",
+            "on",
             "Mirror the host IDE's permission rules onto lean-ctx tools (v1: \
              OpenCode). When on, ctx_shell honors your bash/rm * rules instead of \
-             bypassing them. Override via LEAN_CTX_PERMISSION_INHERITANCE",
+             bypassing them",
+            "LEAN_CTX_PERMISSION_INHERITANCE",
         ),
     );
     root.insert(
@@ -1075,6 +1076,100 @@ pub(super) fn build(sections: &mut BTreeMap<String, SectionSchema>) {
         SectionSchema {
             description: "Solution Intelligence guidance and decision tracking".into(),
             keys: solution,
+        },
+    );
+
+    // --- solution.commercial ---
+    let mut sol_commercial = BTreeMap::new();
+    sol_commercial.insert(
+        "fingerprints_enabled".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.solution.commercial.fingerprints_enabled),
+            "Enable solution fingerprint prediction (commercial)",
+        ),
+    );
+    sol_commercial.insert(
+        "cross_project_patterns".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.solution.commercial.cross_project_patterns),
+            "Enable cross-project pattern analysis (commercial)",
+        ),
+    );
+    sections.insert(
+        "solution.commercial".into(),
+        SectionSchema {
+            description: "Commercial solution features (require enterprise license)".into(),
+            keys: sol_commercial,
+        },
+    );
+
+    // --- solution.commercial.adaptive ---
+    let mut sol_adaptive = BTreeMap::new();
+    sol_adaptive.insert(
+        "enabled".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.solution.commercial.adaptive.enabled),
+            "Enable adaptive intensity ML model (commercial)",
+        ),
+    );
+    sol_adaptive.insert(
+        "learning_rate".into(),
+        key(
+            "f64",
+            serde_json::json!(cfg.solution.commercial.adaptive.learning_rate),
+            "Learning rate for adaptive intensity model",
+        ),
+    );
+    sol_adaptive.insert(
+        "min_observations".into(),
+        key(
+            "u64",
+            serde_json::json!(cfg.solution.commercial.adaptive.min_observations),
+            "Minimum observations before adaptive recommendations",
+        ),
+    );
+    sections.insert(
+        "solution.commercial.adaptive".into(),
+        SectionSchema {
+            description: "Adaptive intensity ML settings (commercial)".into(),
+            keys: sol_adaptive,
+        },
+    );
+
+    // --- solution.commercial.team_policy ---
+    let mut sol_team = BTreeMap::new();
+    sol_team.insert(
+        "enabled".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.solution.commercial.team_policy.enabled),
+            "Enable team-wide solution policy enforcement (commercial)",
+        ),
+    );
+    sol_team.insert(
+        "min_intensity".into(),
+        key_enum(
+            &["off", "minimal", "balanced", "aggressive"],
+            &cfg.solution.commercial.team_policy.min_intensity,
+            "Minimum solution intensity enforced for team members",
+        ),
+    );
+    sol_team.insert(
+        "require_decision_logging".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.solution.commercial.team_policy.require_decision_logging),
+            "Require decision logging for all team members",
+        ),
+    );
+    sections.insert(
+        "solution.commercial.team_policy".into(),
+        SectionSchema {
+            description: "Team-wide solution policy (commercial)".into(),
+            keys: sol_team,
         },
     );
 

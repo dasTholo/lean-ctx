@@ -108,7 +108,10 @@ pub(crate) fn install_opencode_hook_with_mode(mode: HookMode) {
     // relative entries against the CWD, not the config dir) and strip any block a
     // prior shared install left in the global AGENTS.md. The rules file itself is
     // written by rules_inject. Shared mode (default) reverses the registration.
-    let dedicated_global = cfg.rules_injection_effective() == RulesInjection::Dedicated
+    // Gate on should_register_mcp() so auto_update_mcp=false prevents ALL
+    // opencode.json modifications (#sb-feedback).
+    let dedicated_global = should_reg_mcp
+        && cfg.rules_injection_effective() == RulesInjection::Dedicated
         && cfg.rules_scope_effective() != RulesScope::Project;
     if dedicated_global {
         register_opencode_instructions(&home);

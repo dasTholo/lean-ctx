@@ -106,7 +106,7 @@ impl Default for Config {
             loop_detection: LoopDetectionConfig::default(),
             rules_scope: None,
             rules_injection: None,
-            permission_inheritance: None,
+            permission_inheritance: Some("on".to_string()),
             extra_ignore_patterns: Vec::new(),
             terse_agent: TerseAgent::default(),
             compression_level: CompressionLevel::default(),

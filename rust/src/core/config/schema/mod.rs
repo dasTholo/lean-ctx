@@ -94,13 +94,23 @@ impl ConfigSchema {
     /// Looks up a key schema by its dot-separated TOML path.
     /// Returns `None` if the key is not part of the schema.
     pub fn lookup(&self, key: &str) -> Option<&KeySchema> {
-        if let Some(dot_pos) = key.find('.') {
-            let section = &key[..dot_pos];
-            let field = &key[dot_pos + 1..];
-            self.sections.get(section)?.keys.get(field)
-        } else {
-            self.sections.get("root")?.keys.get(key)
+        if !key.contains('.') {
+            return self.sections.get("root")?.keys.get(key);
         }
+        // Try progressively longer section prefixes so that dotted sections
+        // like `memory.lifecycle` or `solution.commercial.team_policy` resolve
+        // correctly: `memory.lifecycle.stale_days` → section=`memory.lifecycle`,
+        // field=`stale_days`.
+        for (i, _) in key.rmatch_indices('.') {
+            let section = &key[..i];
+            let field = &key[i + 1..];
+            if let Some(schema) = self.sections.get(section) {
+                if let Some(ks) = schema.keys.get(field) {
+                    return Some(ks);
+                }
+            }
+        }
+        None
     }
 
     /// All known TOML keys (dot-separated) for validation.
