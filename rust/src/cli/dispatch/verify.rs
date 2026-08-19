@@ -370,8 +370,20 @@ fn verify_manifest_signature(
             return false;
         }
     };
+    // Primary path: use the canonical signer/verifier from canonical.rs
+    // which strips signature fields the same way sign_manifest does.
     let cryptographically_valid =
-        crate::core::agent_identity::verify_signature(&public_key, &canonical_manifest, &signature)
+        crate::core::canonical::verify_manifest_signature(manifest, &public_key).unwrap_or(false)
+            || {
+                // Fallback: try with canonical_serialize on the empty-field unsigned manifest.
+                let canon_v2 = crate::core::canonical::canonical_serialize(&unsigned_manifest);
+                crate::core::agent_identity::verify_signature(&public_key, &canon_v2, &signature)
+            }
+            || crate::core::agent_identity::verify_signature(
+                &public_key,
+                &canonical_manifest,
+                &signature,
+            )
             || crate::core::agent_identity::verify_signature(
                 &public_key,
                 computed_digest.as_bytes(),
