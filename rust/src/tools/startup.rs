@@ -15,7 +15,7 @@ pub(super) fn has_project_marker(dir: &std::path::Path) -> bool {
     crate::core::pathutil::has_project_marker(dir)
 }
 
-pub(super) fn is_suspicious_root(dir: &std::path::Path) -> bool {
+pub(crate) fn is_suspicious_root(dir: &std::path::Path) -> bool {
     crate::core::pathutil::is_agent_config_dir(dir)
 }
 
