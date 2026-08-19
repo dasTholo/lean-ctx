@@ -234,13 +234,18 @@ fn cursor_covered_client_gets_anchor_and_lazy_core() {
         !has_skeleton(&instructions),
         "cursor instructions must NOT repeat the full skeleton.\n{instructions}"
     );
-    // Shadow-only surface: hook-covered clients (Cursor) only get ctx_call.
-    // The full tool surface is reached transparently through installed hooks.
-    assert_eq!(
-        tools,
-        vec!["ctx_call".to_string()],
-        "cursor with shadow-only surface must advertise only ctx_call: {tools:?}"
-    );
+    // GH #1474: ShadowOnly merged into LazyCore — hook-covered clients
+    // now get the full core tool surface.
+    let core: Vec<String> = lean_ctx::tool_defs::CORE_TOOL_NAMES
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    for tool in &core {
+        assert!(
+            tools.contains(tool),
+            "cursor lazy-core surface must include {tool}: {tools:?}"
+        );
+    }
 }
 
 #[test]
@@ -303,13 +308,18 @@ fn codex_covered_client_gets_anchor() {
         !has_skeleton(&instructions),
         "codex instructions must NOT repeat the full skeleton.\n{instructions}"
     );
-    // Codex with hooks → transparent shadow mode: only ctx_call is
-    // advertised, hooks handle native tool redirection at runtime.
-    assert_eq!(
-        tools,
-        vec!["ctx_call"],
-        "codex in shadow mode must expose only ctx_call: {tools:?}"
-    );
+    // GH #1474: ShadowOnly merged into LazyCore — hook-covered clients
+    // now get the full core tool surface, not just ctx_call.
+    let core: Vec<String> = lean_ctx::tool_defs::CORE_TOOL_NAMES
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    for tool in &core {
+        assert!(
+            tools.contains(tool),
+            "codex lazy-core surface must include {tool}: {tools:?}"
+        );
+    }
 }
 
 /// Zero-config golden path: the FIRST MCP session on a fresh machine must
