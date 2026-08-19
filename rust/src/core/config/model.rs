@@ -2,6 +2,10 @@ use serde::{Deserialize, Serialize};
 
 #[allow(clippy::wildcard_imports)]
 use super::*;
+fn default_true() -> bool {
+    true
+}
+
 /// Global lean-ctx configuration loaded from `config.toml`, merged with project-local overrides.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -618,10 +622,10 @@ pub struct Config {
     /// merged from project-local config) and fully permissive by default.
     #[serde(default)]
     pub addons: crate::core::addons::AddonsConfig,
-    /// Allow automatic project-root re-rooting when absolute paths outside the jail are seen.
-    /// When false (default), absolute paths outside the jail are rejected without re-rooting.
-    /// Override via LEAN_CTX_ALLOW_REROOT env var.
-    #[serde(default)]
+    /// Deprecated: auto-reroot is now always active when the jail root is
+    /// suspicious, None, or has no project marker. Kept for config-file
+    /// backward compatibility but no longer controls behavior.
+    #[serde(default = "default_true")]
     pub allow_auto_reroot: bool,
     /// Verbatim binary path/expression for generated agent-hook commands
     /// (#708). Users who sync agent settings (`~/.claude/settings.json`, …)

@@ -179,7 +179,7 @@ impl Default for Config {
             gateway_server: GatewayServerConfig::default(),
             enterprise: EnterpriseConfig::default(),
             addons: crate::core::addons::AddonsConfig::default(),
-            allow_auto_reroot: false,
+            allow_auto_reroot: true,
             hook_binary: None,
             path_jail: None,
             sandbox_level: 0,
