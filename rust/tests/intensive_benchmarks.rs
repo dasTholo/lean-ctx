@@ -1831,6 +1831,10 @@ fn bench_session_prepare_save_is_cpu_only() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "session save may fail on Windows CI due to temp dir permissions"
+)]
 fn bench_session_save_semantics() {
     use lean_ctx::core::session::SessionState;
 
