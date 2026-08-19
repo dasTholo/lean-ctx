@@ -37,6 +37,7 @@ mod index_cmd;
 mod init_cmd;
 mod instructions_cmd;
 mod introspect_cmd;
+mod kit_cmd;
 mod knowledge_cmd;
 #[allow(warnings)]
 mod learn_cmd;
@@ -112,6 +113,7 @@ pub use init_cmd::{cmd_init, cmd_init_quiet};
 pub mod import_cmd;
 pub(crate) use instructions_cmd::cmd_instructions;
 pub(crate) use introspect_cmd::cmd_introspect;
+pub(crate) use kit_cmd::cmd_kit;
 pub(crate) use knowledge_cmd::cmd_knowledge;
 pub(crate) use learn_cmd::cmd_learn;
 pub use ledger_cmd::*;

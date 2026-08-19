@@ -193,6 +193,10 @@ pub struct Config {
     /// Set via `lean-ctx config set profile passthrough` or editing config.toml.
     #[serde(default)]
     pub profile: Option<String>,
+    /// Active task-specific Context Kit. `LEAN_CTX_KIT` takes precedence.
+    /// Set with `lean-ctx kit load <name>`.
+    #[serde(default)]
+    pub active_kit: Option<String>,
     /// Named configuration overlay selected from `[profiles.<name>]`.
     /// `LEAN_CTX_CONFIG_PROFILE` takes precedence over this persisted selector.
     #[serde(default)]

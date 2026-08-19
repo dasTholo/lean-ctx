@@ -170,6 +170,13 @@ fn resolve_inner(ctx: &AutoModeContext) -> ResolvedMode {
         return resolved("full", "binary");
     }
 
+    // Context Kits are task-specific and intentionally sit ahead of the
+    // generic cache/heuristic flow. Explicit caller modes still win at the
+    // public entry points; this only resolves an automatic read.
+    if let Some(mode) = crate::kits::active_mode_for_path(ctx.path) {
+        return resolved(&mode, "context_kit");
+    }
+
     if let Some(cache) = ctx.cache
         && let Some(cached) = cache.get(ctx.path)
     {

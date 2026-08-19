@@ -220,6 +220,7 @@ COMMANDS:
     allow <cmd>                    Allow one shell command (additive; granular re-enable after yolo)
     tools [minimal|standard|power|show|list]  How many MCP tools your agent sees
     profile [list|show|diff|create|set|suggest]  Manage context profiles (suggest = recommend from repo)
+    kit [list|load|show|unload] [name]  Manage task-specific Context Kits (`kit load code-review`)
     theme [list|set|export|import] Customize terminal colors and themes
     tee [list|clear|show <file>|last] Manage output tee files (~/.lean-ctx/tee/)
     compression [off|lite|standard|max]  Set compression level (saves 25-65% tokens; alias: terse)

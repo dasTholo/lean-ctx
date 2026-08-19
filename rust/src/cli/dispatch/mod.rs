@@ -6,6 +6,7 @@ pub mod analytics;
 mod evidence;
 pub(crate) mod evidence_cost;
 pub(crate) mod evidence_realworld;
+pub(crate) mod evidence_report;
 pub(crate) mod evidence_workflow;
 mod help;
 mod lifecycle;
@@ -435,6 +436,10 @@ pub fn run() {
             }
             "knowledge" => {
                 super::cmd_knowledge(&rest);
+                return;
+            }
+            "kit" | "kits" => {
+                super::cmd_kit(&rest);
                 return;
             }
             "skillify" => {
