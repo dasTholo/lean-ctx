@@ -1003,3 +1003,33 @@ fn openclaw_version_parsing_handles_real_world_formats() {
     assert_eq!(v("not-a-version"), None);
     assert_eq!(v(""), None);
 }
+
+#[test]
+fn claude_code_gets_auto_approve() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("claude.json");
+
+    let t = EditorTarget {
+        name: "Claude Code",
+        agent_key: "claude-code".to_string(),
+        config_path: path.clone(),
+        detect_path: PathBuf::from("/nonexistent"),
+        config_type: ConfigType::McpJson,
+    };
+    let res = write_mcp_json(&t, "/usr/local/bin/lean-ctx", WriteOptions::default()).unwrap();
+    assert_eq!(res.action, WriteAction::Created);
+
+    let json: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let aa = &json["mcpServers"]["lean-ctx"]["autoApprove"];
+    assert!(aa.is_array(), "Claude Code must get autoApprove");
+    let arr = aa.as_array().unwrap();
+    assert!(!arr.is_empty(), "autoApprove must not be empty");
+    assert!(
+        arr.iter().any(|v| v.as_str() == Some("ctx_read")),
+        "ctx_read must be auto-approved"
+    );
+    assert!(
+        arr.iter().any(|v| v.as_str() == Some("ctx_shell")),
+        "ctx_shell must be auto-approved"
+    );
+}

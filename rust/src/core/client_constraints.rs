@@ -24,14 +24,14 @@ pub(crate) const ALL_CLIENTS: &[ClientConstraints] = &[
         id: "claude-code",
         display_name: "Claude Code",
         mcp_instructions_max_chars: Some(2048),
-        supports_auto_approve: false,
+        supports_auto_approve: true,
         supports_config_instructions: true,
     },
     ClientConstraints {
         id: "codebuddy",
         display_name: "CodeBuddy",
         mcp_instructions_max_chars: Some(2048),
-        supports_auto_approve: false,
+        supports_auto_approve: true,
         supports_config_instructions: true,
     },
     ClientConstraints {
