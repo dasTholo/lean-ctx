@@ -112,11 +112,12 @@ fn ensure_claude_mcp_auto_approve(config_path: &std::path::Path, content: &str) 
     else {
         return;
     };
-    if entry.contains_key("autoApprove") {
+    let desired = crate::core::editor_registry::writers::auto_approve_tools();
+    let desired_json = serde_json::json!(desired);
+    if entry.get("autoApprove") == Some(&desired_json) {
         return;
     }
-    let tools = crate::core::editor_registry::writers::auto_approve_tools();
-    entry.insert("autoApprove".to_string(), serde_json::json!(tools));
+    entry.insert("autoApprove".to_string(), desired_json);
     if let Ok(out) = serde_json::to_string_pretty(&root) {
         write_file(config_path, &out);
     }

@@ -331,19 +331,8 @@ impl ServerHandler for LeanCtxServer {
                     }
                 }
                 CandidateSet::Unified => crate::tool_defs::unified_tool_defs(),
-                CandidateSet::ShadowOnly => {
-                    if let Some(ref reg) = self.registry {
-                        reg.tool_defs()
-                            .into_iter()
-                            .filter(|t| t.name.as_ref() == "ctx_call")
-                            .collect()
-                    } else {
-                        crate::tool_defs::lazy_tool_defs()
-                            .into_iter()
-                            .filter(|t| t.name.as_ref() == "ctx_call")
-                            .collect()
-                    }
-                }
+                // GH #1474: ShadowOnly is never returned anymore; treat as LazyCore.
+                CandidateSet::ShadowOnly |
                 CandidateSet::LazyCore => {
                     if let Some(ref reg) = self.registry {
                         let core_names = crate::tool_defs::core_tool_names();
