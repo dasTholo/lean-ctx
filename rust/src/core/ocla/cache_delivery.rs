@@ -32,25 +32,41 @@ pub fn coordinator() -> Option<&'static BuiltinCacheCoordinator> {
         .as_ref()
 }
 
+/// Whether a cached entry may be served as a stub/reference in `current`.
+///
+/// Cross-agent cache hits are withheld unless the producing conversation matches
+/// the requester's — same gate as the `[unchanged]` re-read stub (#1478).
+pub(crate) fn entry_allows_stub(entry: &DeliveryEntryV2, current: Option<&str>) -> bool {
+    crate::core::conversation::conversation_allows_stub(
+        current,
+        Some(entry.producer.conversation_id.as_str()),
+    )
+}
+
 /// Looks up an adapter result across all tiers including cross-process daemon.
 pub fn check(key: &CacheKey, validator: &CacheValidator, adapter: &str) -> Option<DeliveryEntryV2> {
     let coordinator = coordinator()?;
+    let current_conversation = crate::core::conversation::current_conversation_id_fresh();
+    let current = current_conversation.as_deref();
     // L1 + local L2 + L3 (in-process)
     if let Some(entry) = coordinator.check(key, validator) {
-        emit_stats(coordinator, adapter);
-        return Some(entry);
+        if entry_allows_stub(&entry, current) {
+            emit_stats(coordinator, adapter);
+            return Some(entry);
+        }
     }
     // Cross-process: ask daemon (other processes may have recorded this)
     let agent = agent_id();
-    let conv_id =
-        crate::core::conversation::current_conversation_id().unwrap_or_else(|| agent.clone());
+    let conv_id = current_conversation.unwrap_or_else(|| agent.clone());
     if let Some(entry) =
         crate::daemon_client::try_cache_check_blocking(key, validator, Some(&agent), Some(&conv_id))
     {
-        // Promote to L1 so subsequent calls skip IPC
-        coordinator.record(entry.clone());
-        emit_stats(coordinator, adapter);
-        return Some(entry);
+        if entry_allows_stub(&entry, Some(conv_id.as_str())) {
+            // Promote to L1 so subsequent calls skip IPC
+            coordinator.record(entry.clone());
+            emit_stats(coordinator, adapter);
+            return Some(entry);
+        }
     }
     emit_stats(coordinator, adapter);
     None
@@ -76,6 +92,8 @@ pub fn record(
         .saturating_mul(60_000);
     let digest = blake3::hash(content.as_bytes()).to_hex().to_string();
     let agent_id = agent_id();
+    let conversation_id =
+        crate::core::conversation::current_conversation_id().unwrap_or_else(|| agent_id.clone());
     let entry = DeliveryEntryV2 {
         schema_version: 2,
         key,
@@ -91,7 +109,7 @@ pub fn record(
         line_count: Some(content.lines().count() as u32),
         token_count: crate::core::tokens::count_tokens(content) as u64,
         producer: CacheIdentity {
-            conversation_id: agent_id.clone(),
+            conversation_id,
             agent_id,
             host: agent_host(),
         },
@@ -151,5 +169,48 @@ fn agent_host() -> AgentHost {
         AgentHost::Codex
     } else {
         AgentHost::Cli
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::ocla::cache_types::{AgentHost, ContentHandleRef, DeliveryKind};
+
+    fn entry_with_conversation(conversation_id: &str) -> DeliveryEntryV2 {
+        DeliveryEntryV2 {
+            schema_version: 2,
+            key: CacheKey("cache:v1:test:key".into()),
+            kind: DeliveryKind::FileRead,
+            validator: CacheValidator::Immutable,
+            handle: ContentHandleRef {
+                algorithm: "blake3".into(),
+                digest: "a".repeat(64),
+                byte_len: 10,
+                media_type: "text/plain".into(),
+            },
+            display_path: Some("test.rs".into()),
+            line_count: Some(1),
+            token_count: 5,
+            producer: CacheIdentity {
+                agent_id: "agent-a".into(),
+                conversation_id: conversation_id.into(),
+                host: AgentHost::Cli,
+            },
+            created_at_epoch_ms: 1,
+            expires_at_epoch_ms: 9_999_999,
+        }
+    }
+
+    #[test]
+    fn entry_allows_stub_when_conversation_matches() {
+        let entry = entry_with_conversation("conv-a");
+        assert!(entry_allows_stub(&entry, Some("conv-a")));
+    }
+
+    #[test]
+    fn entry_allows_stub_withholds_across_conversations() {
+        let entry = entry_with_conversation("conv-a");
+        assert!(!entry_allows_stub(&entry, Some("conv-b")));
     }
 }

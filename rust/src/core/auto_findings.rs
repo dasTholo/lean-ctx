@@ -335,44 +335,48 @@ fn extract_ctx_semantic_search(output: &str) -> Option<AutoFinding> {
 
 // --- Helpers ---
 
+/// Path segments treated as noise in auto-findings and repo-wide walks (#1480).
+pub(crate) const NOISE_PATH_SEGMENTS: &[&str] = &[
+    ".git",
+    "node_modules",
+    ".ssh",
+    ".gnupg",
+    ".aws",
+    ".cargo",
+    ".rustup",
+    "target",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "site-packages",
+    "dist-packages",
+    ".next",
+    ".cache",
+    "dist",
+    "build",
+    "vendor",
+    ".terraform",
+    ".worktrees",
+    "Library",
+    "ShipIt",
+    "SolutionPackages",
+    "agent-transcripts",
+    "terminals",
+    ".codex-worktrees",
+    ".cursor",
+    ".claude",
+    "worktrees",
+];
+
 /// Returns true for paths whose findings are noise rather than signal:
 /// VCS/dependency/build dirs, virtualenvs, caches, the user's home dotfiles
 /// (e.g. `~/.ssh/config`), and binary/log files. Such findings polluted the
 /// session and knowledge store (see EPIC 6 / #2363).
 pub(crate) fn is_noise_path(path: &str) -> bool {
     let p = path.replace('\\', "/");
-    const NOISE_SEGMENTS: &[&str] = &[
-        ".git",
-        "node_modules",
-        ".ssh",
-        ".gnupg",
-        ".aws",
-        ".cargo",
-        ".rustup",
-        "target",
-        ".venv",
-        "venv",
-        "__pycache__",
-        "site-packages",
-        "dist-packages",
-        ".next",
-        ".cache",
-        "dist",
-        "build",
-        "vendor",
-        ".terraform",
-        ".worktrees",
-        "Library",
-        "ShipIt",
-        "SolutionPackages",
-        "agent-transcripts",
-        "terminals",
-        ".codex-worktrees",
-        ".cursor",
-    ];
     // Match a noise directory anywhere in the path (leading, middle, or with a
     // leading slash). Splitting on components handles relative paths too.
-    if p.split('/').any(|c| NOISE_SEGMENTS.contains(&c)) {
+    if p.split('/').any(|c| NOISE_PATH_SEGMENTS.contains(&c)) {
         return true;
     }
     // Home dotfiles outside any workspace (e.g. ~/.ssh/config, ~/.zshrc).

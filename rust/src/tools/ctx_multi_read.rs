@@ -76,6 +76,7 @@ pub fn handle_with_task_fresh_result(
             mode
         };
         let cache_key = file_read_cache_key(path, effective_mode, crp_mode, task);
+        let current_conversation = crate::core::conversation::current_conversation_id_fresh();
         let cross_agent = (!fresh)
             .then(|| {
                 crate::core::ocla::cache_delivery::check(
@@ -84,7 +85,13 @@ pub fn handle_with_task_fresh_result(
                     "ctx_multi_read",
                 )
             })
-            .flatten();
+            .flatten()
+            .filter(|entry| {
+                crate::core::ocla::cache_delivery::entry_allows_stub(
+                    entry,
+                    current_conversation.as_deref(),
+                )
+            });
         let (chunk, cross_agent_original, reuse_outcome) = if let Some(entry) = cross_agent {
             (
                 crate::core::ocla::cache_delivery::stub(&entry, "file read"),

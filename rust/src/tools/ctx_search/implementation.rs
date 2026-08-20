@@ -175,7 +175,7 @@ pub fn handle_filtered(
     let mut files_searched = 0u32;
     let mut files_skipped_size = 0u32;
     let mut files_skipped_encoding = 0u32;
-    let mut files_skipped_boundary = 0u32;
+    let mut skipped_boundary_files: Vec<(String, &'static str)> = Vec::new();
     let mut files_skipped_special = 0u32;
     let mut deadline_hit = false;
     // Set when any hit gained an `∈name@Lstart` enclosing tag, so the
@@ -194,6 +194,13 @@ pub fn handle_filtered(
         files = idx
             .candidate_paths(pattern, &include_patterns, root)
             .into_paths();
+        if !allow_secret_paths {
+            skipped_boundary_files = crate::core::search_index::boundary_skipped_files(
+                dir,
+                respect_gitignore,
+                &include_patterns,
+            );
+        }
         true
     } else {
         false
@@ -235,15 +242,18 @@ pub fn handle_filtered(
                 continue;
             }
 
-            if !allow_secret_paths && crate::core::io_boundary::is_secret_like(path).is_some() {
-                files_skipped_boundary += 1;
-                continue;
-            }
-
             if !include_patterns.is_empty() {
                 let rel = path.strip_prefix(root).unwrap_or(path);
                 let rel_str = rel.to_string_lossy();
                 if !include_patterns.iter().any(|p| p.matches(&rel_str)) {
+                    continue;
+                }
+            }
+
+            if !allow_secret_paths {
+                if let Some(reason) = crate::core::io_boundary::is_secret_like(path) {
+                    let rel = path.strip_prefix(root).unwrap_or(path);
+                    skipped_boundary_files.push((rel.to_string_lossy().into_owned(), reason));
                     continue;
                 }
             }
@@ -253,6 +263,7 @@ pub fn handle_filtered(
             // exact same eligibility rules.
             files.push(path.to_path_buf());
         }
+        skipped_boundary_files.sort_unstable();
     }
 
     // #870: drop excluded paths after both the index and walk populate `files`,
@@ -408,10 +419,8 @@ pub fn handle_filtered(
                 " ({files_skipped_encoding} files skipped: binary/encoding)"
             ));
         }
-        if files_skipped_boundary > 0 {
-            msg.push_str(&format!(
-                " ({files_skipped_boundary} secret-like files skipped by boundary policy)"
-            ));
+        if let Some(note) = format_boundary_skips(&skipped_boundary_files, false) {
+            msg.push_str(&note);
         }
         if files_skipped_special > 0 {
             msg.push_str(&format!(
@@ -475,10 +484,8 @@ pub fn handle_filtered(
             "\n({files_skipped_encoding} files skipped: binary/encoding)"
         ));
     }
-    if files_skipped_boundary > 0 {
-        result.push_str(&format!(
-            "\n({files_skipped_boundary} secret-like files skipped by boundary policy)"
-        ));
+    if let Some(note) = format_boundary_skips(&skipped_boundary_files, true) {
+        result.push_str(&note);
     }
     if files_skipped_special > 0 {
         result.push_str(&format!(
@@ -527,6 +534,30 @@ pub fn handle_filtered(
     }
 
     SearchOutcome::from_observed(result, raw_tokens_accum)
+}
+
+/// Render boundary-skip audit note (#1481): paths + reason codes, capped at 10.
+fn format_boundary_skips(skipped: &[(String, &'static str)], newline: bool) -> Option<String> {
+    if skipped.is_empty() {
+        return None;
+    }
+    const MAX_SHOW: usize = 10;
+    let n = skipped.len();
+    let details: Vec<String> = skipped
+        .iter()
+        .take(MAX_SHOW)
+        .map(|(p, r)| format!("{p} [{r}]"))
+        .collect();
+    let prefix = if newline { "\n(" } else { " (" };
+    let mut msg = format!(
+        "{prefix}{n} secret-like files skipped by boundary policy: {}",
+        details.join(", ")
+    );
+    if n > MAX_SHOW {
+        msg.push_str(&format!(", and {} more...", n - MAX_SHOW));
+    }
+    msg.push(')');
+    Some(msg)
 }
 
 pub(crate) fn is_binary_ext(path: &Path) -> bool {
