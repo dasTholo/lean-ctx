@@ -451,7 +451,7 @@ Parameters: `action`, `description`, `path`
 
 ## `ctx_patch`
 
-Safe file edit. Anchored ops use line+hash from ctx_read(mode="anchored"); CONFLICT means re-read. replace_unique(path,old_text,new_text) is a no-read, exact unique replacement. replace_symbol/create/replace_all and cross-file ops[] (incl. replace_unique) supported.
+Safe file edit. Anchored ops use line+hash from ctx_read(mode="anchored"); CONFLICT means re-read. replace_unique(path,old_text,new_text) is a no-read, exact unique replacement. replace_symbol/create/replace_all supported as top-level ops. Cross-file ops[] batch (incl. replace_unique) supported; replace_all and create must be sent as separate top-level calls, not inside ops[].
 
 Parameters: `dry_run`, `end_hash`, `end_line`, `find`, `hash`, `line`, `name`, `new_text`, `old_text`, `op`, `ops`, `path`, `replace`, `start_hash`, `start_line`
 
