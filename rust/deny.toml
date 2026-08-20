@@ -11,6 +11,23 @@ unmaintained = "all"
 yanked = "deny"
 unused-ignored-advisory = "warn"
 ignore = [
+    # arrayref 0.3.9 (YANKED, not an advisory — hence the bare package spec
+    # rather than a RUSTSEC id): the yank is resolved DOWN, deliberately.
+    # 0.3.10 is the only successor and declares `proc-macro1` as a NORMAL
+    # dependency — a clone of proc-macro2 1.0.107 published under a spoofed
+    # author mail, whose build.rs reassembles a base64-split URL, replaces
+    # certificate validation with a ServerCertVerifier that accepts anything,
+    # then downloads, chmods and spawns a payload at compile time.
+    # MEASURED: the sparse index lists `proc-macro1 kind=normal` for 0.3.10 and
+    # nothing for 0.3.9; `arrayref-0.3.10/Cargo.toml` in the checksum-verified
+    # .crate carries the same edge. proc-macro1 is one character off
+    # proc-macro2 and has since been removed from crates.io (404) — arrayref
+    # 0.3.10 itself is still un-yanked. Chain here: lean-ctx -> blake3 1.8.6 ->
+    # arrayref. Staying on the yanked version is the SMALLER risk.
+    # Revisit when blake3 resolves an arrayref that is neither yanked nor
+    # carries that edge — cargo deny says so itself via advisory-not-detected.
+    "arrayref@0.3.9",
+
     # Transitive deps — no direct replacement available yet:
     "RUSTSEC-2023-0089", # atomic-polyfill (transitive via hash32/heapless)
     "RUSTSEC-2024-0436", # paste (transitive, awaiting upstream migration)
