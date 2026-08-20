@@ -81,7 +81,7 @@ pub fn apply_tool_annotations(tools: Vec<Tool>) -> Vec<Tool> {
                         .idempotent(true),
                 )
             } else if DESTRUCTIVE_TOOL_NAMES.contains(&name) {
-                t.annotate(ToolAnnotations::new().destructive(true))
+                t.annotate(ToolAnnotations::new().read_only(false).destructive(true))
             } else {
                 t
             }
