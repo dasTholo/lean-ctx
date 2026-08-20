@@ -62,8 +62,36 @@ pub(in crate::server) async fn dispatch_and_post_process(
         crate::core::decision_loop_runtime::DecisionLoopRuntime::get_or_init()
             .profile_for_session(&session.id)
     };
-    result_text =
-        apply_task_triage_filter(result_text, task_profile.as_ref(), &mut decision_context);
+    // #1484: respect lossless escape hatches — never triage when the caller
+    // explicitly requested unfiltered output (raw, aggressiveness=0, fresh=true).
+    let triage_bypass = args.is_some_and(|a| {
+        a.get("raw")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+            || a.get("mode")
+                .and_then(|v| v.as_str())
+                .is_some_and(|m| m == "raw")
+            || a.get("aggressiveness")
+                .and_then(serde_json::Value::as_f64)
+                .is_some_and(|v| v == 0.0)
+            || a.get("fresh")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+    });
+    if !triage_bypass {
+        result_text =
+            apply_task_triage_filter(result_text, task_profile.as_ref(), &mut decision_context);
+    }
+
+    // #1484 (bug 3): if triage filtered lines, invalidate the dedup cache for
+    // the tool path so subsequent reads deliver full content instead of a stub.
+    if let Some(ref ctx) = decision_context {
+        if ctx.filtered_lines > 0 {
+            if let Some(path) = args.and_then(|a| a.get("path").and_then(|p| p.as_str())) {
+                crate::tools::ctx_read::dedup_hook::on_write(path);
+            }
+        }
+    }
 
     // Image/binary content blocks: skip all post-processing, return directly.
     if let Some(blocks) = content_blocks {

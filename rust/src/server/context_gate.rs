@@ -563,33 +563,60 @@ pub fn apply_triage_filter(
             return (output.to_string(), 0);
         }
     }
-    let filtered: Vec<&str> = match level {
+    // Build a set of kept lines for O(1) lookup.
+    let keep: std::collections::HashSet<usize> = match level {
         1 => lines
             .iter()
-            .copied()
-            .filter(|line| !is_boilerplate_line(line.trim_start()))
+            .enumerate()
+            .filter(|(_, line)| !is_boilerplate_line(line.trim_start()))
+            .map(|(i, _)| i)
             .collect(),
         2 => {
             let keywords = extract_task_keywords(&profile.task_class, &profile.intent);
             lines
                 .iter()
-                .copied()
-                .filter(|line| {
+                .enumerate()
+                .filter(|(_, line)| {
                     let trimmed = line.trim();
                     is_structural_line(trimmed) || {
                         let lowercase = trimmed.to_lowercase();
                         keywords.iter().any(|keyword| lowercase.contains(keyword))
                     }
                 })
+                .map(|(i, _)| i)
                 .collect()
         }
         _ => return (output.to_string(), 0),
     };
 
-    let removed = lines.len().saturating_sub(filtered.len());
-    let mut result = filtered.join("\n");
+    // #1484: assemble output with inline elision markers so omissions are visible.
+    let removed = lines.len().saturating_sub(keep.len());
+    if removed == 0 {
+        return (output.to_string(), 0);
+    }
+    let mut result = String::with_capacity(output.len());
+    let mut consecutive_omitted: usize = 0;
+    for (i, line) in lines.iter().enumerate() {
+        if keep.contains(&i) {
+            if consecutive_omitted > 0 {
+                result.push_str(&format!(
+                    "  [...{consecutive_omitted} lines omitted by triage...]\n"
+                ));
+                consecutive_omitted = 0;
+            }
+            result.push_str(line);
+            result.push('\n');
+        } else {
+            consecutive_omitted += 1;
+        }
+    }
+    if consecutive_omitted > 0 {
+        result.push_str(&format!(
+            "  [...{consecutive_omitted} lines omitted by triage...]\n"
+        ));
+    }
     result.push_str(&format!(
-        "\n[lean-ctx: {removed} lines filtered by triage (level {level})]"
+        "[lean-ctx: {removed} lines filtered by triage (level {level})]"
     ));
     (result, removed)
 }
