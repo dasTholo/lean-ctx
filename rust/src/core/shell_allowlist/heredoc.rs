@@ -62,6 +62,8 @@ pub(crate) fn heredoc_delims(line: &str, quoted_only: bool) -> Vec<String> {
     let mut i = 0;
     let mut in_single = false;
     let mut in_double = false;
+    // Nesting depth of `$()` opened while inside double quotes (#1482).
+    let mut subst_depth = 0usize;
     let mut delims = Vec::new();
     while i < len {
         let ch = bytes[i];
@@ -75,6 +77,11 @@ pub(crate) fn heredoc_delims(line: &str, quoted_only: bool) -> Vec<String> {
         if in_double {
             match ch {
                 b'\\' => i = (i + 2).min(len),
+                b'$' if i + 1 < len && bytes[i + 1] == b'(' => {
+                    subst_depth += 1;
+                    in_double = false;
+                    i += 2;
+                }
                 b'"' => {
                     in_double = false;
                     i += 1;
@@ -89,8 +96,23 @@ pub(crate) fn heredoc_delims(line: &str, quoted_only: bool) -> Vec<String> {
                 in_single = true;
                 i += 1;
             }
+            b'"' if subst_depth > 0 => {
+                // Nested quote inside `$()` — not the outer closing quote.
+                i += 1;
+            }
             b'"' => {
                 in_double = true;
+                i += 1;
+            }
+            b'$' if subst_depth > 0 && i + 1 < len && bytes[i + 1] == b'(' => {
+                subst_depth += 1;
+                i += 2;
+            }
+            b')' if subst_depth > 0 => {
+                subst_depth -= 1;
+                if subst_depth == 0 {
+                    in_double = true;
+                }
                 i += 1;
             }
             b'<' if i + 1 < len && bytes[i + 1] == b'<' => {

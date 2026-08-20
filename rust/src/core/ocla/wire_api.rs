@@ -546,6 +546,19 @@ struct CacheCheckRequest {
     requester_conversation_id: Option<String>,
 }
 
+fn cache_cross_agent_hit(
+    entry: &crate::core::ocla::cache_types::DeliveryEntryV2,
+    requester_agent_id: Option<&str>,
+    requester_conversation_id: Option<&str>,
+) -> bool {
+    let same_agent = requester_agent_id.is_some_and(|a| a == entry.producer.agent_id);
+    let same_conv = requester_conversation_id.is_some_and(|c| c == entry.producer.conversation_id);
+    if same_agent && same_conv {
+        return false;
+    }
+    crate::core::ocla::cache_delivery::entry_allows_stub(entry, requester_conversation_id)
+}
+
 async fn cache_check(Json(req): Json<CacheCheckRequest>) -> Json<Value> {
     let coordinator = crate::core::ocla::cache_coordinator::materialized_cache();
     use crate::core::ocla::cache_coordinator::CacheCoordinator;
@@ -553,18 +566,14 @@ async fn cache_check(Json(req): Json<CacheCheckRequest>) -> Json<Value> {
     let validator = parse_validator(&req.validator);
     match coordinator.check(&key, &validator) {
         Some(entry) => {
-            let same_agent = req
-                .requester_agent_id
-                .as_deref()
-                .is_some_and(|a| a == entry.producer.agent_id);
-            let same_conv = req
-                .requester_conversation_id
-                .as_deref()
-                .is_some_and(|c| c == entry.producer.conversation_id);
-            if same_agent && same_conv {
-                Json(json!({"hit": false}))
-            } else {
+            if cache_cross_agent_hit(
+                &entry,
+                req.requester_agent_id.as_deref(),
+                req.requester_conversation_id.as_deref(),
+            ) {
                 Json(json!({"hit": true, "entry": entry}))
+            } else {
+                Json(json!({"hit": false}))
             }
         }
         None => Json(json!({"hit": false})),
@@ -604,23 +613,19 @@ async fn cache_batch_check(
             let validator = parse_validator(&check.validator);
             match coordinator.check(&key, &validator) {
                 Some(entry) => {
-                    let same = check
-                        .requester_agent_id
-                        .as_deref()
-                        .is_some_and(|a| a == entry.producer.agent_id)
-                        && check
-                            .requester_conversation_id
-                            .as_deref()
-                            .is_some_and(|c| c == entry.producer.conversation_id);
-                    if same {
-                        CacheBatchCheckResult {
-                            hit: false,
-                            entry: None,
-                        }
-                    } else {
+                    if cache_cross_agent_hit(
+                        &entry,
+                        check.requester_agent_id.as_deref(),
+                        check.requester_conversation_id.as_deref(),
+                    ) {
                         CacheBatchCheckResult {
                             hit: true,
                             entry: Some(entry),
+                        }
+                    } else {
+                        CacheBatchCheckResult {
+                            hit: false,
+                            entry: None,
                         }
                     }
                 }
@@ -1211,7 +1216,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cache_record_then_check_returns_hit() {
+    async fn cache_check_withholds_hit_across_conversations() {
         let key_str = "cache:v1:shell_command:test_record_check";
         let entry = cache_entry_fixture(key_str);
 
@@ -1233,6 +1238,48 @@ mod tests {
             "validator": "immutable",
             "requester_agent_id": "agent-B",
             "requester_conversation_id": "conv-B"
+        });
+        let check_resp = ocla_router()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/ocla/v1/cache/check")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(serde_json::to_string(&check_body).unwrap()))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(check_resp.status(), StatusCode::OK);
+        let val = json_response(check_resp).await;
+        assert_eq!(
+            val["hit"], false,
+            "a new conversation must not receive a cross-agent stub (#1478)"
+        );
+    }
+
+    #[tokio::test]
+    async fn cache_check_returns_hit_for_same_conversation_different_agent() {
+        let key_str = "cache:v1:shell_command:test_same_conv_cross_agent";
+        let entry = cache_entry_fixture(key_str);
+
+        ocla_router()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/ocla/v1/cache/record")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(serde_json::to_string(&entry).unwrap()))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        let check_body = json!({
+            "key": key_str,
+            "validator": "immutable",
+            "requester_agent_id": "agent-B",
+            "requester_conversation_id": "conv-A"
         });
         let check_resp = ocla_router()
             .oneshot(
@@ -1315,7 +1362,7 @@ mod tests {
 
         let batch = json!({
             "checks": [
-                {"key": key_a, "validator": "immutable", "requester_agent_id": "agent-B", "requester_conversation_id": "conv-B"},
+                {"key": key_a, "validator": "immutable", "requester_agent_id": "agent-B", "requester_conversation_id": "conv-A"},
                 {"key": "cache:v1:shell_command:nonexistent", "validator": "immutable"},
                 {"key": key_b, "validator": "immutable", "requester_agent_id": "agent-B", "requester_conversation_id": "conv-B"}
             ]
@@ -1335,8 +1382,11 @@ mod tests {
         let results: Vec<Value> =
             serde_json::from_slice(&to_bytes(resp.into_body(), usize::MAX).await.unwrap()).unwrap();
         assert_eq!(results.len(), 3);
-        assert_eq!(results[0]["hit"], true, "key_a should hit");
+        assert_eq!(results[0]["hit"], true, "same conversation should hit");
         assert_eq!(results[1]["hit"], false, "nonexistent should miss");
-        assert_eq!(results[2]["hit"], true, "key_b should hit");
+        assert_eq!(
+            results[2]["hit"], false,
+            "different conversation must not receive a stub (#1478)"
+        );
     }
 }

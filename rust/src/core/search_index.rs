@@ -178,6 +178,7 @@ impl SearchIndex {
             root,
             respect_gitignore,
             allow_secret_paths,
+            None,
             |path, state| {
                 sig_sum = sig_sum.wrapping_add(file_sig(path, state));
                 file_count += 1;
@@ -391,6 +392,63 @@ fn glob_matches(path: &Path, includes: &[Pattern], root: &Path) -> bool {
     includes.iter().any(|p| p.matches(&rel_str))
 }
 
+/// Secret-like files under `root` that match `includes`, for boundary-skip
+/// reporting on the trigram-index fast path (#1481). The include filter runs
+/// before the secret-like check so the note reflects only files the query
+/// would have searched.
+pub fn boundary_skipped_files(
+    root: &str,
+    respect_gitignore: bool,
+    includes: &[Pattern],
+) -> Vec<(String, &'static str)> {
+    let root_path = Path::new(root);
+    if !root_path.exists() {
+        return Vec::new();
+    }
+    if !crate::core::graph_index::is_safe_scan_root_public(root) {
+        return Vec::new();
+    }
+
+    let walker = WalkBuilder::new(root_path)
+        .hidden(false)
+        .max_depth(Some(crate::tools::ctx_search::MAX_WALK_DEPTH))
+        .git_ignore(respect_gitignore)
+        .git_global(respect_gitignore)
+        .git_exclude(respect_gitignore)
+        .require_git(false)
+        .filter_entry(move |e| {
+            if respect_gitignore {
+                crate::core::walk_filter::keep_entry(e)
+            } else {
+                crate::core::cloud_files::keep_entry(e)
+            }
+        })
+        .build();
+
+    let mut skipped = Vec::new();
+    for entry in walker.filter_map(std::result::Result::ok) {
+        if entry.file_type().is_none_or(|ft| ft.is_dir()) {
+            continue;
+        }
+        if entry.file_type().is_some_and(|ft| ft.is_symlink()) {
+            continue;
+        }
+        let path = entry.path();
+        if is_binary_ext(path) || is_generated_file(path) {
+            continue;
+        }
+        if !includes.is_empty() && !glob_matches(path, includes, root_path) {
+            continue;
+        }
+        if let Some(reason) = crate::core::io_boundary::is_secret_like(path) {
+            let rel = path.strip_prefix(root_path).unwrap_or(path);
+            skipped.push((rel.to_string_lossy().into_owned(), reason));
+        }
+    }
+    skipped.sort_unstable();
+    skipped
+}
+
 /// Intersection of two ascending, deduped `u32` slices.
 fn intersect_sorted(a: &[u32], b: &[u32]) -> Vec<u32> {
     let mut out = Vec::new();
@@ -427,6 +485,7 @@ fn walk_index_corpus<F>(
     root: &str,
     respect_gitignore: bool,
     allow_secret_paths: bool,
+    includes: Option<&[Pattern]>,
     mut visit: F,
 ) -> Option<()>
 where
@@ -464,6 +523,11 @@ where
         let path = entry.path();
         if is_binary_ext(path) || is_generated_file(path) {
             continue;
+        }
+        if let Some(includes) = includes {
+            if !includes.is_empty() && !glob_matches(path, includes, root_path) {
+                continue;
+            }
         }
         if !allow_secret_paths && crate::core::io_boundary::is_secret_like(path).is_some() {
             continue;
@@ -522,6 +586,7 @@ fn corpus_signature(root: &str, respect_gitignore: bool, allow_secret_paths: boo
         root,
         respect_gitignore,
         allow_secret_paths,
+        None,
         |path, state| {
             sum = sum.wrapping_add(file_sig(path, state));
             count += 1;

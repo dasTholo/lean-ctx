@@ -1,7 +1,7 @@
 //! Central `filter_entry` predicate shared by every directory walker
 //! (graph/index builders, `ctx_search`, `ctx_tree`, `ctx_glob`, CLI scans).
 //!
-//! Combines two protections:
+//! Combines three protections:
 //! 1. Cloud-placeholder pruning (`cloud_files::keep_entry`) so walks never
 //!    hydrate OneDrive/iCloud stubs.
 //! 2. A conservative vendor-directory skip list (#400). Package-manager
@@ -9,6 +9,8 @@
 //!    overview/index when no `.gitignore` applies — e.g. a project without a
 //!    `.git` directory, where the `ignore` crate skips `.gitignore` files
 //!    entirely unless `require_git(false)` is set.
+//! 3. Stale agent worktree copies (`.claude/worktrees`, `.codex-worktrees`, …)
+//!    that crowd out canonical files in repo-wide scans (#1480).
 //!
 //! Explicitly requested roots stay reachable: the guard only prunes entries
 //! at `depth > 0`, so `ctx_tree path=node_modules/react` still works.
@@ -22,6 +24,11 @@ const VENDOR_DIR_NAMES: &[&str] = &["node_modules", "__pycache__", "bower_compon
 /// Virtualenv directory names; only skipped when they actually contain a
 /// `pyvenv.cfg`, so a source folder that happens to be called `venv` survives.
 const VENV_DIR_NAMES: &[&str] = &[".venv", "venv"];
+
+/// Basenames of directories that hold stale agent worktree copies (#1480).
+/// Kept in sync with the agent-worktree subset of
+/// [`crate::core::auto_findings::NOISE_PATH_SEGMENTS`].
+const AGENT_COPY_DIR_NAMES: &[&str] = &[".worktrees", ".codex-worktrees", ".claude", ".cursor"];
 
 /// Resolve an explicitly requested Windows directory junction before handing it
 /// to `ignore::WalkBuilder`. The walker can treat a reparse-point root as a
@@ -55,10 +62,34 @@ pub(crate) fn is_vendor_dir(entry: &ignore::DirEntry) -> bool {
     VENV_DIR_NAMES.contains(&name) && entry.path().join("pyvenv.cfg").is_file()
 }
 
+/// Returns `true` when `entry` is a stale agent worktree directory that
+/// should not be descended into during repo-wide scans (#1480).
+pub(crate) fn is_agent_worktree_dir(entry: &ignore::DirEntry) -> bool {
+    if entry.depth() == 0 || !entry.file_type().is_some_and(|ft| ft.is_dir()) {
+        return false;
+    }
+    let Some(name) = entry.file_name().to_str() else {
+        return false;
+    };
+    if AGENT_COPY_DIR_NAMES.contains(&name) {
+        return true;
+    }
+    // `.claude/worktrees`, `.cursor/worktrees`, … — segment is `worktrees`
+    // (not `.worktrees`), so match by name + dot-prefixed parent.
+    name == "worktrees"
+        && entry.path().parent().is_some_and(|parent| {
+            parent
+                .file_name()
+                .is_some_and(|pn| pn.to_string_lossy().starts_with('.'))
+        })
+}
+
 /// Predicate for `ignore::WalkBuilder::filter_entry`: prunes vendor
-/// directories and cloud placeholders.
+/// directories, stale agent worktree copies, and cloud placeholders.
 pub(crate) fn keep_entry(entry: &ignore::DirEntry) -> bool {
-    !is_vendor_dir(entry) && crate::core::cloud_files::keep_entry(entry)
+    !is_vendor_dir(entry)
+        && !is_agent_worktree_dir(entry)
+        && crate::core::cloud_files::keep_entry(entry)
 }
 
 #[cfg(test)]
@@ -155,5 +186,66 @@ mod tests {
 
         assert!(seen.iter().any(|p| p.ends_with("app.js")));
         assert!(!seen.iter().any(|p| p.contains("node_modules")));
+    }
+
+    #[test]
+    fn claude_worktrees_are_skipped_but_canonical_src_survives() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(tmp.path().join(".claude/worktrees/wt/src")).expect("mkdir");
+        std::fs::write(
+            tmp.path().join(".claude/worktrees/wt/src/stale.rs"),
+            "fn stale_canary() {}",
+        )
+        .expect("write");
+        std::fs::create_dir_all(tmp.path().join("src")).expect("mkdir");
+        std::fs::write(tmp.path().join("src/main.rs"), "fn main() {}").expect("write");
+
+        let seen: Vec<String> = ignore::WalkBuilder::new(tmp.path())
+            .hidden(false)
+            .filter_entry(keep_entry)
+            .build()
+            .filter_map(std::result::Result::ok)
+            .map(|e| e.path().to_string_lossy().to_string())
+            .collect();
+
+        assert!(seen.iter().any(|p| p.ends_with("main.rs")));
+        assert!(!seen.iter().any(|p| p.contains(".claude/worktrees")));
+    }
+
+    #[test]
+    fn codex_worktrees_are_skipped() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(tmp.path().join(".codex-worktrees/wt")).expect("mkdir");
+        std::fs::write(tmp.path().join(".codex-worktrees/wt/copy.rs"), "x").expect("write");
+        std::fs::write(tmp.path().join("real.rs"), "y").expect("write");
+
+        let seen: Vec<String> = ignore::WalkBuilder::new(tmp.path())
+            .hidden(false)
+            .filter_entry(keep_entry)
+            .build()
+            .filter_map(std::result::Result::ok)
+            .map(|e| e.path().to_string_lossy().to_string())
+            .collect();
+
+        assert!(seen.iter().any(|p| p.ends_with("real.rs")));
+        assert!(!seen.iter().any(|p| p.contains(".codex-worktrees")));
+    }
+
+    #[test]
+    fn explicit_root_named_claude_worktrees_is_not_pruned() {
+        // depth == 0 must never be filtered, so an explicit
+        // `ctx_search path=.claude/worktrees/wt` still works.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let wt = tmp.path().join(".claude/worktrees/wt");
+        std::fs::create_dir_all(&wt).expect("mkdir");
+        std::fs::write(wt.join("inside.rs"), "fn inside() {}").expect("write");
+        let root_entry = ignore::WalkBuilder::new(&wt)
+            .hidden(false)
+            .build()
+            .filter_map(std::result::Result::ok)
+            .find(|e| e.depth() == 0)
+            .expect("root entry");
+        assert!(!is_agent_worktree_dir(&root_entry));
+        assert!(keep_entry(&root_entry));
     }
 }

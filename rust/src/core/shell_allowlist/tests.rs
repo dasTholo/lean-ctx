@@ -300,6 +300,33 @@ fn allows_git_commit_with_cat_heredoc() {
 }
 
 #[test]
+fn allows_gh_issue_create_with_heredoc_body_containing_create() {
+    // Regression test for #1482
+    let cmd = r#"gh issue create -R repo --title "test" --body "$(cat <<'EOF'
+text with replace_symbol/create/replace_all
+EOF
+)""#;
+    assert!(check_all_segments(cmd, &crate::core::config::default_shell_allowlist()).is_ok());
+}
+
+#[test]
+fn allows_gh_heredoc_body_with_parentheses() {
+    let cmd = r#"gh issue create --body "$(cat <<'EOF'
+see [link](http://example.com) for details
+EOF
+)""#;
+    assert!(check_all_segments(cmd, &crate::core::config::default_shell_allowlist()).is_ok());
+}
+
+#[test]
+fn heredoc_delims_inside_dollar_paren_in_double_quotes() {
+    // #1482: `<<` inside `"$(cat <<'EOF' ...)"` must be detected.
+    let line = r#"gh issue create --body "$(cat <<'EOF'"#;
+    assert_eq!(heredoc_delims(line, true), vec!["EOF".to_string()]);
+    assert_eq!(heredoc_delims(line, false), vec!["EOF".to_string()]);
+}
+
+#[test]
 fn allows_git_commit_heredoc_body_with_conventional_prefix() {
     // #876: `git commit -F - <<'EOF' … EOF` — the quoted heredoc body is literal
     // stdin data. Its lines (a commit message starting `feat(...)`) must not be
