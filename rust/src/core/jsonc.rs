@@ -6,7 +6,12 @@ use serde_json::Value;
 /// This makes lean-ctx tolerant of the JSONC dialect that editors like VS Code
 /// use for `settings.json` / `mcp.json` (comments + trailing commas are valid
 /// there but rejected by strict JSON). See issue #311.
+///
+/// A single leading UTF-8 BOM is also accepted. Windows editors emit it
+/// routinely, serde_json rejects it, and callers used to read that rejection as
+/// "config is corrupt" and scaffold a fresh one over the user's file (#1586).
 pub fn parse_jsonc(input: &str) -> Result<Value, serde_json::Error> {
+    let input = input.strip_prefix('\u{feff}').unwrap_or(input);
     let stripped = strip_json_comments(input);
     let cleaned = strip_trailing_commas(&stripped);
     serde_json::from_str(&cleaned)
@@ -120,6 +125,19 @@ fn strip_trailing_commas(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn leading_bom_is_accepted() {
+        // #1586: Windows editors save configs BOM-prefixed. serde_json rejects
+        // that, and callers read the rejection as "file is corrupt".
+        let v = parse_jsonc("\u{feff}{\n  // hi\n  \"a\": 1,\n}").expect("BOM config must parse");
+        assert_eq!(v["a"], 1);
+    }
+
+    #[test]
+    fn only_one_leading_bom_is_stripped() {
+        assert!(parse_jsonc("\u{feff}\u{feff}{\"a\":1}").is_err());
+    }
 
     #[test]
     fn strips_line_comments() {

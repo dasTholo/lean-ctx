@@ -1119,7 +1119,18 @@ pub(in crate::server) async fn dispatch_and_post_process(
     // This applies uniformly to every tool, including raw shell output and
     // explicit full reads. Oversized archivable responses retain their
     // ctx_expand handle from the archive stage above.
-    let budget_limit = crate::core::config::Config::load().turn_fresh_limit_effective();
+    //
+    // #1582: a read the caller explicitly asked to be verbatim gets the larger
+    // verbatim budget. `raw=true` is what every compression annotation and the
+    // server instructions name as the way back to the original bytes; holding
+    // it to the same 4096-token backstop as an unrequested response made that
+    // documented recovery path silently unreachable above ~16 KB.
+    let cfg = crate::core::config::Config::load();
+    let budget_limit = if verbatim_requested(name, args) {
+        cfg.turn_fresh_limit_verbatim_effective()
+    } else {
+        cfg.turn_fresh_limit_effective()
+    };
     if budget_limit > 0 {
         let (budgeted, action) = crate::core::budget::apply_turn_budget(&result_text, budget_limit);
         if let crate::core::budget::BudgetAction::Truncated {
@@ -1206,6 +1217,32 @@ pub(super) fn triage_bypass_requested(
                     .and_then(serde_json::Value::as_bool)
                     .unwrap_or(false)
         })
+}
+
+/// Whether the caller explicitly asked for the original bytes (#1582).
+///
+/// Deliberately narrower than [`triage_bypass_requested`]: only `raw = true` and
+/// `mode = "raw"` count. Those two are the escape hatch every compression
+/// annotation points at, so they earn the larger verbatim turn budget. `full`,
+/// `lines:`, `anchored` and friends stay on the ordinary budget — they are
+/// routine reads, not a request to defeat compression, and exempting them would
+/// turn the backstop off for most traffic.
+pub(super) fn verbatim_requested(
+    name: &str,
+    args: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> bool {
+    if !matches!(name, "ctx_read" | "ctx_shell") {
+        return false;
+    }
+    args.is_some_and(|args| {
+        args.get("raw")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+            || args
+                .get("mode")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|mode| mode == "raw")
+    })
 }
 
 /// Applies task triage at the native dispatch chokepoint. If no profile is
@@ -1335,7 +1372,10 @@ fn record_decision_loop(
 
 #[cfg(test)]
 mod savings_tests {
-    use super::{apply_task_triage_filter, compression_tracker_tokens, triage_bypass_requested};
+    use super::{
+        apply_task_triage_filter, compression_tracker_tokens, triage_bypass_requested,
+        verbatim_requested,
+    };
 
     #[test]
     fn test_tracker_in_pipeline() {
@@ -1415,5 +1455,44 @@ mod savings_tests {
 
         let shell = serde_json::Map::new();
         assert!(!triage_bypass_requested("ctx_shell", Some(&shell)));
+    }
+
+    fn args(pairs: &[(&str, serde_json::Value)]) -> serde_json::Map<String, serde_json::Value> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), v.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn raw_true_and_mode_raw_are_explicit_verbatim_requests() {
+        let raw_flag = args(&[("raw", serde_json::Value::Bool(true))]);
+        let raw_mode = args(&[("mode", serde_json::Value::String("raw".to_owned()))]);
+        assert!(verbatim_requested("ctx_read", Some(&raw_flag)));
+        assert!(verbatim_requested("ctx_read", Some(&raw_mode)));
+        assert!(verbatim_requested("ctx_shell", Some(&raw_flag)));
+    }
+
+    #[test]
+    fn ordinary_reads_stay_on_the_ordinary_budget() {
+        // #1582 raises the cap for an explicit escape hatch, not for the
+        // everyday modes — otherwise the backstop is off for most traffic.
+        for mode in ["full", "auto", "lines:1-40", "anchored", "signatures"] {
+            let a = args(&[("mode", serde_json::Value::String(mode.to_owned()))]);
+            assert!(
+                !verbatim_requested("ctx_read", Some(&a)),
+                "mode={mode} must not claim the verbatim budget"
+            );
+        }
+        let off = args(&[("raw", serde_json::Value::Bool(false))]);
+        assert!(!verbatim_requested("ctx_read", Some(&off)));
+        assert!(!verbatim_requested("ctx_read", None));
+    }
+
+    #[test]
+    fn other_tools_never_claim_the_verbatim_budget() {
+        let raw_flag = args(&[("raw", serde_json::Value::Bool(true))]);
+        assert!(!verbatim_requested("ctx_search", Some(&raw_flag)));
+        assert!(!verbatim_requested("ctx_compose", Some(&raw_flag)));
     }
 }

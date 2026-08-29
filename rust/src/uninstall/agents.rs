@@ -350,7 +350,13 @@ pub(super) fn remove_mcp_configs(home: &Path, dry_run: bool) -> bool {
                 .join("config.toml"),
         ),
         ("Grok", home.join(".grok/config.toml")),
+        // #1585: OpenCode accepts either name. Uninstall visits both so a
+        // lean-ctx entry is never left behind in the file we did not install to.
         ("OpenCode", home.join(".config/opencode/opencode.json")),
+        (
+            "OpenCode (jsonc)",
+            home.join(".config/opencode/opencode.jsonc"),
+        ),
         ("Qwen Code", home.join(".qwen/settings.json")),
         ("Qwen Code (legacy)", home.join(".qwen/mcp.json")),
         ("Trae", home.join(".trae/mcp.json")),
@@ -649,7 +655,7 @@ pub(super) fn remove_rules_files(home: &Path, dry_run: bool) -> bool {
     // Always attempt regardless of the current rules_injection mode, since a prior
     // dedicated install could have left these behind.
     if dry_run {
-        let opencode_cfg = home.join(".config/opencode/opencode.json");
+        let opencode_cfg = crate::core::opencode_config::resolve(home).path;
         if fs::read_to_string(&opencode_cfg)
             .is_ok_and(|c| c.contains("lean-ctx") && c.contains("instructions"))
         {

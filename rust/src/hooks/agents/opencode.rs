@@ -1,11 +1,30 @@
 use super::super::{HookMode, mcp_server_quiet_mode, resolve_binary_path};
 use crate::core::config::{Config, RulesInjection, RulesScope};
 
+/// The JSON document a config update starts from (#1586).
+///
+/// `Err` means "leave the file alone": an existing config we cannot parse is
+/// never replaced with a fresh lean-ctx-only scaffold. Starting from an empty
+/// object there wiped providers, models, plugins and foreign MCP entries — and
+/// the command still reported success. Only a genuinely absent file may start
+/// empty.
+fn starting_document(file_existed: bool, content: &str) -> Result<serde_json::Value, String> {
+    match crate::core::jsonc::parse_jsonc(content) {
+        Ok(v) => Ok(v),
+        Err(e) if file_existed => Err(e.to_string()),
+        Err(_) => Ok(serde_json::Value::Object(serde_json::Map::new())),
+    }
+}
+
 pub(crate) fn install_opencode_hook_with_mode(mode: HookMode) {
     let binary = resolve_binary_path();
     let home = crate::core::home::resolve_home_dir().unwrap_or_default();
-    let config_path = home.join(".config/opencode/opencode.json");
-    let display_path = "~/.config/opencode/opencode.json";
+    // #1585: write into the user's existing opencode.jsonc when that is the file
+    // they actually have, rather than creating a competing opencode.json.
+    let resolved = crate::core::opencode_config::resolve(&home);
+    let display_path = resolved.display(&home);
+    let display_path = display_path.as_str();
+    let config_path = resolved.path;
 
     if let Some(parent) = config_path.parent() {
         let _ = std::fs::create_dir_all(parent);
@@ -37,8 +56,17 @@ pub(crate) fn install_opencode_hook_with_mode(mode: HookMode) {
     };
     let has_lean_ctx = content.contains("lean-ctx");
 
-    let mut json = crate::core::jsonc::parse_jsonc(&content)
-        .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()));
+    let mut json = match starting_document(file_existed, &content) {
+        Ok(v) => v,
+        Err(e) => {
+            if !mcp_server_quiet_mode() {
+                eprintln!(
+                    "  \x1b[33m!\x1b[0m OpenCode config at {display_path} could not be parsed ({e}) — left untouched. Fix the file, then re-run."
+                );
+            }
+            return;
+        }
+    };
     let Some(obj) = json.as_object_mut() else {
         return;
     };
@@ -122,7 +150,9 @@ pub(crate) fn install_opencode_hook_with_mode(mode: HookMode) {
 }
 
 fn opencode_config_path(home: &std::path::Path) -> std::path::PathBuf {
-    home.join(".config/opencode/opencode.json")
+    // #1585: resolve .json/.jsonc instead of hardcoding one name, so
+    // registration and unregistration touch the same file the installer wrote.
+    crate::core::opencode_config::resolve(home).path
 }
 
 /// Add the dedicated rules file to opencode.json `instructions[]` (idempotent).
@@ -133,9 +163,20 @@ fn register_opencode_instructions(home: &std::path::Path) {
         .into_owned();
 
     let mut json = match std::fs::read_to_string(&config_path) {
-        Ok(content) => crate::core::jsonc::parse_jsonc(&content).unwrap_or_else(
-            |_| serde_json::json!({ "$schema": "https://opencode.ai/config.json" }),
-        ),
+        // #1586: same rule as the installer — an existing config we cannot parse
+        // is left alone, never overwritten with a fresh scaffold.
+        Ok(content) => match starting_document(true, &content) {
+            Ok(v) => v,
+            Err(e) => {
+                if !mcp_server_quiet_mode() {
+                    eprintln!(
+                        "  \x1b[33m!\x1b[0m OpenCode config at {} could not be parsed ({e}) — instructions[] not registered.",
+                        config_path.display()
+                    );
+                }
+                return;
+            }
+        },
         Err(_) => serde_json::json!({ "$schema": "https://opencode.ai/config.json" }),
     };
 
@@ -636,5 +677,94 @@ mod shadow_permission_tests {
             json.get("permissions").is_none(),
             "'permissions' (plural) should not exist"
         );
+    }
+}
+
+/// #1585 / #1586: the OpenCode global config must survive a lean-ctx install.
+#[cfg(test)]
+mod config_preservation_tests {
+    use super::*;
+
+    const REAL_WORLD: &str = r#"{
+  // my setup
+  "$schema": "https://opencode.ai/config.json",
+  "model": "anthropic/claude-opus-4",
+  "provider": {
+    "anthropic": { "options": { "apiKey": "{env:ANTHROPIC_API_KEY}" } }
+  },
+  "plugin": ["my-plugin"],
+  "permission": { "bash": "ask" },
+  "mcp": {
+    "other-tool": { "type": "local", "command": ["other"], "enabled": true }
+  },
+}"#;
+
+    #[test]
+    fn unparseable_existing_config_is_never_replaced_by_a_scaffold() {
+        // The #1586 regression: this used to yield an empty object, which the
+        // installer then wrote back over the user's file.
+        let broken = r#"{ "model": "x" "provider": {} }"#;
+        let err = starting_document(true, broken)
+            .expect_err("a config we cannot parse must abort the write, not reset it");
+        assert!(!err.is_empty(), "the user needs to know what was wrong");
+    }
+
+    #[test]
+    fn absent_config_may_start_from_an_empty_object() {
+        let v = starting_document(false, "").expect("a missing file is created from scratch");
+        assert_eq!(v, serde_json::json!({}));
+    }
+
+    #[test]
+    fn jsonc_comments_and_trailing_commas_still_parse() {
+        let v = starting_document(true, REAL_WORLD).expect("JSONC is valid OpenCode config");
+        assert_eq!(v["model"], "anthropic/claude-opus-4");
+        assert!(v["mcp"]["other-tool"]["enabled"].as_bool().unwrap());
+    }
+
+    #[test]
+    fn bom_prefixed_config_parses_instead_of_being_reset() {
+        // Windows editors emit a UTF-8 BOM. serde_json rejects it, and that
+        // rejection used to be read as "corrupt, scaffold a fresh one".
+        let with_bom = format!("\u{feff}{REAL_WORLD}");
+        let v = starting_document(true, &with_bom)
+            .expect("a BOM is an encoding artefact, not a corrupt config");
+        assert_eq!(v["model"], "anthropic/claude-opus-4");
+        assert_eq!(v["plugin"][0], "my-plugin");
+    }
+
+    #[test]
+    fn user_content_survives_the_lean_ctx_mcp_insertion() {
+        let mut v = starting_document(true, REAL_WORLD).unwrap();
+        let obj = v.as_object_mut().unwrap();
+        obj.entry("mcp")
+            .or_insert_with(|| serde_json::json!({}))
+            .as_object_mut()
+            .unwrap()
+            .insert("lean-ctx".to_string(), serde_json::json!({"enabled": true}));
+
+        assert_eq!(v["model"], "anthropic/claude-opus-4");
+        assert!(v["provider"]["anthropic"]["options"]["apiKey"].is_string());
+        assert_eq!(v["plugin"][0], "my-plugin");
+        assert_eq!(v["permission"]["bash"], "ask");
+        assert!(
+            v["mcp"]["other-tool"]["enabled"].as_bool().unwrap(),
+            "a foreign MCP server must not be dropped"
+        );
+        assert!(v["mcp"]["lean-ctx"]["enabled"].as_bool().unwrap());
+    }
+
+    #[test]
+    fn config_path_follows_the_users_jsonc_file() {
+        // #1585: with only opencode.jsonc present we must not create a second,
+        // competing opencode.json.
+        let dir = tempfile::tempdir().unwrap();
+        let cfg_dir = dir.path().join(".config/opencode");
+        std::fs::create_dir_all(&cfg_dir).unwrap();
+        std::fs::write(cfg_dir.join("opencode.jsonc"), REAL_WORLD).unwrap();
+
+        let resolved = crate::core::opencode_config::resolve_in_dir(&cfg_dir);
+        assert_eq!(resolved.path, cfg_dir.join("opencode.jsonc"));
+        assert!(!cfg_dir.join("opencode.json").exists());
     }
 }

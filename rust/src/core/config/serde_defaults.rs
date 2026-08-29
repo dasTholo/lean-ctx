@@ -73,6 +73,10 @@ pub(super) fn default_turn_fresh_limit() -> usize {
     4096
 }
 
+pub(super) fn default_turn_fresh_limit_verbatim() -> usize {
+    32_768
+}
+
 pub(super) fn default_session_token_limit() -> usize {
     200_000
 }

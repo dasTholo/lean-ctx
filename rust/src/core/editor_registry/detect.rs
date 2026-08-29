@@ -9,24 +9,11 @@ use super::paths::{
 use super::types::{ConfigType, EditorTarget};
 
 pub fn build_targets(home: &Path) -> Vec<EditorTarget> {
-    #[cfg(windows)]
-    let opencode_cfg = if let Ok(appdata) = std::env::var("APPDATA") {
-        PathBuf::from(appdata)
-            .join("opencode")
-            .join("opencode.json")
-    } else {
-        home.join(".config/opencode/opencode.json")
-    };
-    #[cfg(not(windows))]
-    let opencode_cfg = home.join(".config/opencode/opencode.json");
-
-    #[cfg(windows)]
-    let opencode_detect = opencode_cfg
-        .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| home.join(".config/opencode"));
-    #[cfg(not(windows))]
-    let opencode_detect = home.join(".config/opencode");
+    // #1585: honour an existing opencode.jsonc instead of creating a competing
+    // opencode.json next to it.
+    let opencode_dir = crate::core::opencode_config::config_dir(home);
+    let opencode_cfg = crate::core::opencode_config::resolve_in_dir(&opencode_dir).path;
+    let opencode_detect = opencode_dir;
 
     let mut targets = vec![
         EditorTarget {

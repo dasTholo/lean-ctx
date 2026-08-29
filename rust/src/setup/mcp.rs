@@ -310,16 +310,9 @@ pub(crate) fn agent_mcp_targets(
             ConfigType::McpJson,
         ),
         "opencode" => {
-            #[cfg(windows)]
-            let opencode_path = if let Ok(appdata) = std::env::var("APPDATA") {
-                std::path::PathBuf::from(appdata)
-                    .join("opencode")
-                    .join("opencode.json")
-            } else {
-                home.join(".config/opencode/opencode.json")
-            };
-            #[cfg(not(windows))]
-            let opencode_path = home.join(".config/opencode/opencode.json");
+            // #1585: write into the user's existing opencode.jsonc when that is
+            // the file they have, instead of creating a competing opencode.json.
+            let opencode_path = crate::core::opencode_config::resolve(home).path;
             push(
                 &mut targets,
                 "OpenCode",
@@ -583,16 +576,9 @@ pub fn disable_agent_mcp(agent: &str, overwrite_invalid: bool) -> Result<(), Str
             ConfigType::McpJson,
         ),
         "opencode" => {
-            #[cfg(windows)]
-            let opencode_path = if let Ok(appdata) = std::env::var("APPDATA") {
-                std::path::PathBuf::from(appdata)
-                    .join("opencode")
-                    .join("opencode.json")
-            } else {
-                home.join(".config/opencode/opencode.json")
-            };
-            #[cfg(not(windows))]
-            let opencode_path = home.join(".config/opencode/opencode.json");
+            // #1585: write into the user's existing opencode.jsonc when that is
+            // the file they have, instead of creating a competing opencode.json.
+            let opencode_path = crate::core::opencode_config::resolve(home.as_ref()).path;
             push(
                 &mut targets,
                 "OpenCode",

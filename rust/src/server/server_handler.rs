@@ -259,11 +259,6 @@ impl ServerHandler for LeanCtxServer {
         crate::core::client_capabilities::set_detected(&client_caps);
 
         let session = self.session.read().await.clone();
-        let instructions = crate::instructions::build_instructions_with_client_and_session(
-            CrpMode::effective(),
-            &name,
-            &session,
-        );
 
         let capabilities = server_capabilities(client_caps.resources, client_caps.prompts);
 
@@ -273,9 +268,23 @@ impl ServerHandler for LeanCtxServer {
         // GH #1447: Antigravity/Gemini CLI disconnect when the initialize
         // response contains `instructions`. The MCP spec marks it optional,
         // but these clients fail on any unexpected field in the JSON envelope.
-        if matches!(client_caps.client_id.as_str(), "antigravity" | "gemini-cli") {
+        //
+        // GH #1599: `rules_injection = "off"` means the user has opted out of
+        // lean-ctx steering their agent. The initialize `instructions` field is
+        // that same steering block delivered over a different channel, so
+        // honouring the setting in the files but still shipping ~780 tokens of
+        // "ALWAYS use ctx_*, NEVER use native Read/Grep" on every session start
+        // makes the setting look broken. Off means off, on every channel.
+        let injection_off = crate::core::config::Config::load().rules_injection_effective()
+            == crate::core::config::RulesInjection::Off;
+        if injection_off || matches!(client_caps.client_id.as_str(), "antigravity" | "gemini-cli") {
             Ok(result)
         } else {
+            let instructions = crate::instructions::build_instructions_with_client_and_session(
+                CrpMode::effective(),
+                &name,
+                &session,
+            );
             Ok(result.with_instructions(instructions))
         }
     }
