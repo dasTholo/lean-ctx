@@ -3,10 +3,12 @@
 All notable changes to lean-ctx are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [3.10.1] — 2026-08-29
 
-Merged after the `v3.10.0` tag (`5b69202`), so **none of this is in the 3.10.0
-artifacts** — a user on 3.10.0 still hits every defect below.
+Patch release: the nine defect fixes below merged after the `v3.10.0` tag
+(`5b69202`) and are therefore **absent from the 3.10.0 artifacts**. 3.10.1
+carries them, plus a CI-only test fix. No new features, no behavior change
+beyond the fixes themselves.
 
 ### Fixed
 
@@ -52,6 +54,18 @@ artifacts** — a user on 3.10.0 still hits every defect below.
   removed in 3.9.20. All surfaces now name the replacements (`lean-ctx
   dashboard`, `lean-ctx cep`, `lean-ctx index watch`).
 - **Dependency** — `chacha20` 0.10.1 → 0.10.2 (0.10.1 was yanked upstream).
+
+### Internal
+
+- **Deterministic auto-detach test (#1611)** — the `auto_detached_result`
+  harness helper raced its own premise (a 10 ms soft cap against a `sleep 0.1`
+  child) and turned `main` red on macOS after a green PR run. The child now
+  blocks on a barrier file until the detach has been observed, so the path
+  under test is exercised by construction. Test-only; no shipped code involved.
+- **Post-release records (#1612)** — the `v3.10.0` artifacts were verified
+  against `SHA256SUMS` and `release-manifest.json`, and a clean-environment
+  install passed `lean-ctx doctor`; the changelog now states which fixes a
+  given tag does and does not carry.
 
 ## [3.10.0] — 2026-08-29
 
