@@ -208,13 +208,23 @@ pub(super) fn cmd_dashboard(rest: &[String]) {
     ));
 }
 
+/// #1602: the live TUI dashboard went away with the dead-module cleanup in
+/// 3.9.20 (de96cc5b), but every surface kept advertising it — `help all` as
+/// "Live TUI dashboard", the completion spec as "Watch for file changes", and
+/// `watch --help` as if it still ran — while the command itself exited 1 with
+/// a bare removal notice and no way forward. The listings are gone; the
+/// command stays as a signpost, because the muscle memory outlives the
+/// feature. Both paths now say the same thing and name the replacement.
 pub(super) fn cmd_watch(rest: &[String]) {
+    const NOTICE: &str = "`lean-ctx watch` (live TUI dashboard) was removed in 3.9.20.\n\
+         Use `lean-ctx dashboard` for the same event stream in the web UI \
+         (http://localhost:3333), or `lean-ctx cep` for the metrics as text.\n\
+         For the codebase index watcher, the command is `lean-ctx index watch`.";
     if rest.iter().any(|a| a == "--help" || a == "-h") {
-        println!("Usage: lean-ctx watch");
-        println!("  Live TUI dashboard (real-time event stream).");
+        println!("{NOTICE}");
         return;
     }
-    eprintln!("The live TUI dashboard has been removed.");
+    eprintln!("{NOTICE}");
     std::process::exit(1);
 }
 

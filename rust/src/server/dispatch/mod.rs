@@ -112,7 +112,27 @@ impl LeanCtxServer {
                                 None,
                             ));
                         }
-                        None
+                        // #1604: agents also *flatten* the call —
+                        // ctx_call(name="ctx_edit", path=…, old_string=…) —
+                        // and the inner tool then answered "path is required",
+                        // naming a parameter the caller demonstrably supplied.
+                        // That message sent one reporter hunting a marshalling
+                        // bug through three identical retries and a hand-rolled
+                        // stdio probe. `name` is the only key ctx_call reserves,
+                        // so a flattened call is unambiguous: forward the rest.
+                        let flattened: serde_json::Map<String, Value> = args
+                            .map(|m| {
+                                m.iter()
+                                    .filter(|(k, _)| k.as_str() != "name")
+                                    .map(|(k, v)| (k.clone(), v.clone()))
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        if flattened.is_empty() {
+                            None
+                        } else {
+                            Some(flattened)
+                        }
                     }
                     Some(Value::Object(map)) => Some(map.clone()),
                     Some(_) => {
@@ -830,6 +850,81 @@ mod tests {
             !err.message.contains("did you mean"),
             "no confident suggestion for garbage: {}",
             err.message
+        );
+    }
+
+    /// #1604: `ctx_call(name="ctx_edit", path=…, old_string=…)` — the inner
+    /// tool's arguments flattened onto the ctx_call envelope instead of nested
+    /// under `arguments` — used to reach the inner tool with NO arguments, so
+    /// it answered "path is required" about a parameter the caller had just
+    /// supplied. `name` is the only key ctx_call reserves, so the rest is
+    /// forwarded. The nested form and the #658 misspelling guard are unchanged.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ctx_call_forwards_flattened_inner_arguments() {
+        let server = crate::tools::create_server();
+        fn msg(
+            r: Result<
+                (
+                    String,
+                    usize,
+                    Option<ShellOutcome>,
+                    Option<Vec<ContentBlock>>,
+                ),
+                ErrorData,
+            >,
+        ) -> String {
+            match r {
+                Ok((text, ..)) => text,
+                Err(e) => e.message.to_string(),
+            }
+        }
+
+        // `ctx_read` on purpose: it is on every built-in role's allowlist, so a
+        // sibling test that leaves a non-default role in the global slot cannot
+        // turn these assertions into `[ROLE DENIED]`. Its missing-argument error
+        // is also the exact one from the report.
+        //
+        // Control: genuinely no arguments — the inner tool's own error stands.
+        let mut bare = serde_json::Map::new();
+        bare.insert("name".into(), Value::String("ctx_read".into()));
+        let bare = msg(server.dispatch_tool("ctx_call", Some(&bare), false).await);
+        assert!(
+            bare.contains("path is required"),
+            "an argument-less inner call must still say what is missing: {bare}"
+        );
+
+        // Flattened: the same message would be a lie — the caller passed it.
+        let mut flat = serde_json::Map::new();
+        flat.insert("name".into(), Value::String("ctx_read".into()));
+        flat.insert("path".into(), Value::String("Cargo.toml".into()));
+        let flat = msg(server.dispatch_tool("ctx_call", Some(&flat), false).await);
+        assert!(
+            !flat.contains("path is required"),
+            "flattened arguments must reach the inner tool: {flat}"
+        );
+
+        // Nested form: unchanged.
+        let mut nested = serde_json::Map::new();
+        nested.insert("name".into(), Value::String("ctx_read".into()));
+        nested.insert(
+            "arguments".into(),
+            serde_json::json!({ "path": "Cargo.toml" }),
+        );
+        let nested = msg(server.dispatch_tool("ctx_call", Some(&nested), false).await);
+        assert!(
+            !nested.contains("path is required"),
+            "nested arguments must keep working: {nested}"
+        );
+
+        // #658 guard: an `args`/`params` wrapper is a typo, not a flat call —
+        // forwarding it would hand the inner tool a bogus `args` parameter.
+        let mut typo = serde_json::Map::new();
+        typo.insert("name".into(), Value::String("ctx_read".into()));
+        typo.insert("args".into(), serde_json::json!({ "path": "Cargo.toml" }));
+        let typo = msg(server.dispatch_tool("ctx_call", Some(&typo), false).await);
+        assert!(
+            typo.contains("unknown key 'args'"),
+            "the #658 misspelling hint must survive: {typo}"
         );
     }
 }
