@@ -181,21 +181,50 @@ mod shell_outcome_tests {
         )
     }
 
+    /// Drive a command through the auto-detach path *deterministically*.
+    ///
+    /// The 10 ms foreground window used to be held open by the caller's own
+    /// `sleep 0.1`, which assumes the child is spawned, scheduled and still
+    /// running 10 ms later. On a loaded macOS runner that assumption broke and
+    /// the helper panicked with "the reproduction must exercise the
+    /// auto-detached path" — a flake in the harness, not a defect in the code
+    /// under test. The child now blocks on a barrier file until the test
+    /// releases it, exactly like `auto_detached_pipeline_result` below, so the
+    /// detach is guaranteed no matter how the runner schedules us.
     #[cfg(not(windows))]
     fn auto_detached_result(command: &str) -> CallToolResult {
+        let release_dir = tempfile::tempdir().expect("create auto-detach barrier directory");
+        let release_path = release_dir.path().join("release");
+        let mut extra_env = std::collections::HashMap::new();
+        extra_env.insert(
+            "LCTX_TEST_RELEASE_PATH".to_string(),
+            release_path.to_string_lossy().into_owned(),
+        );
+        let guarded_command =
+            format!("while [ ! -e \"$LCTX_TEST_RELEASE_PATH\" ]; do sleep 0.01; done; {command}");
         let detached = crate::server::background_shell::run_foreground_or_detach(
-            command.to_string(),
+            guarded_command,
             ".".to_string(),
-            std::collections::HashMap::default(),
+            extra_env,
             Some(10_000),
             std::time::Duration::from_millis(10),
             None,
         );
-        let crate::server::background_shell::ForegroundResult::Detached { job_id } = detached
-        else {
-            panic!("the reproduction must exercise the auto-detached path");
+        let job_id = match detached {
+            crate::server::background_shell::ForegroundResult::Detached { job_id } => job_id,
+            // Diagnostic on purpose: if this ever fires on CI we need to see
+            // *why* the child never reached the soft cap. A failed spawn or a
+            // missing `sleep` shows up here as an exit code and a shell error
+            // rather than as an unexplained timing story.
+            crate::server::background_shell::ForegroundResult::Finished { output, exit_code } => {
+                panic!(
+                    "the reproduction must exercise the auto-detached path; the child \
+                     finished inside the soft cap instead (exit {exit_code}): {output}"
+                )
+            }
         };
         let _job = BackgroundJobGuard::new(job_id.clone());
+        std::fs::write(&release_path, b"release").expect("release auto-detached child");
 
         let mut terminal = false;
         for _ in 0..240 {
@@ -244,9 +273,18 @@ mod shell_outcome_tests {
             std::time::Duration::from_millis(10),
             None,
         );
-        let crate::server::background_shell::ForegroundResult::Detached { job_id } = detached
-        else {
-            panic!("the reproduction must exercise the auto-detached path");
+        let job_id = match detached {
+            crate::server::background_shell::ForegroundResult::Detached { job_id } => job_id,
+            // Diagnostic on purpose: if this ever fires on CI we need to see
+            // *why* the child never reached the soft cap. A failed spawn or a
+            // missing `sleep` shows up here as an exit code and a shell error
+            // rather than as an unexplained timing story.
+            crate::server::background_shell::ForegroundResult::Finished { output, exit_code } => {
+                panic!(
+                    "the reproduction must exercise the auto-detached path; the child \
+                     finished inside the soft cap instead (exit {exit_code}): {output}"
+                )
+            }
         };
         let job = BackgroundJobGuard::new(job_id.clone());
         std::fs::write(release_path, b"release").expect("release auto-detached child");
@@ -287,9 +325,18 @@ mod shell_outcome_tests {
             std::time::Duration::from_millis(10),
             None,
         );
-        let crate::server::background_shell::ForegroundResult::Detached { job_id } = detached
-        else {
-            panic!("the reproduction must exercise the auto-detached path");
+        let job_id = match detached {
+            crate::server::background_shell::ForegroundResult::Detached { job_id } => job_id,
+            // Diagnostic on purpose: if this ever fires on CI we need to see
+            // *why* the child never reached the soft cap. A failed spawn or a
+            // missing `sleep` shows up here as an exit code and a shell error
+            // rather than as an unexplained timing story.
+            crate::server::background_shell::ForegroundResult::Finished { output, exit_code } => {
+                panic!(
+                    "the reproduction must exercise the auto-detached path; the child \
+                     finished inside the soft cap instead (exit {exit_code}): {output}"
+                )
+            }
         };
         let _job = BackgroundJobGuard::new(job_id.clone());
 
@@ -511,9 +558,18 @@ mod shell_outcome_tests {
             std::time::Duration::from_millis(10),
             None,
         );
-        let crate::server::background_shell::ForegroundResult::Detached { job_id } = detached
-        else {
-            panic!("the reproduction must exercise the auto-detached path");
+        let job_id = match detached {
+            crate::server::background_shell::ForegroundResult::Detached { job_id } => job_id,
+            // Diagnostic on purpose: if this ever fires on CI we need to see
+            // *why* the child never reached the soft cap. A failed spawn or a
+            // missing `sleep` shows up here as an exit code and a shell error
+            // rather than as an unexplained timing story.
+            crate::server::background_shell::ForegroundResult::Finished { output, exit_code } => {
+                panic!(
+                    "the reproduction must exercise the auto-detached path; the child \
+                     finished inside the soft cap instead (exit {exit_code}): {output}"
+                )
+            }
         };
         let _job = BackgroundJobGuard::new(job_id.clone());
 
