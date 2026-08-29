@@ -3,6 +3,56 @@
 All notable changes to lean-ctx are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+Merged after the `v3.10.0` tag (`5b69202`), so **none of this is in the 3.10.0
+artifacts** — a user on 3.10.0 still hits every defect below.
+
+### Fixed
+
+- **Verbatim reads were capped at 4096 tokens (#1582)** — the #1306 turn budget
+  applied to explicit `raw=true` / `mode="raw"` requests too, so the documented
+  way back to the original bytes was unreachable for any file above ~16 KB.
+  Verbatim requests now use `turn_fresh_limit_verbatim` (default 32768, env
+  `LEAN_CTX_TURN_FRESH_LIMIT_VERBATIM`, `0` = unlimited); everyday modes keep
+  the 4096-token backstop and its `lines=` recovery banner.
+- **An OpenCode config could be replaced by a lean-ctx-only scaffold (#1586)** —
+  both writers started from an empty object whenever `parse_jsonc` failed,
+  discarding providers, models, plugins and foreign MCP entries while still
+  reporting success. They now fail closed and print the reason. `parse_jsonc`
+  also tolerates a leading UTF-8 BOM, one of the ways a healthy config was read
+  as corrupt.
+- **`opencode.json` vs `opencode.jsonc` (#1585)** — each call site hardcoded one
+  name, so install, doctor, setup and uninstall could target different files.
+  `core::opencode_config` is now the single resolver; uninstall visits both
+  names. The resolver stays under the caller's `home` on every platform.
+- **Deliberately absent rules files reported as drift (#1596)** — a missing
+  global rules file counted as unhealthy even when `rules_injection = "off"` or
+  `rules_scope = "project"` made its absence intentional. Cline, Cline CLI, Roo,
+  Windsurf and the rest now reason like Claude Code's dedicated check.
+- **Windows `setup --fix` loop (#1598)** — generated bash wrappers hold an MSYS
+  path while the expected binary is native, so byte comparison called a correct
+  wrapper stale and rewrote it to a byte-identical result, forever.
+- **`rules_injection = "off"` was only half honoured (#1599)** — the initialize
+  `instructions` field still shipped the same steering block over a different
+  channel. Off is now off on every channel; the #1447 Antigravity/Gemini CLI
+  carve-out is unchanged.
+- **`config set llm.api_key` reported a save it discarded (#1605)** — the
+  `[llm]` schema block was hand-written and had drifted: an `api_key` key no
+  struct field backs (silently dropped after the CLI printed "Updated"), a wrong
+  `model` default, and a missing `base_url`. Defaults now derive from
+  `cfg.llm.*`, `api_key` is gone, and a test guards the class.
+- **Flattened `ctx_call` lost its arguments (#1604)** — the envelope parser
+  accepted inner arguments only under `arguments`, so
+  `ctx_call(name="ctx_edit", path=…)` reached the inner tool with none at all
+  and got back "path is required" about a parameter the caller had supplied.
+  Everything except `name` is now forwarded; the #658 typo hint is unchanged.
+- **`lean-ctx watch` was still advertised after its removal (#1602)** — `--help`,
+  the completion spec and `watch --help` all described a command that had been
+  removed in 3.9.20. All surfaces now name the replacements (`lean-ctx
+  dashboard`, `lean-ctx cep`, `lean-ctx index watch`).
+- **Dependency** — `chacha20` 0.10.1 → 0.10.2 (0.10.1 was yanked upstream).
+
 ## [3.10.0] — 2026-08-29
 
 ### Added — context-budget transparency (`tools health`)
@@ -241,7 +291,7 @@ documented lossless escape hatch, and corrupting the read-dedup contract.
 - Lock ordering documentation updated with new static locks.
 - Tool count updated across all documentation (83 → 84 MCP tools).
 
-## [Unreleased] — Sprint R35 (2026-08-12)
+### Sprint R35 (2026-08-12) — shipped in the 3.9.x line
 
 ### Added
 
