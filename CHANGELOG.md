@@ -69,46 +69,130 @@ beyond the fixes themselves.
 
 ## [3.10.0] — 2026-08-29
 
-### Added — context-budget transparency (`tools health`)
+3.10.0 adds portable local checkpoints and makes LeanCTX's efficiency reports
+more useful. It also fixes eight accuracy and recovery problems in the core
+read, search, edit, and refactor tools. The final sections cover security,
+release, and Engine-extraction work that does not require user action.
 
-- **Portable P6 checkpoint packages** — `ctxpkg` v2 can carry bounded,
-  canonical checkpoint state with explicit manifest-layer coherence,
-  credential and non-portable-path rejection, cross-field digest binding, and
-  an opt-in SDK seed path; generic loaders continue to fail closed.
+### Added — portable checkpoint packages (`.ctxpkg`, Research)
 
-- **Foreign MCP server audit** — `tools health` now cross-references every
-  non-lean-ctx MCP server the client loads (local config, project `.mcp.json`,
-  and observed connections incl. claude.ai connectors) with recorded
-  `tool_use` calls from local Claude Code transcripts, and flags servers that
-  were never called — their schemas are pure fixed cost lean-ctx cannot
-  compress. Honest by design: usage is measured, schema size is never
-  estimated.
-- **Cross-layer rules dedup detection** — a rules carrier on a dedicated host
-  (claude/codex/codebuddy) holding more than a pointer duplicates the mapping
-  the MCP `instructions` already deliver every session; `tools health` now
-  flags it with the reclaimable size. `.claude/rules/*.md` project files are
-  now included in the fixed-cost scan.
-- **Behavior telemetry + in-band nudges** — a new `tools health` Behavior
-  section reports the explicit full/raw read share (from recorded CEP modes)
-  and search→read→search chains vs `ctx_compose` adoption; the server appends
-  at most one ~30-token hint per pattern per session at the moment of waste
-  (new `behavior_nudges` config key, `auto`/`off`; detections are counted
-  either way).
-- **Measured output shaping in `gain`** — surfaces the #895 holdout A/B
-  (`proxy.output_holdout`): measured output-token reduction with 95% CI when
-  enough paired turns exist, honest "measuring"/"not measured" status
-  otherwise.
+- **Seal and inspect a local checkpoint package** — `lean-ctx pack
+  checkpoint-seal` stores a bounded `ContextCheckpointV2` payload in a
+  `.ctxpkg`; `lean-ctx pack checkpoint-inspect` verifies it and prints its
+  package identity, signer state, and checkpoint metadata.
+- **Tamper-resistant package identity** — checkpoint ID, logical-state digest,
+  content hash, package digest, and signature are kept separate and bound
+  together. Manifest and content checkpoint layers must agree.
+- **Fail-closed portability and secret checks** — credentials, absolute or
+  otherwise non-portable paths, oversized files, symlinks, malformed layers,
+  and digest mismatches are rejected. Packages are signed by default; unsigned
+  packages must be requested explicitly.
+- **Compatibility remains explicit** — existing packages keep their previous
+  behavior. Generic loaders reject the new checkpoint layer; only a
+  checkpoint-aware, opt-in admission or SDK seed path may consume it.
 
-### Fixed
+This is a local Research substrate, not a hosted registry, marketplace,
+automatic installer, or general restore contract.
 
-- **pi-lean-ctx footer no longer fabricates "N → N (0%)"** (#1578) — the
-  extension now parses the CLI's real marker formats (savings banner incl.
-  abbreviated counts and mode/detail parts, reason bracket, saved brackets)
-  and renders one honest footer; when nothing was measured it emits no footer
-  instead of measuring the compressed text against itself.
-- **Flaky CI hardening** (#1536) — `health_latency` runs best-of-3 with a
-  doubled budget under the perf gate; the Windows descendant-pipe formatter
-  test waits up to 30 s for PowerShell cold-start on loaded runners.
+### Added — clearer context-cost and behavior reporting
+
+- **Find MCP servers that consume context but are never used** — `lean-ctx
+  tools health` compares configured non-LeanCTX MCP servers with locally
+  recorded Claude Code tool calls. It reports measured non-use without
+  inventing an estimate for unknown schema sizes.
+- **Find duplicated agent instructions** — `tools health` detects substantial
+  Claude, Codex, and CodeBuddy rule files that repeat LeanCTX's MCP
+  instructions. Project `.claude/rules/*.md` files are included in the scan,
+  and known reclaimable bytes are shown.
+- **Spot inefficient tool-use patterns** — a new Behavior section reports the
+  share of explicit full/raw reads and repeated search → read → search chains,
+  alongside `ctx_compose` adoption.
+- **Optional, bounded guidance** — LeanCTX can append one short hint per
+  detected pattern per session. Set `behavior_nudges = "off"` to hide hints;
+  measurements remain available either way.
+- **Measured output-shaping results** — `lean-ctx gain` reports the
+  `proxy.output_holdout` A/B result with a 95% confidence interval when enough
+  paired observations exist. Otherwise it clearly says that the result is
+  still measuring or was not measured.
+
+### Fixed — reads, searches, edits, and refactors
+
+- **`ctx_read mode=diff` works as documented** (#1584) — instruction files no
+  longer force it to `full`. If no cached baseline exists, LeanCTX returns a
+  short recovery instruction instead of calling the mode unknown and dumping
+  the entire file.
+- **`fresh=true` is a real escape hatch** (#1588) — it can recompute the
+  requested view after edit/bounce protection or task targeting had selected
+  `full`. Task targets now match complete path components or file stems, not
+  accidental substrings such as `print` inside `printer.rs`.
+- **Task-mode code fragments preserve the source** (#1589) — selected lines
+  remain in source order, carry line numbers, show omitted gaps, and no longer
+  spend the selection budget on blank lines. Markdown keeps its section-aware
+  rendering.
+- **Inferred session tasks no longer filter reads** (#1590) — only explicit or
+  otherwise grounded task signals may steer a lossy view; an automatically
+  fabricated “working on …” description cannot silently answer a different
+  question.
+- **Full-content fallback is visible** (#1587) — when a requested compressed
+  view of a substantial file is not smaller and LeanCTX returns the full file,
+  the output now says so. Small-file reads remain free of a banner that would
+  cost more than it explains.
+- **Search result counts mean what they say** (#1591) — `ctx_search` reports
+  matches, files containing matches, and files scanned as separate values.
+- **Edit receipts name the real hash** (#1592) — the 64-character pre/postimage
+  digest is now labelled `blake3`, not `md5`; optimistic-concurrency parameters
+  and mismatch errors use the same name. The old wire name remains accepted
+  for compatibility.
+- **Refactors can resolve newly created files** (#1593) — when a file path is
+  supplied, `ctx_refactor` parses that file directly instead of relying only
+  on a possibly stale repository index. Missing-symbol errors now suggest
+  reindexing.
+
+### Fixed — extension and CI reliability
+
+- **pi-lean-ctx no longer fabricates `N → N (0%)`** (#1578, merged via #1580)
+  — its footer parses the CLI's real savings markers and emits nothing when no
+  measurement exists.
+- **Less flaky performance and Windows CI** (#1536, merged via #1580) — the
+  latency gate uses the best of three runs with an appropriate CI budget, and
+  the Windows formatter test allows for PowerShell cold starts.
+- **More reliable release artifacts** — release staging no longer writes
+  temporary files into packaged crate sources; Linux packaging has a
+  musl-compatible atomic-rename fallback and a pinned `cargo-zigbuild` version.
+
+### Security and release hardening
+
+- npm publication now uses GitHub OIDC Trusted Publishing instead of a
+  long-lived registry token.
+- A previously tracked internal documentation artifact was removed, and CI now
+  blocks internal release material from returning to the public tree.
+- The full-history security baseline and scanner evidence were rotated to the
+  current audited tree. The Pi extension also received patched dependency
+  versions, including the `nanoid` advisory fix.
+
+### Changed under the hood — no user action required
+
+- Engine configuration and safety rules were separated from older
+  coding-agent compatibility behavior. Context injection, selection, and
+  delivery evidence now have explicit boundaries; default behavior and CLI/MCP
+  output remain compatible.
+- Context Kit documents can be validated without loading them or executing
+  their declared commands. Session continuity gained a bounded, minimal
+  Attach-journal projection without changing the existing session store.
+- Delivery receipts now report observed dispatch facts instead of inferred
+  task outcomes. Legacy routing types were frozen, and unused memory and
+  outcome-inference branches were removed.
+
+### Documentation and SDK boundaries
+
+- The public README was restored as an OSS product overview.
+- The Engine/SDK extraction finished as two explicitly governed tracks: this
+  repository retained the OSS Engine and Preview compatibility path, while a
+  Production SDK remained a separately gated release. No stable SDK was
+  bundled into the 3.10.0 Engine release.
+- Documentation now distinguishes the Preview Rust in-process embedding
+  substrate from supported SDK surfaces. These refactors do **not** turn the
+  Rust workspace crate into a stable public SDK or add a hosted service.
 
 ## [3.9.20] — 2026-08-25
 
