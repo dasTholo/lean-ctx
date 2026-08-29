@@ -92,8 +92,12 @@ GITHUB:  https://github.com/yvgude/lean-ctx
     )
 }
 
-pub(super) fn print_help() {
-    println!(
+/// The full command reference (`lean-ctx help all`). Split out of
+/// [`print_help`] the way [`concise_help_text`] is split out of
+/// [`print_help_concise`], so tests can assert what the reference advertises
+/// — a removed command listed here is how #1602 reached a user.
+pub(super) fn full_help_text() -> String {
+    format!(
         "lean-ctx {version} — Context SDK for AI Agents
 
 {banner}
@@ -165,7 +169,6 @@ COMMANDS:
     verify-cache [path] [--json]   Inspect local session-cache re-read behavior
     prove [--format table|json|markdown] [--output FILE]  Generate Decision Loop evidence report
     health [path] [--json] [--gate]  Code-health report: cognitive complexity, naming, navigability score + token tax
-    watch                          Live TUI dashboard (real-time event stream)
     dashboard [--port=N] [--host=H] [--base-path=/prefix] [--open=browser|none|vscode]  Open web dashboard (default: http://localhost:3333)
     serve [--host H] [--port N]    MCP over HTTP (Streamable HTTP, local-first)
     proxy start [--port=4444] [--detach]  API proxy: compress tool_results before LLM API
@@ -393,5 +396,28 @@ GITHUB:  https://github.com/yvgude/lean-ctx
         version = env!("CARGO_PKG_VERSION"),
         banner = capability_banner(),
         rc_file = crate::shell_hook::shell_rc_file(),
-    );
+    )
+}
+
+pub(super) fn print_help() {
+    println!("{}", full_help_text());
+}
+
+#[cfg(test)]
+mod tests {
+    /// #1602: `lean-ctx help all` advertised "watch — Live TUI dashboard
+    /// (real-time event stream)" for a command removed in 3.9.20, which then
+    /// exited 1 with a bare removal notice. The reference lists what works.
+    #[test]
+    fn full_help_does_not_advertise_the_removed_tui_dashboard() {
+        let text = super::full_help_text();
+        assert!(
+            !text.contains("Live TUI dashboard"),
+            "`help all` must not list the removed TUI dashboard"
+        );
+        assert!(
+            text.contains("dashboard [--port=N]"),
+            "the web dashboard — the actual replacement — must still be listed"
+        );
+    }
 }

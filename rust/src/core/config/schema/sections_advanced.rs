@@ -623,20 +623,31 @@ pub(super) fn build(sections: &mut BTreeMap<String, SectionSchema>) {
             },
         );
 
+    // #1605: these defaults are derived from `cfg.llm`, never written out by
+    // hand. The literal copies that used to live here had drifted from
+    // `LlmConfig`: `model` advertised `llama3.2` while the struct defaulted to
+    // `qwen2.5-coder:1.5b`, `base_url` was missing, and `api_key` named a field
+    // that does not exist — so `config set llm.api_key …` reported a save that
+    // was silently discarded. The key is gone; the environment variables that
+    // actually supply the credential are named in the section description.
     let mut llm_keys = BTreeMap::new();
     llm_keys.insert(
         "enabled".into(),
         key(
             "bool",
-            serde_json::json!(false),
+            serde_json::json!(cfg.llm.enabled),
             "Enable optional LLM enhancements (query expansion, contradiction explanation)",
         ),
     );
+    let backend_default = serde_json::to_value(cfg.llm.backend.clone())
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_else(|| "ollama".to_string());
     llm_keys.insert(
         "backend".into(),
         key_enum(
             &["ollama", "openrouter", "anthropic"],
-            "ollama",
+            &backend_default,
             "LLM backend provider",
         ),
     );
@@ -644,28 +655,28 @@ pub(super) fn build(sections: &mut BTreeMap<String, SectionSchema>) {
         "model".into(),
         key(
             "string",
-            serde_json::json!("llama3.2"),
+            serde_json::json!(cfg.llm.model),
             "Model name for the selected backend",
         ),
     );
     llm_keys.insert(
-        "api_key".into(),
+        "base_url".into(),
         key(
             "string",
-            serde_json::json!(""),
-            "API key for OpenRouter or Anthropic backends",
+            serde_json::json!(cfg.llm.base_url.clone().unwrap_or_default()),
+            "Override the backend's base URL (empty = the backend's own default)",
         ),
     );
     llm_keys.insert(
         "timeout_secs".into(),
         key(
             "u64",
-            serde_json::json!(10),
+            serde_json::json!(cfg.llm.timeout_secs),
             "HTTP timeout for LLM requests",
         ),
     );
     sections.insert("llm".into(), SectionSchema {
-            description: "Optional LLM enhancement settings (query expansion, contradiction explanation). Deterministic fallback when disabled or unreachable.".into(),
+            description: "Optional LLM enhancement settings (query expansion, contradiction explanation). Deterministic fallback when disabled or unreachable. Credentials come from the environment — OPENROUTER_API_KEY or ANTHROPIC_API_KEY — not from this file.".into(),
             keys: llm_keys,
         });
 

@@ -208,6 +208,24 @@ impl Config {
             .unwrap_or(self.turn_fresh_limit)
     }
 
+    /// Effective turn budget for an explicitly verbatim response (#1582).
+    ///
+    /// 0 = unlimited. Never below `turn_fresh_limit_effective()`: raising the
+    /// ordinary budget above the verbatim one must not make `raw=true` deliver
+    /// *less* than a compressed read of the same file. An unlimited ordinary
+    /// budget stays unlimited here.
+    pub fn turn_fresh_limit_verbatim_effective(&self) -> usize {
+        let ordinary = self.turn_fresh_limit_effective();
+        if ordinary == 0 {
+            return 0;
+        }
+        let verbatim = std::env::var("LEAN_CTX_TURN_FRESH_LIMIT_VERBATIM")
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(self.turn_fresh_limit_verbatim);
+        resolve_verbatim_limit(ordinary, verbatim)
+    }
+
     /// Whether progressive disclosure is active. Default true. The env var
     /// `LEAN_CTX_PROGRESSIVE_DISCLOSURE` overrides the config field.
     pub fn progressive_disclosure_effective(&self) -> bool {
@@ -633,5 +651,39 @@ impl Config {
             }
         }
         out
+    }
+}
+
+/// Resolve the verbatim turn budget from the two configured limits (#1582).
+///
+/// Pure so the precedence rules are testable without touching process env:
+/// `0` means unlimited, and the verbatim budget is never smaller than the
+/// ordinary one.
+fn resolve_verbatim_limit(ordinary: usize, verbatim: usize) -> usize {
+    if verbatim == 0 {
+        return 0;
+    }
+    verbatim.max(ordinary)
+}
+
+#[cfg(test)]
+mod verbatim_budget_tests {
+    use super::resolve_verbatim_limit;
+
+    #[test]
+    fn verbatim_budget_is_larger_than_the_ordinary_backstop() {
+        assert_eq!(resolve_verbatim_limit(4096, 32_768), 32_768);
+    }
+
+    #[test]
+    fn zero_means_unlimited_verbatim_reads() {
+        assert_eq!(resolve_verbatim_limit(4096, 0), 0);
+    }
+
+    #[test]
+    fn a_raised_ordinary_budget_is_never_undercut() {
+        // Someone who sets turn_fresh_limit = 64k must not get *less* content
+        // back from an explicit raw read than from a compressed one.
+        assert_eq!(resolve_verbatim_limit(65_536, 32_768), 65_536);
     }
 }

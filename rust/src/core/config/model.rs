@@ -576,6 +576,16 @@ pub struct Config {
     /// Override via LEAN_CTX_TURN_FRESH_LIMIT env var.
     #[serde(default = "serde_defaults::default_turn_fresh_limit")]
     pub turn_fresh_limit: usize,
+    /// Turn budget for a response the caller explicitly asked to be verbatim
+    /// (`ctx_read` with `raw=true` or `mode="raw"`). 0 = unlimited.
+    /// Default: 32768. Override via LEAN_CTX_TURN_FRESH_LIMIT_VERBATIM.
+    ///
+    /// The ordinary `turn_fresh_limit` is a compression backstop for output the
+    /// agent did not size itself. A verbatim read is the documented recovery
+    /// path out of compression (#1582); capping it at the same 4096 tokens made
+    /// that path unreachable for any file above ~16 KB.
+    #[serde(default = "serde_defaults::default_turn_fresh_limit_verbatim")]
+    pub turn_fresh_limit_verbatim: usize,
     /// Maximum cumulative fresh tokens per session. 0 = unlimited.
     /// Default: 200000. Progressive compression kicks in at 50/75/90%.
     /// Override via LEAN_CTX_SESSION_TOKEN_LIMIT env var.

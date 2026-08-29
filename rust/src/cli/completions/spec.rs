@@ -1426,11 +1426,13 @@ pub static COMMAND_TREE: &[CommandNode] = &[
     CommandNode {
         name: "watch",
         aliases: &[],
-        description: "Watch for file changes",
+        // #1602: removed in 3.9.20; kept only as a signpost to `dashboard`,
+        // so it must not be completed as if it were a working command.
+        description: "Removed — see `lean-ctx dashboard`",
         subcommands: &[],
         flags: &[],
         positional: None,
-        hidden: false,
+        hidden: true,
     },
     CommandNode {
         name: "yolo",
@@ -1570,5 +1572,26 @@ mod tests {
             .expect("benchmark command must be registered");
         assert!(benchmark.flags.iter().any(|flag| flag.long == "--real"));
         assert!(benchmark.flags.iter().any(|flag| flag.long == "--json"));
+    }
+
+    /// #1602: `watch` was removed in 3.9.20, but the completion spec still
+    /// offered it — under a third description ("Watch for file changes") that
+    /// matched neither the removed TUI nor `index watch`. A removed command
+    /// must not be advertised as a working one.
+    #[test]
+    fn removed_watch_command_is_not_advertised() {
+        let watch = COMMAND_TREE
+            .iter()
+            .find(|node| node.name == "watch")
+            .expect("watch stays in the tree as a signpost to `dashboard`");
+        assert!(
+            watch.hidden,
+            "a removed command must not be completed as a working one"
+        );
+        assert!(
+            watch.description.contains("Removed"),
+            "the description must say the command is gone, got: {}",
+            watch.description
+        );
     }
 }

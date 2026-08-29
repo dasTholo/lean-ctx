@@ -445,6 +445,7 @@ pub mod multi_repo;
 pub(crate) mod nc_compress;
 pub mod ocp;
 pub mod openapi;
+pub mod opencode_config;
 pub(crate) mod output_echo;
 pub(crate) mod owasp_alignment;
 pub(crate) mod path_locks;

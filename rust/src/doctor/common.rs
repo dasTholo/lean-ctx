@@ -365,26 +365,16 @@ pub(super) fn mcp_config_locations(home: &std::path::Path) -> Vec<McpLocation> {
     });
 
     {
-        #[cfg(unix)]
-        let opencode_cfg = home.join(".config").join("opencode").join("opencode.json");
-        #[cfg(unix)]
-        let opencode_display = "~/.config/opencode/opencode.json";
-
-        #[cfg(windows)]
-        let opencode_cfg = if let Ok(appdata) = std::env::var("APPDATA") {
-            std::path::PathBuf::from(appdata)
-                .join("opencode")
-                .join("opencode.json")
-        } else {
-            home.join(".config").join("opencode").join("opencode.json")
-        };
-        #[cfg(windows)]
-        let opencode_display = "%APPDATA%/opencode/opencode.json";
+        // #1585: OpenCode accepts opencode.json and opencode.jsonc. Doctor must
+        // inspect the file the user actually has, not the name we happen to
+        // prefer, or it reports "not configured" for a working setup.
+        let resolved = crate::core::opencode_config::resolve(home);
+        let opencode_display = resolved.display(home);
 
         locations.push(McpLocation {
             name: "OpenCode",
             display: opencode_display.into(),
-            path: opencode_cfg,
+            path: resolved.path,
         });
     }
 

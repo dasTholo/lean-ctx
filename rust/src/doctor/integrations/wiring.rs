@@ -180,7 +180,55 @@ pub(crate) fn cmd_matches_expected(cmd: &str, portable: &str) -> bool {
     {
         return true;
     }
+    // #1598: the generated bash wrappers hold an MSYS-style path
+    // (`/c/Users/Max/.cargo/bin/lean-ctx.exe`) because that is what bash needs,
+    // while the expected binary is native (`C:\Users\Max\…`). Byte comparison
+    // calls a correct wrapper stale and sends Windows users into a
+    // `setup --fix` loop that rewrites the file to a byte-identical result.
+    if same_windows_path(cmd, portable) {
+        return true;
+    }
+    if let Some(resolved) = resolve_lean_ctx_binary()
+        && same_windows_path(cmd, &resolved.to_string_lossy())
+    {
+        return true;
+    }
     false
+}
+
+/// Whether two strings name the same Windows file across the MSYS/native
+/// spelling divide: `/c/Users/Max/x.exe` ≡ `C:\Users\Max\x.exe` (#1598).
+///
+/// Returns `false` for anything that is not drive-qualified in one of the two
+/// forms, so ordinary Unix paths are never conflated.
+fn same_windows_path(a: &str, b: &str) -> bool {
+    fn canon(s: &str) -> Option<String> {
+        let s = s.trim().trim_matches('"');
+        let bytes = s.as_bytes();
+        // `X:\…` / `X:/…`  →  drive + remainder after the colon
+        // `/x/…` (MSYS)     →  drive + remainder after the drive letter
+        let (drive, rest) =
+            if bytes.len() >= 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic() {
+                (bytes[0], &s[2..])
+            } else if bytes.len() >= 3
+                && bytes[0] == b'/'
+                && bytes[1].is_ascii_alphabetic()
+                && bytes[2] == b'/'
+            {
+                (bytes[1], &s[2..])
+            } else {
+                return None;
+            };
+        Some(format!(
+            "{}:{}",
+            drive.to_ascii_lowercase() as char,
+            rest.replace('\\', "/").to_ascii_lowercase()
+        ))
+    }
+    match (canon(a), canon(b)) {
+        (Some(x), Some(y)) => x == y,
+        _ => false,
+    }
 }
 
 /// Collect the `lean-ctx` binary tokens that appear immediately before a
@@ -232,6 +280,41 @@ pub(crate) fn check_rules_file(path: &std::path::Path) -> NamedCheck {
         } else {
             format!("missing ({})", path.display())
         },
+    }
+}
+
+/// Rules-file health that respects the configured rules policy (#1596).
+///
+/// A missing global rules file is only drift when lean-ctx was actually asked to
+/// write one. With `rules_injection = "off"` — or `rules_scope = "project"`,
+/// which keeps global files out by design — the file is absent on purpose, and
+/// reporting the integration as unhealthy for it sends users chasing a
+/// non-problem. Claude Code's dedicated check already reasoned this way; this
+/// gives every other editor (Cline, Cline CLI, Roo, Windsurf, …) the same rule.
+pub(crate) fn check_rules_file_for_policy(
+    path: &std::path::Path,
+    injection: crate::core::config::RulesInjection,
+    scope: crate::core::config::RulesScope,
+) -> NamedCheck {
+    use crate::core::config::{RulesInjection, RulesScope};
+
+    if path.exists() {
+        return check_rules_file(path);
+    }
+    let intentional = match injection {
+        RulesInjection::Off => Some("rules injection off (intentionally not installed)"),
+        _ if scope == RulesScope::Project => {
+            Some("project scope (global rules intentionally absent)")
+        }
+        _ => None,
+    };
+    match intentional {
+        Some(detail) => NamedCheck {
+            name: "Rules file".to_string(),
+            ok: true,
+            detail: detail.to_string(),
+        },
+        None => check_rules_file(path),
     }
 }
 
@@ -331,5 +414,111 @@ pub(crate) fn rules_path_for(name: &str, home: &std::path::Path) -> Option<std::
         "Pi Coding Agent" => Some(home.join(".pi/rules/lean-ctx.md")),
         "Crush" => Some(home.join(".config/crush/rules/lean-ctx.md")),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::config::{RulesInjection, RulesScope};
+
+    // --- #1598: MSYS vs native Windows spelling of the same wrapper binary ---
+
+    #[test]
+    fn msys_and_native_windows_paths_are_the_same_binary() {
+        assert!(same_windows_path(
+            "/c/Users/Max/.cargo/bin/lean-ctx.exe",
+            r"C:\Users\Max\.cargo\bin\lean-ctx.exe"
+        ));
+    }
+
+    #[test]
+    fn drive_letter_and_separators_compare_case_insensitively() {
+        assert!(same_windows_path(
+            "/d/Tools/lean-ctx.exe",
+            r"D:\tools\LEAN-CTX.exe"
+        ));
+        assert!(same_windows_path("C:/x/lean-ctx.exe", r"c:\x\lean-ctx.exe"));
+    }
+
+    #[test]
+    fn different_windows_paths_still_differ() {
+        assert!(!same_windows_path(
+            "/c/Users/Max/.cargo/bin/lean-ctx.exe",
+            r"C:\Users\Other\.cargo\bin\lean-ctx.exe"
+        ));
+    }
+
+    #[test]
+    fn plain_unix_paths_are_never_conflated() {
+        // No drive qualification on either side -> the comparison must abstain
+        // rather than invent an equivalence.
+        assert!(!same_windows_path(
+            "/usr/local/bin/lean-ctx",
+            "/opt/lean-ctx"
+        ));
+        assert!(!same_windows_path(
+            "/usr/local/bin/lean-ctx",
+            "/usr/local/bin/lean-ctx"
+        ));
+    }
+
+    #[test]
+    fn wrapper_written_for_bash_is_not_reported_stale() {
+        let native = r"C:\Users\Max\.cargo\bin\lean-ctx.exe";
+        let bash = crate::hooks::to_bash_compatible_path(native);
+        assert_eq!(bash, "/c/Users/Max/.cargo/bin/lean-ctx.exe");
+        assert!(
+            cmd_matches_expected(&bash, native),
+            "the wrapper we generate ourselves must pass our own staleness check"
+        );
+    }
+
+    // --- #1596: an intentionally absent rules file is not drift ---
+
+    #[test]
+    fn missing_rules_file_is_drift_when_injection_is_on() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("lean-ctx.md");
+        let c = check_rules_file_for_policy(&path, RulesInjection::Dedicated, RulesScope::Global);
+        assert!(!c.ok);
+        assert!(c.detail.starts_with("missing"));
+    }
+
+    #[test]
+    fn missing_rules_file_is_healthy_when_injection_is_off() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("lean-ctx.md");
+        let c = check_rules_file_for_policy(&path, RulesInjection::Off, RulesScope::Global);
+        assert!(
+            c.ok,
+            "rules_injection=off means the file is absent by design"
+        );
+        assert!(c.detail.contains("injection off"));
+    }
+
+    #[test]
+    fn missing_global_rules_file_is_healthy_in_project_scope() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("lean-ctx.md");
+        let c = check_rules_file_for_policy(&path, RulesInjection::Shared, RulesScope::Project);
+        assert!(c.ok);
+        assert!(c.detail.contains("project scope"));
+    }
+
+    #[test]
+    fn present_rules_file_is_healthy_under_every_policy() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("lean-ctx.md");
+        std::fs::write(&path, "rules").unwrap();
+        for (inj, scope) in [
+            (RulesInjection::Off, RulesScope::Global),
+            (RulesInjection::Shared, RulesScope::Project),
+            (RulesInjection::Dedicated, RulesScope::Both),
+        ] {
+            let c = check_rules_file_for_policy(&path, inj, scope);
+            assert!(c.ok);
+            assert!(c.detail.contains("lean-ctx.md"));
+        }
     }
 }
