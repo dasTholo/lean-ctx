@@ -315,4 +315,51 @@ mod tests {
             "permission_inheritance must default to On so IDE permission rules are honored out of the box"
         );
     }
+
+    /// #1605: the `[llm]` schema was hand-written with literal defaults and had
+    /// drifted from `LlmConfig` — it named an `api_key` key that no field backs
+    /// (so `config set llm.api_key <secret>` printed "Updated" and then dropped
+    /// the value in the serde round-trip), advertised `llama3.2` as the model
+    /// default, and omitted `base_url` entirely. Every `[llm]` schema key must
+    /// name a real serialised field, and its default must be the struct's.
+    #[test]
+    fn llm_schema_keys_match_the_llm_config_struct() {
+        let schema = ConfigSchema::generate();
+        let section = schema
+            .sections
+            .get("llm")
+            .expect("[llm] section must exist in the schema");
+        let defaults = serde_json::to_value(crate::core::llm_enhance::LlmConfig::default())
+            .expect("LlmConfig serialises");
+        let defaults = defaults.as_object().expect("LlmConfig is a struct");
+
+        for (key, entry) in &section.keys {
+            let actual = defaults.get(key).unwrap_or_else(|| {
+                panic!(
+                    "schema key `llm.{key}` has no field on LlmConfig — \
+                     `config set llm.{key} <v>` would report a save that serde discards"
+                )
+            });
+            // `Option<String>` serialises as null; the schema shows an empty string.
+            let expected = if actual.is_null() {
+                serde_json::json!("")
+            } else {
+                actual.clone()
+            };
+            assert_eq!(
+                entry.default, expected,
+                "schema default for `llm.{key}` has drifted from LlmConfig::default()"
+            );
+        }
+
+        assert!(
+            schema.lookup("llm.api_key").is_none(),
+            "`llm.api_key` is not a config field — the credential comes from \
+             OPENROUTER_API_KEY / ANTHROPIC_API_KEY, so `config set` must reject it"
+        );
+        assert!(
+            schema.lookup("llm.base_url").is_some(),
+            "`llm.base_url` is a real field and must be settable"
+        );
+    }
 }

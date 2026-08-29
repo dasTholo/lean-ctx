@@ -266,12 +266,12 @@ Index-time file filters: declare the retrieval corpus explicitly (BM25 + graph +
 
 ## `[llm]`
 
-Optional LLM enhancement settings (query expansion, contradiction explanation). Deterministic fallback when disabled or unreachable.
+Optional LLM enhancement settings (query expansion, contradiction explanation). Deterministic fallback when disabled or unreachable. Credentials come from the environment — OPENROUTER_API_KEY or ANTHROPIC_API_KEY — not from this file.
 
-- `api_key` (string, default `""`) — API key for OpenRouter or Anthropic backends
 - `backend` (enum: ollama | openrouter | anthropic, default `ollama`) — LLM backend provider
+- `base_url` (string, default `""`) — Override the backend's base URL (empty = the backend's own default)
 - `enabled` (bool, default `false`) — Enable optional LLM enhancements (query expansion, contradiction explanation)
-- `model` (string, default `llama3.2`) — Model name for the selected backend
+- `model` (string, default `qwen2.5-coder:1.5b`) — Model name for the selected backend
 - `timeout_secs` (u64, default `10`) — HTTP timeout for LLM requests
 
 ## `[loop_detection]`
