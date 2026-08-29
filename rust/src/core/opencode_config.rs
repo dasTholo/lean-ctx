@@ -54,19 +54,16 @@ pub fn resolve_in_dir(dir: &Path) -> Resolved {
     }
 }
 
-/// Resolve OpenCode's global config directory for this platform.
+/// Resolve OpenCode's global config directory.
+///
+/// `~/.config/opencode` on every platform — OpenCode uses the XDG layout on
+/// Windows too, and so does the rest of lean-ctx: the rules file, skills,
+/// detection and uninstall all address `home/.config/opencode`. Special-casing
+/// `%APPDATA%` here would point the MCP writer and doctor at a directory the
+/// uninstaller never visits and the rules writer never fills — and would make
+/// every caller that passes a test home write to the real user profile.
 pub fn config_dir(home: &Path) -> PathBuf {
-    #[cfg(windows)]
-    {
-        if let Ok(appdata) = std::env::var("APPDATA") {
-            return PathBuf::from(appdata).join("opencode");
-        }
-        home.join(".config/opencode")
-    }
-    #[cfg(not(windows))]
-    {
-        home.join(".config/opencode")
-    }
+    home.join(".config/opencode")
 }
 
 /// Resolve the global OpenCode config for a given home directory.
@@ -119,6 +116,18 @@ mod tests {
         let r = resolve_in_dir(dir.path());
         assert_eq!(r.path.file_name().unwrap(), "opencode.json");
         assert!(!r.ambiguous);
+    }
+
+    #[test]
+    fn config_dir_stays_under_the_given_home_on_every_platform() {
+        // Windows CI caught this the hard way: a `%APPDATA%` branch here made
+        // the config resolver ignore its `home` argument, so five tests shared
+        // the runner's real profile and contaminated each other — and in
+        // production it would have split the config away from the rules file,
+        // detection and uninstall, which all use `home/.config/opencode`.
+        let home = Path::new("/tmp/leanctx-home-probe");
+        assert_eq!(config_dir(home), home.join(".config/opencode"));
+        assert!(config_dir(home).starts_with(home));
     }
 
     #[test]
