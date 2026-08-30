@@ -178,6 +178,10 @@ pub fn handle_filtered(
     let mut skipped_boundary_files: Vec<(String, &'static str)> = Vec::new();
     let mut files_skipped_special = 0u32;
     let mut deadline_hit = false;
+    // #1625: whether the result cap stopped the scan. Without this, a search
+    // that quit after one file reported "10 matches in 1 files (scanned 1)" —
+    // indistinguishable from an exhaustive scan that genuinely found ten.
+    let mut cap_hit = false;
     // Set when any hit gained an `∈name@Lstart` enclosing tag, so the
     // self-describing legend is emitted only when it is actually needed (#580).
     let mut any_enclosing = false;
@@ -283,6 +287,7 @@ pub fn handle_filtered(
     let deadline = search_deadline().map(|budget| Instant::now() + budget);
     for path in &files {
         if matches.len() >= max_results {
+            cap_hit = true;
             break;
         }
 
@@ -385,6 +390,7 @@ pub fn handle_filtered(
                     matches.push(format!("{short_path}:{} {}{}", i + 1, shown, tag));
                 }
                 if matches.len() >= max_results {
+                    cap_hit = true;
                     break;
                 }
             }
@@ -504,6 +510,18 @@ pub fn handle_filtered(
             "\n(search stopped after the {}s budget — {files_searched} files scanned; \
              refine the pattern or scope with path= for full coverage)",
             search_deadline().map_or(0, |d| d.as_secs())
+        ));
+    }
+    // #1625: the cap stopping the scan is the same class of event as the
+    // deadline above, and it was silent. A caller auditing a codebase read
+    // "10 matches in 1 files (scanned 1)" as an exhaustive answer when the
+    // scan had in fact stopped after the first file of 32.
+    if cap_hit {
+        let candidates = files.len();
+        result.push_str(&format!(
+            "\n(stopped at the max_results={max_results} cap — {files_searched} of {candidates} \
+             files scanned; the counts above are a floor, not a total. Raise max_results, \
+             narrow with include=/path=, or split the pattern.)"
         ));
     }
 

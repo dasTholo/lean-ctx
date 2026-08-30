@@ -81,7 +81,10 @@ impl McpTool for CtxSearchTool {
                     "exclude": { "type": "string" },
                     "exclude_pattern": { "type": "string" },
                     "anchored": { "type": "boolean" },
-                    "max_results": { "type": "integer" },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "With queries: a SHARED total, split across them"
+                    },
                     "top_k": { "type": "integer" },
                     "mode": { "type": "string", "enum": ["bm25", "dense", "hybrid"] },
                     "file": { "type": "string" },
@@ -786,6 +789,48 @@ fn search_single(
 /// separators, so it still matches at any depth, preserving the old behaviour).
 /// A value that already looks like a glob/path (`*`, `{`, `?`, `/`) is passed
 /// through untouched so any power user who put a pattern in `ext` keeps working.
+/// Keys a `queries[]` entry may carry. `items` used to be an untyped object,
+/// so a misspelled or unsupported key was dropped without a word — #1625 lost
+/// half an audit's results to exactly that.
+const QUERY_KEYS: &[&str] = &[
+    "pattern",
+    "include",
+    "ext",
+    "exclude",
+    "exclude_pattern",
+    "max_results",
+];
+
+/// Reject a query entry that carries a key `handle_batch_queries` would ignore.
+fn validate_query_keys(obj: &Map<String, Value>, idx: usize) -> Result<(), String> {
+    match obj.keys().find(|k| !QUERY_KEYS.contains(&k.as_str())) {
+        Some(unknown) => Err(format!(
+            "queries[{}]: unknown key '{unknown}' — accepted keys are {}",
+            idx + 1,
+            QUERY_KEYS.join(", ")
+        )),
+        None => Ok(()),
+    }
+}
+
+/// The cap for one query: its own `max_results` when present, otherwise its
+/// equal share of the shared top-level budget. Clamped to the same 500 ceiling
+/// the top-level value gets, so a per-query value cannot escape the global one.
+fn resolve_query_cap(
+    obj: &Map<String, Value>,
+    default_share: usize,
+    idx: usize,
+) -> Result<usize, String> {
+    match get_int(obj, "max_results") {
+        Some(n) if n > 0 => Ok((n as usize).min(500)),
+        Some(_) => Err(format!(
+            "queries[{}].max_results must be a positive integer",
+            idx + 1
+        )),
+        None => Ok(default_share),
+    }
+}
+
 /// #871: batch multi-query — runs each query independently and groups output.
 fn handle_batch_queries(
     queries: &[Value],
@@ -814,7 +859,14 @@ fn handle_batch_queries(
     let allow_secret_paths = crate::core::roles::active_role().io.allow_secret_paths;
     let root = &resolved.roots[0];
     let global_max = (get_int(args, "max_results").unwrap_or(20) as usize).min(500);
-    let per_query_max = (global_max / queries.len()).max(5);
+    // #1625: the top-level budget is *shared* — it is split across the queries,
+    // so two queries under the default 20 get 10 each. That is a defensible
+    // default, but a `max_results` written inside a query object used to be
+    // dropped on the floor, and `queries.items` was an untyped object so no
+    // validation error came back either. A per-query value now wins over its
+    // share of the split, and anything unrecognised is rejected rather than
+    // silently ignored.
+    let default_share = (global_max / queries.len()).max(5);
 
     let _mode_guard = crate::core::savings_footer::ModeGuard::new("search");
     let mut combined = String::new();
@@ -836,10 +888,16 @@ fn handle_batch_queries(
             ));
             continue;
         };
+        // #1625: an untyped `items` schema meant a misspelled or unsupported
+        // key vanished without a word — the reporter lost half their results to
+        // exactly that. Name the offending key and the accepted set instead.
+        validate_query_keys(obj, idx).map_err(|e| ErrorData::invalid_params(e, None))?;
         let include =
             get_str(obj, "include").or_else(|| get_str(obj, "ext").map(|e| ext_to_include(&e)));
         let exclude = get_str(obj, "exclude");
         let exclude_pattern = get_str(obj, "exclude_pattern");
+        let per_query_max = resolve_query_cap(obj, default_share, idx)
+            .map_err(|e| ErrorData::invalid_params(e, None))?;
 
         let search_result = tokio::task::block_in_place(|| {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -929,7 +987,7 @@ fn ext_to_include(ext: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{SearchAction, ext_to_include};
+    use super::{SearchAction, ext_to_include, resolve_query_cap, validate_query_keys};
     use serde_json::{Map, Value, json};
 
     fn args(pairs: &[(&str, Value)]) -> Map<String, Value> {
@@ -1059,5 +1117,108 @@ mod tests {
                 .and_then(|(_, v)| v.as_str().map(String::from))
         });
         assert_eq!(pattern, None);
+    }
+
+    /// #1625: a `max_results` inside a query object was read by nothing. The
+    /// caller saw exactly half the default budget per query and no indication
+    /// that the value they had written was ignored.
+    #[test]
+    fn per_query_max_results_overrides_its_share_of_the_shared_budget() {
+        // Two queries under the default budget of 20 → 10 each.
+        let share = 10;
+        assert_eq!(
+            resolve_query_cap(&args(&[("pattern", json!("x"))]), share, 0),
+            Ok(share),
+            "without its own cap a query keeps its share of the shared budget"
+        );
+        assert_eq!(
+            resolve_query_cap(
+                &args(&[("pattern", json!("x")), ("max_results", json!(20))]),
+                share,
+                0
+            ),
+            Ok(20),
+            "a per-query cap must win over the split"
+        );
+        assert_eq!(
+            resolve_query_cap(
+                &args(&[("pattern", json!("x")), ("max_results", json!(9_000))]),
+                share,
+                0
+            ),
+            Ok(500),
+            "a per-query cap may not escape the 500 ceiling the top level has"
+        );
+    }
+
+    #[test]
+    fn non_positive_per_query_max_results_is_rejected_not_ignored() {
+        let error = resolve_query_cap(
+            &args(&[("pattern", json!("x")), ("max_results", json!(0))]),
+            10,
+            1,
+        )
+        .expect_err("zero is not a usable cap");
+        assert!(
+            error.contains("queries[2].max_results"),
+            "the error must point at the offending entry, 1-based: {error}"
+        );
+    }
+
+    /// The untyped `items` schema is why the ignored key produced no validation
+    /// error on the client side either. Both halves are closed now: the schema
+    /// says `additionalProperties: false`, and the handler checks it too, since
+    /// not every client validates before dispatch.
+    #[test]
+    fn unknown_query_keys_are_named_rather_than_dropped() {
+        assert_eq!(
+            validate_query_keys(&args(&[("pattern", json!("x"))]), 0),
+            Ok(())
+        );
+        let error = validate_query_keys(
+            &args(&[("pattern", json!("x")), ("maxResults", json!(20))]),
+            0,
+        )
+        .expect_err("a camelCase near-miss must not be silently dropped");
+        assert!(
+            error.contains("unknown key 'maxResults'"),
+            "the offending key must be named: {error}"
+        );
+        assert!(
+            error.contains("max_results"),
+            "the accepted set must be listed so the fix is obvious: {error}"
+        );
+    }
+
+    /// The published schema must describe the shared-budget semantics the
+    /// reporter had to reverse-engineer from the results — and must do it
+    /// without paying for a fully expanded `queries.items` object.
+    ///
+    /// Typing every `items` key (`additionalProperties: false` + six property
+    /// entries) cost ~52 tokens on *every turn of every session* and broke
+    /// `minimal_arm_per_turn_prefix_stays_within_budget`. Its only benefit is
+    /// client-side rejection of a rare malformed call, which
+    /// `validate_query_keys` already catches at dispatch with a better message
+    /// (it names the offending key and the accepted set). In a tool whose
+    /// purpose is context economy, the per-turn cost loses. The one line kept
+    /// is the shared-budget note, because that is the misconception #1625 was
+    /// actually made of.
+    #[test]
+    fn schema_documents_the_shared_budget_without_paying_for_typed_items() {
+        use crate::server::tool_trait::McpTool;
+        let def = super::CtxSearchTool.tool_def();
+        let schema = serde_json::to_value(&*def.input_schema).expect("schema");
+        let top = schema["properties"]["max_results"]["description"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(
+            top.contains("SHARED"),
+            "the top-level budget must announce that it is split across queries: {top}"
+        );
+        assert!(
+            schema["properties"]["queries"]["items"]["properties"].is_null(),
+            "queries.items must stay unexpanded — the per-turn token cost is not \
+             worth duplicating a check validate_query_keys already makes"
+        );
     }
 }

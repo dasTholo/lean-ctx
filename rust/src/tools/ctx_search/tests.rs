@@ -670,3 +670,76 @@ fn match_count_reports_matched_files_not_scanned_files() {
         "the scanned count stays visible, explicitly labelled: {out}"
     );
 }
+
+/// #1625: the reporter's fixture — 14 matches across three files — audited
+/// under a cap of 10. The old output was "10 matches in 1 files (scanned 1)"
+/// with nothing to suggest the scan had stopped early, so an endpoint audit
+/// over 32 files read as complete at 10 hits in 1 file. The scanned count is
+/// not completeness evidence when the budget ran out, and now says so.
+#[test]
+fn result_cap_is_announced_instead_of_looking_exhaustive() {
+    // Distinct literal per case: a repeated pattern in one process renders as
+    // a *delta* against the previous result, which would compare the two runs
+    // against each other rather than against the corpus.
+    let fixture = |token: &str| {
+        let dir = tempfile::tempdir().unwrap();
+        let many: String = (0..12)
+            .map(|i| format!("const {token}_{i} = \"/api/v{i}\";\n"))
+            .collect();
+        std::fs::write(dir.path().join("a.ts"), many).unwrap();
+        std::fs::write(
+            dir.path().join("b.ts"),
+            format!("const {token}_B = \"/api/b\";\n"),
+        )
+        .unwrap();
+        std::fs::create_dir_all(dir.path().join("nested")).unwrap();
+        std::fs::write(
+            dir.path().join("nested/c.ts"),
+            format!("const {token}_C = \"/api/c\";\n"),
+        )
+        .unwrap();
+        dir
+    };
+    let search = |dir: &tempfile::TempDir, token: &str, max: usize| {
+        handle(
+            token,
+            &dir.path().to_string_lossy(),
+            Some("*.ts"),
+            max,
+            CrpMode::Off,
+            true,
+            true,
+            false,
+        )
+        .text
+    };
+
+    let capped_dir = fixture("CAPPED_ENDPOINT");
+    let capped = search(&capped_dir, "CAPPED_ENDPOINT", 10);
+
+    assert!(
+        capped.contains("stopped at the max_results=10 cap"),
+        "hitting the cap must be stated, not inferred: {capped}"
+    );
+    assert!(
+        capped.contains("of 3 files scanned"),
+        "the notice must contrast files scanned with files eligible: {capped}"
+    );
+    assert!(
+        capped.contains("floor, not a total"),
+        "the counts must be labelled as a lower bound: {capped}"
+    );
+
+    // The same shape under a sufficient budget is exhaustive, and must carry
+    // no notice — otherwise the warning becomes noise and stops being read.
+    let full_dir = fixture("FULL_ENDPOINT");
+    let complete = search(&full_dir, "FULL_ENDPOINT", 40);
+    assert!(
+        complete.starts_with("14 matches in 3 files"),
+        "the uncapped search must find every match: {complete}"
+    );
+    assert!(
+        !complete.contains("stopped at the max_results"),
+        "an exhaustive search must not warn about a cap it never reached: {complete}"
+    );
+}
