@@ -1,16 +1,19 @@
 // Auto-split from the former monolithic dispatch.rs. run() (the command
 // match) stays in mod.rs; standalone helpers grouped by concern.
 
-/// Short, friendly orientation shown when a human runs bare `lean-ctx` in a
-/// terminal (where the silent stdio MCP server would otherwise just hang). One
-/// obvious next step (`onboard`), not the full 150-line command reference.
+/// Short, friendly orientation shown when a human runs bare `lean-ctx` on a
+/// terminal. It goes to stderr and the stdio server starts anyway (#1595): a
+/// TTY on stdin means a human *may* be watching, never that an MCP client is
+/// absent — some clients spawn the server under a PTY. One obvious next step
+/// (`onboard`), not the full 150-line command reference.
 pub(super) fn quickstart_text() -> String {
     format!(
         "lean-ctx {version} — Context SDK for AI Agents
 
 With no arguments, lean-ctx speaks the MCP protocol on stdin/stdout — that is
-for your AI editor, not for interactive use, so it is waiting silently. You
-probably want one of these:
+for your AI editor, not for interactive use. It is doing that right now and
+will sit there waiting for JSON-RPC; press Ctrl-C to stop it. You probably
+want one of these:
 
   lean-ctx wrap cursor   One-command setup for Cursor (recommended)
   lean-ctx wrap claude   One-command setup for Claude Code
@@ -21,10 +24,6 @@ Docs: https://leanctx.com
 ",
         version = env!("CARGO_PKG_VERSION"),
     )
-}
-
-pub(super) fn print_quickstart() {
-    print!("{}", quickstart_text());
 }
 
 /// One-line capability summary under the `--help` title. The MCP-tool count is
