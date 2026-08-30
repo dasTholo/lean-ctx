@@ -27,12 +27,24 @@ pub(crate) fn check_codex_toml(path: &std::path::Path, binary: &str) -> NamedChe
         .and_then(|t| t.get("command"))
         .and_then(|c| c.as_str());
     let cmd_ok = cmd.is_some_and(|c| cmd_matches_expected(c, binary));
-    let args_ok = v
+    // `args` is optional by design. A bare `lean-ctx` invocation starts the
+    // stdio server just as `lean-ctx mcp` does (`cli/dispatch/server.rs`
+    // matches `None | Some("mcp")`), so a missing key and `args = []` are both
+    // working configurations — reporting them as drift would push a `--fix`
+    // that rewrites a functional file into a semantically identical one, the
+    // same failure mode as #1596. New installs are written with the explicit
+    // `["mcp"]`; only an `args` value that replaces the entry point with
+    // something else is real drift.
+    let args_ok = match v
         .get("mcp_servers")
         .and_then(|t| t.get("lean-ctx"))
         .and_then(|t| t.get("args"))
-        .and_then(|a| a.as_array())
-        .is_some_and(|arr| arr.iter().any(|arg| arg.as_str() == Some("mcp")));
+    {
+        None => true,
+        Some(args) => args
+            .as_array()
+            .is_some_and(|arr| arr.is_empty() || arr.iter().any(|arg| arg.as_str() == Some("mcp"))),
+    };
     let ok = cmd_ok && args_ok;
     NamedCheck {
         name: "Codex MCP".to_string(),

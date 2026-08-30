@@ -170,7 +170,11 @@ args = ["x"]
 
     let content = std::fs::read_to_string(&path).unwrap();
     assert!(content.contains(r#"command = "new""#));
-    assert!(content.contains("args = []"));
+    // The pre-existing `args = ["x"]` names no entry point that starts the
+    // stdio server, so the writer replaces it with the explicit one. An `args`
+    // list that already contains `mcp` is preserved verbatim
+    // (`upsert_codex_toml_preserves_custom_args_containing_mcp`).
+    assert!(content.contains(r#"args = ["mcp"]"#));
 }
 
 #[test]
@@ -289,6 +293,22 @@ startup_timeout_sec = 30
     let updated = upsert_codex_toml(input, "/opt/homebrew/bin/lean-ctx");
     assert!(updated.contains("args = [\"mcp\"]"));
     assert!(updated.contains("startup_timeout_sec = 30"));
+}
+
+#[test]
+fn upsert_codex_toml_preserves_custom_args_containing_mcp() {
+    // A user who added their own flag alongside `mcp` has a working entry
+    // point; rewriting it to a bare `["mcp"]` would silently drop their flag.
+    let input = "\
+[mcp_servers.lean-ctx]
+command = \"/opt/homebrew/bin/lean-ctx\"
+args = [\"mcp\", \"--verbose\"]
+";
+    let updated = upsert_codex_toml(input, "/opt/homebrew/bin/lean-ctx");
+    assert!(
+        updated.contains("args = [\"mcp\", \"--verbose\"]"),
+        "custom args carrying `mcp` must survive verbatim: {updated}"
+    );
 }
 
 #[test]

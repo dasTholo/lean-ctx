@@ -360,7 +360,11 @@ fn check_codex_toml_detects_missing_file() {
 }
 
 #[test]
-fn check_codex_toml_detects_legacy_empty_args_drift() {
+fn check_codex_toml_accepts_legacy_empty_args() {
+    // The pre-3.9.20 writers emitted `args = []`, and that config still works:
+    // a bare `lean-ctx` starts the stdio server. Calling it drift would give
+    // every existing Codex user a red check and a `--fix` that rewrites a
+    // working file — the #1596 failure mode.
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("config.toml");
     std::fs::write(
@@ -369,15 +373,30 @@ fn check_codex_toml_detects_legacy_empty_args_drift() {
     )
     .unwrap();
     let check = check_codex_toml(&path, "lean-ctx");
-    assert!(!check.ok);
-    assert!(check.detail.contains("drift"));
+    assert!(check.ok);
+    assert!(check.detail.contains("ok"));
 }
 
 #[test]
-fn check_codex_toml_detects_missing_args_drift() {
+fn check_codex_toml_accepts_absent_args() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("config.toml");
     std::fs::write(&path, "[mcp_servers.lean-ctx]\ncommand = \"lean-ctx\"\n").unwrap();
+    let check = check_codex_toml(&path, "lean-ctx");
+    assert!(check.ok);
+    assert!(check.detail.contains("ok"));
+}
+
+#[test]
+fn check_codex_toml_flags_args_that_replace_the_entry_point() {
+    // Neither bare nor `mcp`: this one really would not start the server.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "[mcp_servers.lean-ctx]\ncommand = \"lean-ctx\"\nargs = [\"dashboard\"]\n",
+    )
+    .unwrap();
     let check = check_codex_toml(&path, "lean-ctx");
     assert!(!check.ok);
     assert!(check.detail.contains("drift"));
