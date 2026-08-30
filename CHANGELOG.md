@@ -5,10 +5,42 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [3.10.1] — 2026-08-30
 
-Patch release: the defect fixes below merged after the `v3.10.0` tag
-(`5b69202`) and are therefore **absent from the 3.10.0 artifacts**. 3.10.1
-carries them, plus a CI-only test fix. No new features, no behavior change
-beyond the fixes themselves.
+This release includes the defect fixes merged after the `v3.10.0` tag
+(`5b69202`) and the additive SDK Agent Tools interface below. Neither is
+present in the 3.10.0 artifacts.
+
+### Added — SDK Agent Tools Interface
+
+- `lean-ctx engine tool-session` provides a persistent, version-negotiated
+  NDJSON session for the Python SDK's `AgentContext`.
+- Read, search, tree, compose, symbol, glob, patch, and shell capabilities use
+  the existing Engine registry, cache, path jail, and compression pipeline.
+- Each result includes deterministic original, output, and saved-token counts.
+- Non-text MCP content blocks, including image reads, survive the SDK transport.
+- Release builds produce deterministic, integrity-checking Python companion
+  wheels for macOS, Linux (glibc and musl), Windows, CUDA, and Windows GNU.
+- Every native release target installs its wheel, passes strict package-metadata
+  validation, and runs the SDK's real AgentContext lifecycle before publication.
+
+### Security
+
+- Sessions are project-rooted and read-only by default. Write and execution
+  require an owner-only immutable policy file and are enforced by the Engine.
+- Execution accepts structured argv only. The Engine revalidates policy, env,
+  timeout, and workdir jail; resolves a bare allowlisted name to an absolute
+  executable outside the project; and launches argv without shell interpolation.
+- Shell output is bounded, timeouts terminate Unix process groups and Windows
+  process trees, and repository-local executable shadowing is rejected.
+- The protocol rejects oversized frames, malformed requests, unknown tools,
+  incompatible versions, unsafe roots, and permission escalation attempts.
+- SDK shell responses always include an explicit foreground exit code, so
+  custom agents never need to infer success from terminal text.
+
+### Compatibility
+
+- Agent Tools Interface `1.0.0`, schema `1`, transport `1` is additive. The
+  existing Engine Interface v1 context-view and recovery commands are
+  unchanged.
 
 ### Fixed
 

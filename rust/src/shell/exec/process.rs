@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// the join below blocks forever, wedging the caller *despite* the timeout
 /// having fired (GH #720: an orphaned `rg` kept a Cursor shell session dead
 /// for hours).
-pub(in crate::shell) fn wait_with_limits(
+pub(crate) fn wait_with_limits(
     mut child: Child,
     max_bytes: usize,
     timeout: std::time::Duration,
@@ -90,7 +90,16 @@ pub(in crate::shell) fn wait_with_limits(
             break;
         }
         match child.try_wait() {
-            Ok(Some(_)) | Err(_) => break,
+            Ok(Some(_)) => {
+                if kill_group && (!stdout_handle.is_finished() || !stderr_handle.is_finished()) {
+                    kill_child(&mut child, true);
+                }
+                break;
+            }
+            Err(_) => {
+                kill_child(&mut child, kill_group);
+                break;
+            }
             Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
         }
     }
@@ -129,7 +138,11 @@ pub(in crate::shell) fn wait_with_limits(
 fn kill_child(child: &mut Child, kill_group: bool) {
     #[cfg(unix)]
     if kill_group {
-        let pgid = child.id() as libc::pid_t;
+        // Agent Tools children inherit the Engine's dedicated process group;
+        // ordinary ctx_shell children create their own. Resolve the actual
+        // group so either topology terminates atomically.
+        // SAFETY: getpgid only reads kernel process metadata for this live PID.
+        let pgid = unsafe { libc::getpgid(child.id() as libc::pid_t) };
         if pgid > 0 {
             // SAFETY: plain syscall; a stale pgid at worst returns ESRCH.
             unsafe { libc::killpg(pgid, libc::SIGKILL) };
@@ -137,6 +150,14 @@ fn kill_child(child: &mut Child, kill_group: bool) {
     }
     #[cfg(not(unix))]
     let _ = kill_group;
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &child.id().to_string()])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
     let _ = child.kill();
 }
 
