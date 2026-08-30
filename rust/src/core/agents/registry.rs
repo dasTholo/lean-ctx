@@ -5,8 +5,8 @@ use std::path::Path;
 #[cfg(test)]
 use super::diary::{AgentDiary, DiaryEntryType, truncate};
 use super::persistence::{
-    FileLock, ProcessIdentityIndex, agents_dir, generate_short_id, load_registry_file,
-    mutate_persistent, save_registry_file,
+    FileLock, ProcessIdentityIndex, agents_dir, create_agents_dir, generate_short_id,
+    load_registry_file, mutate_persistent, save_registry_file,
 };
 use super::{AgentEntry, AgentRegistry, AgentStatus, LogicalSessionPresence, ScratchpadEntry};
 use crate::core::a2a::message::{MessagePriority, PrivacyLevel};
@@ -616,7 +616,7 @@ impl AgentRegistry {
 
     pub(crate) fn save(&self) -> Result<(), String> {
         let dir = agents_dir()?;
-        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        create_agents_dir(&dir)?;
 
         let lock_path = dir.join("registry.lock");
         let _lock = FileLock::acquire(&lock_path)?;
@@ -650,7 +650,7 @@ impl AgentRegistry {
     /// latest on-disk state.
     pub(crate) fn mutate_locked<T>(f: impl FnOnce(&mut Self) -> T) -> Result<(Self, T), String> {
         let dir = agents_dir()?;
-        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        create_agents_dir(&dir)?;
 
         let lock_path = dir.join("registry.lock");
         let _lock = FileLock::acquire(&lock_path)?;
@@ -1256,6 +1256,33 @@ mod presence_tests {
 
         assert!(error.contains("agent registry is corrupt"));
         assert_eq!(std::fs::read_to_string(registry_path).unwrap(), corrupt);
+    }
+
+    /// #1619: a sandbox or filesystem policy denies exactly one path, and the
+    /// error was reported as a bare `File exists (os error 17)` — no path, no
+    /// operation, nothing to allow-list. The reporter had to guess
+    /// `~/.local/share/lean-ctx/agents` to unblock themselves.
+    #[test]
+    fn agents_dir_creation_failure_names_the_path_and_operation() {
+        let isolated = crate::core::data_dir::isolated_data_dir();
+        // A plain file where the directory belongs reproduces the reported
+        // EEXIST without needing a sandbox.
+        let blocker = isolated.path().join("agents");
+        std::fs::write(&blocker, b"not a directory").expect("blocking file");
+
+        let error = AgentRegistry::mutate_locked(|registry| {
+            let _ = registry.register_process("mcp", Some("context-engine"), "/project", 101);
+        })
+        .expect_err("a file in place of the agents directory must fail");
+
+        assert!(
+            error.contains("create agent registry directory"),
+            "the failing operation must be named; got: {error}"
+        );
+        assert!(
+            error.contains(&blocker.display().to_string()),
+            "the conflicting path must be in the message so it can be allow-listed; got: {error}"
+        );
     }
 
     #[test]

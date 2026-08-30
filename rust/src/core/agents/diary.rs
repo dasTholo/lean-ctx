@@ -117,10 +117,14 @@ impl AgentDiary {
 
     pub(crate) fn save(&self) -> Result<(), String> {
         let dir = diary_dir()?;
-        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        // Same reasoning as #1619: name the path and the operation, or a
+        // sandbox denial reads as an unattributable "Operation not permitted".
+        std::fs::create_dir_all(&dir)
+            .map_err(|error| format!("create agent diary directory {}: {error}", dir.display()))?;
         let path = dir.join(format!("{}.json", sanitize_filename(&self.agent_id)));
         let json = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
-        std::fs::write(&path, json).map_err(|e| e.to_string())
+        std::fs::write(&path, json)
+            .map_err(|error| format!("write agent diary {}: {error}", path.display()))
     }
 
     pub(crate) fn load(agent_id: &str) -> Option<Self> {
