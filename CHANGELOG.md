@@ -3,15 +3,31 @@
 All notable changes to lean-ctx are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [3.10.1] — 2026-08-29
+## [3.10.1] — 2026-08-30
 
-Patch release: the nine defect fixes below merged after the `v3.10.0` tag
+Patch release: the defect fixes below merged after the `v3.10.0` tag
 (`5b69202`) and are therefore **absent from the 3.10.0 artifacts**. 3.10.1
 carries them, plus a CI-only test fix. No new features, no behavior change
 beyond the fixes themselves.
 
 ### Fixed
 
+- **A bare `lean-ctx` refused to serve MCP under a pty (#1595)** — the startup
+  path treated a terminal on stdin as proof that a human was there, printed the
+  quickstart and exited. MCP clients that spawn the server under a pty (Devin,
+  containerized agent runners, anything driving the child through
+  `script`/`expect`) therefore never got a connection, and the child exited `0`
+  after writing help text to stdout, so nothing in the client's log explained
+  it. A TTY means a human *may* be watching; it never means a client is absent.
+  The quickstart now goes to stderr — which clients log rather than parse — and
+  the server starts either way. `args = ["mcp"]` remains the explicit spelling
+  and is what the writers emit; it is no longer the only spelling that works.
+- **Codex config wrote `args = []` (#1597, thanks @reysilvaa)** — new Codex
+  entries are written as `args = ["mcp"]`, matching the Copilot writer, and an
+  existing list carrying `mcp` is preserved verbatim. `lean-ctx doctor`
+  deliberately still accepts a legacy `args = []` and an absent `args`: both
+  start the server, so reporting them would turn working installations red and
+  have `--fix` rewrite a file into an equivalent one.
 - **Verbatim reads were capped at 4096 tokens (#1582)** — the #1306 turn budget
   applied to explicit `raw=true` / `mode="raw"` requests too, so the documented
   way back to the original bytes was unreachable for any file above ~16 KB.
