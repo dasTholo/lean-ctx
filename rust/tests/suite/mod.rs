@@ -54,6 +54,8 @@ mod mcp_fast_initialize_669;
 mod mcp_manifest_up_to_date;
 mod mcp_optout_281;
 mod mcp_preinit_method_not_found_1454;
+#[cfg(unix)]
+mod mcp_pty_startup_1595;
 mod metrics_contract;
 mod ocla_wire_contract_suite;
 mod onboard_doctor_clean;

@@ -821,14 +821,20 @@ pub fn run() {
         }
     }
 
-    // Bare `lean-ctx` in an interactive terminal: a human almost certainly did
-    // not mean to start a silent stdio MCP server (which just hangs waiting for
-    // JSON-RPC). Show a short quickstart instead. MCP clients pipe stdin (not a
-    // TTY) so they still get the server, and explicit `lean-ctx mcp` always
-    // serves regardless of TTY.
+    // Bare `lean-ctx` on an interactive terminal: a human almost certainly did
+    // not mean to start a silent stdio MCP server, so print the quickstart.
+    //
+    // #1595: the TTY test alone is not a safe *stop* condition. An MCP client
+    // that spawns the server under a PTY (Devin, several containerized agent
+    // runners, anything driving the child through `script`/`expect`) hands it a
+    // terminal on stdin and is then answered with the quickstart instead of a
+    // server — the connection simply never comes up, with no error to see.
+    // A TTY tells us a human *might* be watching; it never tells us a client is
+    // not. So the guidance goes to stderr, which MCP clients log rather than
+    // parse, and the server starts either way: the human reads what is going on
+    // and presses Ctrl-C, the client completes its handshake on stdout.
     if args.len() == 1 && std::io::IsTerminal::is_terminal(&std::io::stdin()) {
-        print_quickstart();
-        return;
+        eprint!("{}", quickstart_text());
     }
 
     if let Err(e) = run_mcp_server() {
