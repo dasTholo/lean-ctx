@@ -83,7 +83,7 @@ impl McpTool for CtxSearchTool {
                     "anchored": { "type": "boolean" },
                     "max_results": {
                         "type": "integer",
-                        "description": "With queries: a SHARED total, split across them"
+                        "description": "shared across queries"
                     },
                     "top_k": { "type": "integer" },
                     "mode": { "type": "string", "enum": ["bm25", "dense", "hybrid"] },
@@ -1212,7 +1212,7 @@ mod tests {
             .as_str()
             .unwrap_or_default();
         assert!(
-            top.contains("SHARED"),
+            top.contains("shared across queries"),
             "the top-level budget must announce that it is split across queries: {top}"
         );
         assert!(
