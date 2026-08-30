@@ -12,6 +12,14 @@ beyond the fixes themselves.
 
 ### Fixed
 
+- **Agent-bus registration errors named no path (#1619, thanks @GrimmiMeloni)** —
+  a sandbox or filesystem policy denies exactly one directory, and the failure
+  arrived as `agent bus registration is required before tool execution: File
+  exists (os error 17)`: no path, no operation, nothing to allow-list. The
+  reporter had to guess `~/.local/share/lean-ctx/agents`. Directory creation
+  for the agent registry and the agent diary now names both the operation and
+  the resolved path (`create agent registry directory /…/agents: …`), as the
+  neighbouring registry-read, lock and persist errors already did.
 - **A bare `lean-ctx` refused to serve MCP under a pty (#1595)** — the startup
   path treated a terminal on stdin as proof that a human was there, printed the
   quickstart and exited. MCP clients that spawn the server under a pty (Devin,

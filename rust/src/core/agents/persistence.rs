@@ -66,11 +66,20 @@ fn identity_index_path() -> Result<PathBuf, String> {
     Ok(agents_dir()?.join("process-identities.json"))
 }
 
+/// Create the agent-registry directory, naming the path and the operation on
+/// failure (#1619). A bare `File exists (os error 17)` or `Operation not
+/// permitted` tells a user nothing they can act on; sandboxes and filesystem
+/// policies deny exactly one path, and that path is the whole diagnosis.
+pub(super) fn create_agents_dir(dir: &std::path::Path) -> Result<(), String> {
+    std::fs::create_dir_all(dir)
+        .map_err(|error| format!("create agent registry directory {}: {error}", dir.display()))
+}
+
 pub(super) fn mutate_persistent<T>(
     mutate: impl FnOnce(&mut AgentRegistry) -> T,
 ) -> Result<T, String> {
     let dir = agents_dir()?;
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    create_agents_dir(&dir)?;
     let _lock = FileLock::acquire(&dir.join("registry.lock"))?;
     let path = dir.join("registry.json");
     let mut registry = load_registry_file(&path)?.unwrap_or_default();
