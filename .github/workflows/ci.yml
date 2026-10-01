@@ -572,7 +572,9 @@ jobs:
           toolchain: 1.98.1
           # tarpaulin's LLVM engine (below) needs llvm-profdata/llvm-cov from
           # the rustup component — without it the engine silently falls back.
-          components: llvm-tools-preview
+          # rustfmt: the lsp::format and ctx_refactor tests run it, and a
+          # pinned toolchain installs the minimal profile without it.
+          components: llvm-tools-preview, rustfmt
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
