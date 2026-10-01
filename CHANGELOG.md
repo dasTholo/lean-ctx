@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed — `ctx_read` keeps a `-N` tail window under `raw=true` (#1965)
+
+- `mode="-3", raw=true` returned the whole file from line 1, with no header
+  and no notice, instead of the last 3 lines. The tail spelling is now
+  canonicalized to `lines:-N` before the raw alias runs, so `-N` behaves like
+  `lines:-N` and `lines:N-M` already did (#1490): verbatim bytes of the
+  requested window.
+
 ### Removed — the orphaned `core::solution_rules` module (#1923)
 
 - `core::solution_rules` built a third copy of the solution-efficiency ladder
