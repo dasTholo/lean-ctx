@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Removed — the orphaned `core::solution_rules` module (#1923)
+
+- `core::solution_rules` built a third copy of the solution-efficiency ladder
+  that no code path read; the live rule blocks come from
+  `SolutionConfig::ladder_text()` (`rules_canonical`, `instructions`,
+  `ctx_optimize`), which honour `solution.intensity`. Removing it changes no
+  runtime behaviour. `core::solution_types` stays: it is the documented
+  backward-compatible re-export of the Solution Intelligence types for library
+  users.
+
 ### Fixed — the background cloud pass no longer reverts config edits (#1934)
 
 - The daily background pass (telemetry, stats/gain sync, model pull,
