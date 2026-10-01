@@ -563,6 +563,13 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
+          # Pinned, not `stable`: tarpaulin parses LLVM's raw profile format
+          # itself, and each new rustc can bump that format before tarpaulin
+          # learns to read it. Rust 1.99.0 did exactly that ("consistency
+          # check for reading counts failed" / "parser failure:
+          # Nom(Satisfy)") and turned Coverage red on unchanged code. Raise
+          # this together with a tarpaulin release that reads the new format.
+          toolchain: 1.98.1
           # tarpaulin's LLVM engine (below) needs llvm-profdata/llvm-cov from
           # the rustup component — without it the engine silently falls back.
           components: llvm-tools-preview
