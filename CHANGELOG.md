@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Removed — the orphaned `core::solution_rules` module (#1923)
+
+- `core::solution_rules` built a third copy of the solution-efficiency ladder
+  that no code path read; the live rule blocks come from
+  `SolutionConfig::ladder_text()` (`rules_canonical`, `instructions`,
+  `ctx_optimize`), which honour `solution.intensity`. Removing it changes no
+  runtime behaviour. `core::solution_types` stays: it is the documented
+  backward-compatible re-export of the Solution Intelligence types for library
+  users.
+
 ### Fixed — shell hooks follow package-manager upgrades (#1959)
 
 - `_lc: command not found` came back after an upgrade through FreeBSD
