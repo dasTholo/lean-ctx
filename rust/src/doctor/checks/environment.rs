@@ -676,13 +676,31 @@ pub(crate) fn config_parity_outcome() -> Outcome {
         }
     }
 }
+/// How the code graph uses the language servers listed below.
+pub(crate) fn semantic_mode_outcome() -> Outcome {
+    use crate::core::config::{Config, SemanticMode};
+    let explain = match SemanticMode::effective(&Config::load()) {
+        SemanticMode::Off => "off  — structural graph only, no semantic backend is queried",
+        SemanticMode::Auto => {
+            "auto — verifies graph edges with servers that are already running or a live IDE; never starts one in the background"
+        }
+        SemanticMode::Eager => {
+            "eager — background graph enrichment may start the language servers below (trusted workspaces only; others run as auto)"
+        }
+    };
+    Outcome {
+        ok: true,
+        line: format!("{BOLD}semantic_mode{RST}  {explain}"),
+    }
+}
+
 pub(crate) fn lsp_server_outcomes() -> Vec<Outcome> {
-    use crate::lsp::config::{KNOWN_SERVERS, find_binary_in_path};
+    use crate::lsp::config::{KNOWN_SERVERS, find_runnable_server};
 
     KNOWN_SERVERS
         .iter()
         .map(|info| {
-            let found = find_binary_in_path(info.binary);
+            let found = find_runnable_server(info.binary);
             match found {
                 Some(path) => Outcome {
                     ok: true,

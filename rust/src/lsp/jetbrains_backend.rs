@@ -28,6 +28,8 @@ pub struct JetBrainsHttpBackend {
     /// Truncation meta of the most recent capped call (references/implementations/
     /// type_hierarchy/symbols_overview), surfaced by ctx_refactor.
     last_meta: Option<crate::lsp::backend::Truncation>,
+    /// Per-request HTTP timeout; see `LspBackend::set_request_timeout`.
+    request_timeout: Duration,
 }
 
 impl JetBrainsHttpBackend {
@@ -55,6 +57,7 @@ impl JetBrainsHttpBackend {
             pid,
             port,
             last_meta: None,
+            request_timeout: Duration::from_secs(REQUEST_TIMEOUT_SECS),
         }
     }
 
@@ -71,7 +74,7 @@ impl JetBrainsHttpBackend {
         let payload = serde_json::to_vec(body).map_err(|e| format!("serialize request: {e}"))?;
         let resp = ureq::post(&url)
             .config()
-            .timeout_global(Some(Duration::from_secs(REQUEST_TIMEOUT_SECS)))
+            .timeout_global(Some(self.request_timeout))
             .build()
             .header("X-LeanCtx-Token", &self.token)
             .header("Content-Type", "application/json")
@@ -765,6 +768,29 @@ impl LspBackend for JetBrainsHttpBackend {
                     || !crate::lsp::port_discovery::pid_alive(self.pid)
             }
             None => true,
+        }
+    }
+
+    fn set_request_timeout(&mut self, timeout: Option<Duration>) {
+        self.request_timeout = timeout.unwrap_or(Duration::from_secs(REQUEST_TIMEOUT_SECS));
+    }
+
+    fn backend_info(&self) -> crate::lsp::capabilities::SemanticBackendInfo {
+        use crate::lsp::capabilities::{
+            SemanticBackendInfo, SemanticBackendKind, SemanticCapabilities,
+        };
+        SemanticBackendInfo {
+            kind: SemanticBackendKind::JetBrains,
+            server_name: Some("jetbrains".to_string()),
+            server_version: crate::lsp::port_discovery::read_port_file(&self.project_root)
+                .map(|pf| pf.ide_version),
+            capabilities: SemanticCapabilities {
+                // The bridge has no call-hierarchy endpoint.
+                call_hierarchy: false,
+                ..SemanticCapabilities::ALL
+            },
+            // PSI offsets are Java chars = UTF-16 code units.
+            utf8_positions: false,
         }
     }
 

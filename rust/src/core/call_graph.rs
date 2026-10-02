@@ -14,29 +14,70 @@ use super::index_paths::normalize_project_root;
 // Data types
 // ---------------------------------------------------------------------------
 
+/// On-disk format of the persisted call graph. Bump whenever the meaning of a
+/// persisted field changes; [`CallGraph::load`] discards any other version, so
+/// the next build starts from scratch instead of reusing stale edges.
+/// v2: 1-based `caller_line` (v1 was off by one), callee position/receiver/method.
+const CALL_GRAPH_FORMAT: u32 = 2;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CallGraph {
+    /// Missing in pre-v2 caches → 0 → rejected by `load`.
+    #[serde(default)]
+    pub format_version: u32,
     pub project_root: String,
     pub edges: Vec<CallEdge>,
     pub file_hashes: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CallEdge {
     pub caller_file: String,
     pub caller_symbol: String,
+    /// 1-based line of the call expression.
     pub caller_line: usize,
     pub callee_name: String,
+    /// Callee identifier position `(1-based line, 0-based byte column)` — where
+    /// a semantic backend resolves the call (see `CallSite::callee_pos`).
+    #[serde(default)]
+    pub callee_pos: Option<(usize, usize)>,
+    #[serde(default)]
+    pub receiver: Option<String>,
+    #[serde(default)]
+    pub is_method: bool,
+}
+
+/// Call edges of one analyzed file, each attributed to its enclosing symbol.
+/// Call-site and symbol lines are both 1-based.
+fn edges_for_file(
+    rel_path: &str,
+    calls: &[deep_queries::CallSite],
+    file_symbols: Option<&Vec<SymbolSpan>>,
+) -> Vec<CallEdge> {
+    calls
+        .iter()
+        .map(|call| CallEdge {
+            caller_file: rel_path.to_string(),
+            caller_symbol: find_enclosing_symbol_owned(file_symbols, call.line),
+            caller_line: call.line,
+            callee_name: call.callee.clone(),
+            callee_pos: call.callee_pos,
+            receiver: call.receiver.clone(),
+            is_method: call.is_method,
+        })
+        .collect()
 }
 
 /// Minimal symbol span the call-graph builder needs to attribute a call site to
 /// its enclosing symbol — backend-agnostic, decoupled from any graph store.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SymbolSpan {
     pub file: String,
     pub name: String,
     pub start_line: usize,
     pub end_line: usize,
+    /// Signature kind (`fn`, `method`, `trait`, `interface`, …).
+    pub kind: String,
 }
 
 /// Everything the call-graph builder reads, sourced from the [`GraphProvider`]
@@ -82,6 +123,7 @@ impl CallGraphInputs {
                 name: s.name.clone(),
                 start_line: s.start_line,
                 end_line: s.end_line,
+                kind: s.kind.clone(),
             })
             .collect();
         let import_edges = index
@@ -108,6 +150,7 @@ impl CallGraphInputs {
                 name: s.name,
                 start_line: s.start_line,
                 end_line: s.end_line,
+                kind: s.kind,
             })
             .collect();
         let import_edges = provider
@@ -207,6 +250,7 @@ fn global_state() -> &'static Mutex<BuildState> {
 impl CallGraph {
     pub fn new(project_root: &str) -> Self {
         Self {
+            format_version: CALL_GRAPH_FORMAT,
             project_root: normalize_project_root(project_root),
             edges: Vec::new(),
             file_hashes: HashMap::new(),
@@ -240,19 +284,7 @@ impl CallGraph {
                 let analysis = deep_queries::analyze(&content, ext);
                 let file_symbols = symbols_by_file.get(rel_path.as_str());
 
-                let edges: Vec<CallEdge> = analysis
-                    .calls
-                    .iter()
-                    .map(|call| {
-                        let caller_sym = find_enclosing_symbol_owned(file_symbols, call.line + 1);
-                        CallEdge {
-                            caller_file: rel_path.clone(),
-                            caller_symbol: caller_sym,
-                            caller_line: call.line + 1,
-                            callee_name: call.callee.clone(),
-                        }
-                    })
-                    .collect();
+                let edges = edges_for_file(rel_path, &analysis.calls, file_symbols);
 
                 if let Some((done, edge_count)) = progress {
                     done.fetch_add(1, Ordering::Relaxed);
@@ -308,20 +340,7 @@ impl CallGraph {
                     let analysis = deep_queries::analyze(&content, ext);
                     let file_symbols = symbols_by_file.get(rel_path.as_str());
 
-                    analysis
-                        .calls
-                        .iter()
-                        .map(|call| {
-                            let caller_sym =
-                                find_enclosing_symbol_owned(file_symbols, call.line + 1);
-                            CallEdge {
-                                caller_file: rel_path.clone(),
-                                caller_symbol: caller_sym,
-                                caller_line: call.line + 1,
-                                callee_name: call.callee.clone(),
-                            }
-                        })
-                        .collect()
+                    edges_for_file(rel_path, &analysis.calls, file_symbols)
                 } else {
                     prev_edges_by_file
                         .get(rel_path.as_str())
@@ -731,6 +750,10 @@ impl CallGraph {
     }
 
     pub fn load(project_root: &str) -> Option<Self> {
+        Self::load_any_version(project_root).filter(|g| g.format_version == CALL_GRAPH_FORMAT)
+    }
+
+    fn load_any_version(project_root: &str) -> Option<Self> {
         let dir = call_graph_dir(project_root)?;
 
         let zst_path = dir.join("call_graph.json.zst");
@@ -883,25 +906,66 @@ fn rank_callee_def_file(
     def_files: &[&str],
     caller_file: &str,
     imports: &HashMap<String, std::collections::HashSet<String>>,
-) -> Option<String> {
+) -> Option<(String, ScopeMatch)> {
     if def_files.is_empty() {
         return None;
     }
     if def_files.contains(&caller_file) {
-        return Some(caller_file.to_string());
+        return Some((caller_file.to_string(), ScopeMatch::SameFile));
     }
     if let Some(imported) = imports.get(caller_file) {
         let mut in_scope = def_files.iter().filter(|f| imported.contains(**f));
         if let Some(first) = in_scope.next()
             && in_scope.next().is_none()
         {
-            return Some((*first).to_string());
+            return Some(((*first).to_string(), ScopeMatch::UniqueImport));
         }
     }
     if def_files.len() == 1 {
-        return Some(def_files[0].to_string());
+        return Some((def_files[0].to_string(), ScopeMatch::UniqueInProject));
     }
     None
+}
+
+/// The identifier a callee name ends in: `crate::db::save` → `save`,
+/// `pkg.Func` → `Func`, `save` → `save`.
+pub fn callee_segment(name: &str) -> &str {
+    name.rsplit(|c: char| c == ':' || c == '.')
+        .next()
+        .unwrap_or(name)
+}
+
+/// Which scope step resolved a callee structurally — the strength of the
+/// evidence. Same-file and imported definitions are bound by the caller's own
+/// scope; a name that is merely unique project-wide may still be an external
+/// function of the same name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScopeMatch {
+    SameFile,
+    UniqueImport,
+    UniqueInProject,
+}
+
+/// Structural view of one call edge's callee.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StructuralTarget {
+    Resolved {
+        file: String,
+        via: ScopeMatch,
+    },
+    /// Several project definitions remain in scope; structure cannot decide.
+    Ambiguous,
+    /// No project symbol has this name (std, dependency, dynamic dispatch).
+    Unknown,
+}
+
+impl StructuralTarget {
+    pub fn file(&self) -> Option<&str> {
+        match self {
+            Self::Resolved { file, .. } => Some(file),
+            Self::Ambiguous | Self::Unknown => None,
+        }
+    }
 }
 
 /// Resolve a single callee name to its defining file in the scope of `caller_file`.
@@ -919,7 +983,7 @@ pub fn resolve_callee_file(
         .collect();
     def_files.sort_unstable();
     def_files.dedup();
-    rank_callee_def_file(&def_files, caller_file, imports)
+    rank_callee_def_file(&def_files, caller_file, imports).map(|(file, _)| file)
 }
 
 /// Resolve each edge's callee to its defining file in *that edge's own* caller
@@ -930,6 +994,19 @@ pub fn resolve_edge_callee_files(
     inputs: &CallGraphInputs,
     edges: &[CallEdge],
 ) -> Vec<Option<String>> {
+    resolve_edge_callee_targets(inputs, edges)
+        .into_iter()
+        .map(|t| t.file().map(str::to_string))
+        .collect()
+}
+
+/// Like [`resolve_edge_callee_files`], but keeps *why* each edge resolved —
+/// or that it is ambiguous vs. unknown — for evidence grading and semantic
+/// escalation.
+pub fn resolve_edge_callee_targets(
+    inputs: &CallGraphInputs,
+    edges: &[CallEdge],
+) -> Vec<StructuralTarget> {
     let callee_names: std::collections::HashSet<&str> =
         edges.iter().map(|e| e.callee_name.as_str()).collect();
     if callee_names.is_empty() {
@@ -950,13 +1027,26 @@ pub fn resolve_edge_callee_files(
         files.dedup();
     }
 
+    // Path callees (`db::save`) keep their full path as name, so a plain
+    // name lookup never finds them. Their last segment being defined in the
+    // project makes them a semantic candidate — never a structural guess.
+    let segment_defined: std::collections::HashSet<&str> =
+        inputs.symbols.iter().map(|s| s.name.as_str()).collect();
+    let last_segment = |name: &str| -> Option<String> {
+        let seg = callee_segment(name);
+        (seg.len() < name.len() && segment_defined.contains(seg)).then(|| seg.to_string())
+    };
+
     let imports = build_import_adjacency(inputs);
     edges
         .iter()
-        .map(|e| {
-            name_files
-                .get(e.callee_name.as_str())
-                .and_then(|defs| rank_callee_def_file(defs, &e.caller_file, &imports))
+        .map(|e| match name_files.get(e.callee_name.as_str()) {
+            None if last_segment(&e.callee_name).is_some() => StructuralTarget::Ambiguous,
+            None => StructuralTarget::Unknown,
+            Some(defs) => match rank_callee_def_file(defs, &e.caller_file, &imports) {
+                Some((file, via)) => StructuralTarget::Resolved { file, via },
+                None => StructuralTarget::Ambiguous,
+            },
         })
         .collect()
 }
@@ -1015,18 +1105,21 @@ pub mod tests {
             caller_symbol: "bar".to_string(),
             caller_line: 10,
             callee_name: "foo".to_string(),
+            ..Default::default()
         });
         graph.edges.push(CallEdge {
             caller_file: "b.rs".to_string(),
             caller_symbol: "baz".to_string(),
             caller_line: 20,
             callee_name: "foo".to_string(),
+            ..Default::default()
         });
         graph.edges.push(CallEdge {
             caller_file: "c.rs".to_string(),
             caller_symbol: "qux".to_string(),
             caller_line: 30,
             callee_name: "other".to_string(),
+            ..Default::default()
         });
         let callers = graph.callers_of("foo");
         assert_eq!(callers.len(), 2);
@@ -1040,18 +1133,21 @@ pub mod tests {
             caller_symbol: "main".to_string(),
             caller_line: 5,
             callee_name: "init".to_string(),
+            ..Default::default()
         });
         graph.edges.push(CallEdge {
             caller_file: "a.rs".to_string(),
             caller_symbol: "main".to_string(),
             caller_line: 6,
             callee_name: "run".to_string(),
+            ..Default::default()
         });
         graph.edges.push(CallEdge {
             caller_file: "a.rs".to_string(),
             caller_symbol: "other".to_string(),
             caller_line: 15,
             callee_name: "init".to_string(),
+            ..Default::default()
         });
         let callees = graph.callees_of("main");
         assert_eq!(callees.len(), 2);
@@ -1063,6 +1159,7 @@ pub mod tests {
             name: name.to_string(),
             start_line: 1,
             end_line: 2,
+            ..Default::default()
         }
     }
 
@@ -1126,18 +1223,21 @@ pub mod tests {
                 caller_symbol: "fa".into(),
                 caller_line: 1,
                 callee_name: "Run".into(),
+                ..Default::default()
             },
             CallEdge {
                 caller_file: "b.rs".into(),
                 caller_symbol: "fb".into(),
                 caller_line: 1,
                 callee_name: "Run".into(),
+                ..Default::default()
             },
             CallEdge {
                 caller_file: "x.rs".into(),
                 caller_symbol: "fx".into(),
                 caller_line: 1,
                 callee_name: "Unique".into(),
+                ..Default::default()
             },
         ];
         let map = resolve_callee_files(&inputs, &edges);
@@ -1147,6 +1247,73 @@ pub mod tests {
         assert_eq!(map.get("Unique").map(String::as_str), Some("u.rs"));
     }
 
+    /// Regression: call lines were shifted by one (`CallSite.line` is already
+    /// 1-based), so a call in a one-line function was attributed to the next
+    /// symbol; and the edge carried no callee position for semantic lookup.
+    #[cfg(feature = "tree-sitter")]
+    #[test]
+    fn build_attributes_call_to_its_own_line_and_locates_callee() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("a.rs"),
+            "fn caller() { repo.save(); }\nfn other() {}\n",
+        )
+        .unwrap();
+        let span = |name: &str, line: usize| SymbolSpan {
+            file: "a.rs".into(),
+            name: name.into(),
+            start_line: line,
+            end_line: line,
+            ..Default::default()
+        };
+        let inputs = CallGraphInputs {
+            project_root: dir.path().to_string_lossy().to_string(),
+            file_paths: vec!["a.rs".into()],
+            symbols: vec![span("caller", 1), span("other", 2)],
+            ..Default::default()
+        };
+
+        let graph = CallGraph::build(&inputs);
+        let edge = graph
+            .edges
+            .iter()
+            .find(|e| e.callee_name == "save")
+            .unwrap();
+        assert_eq!(edge.caller_symbol, "caller");
+        assert_eq!(edge.caller_line, 1);
+        assert_eq!(edge.callee_pos, Some((1, 19)), "must point at `save`");
+        assert_eq!(edge.receiver.as_deref(), Some("repo"));
+        assert!(edge.is_method);
+    }
+
+    /// A path call (`db::save`) is never bound structurally, but must reach
+    /// semantic escalation when its last segment is a project symbol.
+    #[test]
+    fn path_callees_are_semantic_candidates_never_structural_guesses() {
+        let inputs = CallGraphInputs {
+            symbols: vec![sym("save", "db.rs")],
+            ..Default::default()
+        };
+        let call = |callee: &str| CallEdge {
+            caller_file: "main.rs".into(),
+            callee_name: callee.into(),
+            ..Default::default()
+        };
+        let targets = resolve_edge_callee_targets(
+            &inputs,
+            &[call("crate::db::save"), call("std::fs::read"), call("save")],
+        );
+        assert_eq!(targets[0], StructuralTarget::Ambiguous);
+        assert_eq!(targets[1], StructuralTarget::Unknown);
+        assert_eq!(
+            targets[2],
+            StructuralTarget::Resolved {
+                file: "db.rs".into(),
+                via: ScopeMatch::UniqueInProject
+            }
+        );
+    }
+
     #[test]
     fn find_enclosing_picks_narrowest() {
         let outer = SymbolSpan {
@@ -1154,12 +1321,14 @@ pub mod tests {
             name: "Outer".to_string(),
             start_line: 1,
             end_line: 50,
+            ..Default::default()
         };
         let inner = SymbolSpan {
             file: "a.rs".to_string(),
             name: "inner_fn".to_string(),
             start_line: 10,
             end_line: 20,
+            ..Default::default()
         };
         let syms = vec![outer, inner];
         let result = find_enclosing_symbol_owned(Some(&syms), 15);
@@ -1173,6 +1342,7 @@ pub mod tests {
             name: "foo".to_string(),
             start_line: 10,
             end_line: 20,
+            ..Default::default()
         };
         let syms = vec![sym];
         let result = find_enclosing_symbol_owned(Some(&syms), 5);
@@ -1199,18 +1369,21 @@ pub mod tests {
             caller_symbol: "fn_a".into(),
             caller_line: 1,
             callee_name: "fn_b".into(),
+            ..Default::default()
         });
         graph.edges.push(CallEdge {
             caller_file: "b.rs".into(),
             caller_symbol: "fn_b".into(),
             caller_line: 10,
             callee_name: "fn_c".into(),
+            ..Default::default()
         });
         graph.edges.push(CallEdge {
             caller_file: "c.rs".into(),
             caller_symbol: "fn_c".into(),
             caller_line: 20,
             callee_name: "fn_d".into(),
+            ..Default::default()
         });
         graph
     }
@@ -1291,18 +1464,21 @@ pub mod tests {
             caller_symbol: "x".into(),
             caller_line: 1,
             callee_name: "target".into(),
+            ..Default::default()
         });
         graph.edges.push(CallEdge {
             caller_file: "y.rs".into(),
             caller_symbol: "y".into(),
             caller_line: 2,
             callee_name: "target".into(),
+            ..Default::default()
         });
         graph.edges.push(CallEdge {
             caller_file: "z.rs".into(),
             caller_symbol: "z".into(),
             caller_line: 3,
             callee_name: "x".into(),
+            ..Default::default()
         });
         assert_eq!(graph.transitive_caller_count("target", 5), 3);
     }
@@ -1324,12 +1500,14 @@ pub mod tests {
             caller_symbol: "a".into(),
             caller_line: 1,
             callee_name: "b".into(),
+            ..Default::default()
         });
         graph.edges.push(CallEdge {
             caller_file: "b.rs".into(),
             caller_symbol: "b".into(),
             caller_line: 2,
             callee_name: "a".into(),
+            ..Default::default()
         });
         let nodes = graph.bfs_callees("a", 5);
         // Should visit b once (depth 1), then a is already visited

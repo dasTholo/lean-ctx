@@ -5,7 +5,7 @@
 //! exports, type_ref, tested_by, and more. Edge kinds are weighted
 //! for impact scoring.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 use rusqlite::{Connection, params};
 
@@ -28,14 +28,14 @@ pub struct DependencyChain {
 
 /// Edge kinds considered structural (code connectivity).
 const STRUCTURAL_EDGE_KINDS: &str =
-    "'imports','calls','exports','type_ref','tested_by','module','cochange','sibling'";
+    "'imports','calls','implements','exports','type_ref','tested_by','module','cochange','sibling'";
 
 /// Weight multiplier per edge kind for impact scoring.
 pub fn edge_weight(kind: &str) -> f64 {
     match kind {
         "imports" => 1.0,
         "calls" => 0.8,
-        "exports" => 0.7,
+        "exports" | "implements" => 0.7,
         "module" => 0.6,
         "type_ref" => 0.5,
         "tested_by" => 0.4,
@@ -207,7 +207,7 @@ pub fn related_files(
     limit: usize,
 ) -> anyhow::Result<Vec<(String, f64)>> {
     let sql = format!(
-        "SELECT p_other.path, e.kind
+        "SELECT p_other.path, e.kind, e.metadata
          FROM edges e
          JOIN nodes n_self ON (e.source_id = n_self.id OR e.target_id = n_self.id)
          JOIN nodes n_other ON (
@@ -222,20 +222,49 @@ pub fn related_files(
     );
     let mut stmt = conn.prepare(&sql)?;
 
-    let mut scores: HashMap<String, f64> = HashMap::new();
+    // One relationship can be stored several times — file→file plus
+    // symbol→symbol `calls` edges for the same call. Count each (file, kind)
+    // relationship once, at its strongest evidence, so finer-grained edges
+    // cannot inflate a neighbour's score.
+    // Ordered maps: floating-point sums must accumulate in a fixed order so
+    // equal relationships always yield bit-identical scores (#498).
+    let mut strongest: BTreeMap<(String, String), f64> = BTreeMap::new();
     let rows = stmt.query_map(params![file_path], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Option<String>>(2)?,
+        ))
     })?;
-
     for row in rows {
-        let (path, kind) = row?;
-        *scores.entry(path).or_default() += edge_weight(&kind);
+        let (path, kind, metadata) = row?;
+        let w = evidence_weight(&kind, metadata.as_deref());
+        let slot = strongest.entry((path, kind)).or_insert(0.0);
+        if w > *slot {
+            *slot = w;
+        }
+    }
+
+    let mut scores: BTreeMap<String, f64> = BTreeMap::new();
+    for ((path, _), w) in strongest {
+        *scores.entry(path).or_default() += w;
     }
 
     let mut results: Vec<(String, f64)> = scores.into_iter().collect();
-    results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    results.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.0.cmp(&b.0))
+    });
     results.truncate(limit);
     Ok(results)
+}
+
+/// Kind weight scaled by the edge's evidence grade (see
+/// [`crate::core::semantic::EdgeEvidence`]); edges without evidence keep
+/// their full kind weight.
+pub(super) fn evidence_weight(kind: &str, metadata: Option<&str>) -> f64 {
+    edge_weight(kind) * crate::core::semantic::EdgeEvidence::weight_factor_of(metadata)
 }
 
 /// Graph connectivity stats for a file: incoming/outgoing edge counts by kind.
@@ -282,7 +311,7 @@ fn build_weighted_reverse_graph(
     conn: &Connection,
 ) -> anyhow::Result<HashMap<String, Vec<(String, f64)>>> {
     let sql = format!(
-        "SELECT p_tgt.path, p_src.path, e.kind
+        "SELECT p_tgt.path, p_src.path, e.kind, e.metadata
          FROM edges e
          JOIN nodes n_src ON e.source_id = n_src.id
          JOIN nodes n_tgt ON e.target_id = n_tgt.id
@@ -299,12 +328,13 @@ fn build_weighted_reverse_graph(
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
             row.get::<_, String>(2)?,
+            row.get::<_, Option<String>>(3)?,
         ))
     })?;
 
     for row in rows {
-        let (target, source, kind) = row?;
-        let w = edge_weight(&kind);
+        let (target, source, kind, metadata) = row?;
+        let w = evidence_weight(&kind, metadata.as_deref());
         let entry = graph
             .entry(target)
             .or_default()
