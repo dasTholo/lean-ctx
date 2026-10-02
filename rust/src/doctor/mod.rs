@@ -701,6 +701,9 @@ fn run_inner(json: bool) -> u32 {
     for lsp_check in &lsp_outcomes {
         board.info(lsp_check);
     }
+    for coverage in semantic_coverage_outcomes() {
+        board.info(&coverage);
+    }
 
     // Shadow mode status. #1280: the old single line claimed "native tools
     // denied" wholesale, but that guarantee only covers Read/Grep/Glob — shell

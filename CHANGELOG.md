@@ -5,6 +5,36 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — evidence-aware semantic code intelligence (ADR-015)
+
+- Every call edge in the property graph now records how it is known:
+  `verified` (a language server or JetBrains IDE resolved it), `resolved`
+  (bound by the caller's scope) or `heuristic` (a project-unique name match).
+  Ranking, `ctx_impact` and `ctx_callgraph` weigh edges accordingly; ambiguous
+  names are no longer linked to an arbitrary same-named definition.
+- `semantic_mode` (`auto` default, `eager`, `off`): `auto` uses language
+  servers already running in a lean-ctx process or an attached JetBrains IDE
+  and never starts one; `eager` may start them, in trusted workspaces only.
+  Supported standalone servers: rust-analyzer, TypeScript (≥ 7 natively via
+  `tsc --lsp`, ≤ 6 via typescript-language-server), pylsp, gopls. Nothing is
+  installed automatically.
+- Language servers verify ambiguous calls, veto name-match guesses that
+  actually target a library, and add `implements` edges. Answers are cached
+  per call site and reused until the code they depend on changes.
+- `ctx_graph status`, `lean-ctx doctor` and the dashboard graph legend show
+  the verified share per language and whether its server can run.
+- `ctx_impact` marks files reachable only through name matches
+  (`(name match only)`, JSON `weak_files`); its propagation is now exact and
+  deterministic.
+- Guide: [docs/guides/semantic-intelligence.md](docs/guides/semantic-intelligence.md).
+
+### Fixed — JetBrains bridge on Windows
+
+- IDE answers (definitions, references, implementations) were dropped on
+  Windows: the backend kept the project root in verbatim form (`\\?\C:\…`),
+  so no returned location mapped back to a project file, and call sites
+  went out as absolute instead of project-relative paths.
+
 ### Changed — quality evidence states what it can prove (#1905)
 
 - **Breaking for CI users of `--gate`:** `lean-ctx eval ab` / `testbench` /

@@ -13,6 +13,7 @@
 //! background; every target is confined to the indexed project; without any
 //! backend the graph is exactly the structural graph.
 
+pub mod coverage;
 pub mod enrich;
 pub mod evidence;
 pub mod implementations;
@@ -31,35 +32,35 @@ use crate::core::property_graph::{CodeGraph, EdgeKind};
 /// `Semantic: mode=auto | calls 120 verified · 340 resolved · 45 heuristic | implements 12`.
 /// Edges without typed evidence (older graphs, other producers) are counted
 /// as `unannotated` only when present.
-pub fn status_line(graph: &CodeGraph, mode: SemanticMode) -> String {
+pub fn status_line(graph: &CodeGraph, mode: SemanticMode, project_root: &str) -> String {
     let mode = match mode {
         SemanticMode::Off => "off",
         SemanticMode::Auto => "auto",
         SemanticMode::Eager => "eager",
     };
-    let mut by_grade = [0usize; 3];
-    let mut unannotated = 0usize;
-    for (_, _, metadata) in graph
-        .file_edges_of_kind(&EdgeKind::Calls)
-        .unwrap_or_default()
-    {
-        match EdgeEvidence::from_metadata(metadata.as_deref()).map(|e| e.grade) {
-            Some(EvidenceGrade::VerifiedSemantic) => by_grade[0] += 1,
-            Some(EvidenceGrade::ResolvedStructural) => by_grade[1] += 1,
-            Some(EvidenceGrade::HeuristicStructural) => by_grade[2] += 1,
-            None => unannotated += 1,
-        }
+    let coverage = coverage::coverage_by_language(graph);
+    let mut all = coverage::GradeCounts::default();
+    for c in coverage.values() {
+        all.verified += c.verified;
+        all.resolved += c.resolved;
+        all.heuristic += c.heuristic;
+        all.unannotated += c.unannotated;
     }
     let implements = graph
         .file_edges_of_kind(&EdgeKind::Implements)
         .map_or(0, |e| e.len());
-    let extra = if unannotated > 0 {
-        format!(" · {unannotated} unannotated")
+    let extra = if all.unannotated > 0 {
+        format!(" · {} unannotated", all.unannotated)
     } else {
         String::new()
     };
-    format!(
+    let mut out = format!(
         "Semantic: mode={mode} | calls {} verified · {} resolved · {} heuristic{extra} | implements {implements}",
-        by_grade[0], by_grade[1], by_grade[2]
-    )
+        all.verified, all.resolved, all.heuristic
+    );
+    for line in coverage::coverage_lines(&coverage, project_root) {
+        out.push('\n');
+        out.push_str(&line);
+    }
+    out
 }

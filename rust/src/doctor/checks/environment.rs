@@ -694,31 +694,54 @@ pub(crate) fn semantic_mode_outcome() -> Outcome {
     }
 }
 
+/// Per-language verified share of the current project's call edges, when the
+/// project has a property graph. Opening a graph is read-only here: doctor
+/// never builds one.
+pub(crate) fn semantic_coverage_outcomes() -> Vec<Outcome> {
+    let Some(root) = crate::core::config::Config::find_project_root() else {
+        return Vec::new();
+    };
+    if !crate::core::property_graph::graph_dir(&root)
+        .join("graph.db")
+        .exists()
+    {
+        return Vec::new();
+    }
+    let Ok(graph) = crate::core::property_graph::CodeGraph::open(&root) else {
+        return Vec::new();
+    };
+    use crate::core::semantic::coverage::{coverage_by_language, coverage_lines};
+    coverage_lines(&coverage_by_language(&graph), &root)
+        .into_iter()
+        .map(|line| Outcome {
+            ok: true,
+            line: format!("{BOLD}coverage{RST} {}", line.trim_start()),
+        })
+        .collect()
+}
+
 pub(crate) fn lsp_server_outcomes() -> Vec<Outcome> {
-    use crate::lsp::config::{KNOWN_SERVERS, find_runnable_server};
+    use crate::lsp::config::{KNOWN_SERVERS, resolve_server};
 
     KNOWN_SERVERS
         .iter()
-        .map(|info| {
-            let found = find_runnable_server(info.binary);
-            match found {
-                Some(path) => Outcome {
-                    ok: true,
-                    line: format!(
-                        "{BOLD}{}{RST}  {GREEN}✓ {}{RST}  {DIM}{}{RST}",
-                        info.language,
-                        info.binary,
-                        path.display()
-                    ),
-                },
-                None => Outcome {
-                    ok: false,
-                    line: format!(
-                        "{BOLD}{}{RST}  {DIM}not installed{RST}  {YELLOW}{}{RST}",
-                        info.language, info.install_hint
-                    ),
-                },
-            }
+        .map(|info| match resolve_server(info.language, None) {
+            Some(server) => Outcome {
+                ok: true,
+                line: format!(
+                    "{BOLD}{}{RST}  {GREEN}✓ {}{RST}  {DIM}{}{RST}",
+                    info.language,
+                    server.binary_name(),
+                    server.binary_path().display()
+                ),
+            },
+            None => Outcome {
+                ok: false,
+                line: format!(
+                    "{BOLD}{}{RST}  {DIM}not installed{RST}  {YELLOW}{}{RST}",
+                    info.language, info.install_hint
+                ),
+            },
         })
         .collect()
 }
