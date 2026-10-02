@@ -397,6 +397,80 @@ pub(crate) fn refresh_semantic_edges_in_background(project_root: &str) {
     }
 }
 
+/// Minimum spacing of backend-triggered refreshes per project: a burst of
+/// `ctx_refactor` calls warming several languages yields one pass.
+const BACKEND_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_mins(5);
+/// Retry delay when a pass could not run (graph not ready, backend kept busy).
+const BACKEND_REFRESH_RETRY: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// A semantic backend is in use *in this process* (a language server started
+/// for `ctx_refactor`, an attached IDE). Graph builds may run in another
+/// process (the daemon) that cannot see this backend, so `auto` mode would
+/// otherwise never use it: schedule a bounded refresh here, where the backend
+/// lives. It waits until the current call is done (never competing with
+/// interactive use) and runs only on a current, populated property graph.
+/// At most one pass per project every [`BACKEND_REFRESH_INTERVAL`]; a pass
+/// that could not run is retried on a use after [`BACKEND_REFRESH_RETRY`].
+pub(crate) fn schedule_semantic_refresh(project_root: &str) {
+    use std::collections::HashMap;
+    use std::sync::{LazyLock, Mutex, PoisonError};
+    use std::time::{Duration, Instant};
+    /// Earliest next pass per project root.
+    static NEXT: LazyLock<Mutex<HashMap<String, Instant>>> =
+        LazyLock::new(|| Mutex::new(HashMap::new()));
+    let defer = |root: &str, by: Duration| {
+        NEXT.lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(root.to_string(), Instant::now() + by);
+    };
+
+    // Unit tests seed fake backends for fake roots; never refresh those.
+    if cfg!(test) {
+        return;
+    }
+    let root = crate::core::index_paths::normalize_project_root(project_root);
+    {
+        let now = Instant::now();
+        let mut next = NEXT.lock().unwrap_or_else(PoisonError::into_inner);
+        if next.get(&root).is_some_and(|t| now < *t) {
+            return;
+        }
+        // Expired entries carry no state; the map stays bounded by the
+        // projects with a pass due or running.
+        next.retain(|_, t| now < *t);
+        // Reserved while the pass is pending.
+        next.insert(root.clone(), now + BACKEND_REFRESH_INTERVAL);
+    }
+    let worker_root = root.clone();
+    let spawned = std::thread::Builder::new()
+        .name("leanctx-semantic-refresh".into())
+        .spawn(move || {
+            let root = worker_root;
+            let give_up = Instant::now() + Duration::from_mins(2);
+            loop {
+                std::thread::sleep(Duration::from_secs(2));
+                if !crate::lsp::router::backend_busy(&root) {
+                    break;
+                }
+                if Instant::now() > give_up {
+                    return defer(&root, BACKEND_REFRESH_RETRY);
+                }
+            }
+            let ready = !crate::core::property_graph::engine_outdated(&root)
+                && CodeGraph::open(&root).is_ok_and(|g| g.node_count().unwrap_or(0) > 0);
+            if !ready {
+                return defer(&root, BACKEND_REFRESH_RETRY);
+            }
+            refresh_semantic_edges_in_background(&root);
+            defer(&root, BACKEND_REFRESH_INTERVAL);
+        });
+    if spawned.is_err() {
+        NEXT.lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&root);
+    }
+}
+
 fn consolidate_callgraph(graph: &CodeGraph, project_root: &str) -> anyhow::Result<EnrichmentStats> {
     use crate::core::call_graph::{CallGraph, CallGraphInputs, resolve_edge_callee_targets};
     use crate::core::semantic::{escalate_calls, implementations::resolve_implements_edges};

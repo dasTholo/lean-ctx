@@ -23,9 +23,7 @@ use std::time::{Duration, Instant};
 
 use super::backend::LspBackend;
 use super::client::{LspClient, file_path_to_uri};
-use super::config::{
-    LspServerConfig, check_server_available, default_servers, language_for_extension,
-};
+use super::config::{ResolvedServer, check_server_available, language_for_extension};
 use super::jetbrains_backend::JetBrainsHttpBackend;
 use super::port_discovery;
 
@@ -74,37 +72,13 @@ fn expand_tilde(path: &str) -> String {
     path.to_string()
 }
 
-fn resolve_config_for_language(
-    cfg: &crate::core::config::Config,
-    language: &str,
-) -> LspServerConfig {
-    if let Some(custom_path) = cfg.lsp.get(language) {
-        let expanded = expand_tilde(custom_path);
-        return LspServerConfig {
-            command: expanded,
-            args: if language == "typescript" || language == "javascript" {
-                vec!["--stdio".into()]
-            } else if language == "go" {
-                vec!["serve".into()]
-            } else {
-                vec![]
-            },
-        };
-    }
-    let servers = default_servers();
-    servers.get(language).cloned().unwrap_or(LspServerConfig {
-        command: format!("{language}-language-server"),
-        args: vec![],
-    })
-}
-
 /// Selects a code-intelligence backend for `language` (§4.3).
 ///
 /// Config `cfg.lsp[language]` (HashMap<String,String>):
 ///   - absent      → "auto" = B-first (JetBrains if reachable, else rust-analyzer)
 ///   - "auto"      → same as absent
 ///   - "jetbrains" → B only (error if the IDE is not reachable; no fallback)
-///   - anything else → treated as an explicit rust-analyzer binary path = A only
+///   - anything else → an explicit language-server binary path = A only
 ///
 /// Reachability = live port file + pid alive + `/health` ping. On any miss in
 /// "auto" mode we fall back to Backing A deterministically (one ~300ms timeout max).
@@ -151,16 +125,53 @@ fn select_backend(
         ));
     }
 
-    // Backing A: rust-analyzer (today's behavior).
-    let config = resolve_config_for_language(&cfg, language);
-    if super::config::find_runnable_server(&config.command).is_none()
-        && !Path::new(&config.command).is_file()
-    {
-        check_server_available(language)?;
-    }
+    // Backing A: a standalone language server.
+    let server = standalone_server_with(&cfg, language, project_root)?;
     let root_uri = file_path_to_uri(project_root)?;
-    let client = LspClient::start(&config, &root_uri, start_timeout)?;
+    let client = LspClient::start(&server, &root_uri, start_timeout)?;
     Ok(Box::new(client) as Box<dyn LspBackend>)
+}
+
+/// The standalone language server lean-ctx would start for `language` in
+/// `project_root`: the binary configured as `[lsp] <language> = "<path>"`,
+/// or else the one resolved for the project. Also answers status surfaces,
+/// so they report what would actually run.
+pub(crate) fn standalone_server(
+    language: &str,
+    project_root: &str,
+) -> Result<ResolvedServer, String> {
+    let cfg = crate::core::config::Config::load_for_project_root(project_root);
+    standalone_server_with(&cfg, language, project_root)
+}
+
+fn standalone_server_with(
+    cfg: &crate::core::config::Config,
+    language: &str,
+    project_root: &str,
+) -> Result<ResolvedServer, String> {
+    match cfg.lsp.get(language).map(String::as_str) {
+        Some(custom) if !matches!(custom, "auto" | "jetbrains") => {
+            let command = expand_tilde(custom);
+            let command = if Path::new(&command).is_file() {
+                command
+            } else {
+                super::config::find_runnable_server(&command)
+                    .ok_or_else(|| {
+                        format!(
+                            "Configured language server '{command}' for '{language}' not found or not runnable"
+                        )
+                    })?
+                    .to_string_lossy()
+                    .into_owned()
+            };
+            Ok(super::config::configured_server(
+                language,
+                &command,
+                Path::new(project_root),
+            ))
+        }
+        _ => check_server_available(language, Path::new(project_root)),
+    }
 }
 
 /// What a non-mutating look at the registry finds for a language.
@@ -333,6 +344,9 @@ where
         start_idle_reaper();
         Ok(backend)
     })?;
+    // A backend is live here: let `auto` mode put it to use for the graph
+    // (rate-limited; runs on its own thread once this call is done).
+    crate::core::graph_enricher::schedule_semantic_refresh(project_root);
     let result = f(backend, language);
 
     // The server died during the call: evict it so the next call recovers.
@@ -415,6 +429,20 @@ pub fn has_live_backend(project_root: &str) -> bool {
     });
     warm || port_discovery::read_port_file(project_root)
         .is_some_and(|pf| port_discovery::pid_alive(pf.pid))
+}
+
+/// Whether any backend of `project_root` is serving a call right now — a
+/// non-blocking registry peek.
+pub fn backend_busy(project_root: &str) -> bool {
+    let root = crate::core::index_paths::normalize_project_root(project_root);
+    let slots: Vec<Slot> = registry()
+        .iter()
+        .filter(|(key, _)| key.project_root == root)
+        .map(|(_, e)| Arc::clone(&e.slot))
+        .collect();
+    slots
+        .iter()
+        .any(|s| matches!(s.try_lock(), Err(std::sync::TryLockError::WouldBlock)))
 }
 
 pub fn shutdown_all() {
@@ -569,7 +597,9 @@ mod tests {
             live_identity(&format!("{warm}/x.rs"), warm),
             LiveIdentity::Busy
         );
+        assert!(backend_busy(warm));
         drop(guard);
+        assert!(!backend_busy(warm));
 
         // A pure peek: it never creates a registry entry for an unseen root.
         let unseen = "/leanctx-router-test/unseen";

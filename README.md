@@ -674,6 +674,7 @@ A powered quality study is still open ([#1905](https://github.com/yvgude/lean-ct
 - FAQ: [discord-faq.md](discord-faq.md)
 - Feature catalog (SSOT snapshot): [LEANCTX_FEATURE_CATALOG.md](LEANCTX_FEATURE_CATALOG.md)
 - Monorepo guide: [docs/guides/monorepo.md](docs/guides/monorepo.md)
+- Semantic code intelligence: [docs/guides/semantic-intelligence.md](docs/guides/semantic-intelligence.md)
 - Architecture: [ARCHITECTURE.md](ARCHITECTURE.md)
 - Vision: [VISION.md](VISION.md)
 

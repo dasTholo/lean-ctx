@@ -474,7 +474,7 @@ fn handle_status(root: &str) -> String {
         |_| String::new(),
         |g| {
             let mode = crate::core::config::SemanticMode::for_project(root);
-            format!("\n{}", crate::core::semantic::status_line(&g, mode))
+            format!("\n{}", crate::core::semantic::status_line(&g, mode, root))
         },
     );
     format!(

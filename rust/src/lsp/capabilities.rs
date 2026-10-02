@@ -112,6 +112,31 @@ pub fn encode_column(line_text: &str, byte_col: usize, utf8_positions: bool) -> 
     u32::try_from(units).unwrap_or(u32::MAX)
 }
 
+/// Some servers report build metadata as their version (gopls: a multi-KB
+/// JSON build info). The version ends up in every evidence record and cache
+/// key, so anything that is not a short plain token is reduced to its
+/// release (`Version` field of a JSON object, if present) plus a content
+/// hash — still unique per build, but bounded.
+pub fn compact_server_version(raw: &str) -> String {
+    const MAX: usize = 64;
+    /// Build info beyond this is not parsed, only hashed.
+    const MAX_PARSED: usize = 64 * 1024;
+    let raw = raw.trim();
+    if raw.len() <= MAX && !raw.contains(['{', '\n', '"']) {
+        return raw.to_string();
+    }
+    let digest = blake3::hash(raw.as_bytes()).to_hex();
+    let release = (raw.len() <= MAX_PARSED)
+        .then(|| serde_json::from_str::<serde_json::Value>(raw).ok())
+        .flatten()
+        .and_then(|v| v.get("Version")?.as_str().map(str::to_string))
+        .filter(|v| v.len() <= MAX && !v.contains(['{', '\n', '"']));
+    match release {
+        Some(v) => format!("{v}+{}", &digest[..12]),
+        None => format!("build+{}", &digest[..12]),
+    }
+}
+
 impl SemanticBackendInfo {
     /// Stable identity used to key cached semantic results: a different server
     /// or server version may resolve differently, so its results never mix.
@@ -158,5 +183,20 @@ mod tests {
             "inside 😀 snaps to its start"
         );
         assert_eq!(encode_column(line, 999, true), line.len() as u32);
+    }
+
+    #[test]
+    fn server_versions_are_bounded_but_stay_unique_per_build() {
+        assert_eq!(compact_server_version("1.15.0"), "1.15.0");
+        // gopls reports its JSON build info as the version.
+        let a =
+            r#"{"GoVersion":"go1.26","Deps":[{"Path":"x","Version":"v1"}],"Version":"v0.23.0"}"#;
+        let b =
+            r#"{"GoVersion":"go1.27","Deps":[{"Path":"x","Version":"v1"}],"Version":"v0.23.0"}"#;
+        let (ca, cb) = (compact_server_version(a), compact_server_version(b));
+        assert!(ca.starts_with("v0.23.0+") && ca.len() <= 24, "{ca}");
+        assert_ne!(ca, cb, "a different build keeps a different identity");
+        let blob = "x".repeat(500);
+        assert!(compact_server_version(&blob).starts_with("build+"));
     }
 }
