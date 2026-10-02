@@ -99,6 +99,10 @@ mod tests {
                 "windsurfrules.txt",
                 include_str!("../templates/windsurfrules.txt"),
             ),
+            (
+                "hermes extras",
+                crate::hooks::agents::hermes::HERMES_TOOL_EXTRAS,
+            ),
         ];
         let mut stale = Vec::new();
         for (file, text) in texts {

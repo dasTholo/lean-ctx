@@ -334,13 +334,10 @@ impl ServerHandler for LeanCtxServer {
         if suppress_initialize_instructions(client_caps.client_id.as_str()) {
             Ok(result)
         } else {
-            let instructions = crate::instructions::fit_to_client_cap(
-                crate::instructions::build_instructions_with_client_and_session(
-                    CrpMode::effective(),
-                    &name,
-                    &session,
-                ),
-                client_caps.client_id.as_str(),
+            let instructions = crate::instructions::build_instructions_with_client_and_session(
+                CrpMode::effective(),
+                &name,
+                &session,
             );
             Ok(result.with_instructions(instructions))
         }

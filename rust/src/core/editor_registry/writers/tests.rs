@@ -599,7 +599,12 @@ fn auto_approve_names_only_advertised_tools() {
         })
         .collect();
     assert!(stale.is_empty(), "stale autoApprove entries: {stale:?}");
-    assert!(auto_approve_tools().contains(&"ctx_read"));
+    for core in ["ctx_read", "ctx_shell", "ctx_search", "ctx_cost"] {
+        assert!(
+            auto_approve_tools().contains(&core),
+            "{core} lost auto-approval"
+        );
+    }
 }
 
 #[test]
