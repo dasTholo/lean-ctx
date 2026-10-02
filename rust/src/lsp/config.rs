@@ -120,7 +120,7 @@ pub fn find_runnable_server(binary: &str) -> Option<PathBuf> {
 }
 
 fn runnable(path: PathBuf) -> Option<PathBuf> {
-    let is_rustup_proxy = std::fs::read_link(&path).ok().is_some_and(|target| {
+    let is_rustup_proxy = std::fs::read_link(&path).is_ok_and(|target| {
         target
             .file_stem()
             .is_some_and(|stem| stem.eq_ignore_ascii_case("rustup"))
