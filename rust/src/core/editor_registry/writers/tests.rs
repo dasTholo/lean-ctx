@@ -1348,6 +1348,14 @@ fn claude_code_gets_auto_approve() {
         arr.iter().any(|v| v.as_str() == Some("ctx_shell")),
         "ctx_shell must be auto-approved"
     );
+    // Captured requests (2.1.287): `alwaysLoad` keeps lean-ctx schemas out of
+    // ToolSearch; a config `instructions` key never reaches the model.
+    let entry = &json["mcpServers"]["lean-ctx"];
+    assert_eq!(entry["alwaysLoad"], Value::Bool(true));
+    assert!(
+        entry.get("instructions").is_none(),
+        "dead config key: {entry}"
+    );
 }
 
 // --- CodeWhale (#1402) ------------------------------------------------------
