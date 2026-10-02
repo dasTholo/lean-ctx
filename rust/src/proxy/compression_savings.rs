@@ -17,8 +17,15 @@
 use std::collections::HashMap;
 
 use super::holdout::Arm;
-use super::output_savings::{MIN_SAMPLES_PER_ARM, Measured, Sample, welch_reduction};
+use super::output_savings::{Measured, Sample, welch_reduction};
 use super::usage_meter::{CohortUsage, compression_cohort_key};
+use crate::core::context_quality::EvidenceTier;
+use crate::core::eval_ab::report::MIN_POWERED_PAIRS;
+
+/// Turns each arm needs before a reduction is reported — the same power floor
+/// as the paired quality reports, so "measured" means the same everywhere.
+#[allow(clippy::cast_possible_truncation)]
+const MIN_TURNS_PER_ARM: u64 = MIN_POWERED_PAIRS as u64;
 
 /// Outcome of an input-compression savings query.
 #[derive(Debug, Clone, PartialEq)]
@@ -53,11 +60,11 @@ pub fn from_cohorts(cohorts: &HashMap<String, CohortUsage>) -> CompressionSaving
     let (Some(control), Some(treatment)) = (control, treatment) else {
         return CompressionSavings::Off;
     };
-    if control_n < MIN_SAMPLES_PER_ARM || treatment_n < MIN_SAMPLES_PER_ARM {
+    if control_n < MIN_TURNS_PER_ARM || treatment_n < MIN_TURNS_PER_ARM {
         return CompressionSavings::Pending {
             control_n,
             treatment_n,
-            needed: MIN_SAMPLES_PER_ARM,
+            needed: MIN_TURNS_PER_ARM,
         };
     }
     welch_reduction(prompt_sample(control), prompt_sample(treatment))
@@ -69,11 +76,17 @@ fn prompt_sample(c: &CohortUsage) -> Sample {
 }
 
 /// Stable JSON shape, shared by the CLI and any dashboard route.
+///
+/// A measured reduction carries [`EvidenceTier::ProductionOutcome`]: it was
+/// observed in a real deployment with a real control arm. The tier describes
+/// the token measurement only; quality stays `unknown` in every state.
 #[must_use]
 pub fn to_json(s: &CompressionSavings) -> serde_json::Value {
     let mut v = match s {
         CompressionSavings::Measured(m) => serde_json::json!({
             "status": "measured",
+            "power": "powered",
+            "evidence_tier": EvidenceTier::ProductionOutcome,
             "reduction_pct": round2(m.reduction_pct),
             "ci95_low_pct": round2(m.ci95_low_pct),
             "ci95_high_pct": round2(m.ci95_high_pct),
@@ -89,6 +102,7 @@ pub fn to_json(s: &CompressionSavings) -> serde_json::Value {
             needed,
         } => serde_json::json!({
             "status": "pending",
+            "power": "underpowered",
             "control_n": control_n,
             "treatment_n": treatment_n,
             "needed_per_arm": needed,
@@ -157,6 +171,13 @@ mod tests {
         let expected = 400.0 / 1030.0 * 100.0;
         assert!((m.reduction_pct - expected).abs() < 1e-9, "{m:?}");
         assert!(m.ci95_low_pct < m.reduction_pct && m.reduction_pct < m.ci95_high_pct);
+
+        // Only a measured result claims the production-outcome tier, and the
+        // tier never upgrades quality, which stays unknown in every state.
+        assert_eq!(to_json(&small)["power"], "underpowered");
+        assert!(to_json(&small).get("evidence_tier").is_none());
+        let measured = to_json(&CompressionSavings::Measured(m.clone()));
+        assert_eq!(measured["evidence_tier"], "production_outcome");
 
         for s in [
             CompressionSavings::Off,

@@ -74,6 +74,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   verified — resolves, not expired, digest matches, no path escape — without
   exposing content. Policy refusals count as "not recoverable for the model",
   not as a broken mechanism.
+
 ### Added — a real holdout arm for the proxy's input compression (#1905)
 
 - `[proxy] compression_holdout` (env `LEAN_CTX_PROXY_COMPRESSION_HOLDOUT`,
