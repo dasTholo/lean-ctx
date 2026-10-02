@@ -15,8 +15,11 @@ const DEFAULT_FRONT_LOADED_TOOLS = [
   "ctx_callgraph",
   "ctx_session",
 ];
-const LEAN_CTX_TOOL_PATTERN = /^mcp__lean[-_]ctx__ctx_[A-Za-z0-9_-]+$/;
-const LEAN_CTX_TOOL_NAME = /^mcp__(lean[-_]ctx)__(ctx_[A-Za-z0-9_-]+)$/;
+// Every tool of the lean-ctx server, not only `ctx_*`: the `shell` alias of
+// ctx_shell would otherwise stay front-loaded under `alwaysLoad`.
+const LEAN_CTX_TOOL_PATTERN = /^mcp__lean[-_]ctx__[A-Za-z0-9_-]+$/;
+const LEAN_CTX_TOOL_NAME = /^mcp__(lean[-_]ctx)__([A-Za-z0-9_-]+)$/;
+const SHELL_TOOLS = new Set(["ctx_shell", "shell"]);
 const WATCH_CONTEXT =
   "This background job is being watched; you will be woken automatically on completion, so do not poll or sleep.";
 const WATCH_INTERVAL_MS = 2_000;
@@ -105,7 +108,7 @@ export const register: Register = (on, options) => {
     await ensureMeterCommand($);
 
     if (
-      leanCtxTool.tool === "ctx_shell" &&
+      SHELL_TOOLS.has(leanCtxTool.tool) &&
       watchedJobs.size > 0 &&
       isSleepWait(readString(fields, "command"))
     ) {
@@ -113,7 +116,7 @@ export const register: Register = (on, options) => {
       return { result: sleepAnswer() };
     }
 
-    if (leanCtxTool.tool === "ctx_shell" && fields.run_in_background) {
+    if (SHELL_TOOLS.has(leanCtxTool.tool) && fields.run_in_background) {
       const result = await next(event);
       const jobId = extractJobId(result);
       if (!jobId) return result;
@@ -129,7 +132,7 @@ export const register: Register = (on, options) => {
       return addWatchContext(result, job);
     }
 
-    if (leanCtxTool.tool === "ctx_shell" && fields.background_action === "status") {
+    if (SHELL_TOOLS.has(leanCtxTool.tool) && fields.background_action === "status") {
       const jobId = readString(fields, "job_id");
       const job = jobId ? watchedJobs.get(watchKey(leanCtxTool.server, jobId)) : undefined;
       const result = await next(event);

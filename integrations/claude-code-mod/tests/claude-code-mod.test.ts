@@ -46,10 +46,17 @@ test("lean-ctx tools keep descriptions and only configured tools are front-loade
     isDeferred: true,
     provider: { plugin: "engine", tier: "core" },
   });
+  // Real request capture showed the non-`ctx_` alias staying front-loaded.
+  const alias = await $.tool.describe({
+    tool: "mcp__lean-ctx__shell",
+    description: "shell alias",
+    provider: { plugin: "mcp:lean-ctx", tier: "user" },
+  });
 
   expect(read).toEqual({ description: "read description", isDeferred: false });
   expect(glob).toEqual({ description: "glob description", isDeferred: true });
   expect(bash).toEqual({ description: "native Bash description", isDeferred: true });
+  expect(alias).toEqual({ description: "shell alias", isDeferred: true });
 });
 
 test("the mod leaves /leanctx alone when no lean-ctx MCP tools are present", async ($, on) => {
