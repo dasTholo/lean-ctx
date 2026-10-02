@@ -35,13 +35,23 @@ pub fn canonical_body() -> String {
     )
 }
 
-/// `(relative_path, content)` for every artifact the generator writes. All
-/// artifacts share one canonical body today; the shape leaves room for
-/// per-path bodies later without changing callers.
+/// The repo-root skill (installed by `skills/lean-ctx/scripts/install.sh` and
+/// skill marketplaces) is a verbatim copy of the template `lean-ctx setup`
+/// installs, so the two can never drift apart again.
+pub const SKILL_COPY_PATH: &str = "skills/lean-ctx/SKILL.md";
+
+/// `(relative_path, content)` for every artifact the generator writes: the
+/// versioned rule artifacts (one canonical body) plus the skill copy.
 #[must_use]
 pub fn artifacts() -> Vec<(&'static str, String)> {
     let body = canonical_body();
-    ARTIFACT_PATHS.iter().map(|p| (*p, body.clone())).collect()
+    let mut arts: Vec<(&'static str, String)> =
+        ARTIFACT_PATHS.iter().map(|p| (*p, body.clone())).collect();
+    arts.push((
+        SKILL_COPY_PATH,
+        include_str!("../templates/SKILL.md").to_string(),
+    ));
+    arts
 }
 
 #[cfg(test)]
@@ -62,13 +72,65 @@ mod tests {
         assert!(body.ends_with('\n'));
     }
 
+    /// Every tool a shipped instruction text names must be one agents can see:
+    /// registered and publicly advertised — not a deprecated alias or a hidden
+    /// local-collaboration tool. The skill named six hidden tools for months
+    /// because no gate covered the templates.
+    #[test]
+    fn shipped_instruction_texts_name_only_advertised_tools() {
+        use crate::server::dynamic_tools::is_publicly_advertised_tool;
+        let registered: std::collections::HashSet<String> = crate::tool_defs::granular_tool_defs()
+            .iter()
+            .map(|t| t.name.to_string())
+            .collect();
+        let texts = [
+            ("SKILL.md", include_str!("../templates/SKILL.md")),
+            ("CLAUDE.md", include_str!("../templates/CLAUDE.md")),
+            (
+                "CLAUDE_GLOBAL.md",
+                include_str!("../templates/CLAUDE_GLOBAL.md"),
+            ),
+            ("PI_AGENTS.md", include_str!("../templates/PI_AGENTS.md")),
+            (
+                "PI_AGENTS_REPLACE.md",
+                include_str!("../templates/PI_AGENTS_REPLACE.md"),
+            ),
+            (
+                "windsurfrules.txt",
+                include_str!("../templates/windsurfrules.txt"),
+            ),
+        ];
+        let mut stale = Vec::new();
+        for (file, text) in texts {
+            for (i, _) in text.match_indices("ctx_") {
+                let name: String = text[i..]
+                    .chars()
+                    .take_while(|c| c.is_ascii_lowercase() || *c == '_')
+                    .collect();
+                // `mcp__lean-ctx__ctx_read` also yields `ctx__ctx_read` from the
+                // server name; only the real tool segment counts.
+                if name.len() > 4
+                    && !name.contains("__")
+                    && !(registered.contains(&name) && is_publicly_advertised_tool(&name))
+                {
+                    stale.push(format!("{file}: {name}"));
+                }
+            }
+        }
+        assert!(
+            stale.is_empty(),
+            "shipped texts name hidden/unknown tools: {stale:?}"
+        );
+    }
+
     #[test]
     fn artifacts_cover_every_declared_path() {
         let arts = artifacts();
-        assert_eq!(arts.len(), ARTIFACT_PATHS.len());
-        for (path, body) in arts {
-            assert!(ARTIFACT_PATHS.contains(&path));
-            assert!(!body.is_empty());
+        for declared in ARTIFACT_PATHS.iter().chain([&SKILL_COPY_PATH]) {
+            assert!(
+                arts.iter().any(|(p, b)| p == declared && !b.is_empty()),
+                "{declared} missing from the generator output"
+            );
         }
     }
 }

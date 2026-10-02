@@ -53,6 +53,39 @@ pub fn build_instructions_with_client_and_session(
     build_instructions_with_client_and_optional_session(crp_mode, client_name, Some(session))
 }
 
+/// Fit initialize `instructions` into a client's documented hard limit
+/// (`client_constraints::mcp_instructions_max_chars`; Claude Code: 2048).
+/// Claude Code cuts the overflow itself, mid-sentence, with a `[truncated]`
+/// marker. Dropping whole trailing paragraphs keeps every surviving rule intact;
+/// the skeleton puts the binding mapping first, so the least important blocks
+/// (style, ladder) go first. Deterministic for prompt caching (#498).
+#[must_use]
+pub fn fit_to_client_cap(instructions: String, client_id: &str) -> String {
+    let Some(max) = crate::core::client_constraints::by_client_id(client_id)
+        .and_then(|c| c.mcp_instructions_max_chars)
+    else {
+        return instructions;
+    };
+    if instructions.len() <= max {
+        return instructions;
+    }
+    let mut out = String::new();
+    for para in instructions.split("\n\n") {
+        let sep = if out.is_empty() { 0 } else { 2 };
+        if out.len() + sep + para.len() > max {
+            break;
+        }
+        if sep > 0 {
+            out.push_str("\n\n");
+        }
+        out.push_str(para);
+    }
+    if out.is_empty() {
+        out.push_str(&instructions[..instructions.floor_char_boundary(max)]);
+    }
+    out
+}
+
 fn build_instructions_with_client_and_optional_session(
     crp_mode: CrpMode,
     client_name: &str,
@@ -649,6 +682,17 @@ pub(crate) fn max_shell_hint_tokens() -> usize {
 mod tests {
     use super::*;
     use crate::core::tokens::count_tokens;
+
+    #[test]
+    fn claude_cap_drops_whole_trailing_paragraphs() {
+        let head = "MANDATORY MAPPING: Read -> ctx_read".to_string();
+        let tail = "x".repeat(1500);
+        let text = format!("{head}\n\n{tail}\n\n{tail}");
+        let fitted = fit_to_client_cap(text.clone(), "claude-code");
+        assert!(fitted.len() <= 2048, "{}", fitted.len());
+        assert_eq!(fitted, format!("{head}\n\n{tail}"));
+        assert_eq!(fit_to_client_cap(text.clone(), "cursor"), text);
+    }
 
     #[test]
     fn guidance_suffix_survives_oversized_base() {

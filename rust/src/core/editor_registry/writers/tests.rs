@@ -580,14 +580,26 @@ approval_mode = \"approve\"
     );
 }
 
+/// Every auto-approved name must be a tool agents can actually see; the list
+/// carried nine removed/hidden tools (`ctx_symbol`, `ctx_workflow`, …) because
+/// nothing tied it to the registry. `ctx` is the unified meta-tool, which is
+/// not a registry entry.
 #[test]
-fn auto_approve_contains_core_tools() {
-    let tools = auto_approve_tools();
-    assert!(tools.contains(&"ctx_read"));
-    assert!(tools.contains(&"ctx_shell"));
-    assert!(tools.contains(&"ctx_search"));
-    assert!(tools.contains(&"ctx_workflow"));
-    assert!(tools.contains(&"ctx_cost"));
+fn auto_approve_names_only_advertised_tools() {
+    let registered: std::collections::HashSet<String> = crate::tool_defs::granular_tool_defs()
+        .iter()
+        .map(|t| t.name.to_string())
+        .collect();
+    let stale: Vec<_> = auto_approve_tools()
+        .into_iter()
+        .filter(|n| *n != "ctx")
+        .filter(|n| {
+            !(registered.contains(*n)
+                && crate::server::dynamic_tools::is_publicly_advertised_tool(n))
+        })
+        .collect();
+    assert!(stale.is_empty(), "stale autoApprove entries: {stale:?}");
+    assert!(auto_approve_tools().contains(&"ctx_read"));
 }
 
 #[test]

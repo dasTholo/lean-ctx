@@ -106,6 +106,10 @@ fn should_allow(tool_name: &str, file_path: Option<&str>, payload: &str) -> bool
         return true;
     }
 
+    if is_notifying_background_shell(tool_name, payload) {
+        return true;
+    }
+
     // GH #1228: Claude/CodeBuddy auto memory must use native Read/Edit even
     // when Replace-mode deny hooks are installed.
     if file_path.is_some_and(|p| {
@@ -119,6 +123,21 @@ fn should_allow(tool_name: &str, file_path: Option<&str>, payload: &str) -> bool
     }
 
     false
+}
+
+/// Claude Code's `Bash` with `run_in_background: true` re-invokes the model when
+/// the job ends; a `ctx_shell` background job cannot (MCP has no wake channel).
+/// Denying it pushed agents into `sleep` + status polling — ~19 % of all model
+/// requests in a 30-day transcript corpus. Its output lands in a file the agent
+/// reads later, so nothing uncompressed floods the context.
+fn is_notifying_background_shell(tool_name: &str, payload: &str) -> bool {
+    tool_name == "Bash"
+        && serde_json::from_str::<serde_json::Value>(payload).is_ok_and(|v| {
+            v.get("transcript_path").is_some()
+                && v.pointer("/tool_input/run_in_background")
+                    .and_then(serde_json::Value::as_bool)
+                    == Some(true)
+        })
 }
 
 fn is_lean_ctx_tool(tool_name: &str) -> bool {
@@ -428,14 +447,17 @@ fn print_deny_compression_markers(tool_name: &str, payload: &str) {
 /// model got no guidance to switch to ctx_*.
 ///
 /// Strategy:
-/// - stdout: one JSON object carrying the Cursor legacy keys, the Copilot
-///   top-level `permissionDecision`, and the Claude Code `hookSpecificOutput`.
+/// - stdout: Claude Code PreToolUse payloads get only `hookSpecificOutput`
+///   (Claude rejects the legacy top-level `decision: "deny"`); every other host
+///   gets one object carrying the Cursor legacy keys, the Copilot top-level
+///   `permissionDecision`, and `hookSpecificOutput`.
 /// - stderr: the plain reason (Claude Code surfaces stderr on exit 2).
 /// - exit code: 0 for Claude-Code-shaped payloads (`transcript_path` marker)
 ///   so the JSON verdict renders as a clean permission denial; 2 for every
 ///   other host, matching their historical exit-code contract.
 fn emit_deny(msg: &str, payload: &str) -> ! {
-    println!("{}", super::build_dual_deny_output(msg));
+    let parsed = serde_json::from_str(payload).unwrap_or(serde_json::Value::Null);
+    println!("{}", super::build_deny_output(msg, &parsed));
     eprintln!("{msg}");
     if payload_is_claude_code(payload) {
         std::process::exit(0);
@@ -608,7 +630,9 @@ fn build_ctx_shell_hint(args: &serde_json::Map<String, serde_json::Value>) -> St
         .or_else(|| args.get("cmd"))
         .and_then(serde_json::Value::as_str)
         .unwrap_or("<command>");
-    let short_cmd = if cmd.len() > 80 { &cmd[..80] } else { cmd };
+    // Cut on a char boundary: a byte slice panics when byte 80 lands inside a
+    // multi-byte character (umlaut, emoji), killing the hook mid-verdict.
+    let short_cmd = cmd.char_indices().nth(80).map_or(cmd, |(i, _)| &cmd[..i]);
     format!(
         "[DENIED] Native Shell blocked. Use: ctx_shell(command=\"{short_cmd}\") — lean-ctx replace mode is active."
     )
@@ -977,6 +1001,26 @@ mod tests {
             detect_marker_source(payload),
             MarkerSource::Content
         ));
+    }
+
+    #[test]
+    fn only_claude_background_bash_escapes_the_shell_deny() {
+        let bg = r#"{"transcript_path":"/t","tool_name":"Bash","tool_input":{"command":"cargo test","run_in_background":true}}"#;
+        let fg =
+            r#"{"transcript_path":"/t","tool_name":"Bash","tool_input":{"command":"cat a.rs"}}"#;
+        assert!(is_notifying_background_shell("Bash", bg));
+        assert!(!is_notifying_background_shell("Bash", fg));
+        assert!(!is_notifying_background_shell("Shell", bg));
+    }
+
+    #[test]
+    fn shell_hint_truncates_on_char_boundary() {
+        // Byte 80 falls inside "ü" (2 bytes): a byte slice panicked here.
+        let cmd = format!("{}ü{}", "a".repeat(79), "b".repeat(20));
+        let mut args = serde_json::Map::new();
+        args.insert("command".into(), serde_json::Value::String(cmd));
+        let hint = build_ctx_shell_hint(&args);
+        assert!(hint.contains(&format!("{}ü\"", "a".repeat(79))), "{hint}");
     }
 
     #[test]
