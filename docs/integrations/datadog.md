@@ -1,8 +1,9 @@
 # Historical LeanCTX + Datadog integration proposal
 
-> **Status: historical research — not an available integration, FinOps product,
-> or savings claim.** LeanCTX is **The Context SDK for AI Agents**; current scope
-> and status are governed by `docs/internal/README.md` (internal, not in this repository).
+> **Status: Historical / Research.** This retained record is not current
+> onboarding or a release claim. LeanCTX is the **Context Gateway for AI Systems**.
+> See [current positioning](../POSITIONING_CANONICAL.md) and the relevant edition's
+> released contract; older definitions and availability below are historical.
 
 See your agents' token economy next to the rest of your AI spend: what they
 *would* have consumed without lean-ctx, what they actually consumed, and the

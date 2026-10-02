@@ -3,7 +3,7 @@ name: lean-ctx
 description: Local context tooling for AI agents. Use it to select, shape, reuse, recover, and inspect context before inference when reading files, running shell commands, searching code, or exploring directories.
 ---
 
-# lean-ctx — Local Context SDK for AI Agents
+# LeanCTX — Context Gateway for AI Systems
 
 ## Setup
 

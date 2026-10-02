@@ -3,9 +3,9 @@ name: lean-ctx
 description: Local context tooling for AI agents. Use it to select, shape, reuse, recover, and inspect context before inference when reading files, running shell commands, searching code, or exploring directories.
 ---
 
-# LeanCTX — Local Context SDK for AI Agents
+# LeanCTX — Context Gateway for AI Systems
 
-LeanCTX is a local context layer for existing agents. It provides selectable file representations, focused search, controlled shell-output shaping, session continuity, and recovery to exact source when needed.
+LeanCTX is the Context Gateway for AI Systems. Control what your AI can see. LeanCTX Engine provides local context selection, supported access and content controls, and evidence of observed context operations for existing agents. Recovery depends on source or archive availability and access permissions. LeanCTX SDK is the separate integration surface for applications.
 
 ## Setup (run first)
 

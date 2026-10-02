@@ -5,7 +5,8 @@
 > platform, hosted service, shared team context, or a performance guarantee.
 > Measure a comparable workload with a declared quality threshold before making a
 > gain claim. Product scope and status are governed by
-> [`docs/internal/README.md`](../../docs/internal/README.md).
+> [canonical positioning](../../docs/POSITIONING_CANONICAL.md): LeanCTX is the
+> **Context Gateway for AI Systems**. **Control what your AI can see.**
 
 [Pi Coding Agent](https://github.com/badlogic/pi-mono) extension that provides
 `ctx_`-prefixed tools backed by a local [lean-ctx](https://leanctx.com) Runtime.
@@ -381,6 +382,6 @@ the active prefix plus any handed-off (`Disabled`) and skipped tools.
 
 ## Links
 
-- [lean-ctx](https://leanctx.com) — the Context SDK for AI Agents
+- [LeanCTX](https://leanctx.com) — Context Gateway for AI Systems
 - [GitHub](https://github.com/yvgude/lean-ctx)
 - [Discord](https://discord.gg/pTHkG9Hew9)

@@ -8,7 +8,7 @@
 /// (`onboard`), not the full 150-line command reference.
 pub(super) fn quickstart_text() -> String {
     format!(
-        "lean-ctx {version} — Context SDK for AI Agents
+        "lean-ctx {version} — Context Gateway for AI Systems
 
 With no arguments, lean-ctx speaks the MCP protocol on stdin/stdout — that is
 for your AI editor, not for interactive use. It is doing that right now and
@@ -46,7 +46,7 @@ pub(super) fn print_help_concise() {
 
 pub(super) fn concise_help_text() -> String {
     format!(
-        "lean-ctx {version} — Context SDK for AI Agents
+        "lean-ctx {version} — Context Gateway for AI Systems
 
 {banner}
 
@@ -97,7 +97,7 @@ GITHUB:  https://github.com/yvgude/lean-ctx
 /// — a removed command listed here is how #1602 reached a user.
 pub(super) fn full_help_text() -> String {
     format!(
-        "lean-ctx {version} — Context SDK for AI Agents
+        "lean-ctx {version} — Context Gateway for AI Systems
 
 {banner}
 
@@ -362,7 +362,7 @@ SHELL HOOK PATTERNS (95+):
 
 READ MODES:
     auto                           Auto-select optimal mode (default)
-    full                           Full content (cached re-reads = 13 tokens)
+    full                           Full content (eligible re-reads use cache references)
     map                            Dependency graph + API signatures
     signatures                     tree-sitter AST extraction (27 languages)
     task                           Task-relevant filtering (requires ctx_session task)

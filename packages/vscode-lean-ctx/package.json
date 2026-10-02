@@ -1,7 +1,7 @@
 {
   "name": "lean-ctx",
   "displayName": "lean-ctx",
-  "description": "See what lean-ctx did in this project — tokens kept out of context, secrets kept out, risky commands blocked — in one quiet status bar item. Every number is provable with `lean-ctx value`.",
+  "description": "Inspect LeanCTX Engine activity in VS Code: observed context reduction, recorded redactions, and command-policy decisions. Part of the Context Gateway for AI Systems.",
   "version": "0.3.0",
   "publisher": "LeanCTX",
   "license": "Apache-2.0",

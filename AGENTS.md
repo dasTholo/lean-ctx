@@ -1,6 +1,6 @@
-# Context Engineering Layer
+# LeanCTX — Context Gateway for AI Systems
 
-lean-ctx optimizes LLM context by compressing file reads, shell output, and search results.
+LeanCTX Engine selects context, applies supported access and content controls, and records observable context operations; compression is one capability within that path.
 
 ## Mandatory Routing Decision (Direct or Swarm)
 

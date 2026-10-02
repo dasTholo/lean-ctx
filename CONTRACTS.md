@@ -1,6 +1,26 @@
 # LeanCTX Protocol Family & Contracts (v1)
 
-LeanCTX is infrastructure. Contracts are the stable promises that client integrations, CI gates, proof artifacts, and future plugins rely on.
+LeanCTX is the **Context Gateway for AI Systems**. **Control what your AI can see.**
+LeanCTX Engine implements the runtime; LeanCTX SDK is the separate application
+integration surface. Contracts define the supported interfaces and evidence.
+
+## Current product and historical contract scope
+
+Use [canonical positioning](docs/POSITIONING_CANONICAL.md) for current product,
+edition, license, and release boundaries. Frozen v1 documents remain byte-for-byte
+historical artifacts. In particular, `local-free-invariant-v1.md` and
+`oss-plane-separation-v1.md` retain older packaging, SDK licensing, and website
+repository descriptions; these passages do not describe today's separate SDK,
+commercial Enterprise, or independently maintained website.
+
+The Apache-2.0 Engine's local capabilities remain ungated by a commercial account
+or plan. The standalone SDK is source-available and requires a signed written
+commercial agreement for production/OEM use; Enterprise has its own license and
+release scope. An Engine artifact does not confer rights in either product.
+
+The [public contract index](docs/contracts/README.md) lists files currently
+present in this distribution. Legacy commercial entries in the historical matrix
+below are retained for compatibility history, not as public service availability.
 
 ## Architecture positioning
 

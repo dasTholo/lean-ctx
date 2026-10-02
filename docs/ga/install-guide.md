@@ -1,9 +1,10 @@
 # lean-ctx Install Guide
 
-> **Status: local Runtime setup reference.** Installation applies to the local
-> Context SDK for existing agents, not a hosted service or general agent platform.
-> Confirm current behavior with `lean-ctx doctor`; product scope and status are in
-> `docs/internal/README.md` (internal, not in this repository).
+> **Status: local Engine setup reference.** LeanCTX is the **Context Gateway for AI Systems**.
+> **Control what your AI can see.** This guide installs LeanCTX Engine for
+> supported local integrations. LeanCTX SDK and Enterprise have separate
+> integration and deployment contracts. Confirm installed behavior with
+> `lean-ctx doctor`; see [current positioning](../POSITIONING_CANONICAL.md).
 
 ## Overview
 
@@ -106,9 +107,9 @@ lean-ctx dev-install
 
 Do not use `dev-install` for normal production upgrades; use `lean-ctx update`.
 
-> **Enterprise:** Gateway and Cloud binaries ship in the separate
-> [`lean-ctx-enterprise`](https://github.com/yvgude/lean-ctx-enterprise) repository
-> (see [ADR-023](../business/adr-023-open-core-split.md)).
+> **Enterprise:** Commercial deployments have separate distribution and license
+> agreements. Use the [Enterprise overview](https://leanctx.com/enterprise/)
+> and the installation documentation supplied for your licensed release.
 
 To build the gateway binary or image, use the enterprise repository:
 

@@ -2,8 +2,8 @@
 
 > **Status: Available first-class local setup path.** LeanCTX attaches to
 > Codex through local Runtime wiring; its coverage is limited to observable
-> context behavior. Product scope and claim discipline are governed by
-> `docs/internal/README.md` (internal, not in this repository).
+> context behavior. See the [canonical positioning](../POSITIONING_CANONICAL.md)
+> for current product scope and claim boundaries.
 
 Complete guide to setting up and optimally using lean-ctx with Codex CLI (OpenAI's terminal-based coding agent).
 
@@ -53,7 +53,7 @@ If the file already exists, lean-ctx merges the `[mcp_servers.lean-ctx]` section
 Codex CLI shares its rules infrastructure with Claude Code. lean-ctx creates dedicated rules at the Claude rules directory:
 
 ```markdown
-# lean-ctx — Context Engineering Layer
+# LeanCTX — Context Gateway for AI Systems
 <!-- lean-ctx-rules -->
 
 ## Mode Selection
@@ -228,17 +228,17 @@ export CODEX_HOME=/custom/path
 lean-ctx init --agent codex  # Writes to /custom/path/config.toml
 ```
 
-## Token Savings
+## Context selection and measurement
 
-| Operation | Without lean-ctx | With lean-ctx | Savings |
-|-----------|-----------------|---------------|---------|
-| File read (cached) | ~2000 tokens | ~13 tokens | 99.4% |
-| File read (map) | ~2000 tokens | ~400 tokens | 80% |
-| `git diff` | ~1200 tokens | ~200 tokens | 83% |
-| `cargo test` | ~2000 tokens | ~300 tokens | 85% |
-| `npm run build` | ~1500 tokens | ~250 tokens | 83% |
+Use `map` or `signatures` when structure is enough, focused line modes for a
+specific region, and `full` when the task needs the source. Shell hooks can
+summarize supported command output. The representation and resulting context
+depend on the file, task, integration, and recovery behavior.
 
-Monitor savings:
+`lean-ctx gain --live` reports local usage and token/cost estimates for activity
+it observes. Provider-reported usage is available only for supported routed
+paths that record it; estimates do not establish invoice savings or answer
+quality.
 
 ```bash
 lean-ctx gain --live
