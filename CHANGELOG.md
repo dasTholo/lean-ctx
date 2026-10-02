@@ -43,6 +43,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   auto-dictionary legend) count as kept.
 - Contract: [docs/contracts/context-quality-v1.md](docs/contracts/context-quality-v1.md).
 
+### Fixed — tool output is never served stale or replaced by a dead reference (#1980)
+
+- `ctx_shell` no longer replays results from its opt-in result cache
+  (`[cache] shell_cache_enabled`). The cache keyed `ls`, `find`, `rg`,
+  `git status` and `cargo test` without the workspace state they read, so after
+  a file change it returned the old output verbatim. It also mapped every
+  absolute cwd and every path outside the project to one key. The setting is
+  removed; configs that still set it keep loading.
+- The proxy no longer remembers tool results across requests. A result re-sent
+  with the history matched its own earlier copy and was replaced by
+  `[unchanged since turn N …]` / `[Content unchanged since turn N …]`, which
+  removed it from the model's context for every client without a
+  `cache_control` breakpoint on the latest message.
+- Near-duplicate tool output used to become
+  `[Similar to turn N, key differences: ~1 line modified]`, which hid the
+  changed value (for example a rebuilt binary's date in `ls -l`). Dedup now
+  works within one request and is lossless: an exact repeat references the
+  earlier result by its tool-call id, and a near duplicate carries the changed
+  lines verbatim, only when that halves its size. The two newest tool outputs
+  always stay verbatim.
+
 ### Fixed — `gain` no longer reports a bill saving it cannot see
 
 - When the proxy is not in the provider request path (for example a Claude
