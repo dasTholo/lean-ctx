@@ -111,6 +111,37 @@ pub fn find_binary_in_path(binary: &str) -> Option<PathBuf> {
     None
 }
 
+/// Like [`find_binary_in_path`], but only returns servers that can actually
+/// run. A rustup proxy (`~/.cargo/bin/rust-analyzer` → `rustup`) exists even
+/// when the component is not installed and then fails on start; such a proxy
+/// counts only if `--version` succeeds. Plain binaries are not executed.
+pub fn find_runnable_server(binary: &str) -> Option<PathBuf> {
+    find_binary_in_path(binary).and_then(runnable)
+}
+
+fn runnable(path: PathBuf) -> Option<PathBuf> {
+    let is_rustup_proxy = std::fs::read_link(&path).is_ok_and(|target| {
+        target
+            .file_stem()
+            .is_some_and(|stem| stem.eq_ignore_ascii_case("rustup"))
+    });
+    if !is_rustup_proxy {
+        return Some(path);
+    }
+    // Never let the probe install a toolchain (a `rust-toolchain.toml` in the
+    // working directory could otherwise trigger a download).
+    std::process::Command::new(&path)
+        .arg("--version")
+        .env("RUSTUP_AUTO_INSTALL", "0")
+        .current_dir(std::env::temp_dir())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+        .then_some(path)
+}
+
 pub fn install_hint_for_language(language: &str) -> &'static str {
     for info in KNOWN_SERVERS {
         if info.language == language {
@@ -135,10 +166,10 @@ pub fn check_server_available(language: &str) -> Result<PathBuf, String> {
         .get(language)
         .ok_or_else(|| format!("No LSP server configured for '{language}'"))?;
 
-    find_binary_in_path(&config.command).ok_or_else(|| {
+    find_runnable_server(&config.command).ok_or_else(|| {
         let hint = install_hint_for_language(language);
         format!(
-            "Language server '{}' not found in PATH.\n\
+            "Language server '{}' not found in PATH (or not installed behind its rustup proxy).\n\
              \n\
              ctx_refactor requires an external language server for '{}' files.\n\
              Install it with:\n\
@@ -149,4 +180,28 @@ pub fn check_server_available(language: &str) -> Result<PathBuf, String> {
             config.command, language, hint
         )
     })
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::runnable;
+    use std::os::unix::fs::{PermissionsExt, symlink};
+
+    /// A rustup proxy without the installed component must not count as an
+    /// available server (doctor showed ✓ and ctx_refactor failed on start).
+    #[test]
+    fn rustup_proxy_counts_only_when_it_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        let rustup = dir.path().join("rustup");
+        let proxy = dir.path().join("fake-analyzer");
+        symlink(&rustup, &proxy).unwrap();
+
+        let mut verdicts = Vec::new();
+        for exit_code in [1, 0] {
+            std::fs::write(&rustup, format!("#!/bin/sh\nexit {exit_code}\n")).unwrap();
+            std::fs::set_permissions(&rustup, std::fs::Permissions::from_mode(0o755)).unwrap();
+            verdicts.push(runnable(proxy.clone()).is_some());
+        }
+        assert_eq!(verdicts, vec![false, true]);
+    }
 }
