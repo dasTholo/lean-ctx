@@ -1289,6 +1289,31 @@ mod presence_tests {
 
     #[test]
     fn compatibility_index_survives_an_old_registry_writer() {
+        const CHILD_FLAG: &str = "LEAN_CTX_REGISTRY_COMPAT_TEST_CHILD";
+        if std::env::var_os(CHILD_FLAG).is_none() {
+            // The sidecar follows a process-wide data-dir override. Other
+            // parallel registry tests can prune it despite this test holding
+            // the environment lock, so exercise the unchanged fixture alone.
+            let mut command =
+                std::process::Command::new(std::env::current_exe().expect("test executable"));
+            command
+                .args([
+                    "--exact",
+                    "core::agents::registry::presence_tests::compatibility_index_survives_an_old_registry_writer",
+                    "--nocapture",
+                ])
+                .env(CHILD_FLAG, "1");
+            let output =
+                crate::ipc::process::run_with_timeout(command, std::time::Duration::from_secs(30))
+                    .expect("isolated compatibility test must finish within 30 seconds");
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                output.status.success() && stdout.contains("1 passed; 0 failed"),
+                "isolated compatibility test failed: {stdout}\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
         let _isolated = crate::core::data_dir::isolated_data_dir();
         let mut registry = AgentRegistry::new();
         registry

@@ -469,6 +469,8 @@ mod tests {
     #[test]
     fn live_shadow_produces_a_valid_observation_pair_without_mutating_response() {
         use crate::core::ocla::reference_adapters::{RtkConfig, RtkShellAdapter};
+        const TEST_VERSION_PROBE_TIMEOUT_MS: u64 = 10_000;
+        const TEST_INVOCATION_TIMEOUT_MS: u64 = 30_000;
         let directory = tempfile::tempdir().expect("temporary directory");
         let binary = directory.path().join("rtk");
         // #1777: create the fake RTK executable *as* an executable and flush it
@@ -494,16 +496,22 @@ mod tests {
             file.sync_all().expect("flush fake RTK");
         }
         let hash = super::super::rtk_shell::sha256_file(&binary).expect("hash fake RTK");
+        // Allow process startup under suite load; both test budgets stay finite,
+        // and production keeps its fixed version-probe cap.
         let adapter = RtkShellAdapter::new(
             RtkConfig::new(&binary)
                 .with_pins("1.2.3", hash)
+                .with_timeout_ms(TEST_INVOCATION_TIMEOUT_MS)
+                .with_test_version_probe_timeout_ms(TEST_VERSION_PROBE_TIMEOUT_MS)
                 .with_working_dir(directory.path())
                 .with_sandbox_root(directory.path()),
         );
         let runner = ShadowRunner::with_adapter(adapter);
         let production = String::from("production response stays native");
+        let mut test_invocation = invocation("printf unchanged");
+        test_invocation.timeout_ms = TEST_INVOCATION_TIMEOUT_MS;
         let report = runner
-            .compare_preserving(&production, invocation("printf unchanged"))
+            .compare_preserving(&production, test_invocation)
             .expect("shadow pair");
         assert_eq!(production, "production response stays native");
         assert_eq!(
@@ -511,7 +519,12 @@ mod tests {
             report.rtk_observation.task_id
         );
         assert!(report.native_observation.output_ref.is_some());
-        assert!(report.rtk_observation.output_ref.is_some());
+        assert!(
+            report.rtk_observation.output_ref.is_some(),
+            "RTK failure: {:?}; observation: {:?}",
+            report.rtk_failure,
+            report.rtk_observation
+        );
         assert!(matches!(
             report.decision,
             ShadowDecision::LowerEtpaoPolicyEquivalent | ShadowDecision::QualityFloorFailed
