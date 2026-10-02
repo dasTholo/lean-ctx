@@ -72,61 +72,6 @@ mod tests {
         assert!(body.ends_with('\n'));
     }
 
-    /// Every tool a shipped instruction text names must be one agents can see:
-    /// registered and publicly advertised — not a deprecated alias or a hidden
-    /// local-collaboration tool. The skill named six hidden tools for months
-    /// because no gate covered the templates.
-    #[test]
-    fn shipped_instruction_texts_name_only_advertised_tools() {
-        use crate::server::dynamic_tools::is_publicly_advertised_tool;
-        let registered: std::collections::HashSet<String> = crate::tool_defs::granular_tool_defs()
-            .iter()
-            .map(|t| t.name.to_string())
-            .collect();
-        let texts = [
-            ("SKILL.md", include_str!("../templates/SKILL.md")),
-            ("CLAUDE.md", include_str!("../templates/CLAUDE.md")),
-            (
-                "CLAUDE_GLOBAL.md",
-                include_str!("../templates/CLAUDE_GLOBAL.md"),
-            ),
-            ("PI_AGENTS.md", include_str!("../templates/PI_AGENTS.md")),
-            (
-                "PI_AGENTS_REPLACE.md",
-                include_str!("../templates/PI_AGENTS_REPLACE.md"),
-            ),
-            (
-                "windsurfrules.txt",
-                include_str!("../templates/windsurfrules.txt"),
-            ),
-            (
-                "hermes extras",
-                crate::hooks::agents::hermes::HERMES_TOOL_EXTRAS,
-            ),
-        ];
-        let mut stale = Vec::new();
-        for (file, text) in texts {
-            for (i, _) in text.match_indices("ctx_") {
-                let name: String = text[i..]
-                    .chars()
-                    .take_while(|c| c.is_ascii_lowercase() || *c == '_')
-                    .collect();
-                // `mcp__lean-ctx__ctx_read` also yields `ctx__ctx_read` from the
-                // server name; only the real tool segment counts.
-                if name.len() > 4
-                    && !name.contains("__")
-                    && !(registered.contains(&name) && is_publicly_advertised_tool(&name))
-                {
-                    stale.push(format!("{file}: {name}"));
-                }
-            }
-        }
-        assert!(
-            stale.is_empty(),
-            "shipped texts name hidden/unknown tools: {stale:?}"
-        );
-    }
-
     #[test]
     fn artifacts_cover_every_declared_path() {
         let arts = artifacts();
