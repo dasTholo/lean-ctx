@@ -9,6 +9,36 @@ product, privacy, and evidence boundaries, use the
 
 ## [Unreleased]
 
+### Added — evidence-aware semantic code intelligence (ADR-015)
+
+- Every call edge in the property graph now records how it is known:
+  `verified` (a language server or JetBrains IDE resolved it), `resolved`
+  (bound by the caller's scope) or `heuristic` (a project-unique name match).
+  Ranking, `ctx_impact` and `ctx_callgraph` weigh edges accordingly; ambiguous
+  names are no longer linked to an arbitrary same-named definition.
+- `semantic_mode` (`auto` default, `eager`, `off`): `auto` uses language
+  servers already running in a lean-ctx process or an attached JetBrains IDE
+  and never starts one; `eager` may start them, in trusted workspaces only.
+  Supported standalone servers: rust-analyzer, TypeScript (≥ 7 natively via
+  `tsc --lsp`, ≤ 6 via typescript-language-server), pylsp, gopls. Nothing is
+  installed automatically.
+- Language servers verify ambiguous calls, veto name-match guesses that
+  actually target a library, and add `implements` edges. Answers are cached
+  per call site and reused until the code they depend on changes.
+- `ctx_graph status`, `lean-ctx doctor` and the dashboard graph legend show
+  the verified share per language and whether its server can run.
+- `ctx_impact` marks files reachable only through name matches
+  (`(name match only)`, JSON `weak_files`); its propagation is now exact and
+  deterministic.
+- Guide: [docs/guides/semantic-intelligence.md](docs/guides/semantic-intelligence.md).
+
+### Fixed — JetBrains bridge on Windows
+
+- IDE answers (definitions, references, implementations) were dropped on
+  Windows: the backend kept the project root in verbatim form (`\\?\C:\…`),
+  so no returned location mapped back to a project file, and call sites
+  went out as absolute instead of project-relative paths.
+
 ### Changed — quality evidence states what it can prove (#1905)
 
 - **Breaking for CI users of `--gate`:** `lean-ctx eval ab` / `testbench` /
@@ -46,6 +76,36 @@ product, privacy, and evidence boundaries, use the
   Facts are matched as whole tokens; reversible rewrites (`FAIL`, the
   auto-dictionary legend) count as kept.
 - Contract: [docs/contracts/context-quality-v1.md](docs/contracts/context-quality-v1.md).
+
+### Fixed — wide source directories inside a project are searchable (#1984)
+
+- `ctx_search`, `ctx_tree` and `ctx_glob` refused a directory with more than
+  50 subdirectories and no project marker of its own as "broad or
+  privacy-protected", even when it sat inside a project (for example
+  `rust/src/core`, whose markers live in `rust/` and the repo root). A
+  project marker in an ancestor now counts. Directories outside any project
+  keep the protection.
+
+### Fixed — tool output is never served stale or replaced by a dead reference (#1980)
+
+- `ctx_shell` no longer replays results from its opt-in result cache
+  (`[cache] shell_cache_enabled`). The cache keyed `ls`, `find`, `rg`,
+  `git status` and `cargo test` without the workspace state they read, so after
+  a file change it returned the old output verbatim. It also mapped every
+  absolute cwd and every path outside the project to one key. The setting is
+  removed; configs that still set it keep loading.
+- The proxy no longer remembers tool results across requests. A result re-sent
+  with the history matched its own earlier copy and was replaced by
+  `[unchanged since turn N …]` / `[Content unchanged since turn N …]`, which
+  removed it from the model's context for every client without a
+  `cache_control` breakpoint on the latest message.
+- Near-duplicate tool output used to become
+  `[Similar to turn N, key differences: ~1 line modified]`, which hid the
+  changed value (for example a rebuilt binary's date in `ls -l`). Dedup now
+  works within one request and is lossless: an exact repeat references the
+  earlier result by its tool-call id, and a near duplicate carries the changed
+  lines verbatim, only when that halves its size. The two newest tool outputs
+  always stay verbatim.
 
 ### Fixed — `gain` no longer reports a bill saving it cannot see
 

@@ -36,7 +36,7 @@ The **LeanCTX SDK** embeds supported Engine capabilities in your application.
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License"></a>
   <a href="https://discord.gg/pTHkG9Hew9"><img src="https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
   <a href="https://x.com/leanctx"><img src="https://img.shields.io/badge/𝕏-Follow-000000?logo=x&logoColor=white" alt="X/Twitter"></a>
-  <img src="https://img.shields.io/badge/Telemetry-Opt--in%20Only-brightgreen?logo=shield&logoColor=white" alt="Opt-in Telemetry">
+  <a href="#privacy--security"><img src="https://img.shields.io/badge/Telemetry-Configurable-blue?logo=shield&logoColor=white" alt="Configurable telemetry"></a>
 </p>
 
 <p>
@@ -205,7 +205,7 @@ lean-ctx shadow --latest                       # latest baseline comparison
 
 ```bash
 # Enable shadow mode for savings comparison
-echo '[shadow]\nenabled = true' >> ~/.config/lean-ctx/config.toml
+lean-ctx config set shadow.enabled true
 
 # After using LeanCTX for a while:
 lean-ctx savings
@@ -223,7 +223,7 @@ lean-ctx shadow --latest
 - **PR Context Packs**: `lean-ctx pack --pr` builds a PR-ready context pack (changed files, related tests, impact, artifacts)
 - **Context Packages**: `lean-ctx pack create` bundles Knowledge + Graph + Session into portable `.ctxpkg` files with SHA-256 integrity
 - **Context Time Machine**: `lean-ctx snapshot create|list|show|verify|restore|publish|import` — git-anchored, ed25519-signed snapshots of the layer state (lineage, ledger Φ, ROI, session) on an append-only timeline; replay them in the dashboard, `restore` to resume a session (and `--git` to check out the commit), or `publish`/`import` a signed snapshot to share it ([concept →](docs/concepts/context-time-machine.md))
-- **Observability**: `lean-ctx gain --live` for real-time savings, `lean-ctx wrapped` for weekly/monthly summaries (`gain --svg`/`--share` for a shareable card or self-hostable page), `lean-ctx watch` for TUI monitoring
+- **Observability**: `lean-ctx gain --live` for live context metrics, `lean-ctx wrapped` for weekly/monthly summaries (`gain --svg`/`--share` for a shareable card or self-hostable page), and `lean-ctx dashboard` for the browser Context Manager
 - **Savings ledger**: `lean-ctx savings` is an auditable, per-event ledger of local token counts (tokenizer transparency, bounce-netting, tamper-evident SHA-256 chain) — local-only, on by default; provider-measured savings need the proxy with counterfactual metering
 - **HTTP mode**: `lean-ctx serve` for Streamable HTTP MCP + `/v1/tools/call` (used by the Cookbook and external clients)
 
@@ -595,7 +595,7 @@ LeanCTX is a standard **MCP server**, so it works with any MCP-compatible client
 **Great fit if you...**
 - use AI coding tools daily and your sessions are shell-heavy (git/tests/builds)
 - work in medium/large repos (50+ files / monorepos)
-- want a local-first layer with **no telemetry by default**
+- want local context processing with inspectable network and telemetry controls
 
 **Skip it if you...**
 - mostly work in tiny repos and rarely call the shell from your AI tool
@@ -620,7 +620,6 @@ lean-ctx read rust/src/server/mod.rs -m map
 lean-ctx -c "git log -n 5 --oneline"
 lean-ctx gain --live
 lean-ctx dashboard                              # Context Manager (browser)
-lean-ctx watch                                  # TUI monitor
 lean-ctx benchmark report .
 ```
 
@@ -668,15 +667,11 @@ A powered quality study is still open ([#1905](https://github.com/yvgude/lean-ct
 - **Latest snapshot**: [BENCHMARKS.md](BENCHMARKS.md)
 - **Reproduce**: `lean-ctx benchmark report .`
 
-## By the numbers
+## Adoption and compatibility
 
-- **3,000+ GitHub stars** — and counting
-- **280+ forks** — active community contributions
-- **200+ releases** — shipped near-daily since launch
-- **30+ supported AI coding agents** — broadest MCP compatibility
-- **Broad MCP tool set** — from simple file reads to multi-agent orchestration
-- Used in production by teams running Claude Code, Cursor, and Codex daily
-- **Live adoption metrics**: [leanctx.com/metrics](https://leanctx.com/metrics/) — installs, stars and savings, updated continuously
+- [GitHub activity](https://github.com/yvgude/lean-ctx) and [releases](https://github.com/yvgude/lean-ctx/releases) show the current repository counts and release history.
+- [Supported integration paths](docs/integrations/installation-matrix.md) distinguish verified setups from protocol compatibility.
+- [Published metrics](https://leanctx.com/metrics/) state their measurement scope; adoption counts do not establish savings or outcome quality.
 
 ## Docs
 
@@ -691,17 +686,17 @@ A powered quality study is still open ([#1905](https://github.com/yvgude/lean-ct
 - FAQ: [discord-faq.md](discord-faq.md)
 - Feature catalog (SSOT snapshot): [LEANCTX_FEATURE_CATALOG.md](LEANCTX_FEATURE_CATALOG.md)
 - Monorepo guide: [docs/guides/monorepo.md](docs/guides/monorepo.md)
+- Semantic code intelligence: [docs/guides/semantic-intelligence.md](docs/guides/semantic-intelligence.md)
 - Architecture: [ARCHITECTURE.md](ARCHITECTURE.md)
 - Vision: [VISION.md](VISION.md)
 
 ## Privacy & security
 
-- **No telemetry by default**
-- **Optional stats sharing** (opt-in; inspect the payload with `lean-ctx telemetry show`)
+- **Inspectable telemetry controls:** run `lean-ctx telemetry status` to see the effective setting and `lean-ctx telemetry show` to inspect the payload; `lean-ctx telemetry disable` turns reporting off.
 - **Disableable update check** (config `update_check_disabled = true` or `LEAN_CTX_NO_UPDATE_CHECK=1`)
 - **40+ security hardening fixes** in v3.5.16 (path traversal, injection, CSPRNG, CSP, resource limits — [details](CHANGELOG.md))
 - **Context Governance Benchmark self-assessment**: graded **C2 — Managed** against the 32-control [CGB v1.0-draft](https://github.com/yvgude/context-governance-benchmark) spec, gaps declared — [docs/compliance/cgb-self-assessment.md](docs/compliance/cgb-self-assessment.md)
-- Context processing runs locally; configured source providers, proxy/model requests, submitted feedback, updates, and opted-in telemetry have their own network paths.
+- Context processing runs locally; configured source providers, proxy/model requests, submitted feedback, updates, and enabled telemetry have their own network paths.
 
 See [SECURITY.md](SECURITY.md).
 

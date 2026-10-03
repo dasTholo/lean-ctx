@@ -12,7 +12,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
 use super::capabilities::{SemanticBackendInfo, SemanticBackendKind, SemanticCapabilities};
-use super::config::LspServerConfig;
+use super::config::ResolvedServer;
 
 const INIT_TIMEOUT_SECS: u64 = 60;
 const REQUEST_TIMEOUT_SECS: u64 = 30;
@@ -298,10 +298,11 @@ impl LspClient {
     /// handshake (default 60 s) — budgeted background work passes what is left
     /// of its own deadline.
     pub fn start(
-        config: &LspServerConfig,
+        server: &ResolvedServer,
         root_uri: &Uri,
         init_timeout: Option<Duration>,
     ) -> Result<Self, String> {
+        let config = &server.config;
         let mut cmd = Command::new(&config.command);
         cmd.args(&config.args)
             .stdin(Stdio::piped())
@@ -342,7 +343,13 @@ impl LspClient {
         client.initialize(
             root_uri,
             init_timeout.unwrap_or(Duration::from_secs(INIT_TIMEOUT_SECS)),
+            server.init_options.clone(),
         )?;
+        // `serverInfo` is optional (typescript-language-server omits it); the
+        // binary still distinguishes servers in identities and cache keys.
+        if client.info.server_name.is_none() {
+            client.info.server_name = Some(server.binary_name());
+        }
         Ok(client)
     }
 
@@ -355,9 +362,15 @@ impl LspClient {
     }
 
     #[allow(deprecated)]
-    fn initialize(&mut self, root_uri: &Uri, timeout: Duration) -> Result<(), String> {
+    fn initialize(
+        &mut self,
+        root_uri: &Uri,
+        timeout: Duration,
+        init_options: Option<serde_json::Value>,
+    ) -> Result<(), String> {
         let params = InitializeParams {
             root_uri: Some(root_uri.clone()),
+            initialization_options: init_options,
             capabilities: ClientCapabilities {
                 text_document: Some(TextDocumentClientCapabilities {
                     rename: Some(RenameClientCapabilities {
@@ -396,7 +409,10 @@ impl LspClient {
         self.info = SemanticBackendInfo {
             kind: SemanticBackendKind::Lsp,
             server_name: result.server_info.as_ref().map(|s| s.name.clone()),
-            server_version: result.server_info.and_then(|s| s.version),
+            server_version: result
+                .server_info
+                .and_then(|s| s.version)
+                .map(|v| crate::lsp::capabilities::compact_server_version(&v)),
             capabilities: SemanticCapabilities::from_server(&result.capabilities),
             utf8_positions: result.capabilities.position_encoding
                 == Some(PositionEncodingKind::UTF8),

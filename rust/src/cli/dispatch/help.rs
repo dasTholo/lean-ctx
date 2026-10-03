@@ -288,7 +288,7 @@ PROJECT & AGENT TOOLS:
     trust [<path>|status [<path>]|--list]  Trust a workspace (gates project-level overrides)
     untrust [<path>]               Remove a workspace from the trust store
     harden [options]               Deny native Read/Grep/Glob in IDE configs
-    telemetry [status|on|off|show|reset-id|history]  Anonymous usage heartbeat (opt-in, no PII)
+  telemetry [status|on|off|show|reset-id|history]  Inspect and control product telemetry
     completions <zsh|bash|fish>    Print the shell completion script
     report-issue [--title T] [--description D] [--dry-run] [--include-tee]
                                    Open a GitHub issue with diagnostics (alias: report)

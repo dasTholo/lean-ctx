@@ -105,6 +105,13 @@ repository runs as `auto`; its own `.lean-ctx.toml` may lower the mode but not
 raise it. The mode, its trust check, and backend selection are evaluated for
 the project being processed, not for the process's working directory.
 
+In `auto` the graph build usually runs in the daemon, while the live server
+lives in the MCP process that `ctx_refactor` started it in. So the router
+itself schedules a background pass whenever a backend is used in a process:
+at most one per project every 5 minutes, only for a current graph (otherwise
+retried on a use 30 s later), and only after the call using the server has
+released it.
+
 ### 6. One backend per (project root, language)
 
 The router keys backends by normalized project root and language, holds its
@@ -118,6 +125,19 @@ for private git dependencies — the scrub prevents reusable secrets from
 leaking into server logs, it is not process isolation. Capabilities and server identity come from the `initialize`
 handshake instead of being assumed; documents are opened once and updated
 with `didChange`.
+
+Which server serves a language is resolved per project. For TypeScript the
+project's own `typescript` package decides: ≤ 6 ships `tsserver.js`, driven by
+`typescript-language-server`; ≥ 7 (the native port) has no `tsserver.js`, and
+its `tsc --lsp --stdio` is the server. Without a project TypeScript the
+machine-wide install is used — `typescript-language-server` with the
+`tsserver.js` installed beside it (passed as `tsserver.path`, since the server
+does not look there itself), else a TypeScript ≥ 7 `tsc` on `PATH`. Versions
+are read from `package.json`; nothing is executed to decide. npm's Windows
+`.cmd` shims are not executables, so such a server starts as `node <the
+package's bin entry>`, as the shim would. Doctor and the coverage surfaces
+report the same resolution, including a binary configured as
+`[lsp] <language> = "<path>"`.
 
 ### 7. `implements` edges
 
@@ -138,6 +158,39 @@ consumer that needs them.
 - `ctx_graph status` and `ctx_graph enrich` report verified / resolved /
   heuristic counts; `lean-ctx doctor` reports the mode and which servers can
   actually run (a rustup proxy without the component no longer counts).
+- Coverage is reported per language (verified share of the caller files'
+  `calls` edges plus whether that language's server can run) in
+  `ctx_graph status`, `lean-ctx doctor` and the dashboard's capability legend.
+- `ctx_impact` propagates twice — over all edges and over edges that are not
+  heuristic (each file pair weighted by its strongest edge of that class) —
+  and lists files reachable only through name matches as `weak_files` ("name
+  match only"), so a guess is never presented as a fact. Propagation is exact
+  (a heavier path found later still propagates) and deterministic.
+
+## Measured
+
+`core::semantic::e2e_tests` (ignored; needs the servers installed) builds a
+fixture per language with an ambiguous call (two same-named methods), a
+decoy (a library call whose name also exists in the project) and, where the
+language has them, an interface with two implementors. It asserts the
+ambiguous call is verified to the right file, the decoy is vetoed, no false
+edge is written, and a second pass is answered entirely from the cache.
+
+Measured on 2026-10-02 (Apple Silicon, macOS; small fixtures, so the cold
+time is server start plus first indexing, not a large-repository figure):
+
+| Language | Server | Ambiguous call | Decoy vetoed | `implements` | False edges | Cold | Warm / query | Cached pass | Server RSS |
+|---|---|---|---|---|---|---|---|---|---|
+| Rust | rust-analyzer 1.97.1 | verified | yes | yes | 0 | 4.9 s | 1.5 ms | 0.3 ms | 420 MiB |
+| TypeScript 7 | `tsc --lsp` (typescript-go 7.0.2) | verified | yes | yes | 0 | 0.27 s | 1.5 ms | 0.1 ms | 92 MiB |
+| TypeScript 5 | typescript-language-server + project TS 5.9.3 | verified | yes | yes | 0 | 2.0 s | 6.4 ms | 0.3 ms | 448 MiB |
+| Python | pylsp 1.15.0 | verified | yes | n/a | 0 | 2.4 s | 1.4 ms | 0.1 ms | 212 MiB |
+| Go | gopls v0.23.0 | verified | yes | yes | 0 | 0.4 s | 1.1 ms | 0.1 ms | 186 MiB |
+
+"Cached pass" answers every question from `semantic_resolutions` without a
+server request. RSS is the server process tree. The JetBrains path is
+covered by a non-ignored test against a local fake bridge (port file,
+`/health`, `/definition`), since no IDE runs in CI.
 
 ## Not built
 

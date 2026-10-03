@@ -97,7 +97,7 @@ In addition, roles can restrict **unsafe I/O**:
 
 **Optional network activity (review effective configuration):**
 - **Update check**: a lightweight daily GET to `leanctx.com/version.txt` to notify you of new versions. Sends only the current version as User-Agent. Disable with `update_check_disabled = true` in `~/.lean-ctx/config.toml` or `LEAN_CTX_NO_UPDATE_CHECK=1`.
-- **Telemetry** (opt-in, off by default): enabled telemetry can send installation and usage metadata. Inspect the current payload with `lean-ctx telemetry show`; regenerate the installation ID with `lean-ctx telemetry reset-id`. Do not infer zero network activity from telemetry being disabled.
+- **Telemetry**: this source branch enables product telemetry by default; the published v3.10.5 release defaults it off. Inspect your installed build with `lean-ctx telemetry status` and `lean-ctx telemetry show`. Disable sending with `lean-ctx telemetry off`, `DO_NOT_TRACK=1`, or `LEAN_CTX_TELEMETRY=off`. Enabled telemetry sends installation and aggregate usage metadata. Do not infer zero network activity from telemetry being disabled.
 - **Configured providers and integrations**: source connectors, upstream model requests, submitted feedback, and remote endpoints have their own payloads and credentials. Review each enabled path.
 
 **Limits:**
@@ -307,7 +307,8 @@ update_check_disabled = true   # no daily update check
 path_jail = true               # keep the filesystem jail on (default)
 
 [telemetry]
-enabled = false                # opt-in telemetry disabled (default)
+enabled = false                # explicitly disable telemetry
+preference = "explicitly_disabled"
 ```
 
 **2. A locked-down role — `~/.lean-ctx/roles/bank.toml`:**
@@ -340,7 +341,7 @@ export LEAN_CTX_ROLE=bank
 | Endpoint | Purpose | Disable |
 |----------|---------|---------|
 | `leanctx.com/version.txt` | Update check (daily GET) | `update_check_disabled = true` |
-| `api.leanctx.com` | Opt-in telemetry (version, OS, arch, stable install ID, compression patterns) | `[telemetry] enabled = false` (default) |
+| `api.leanctx.com` | Enabled telemetry (version, OS/arch, installation ID, client/setup categories, aggregate tool usage) | `lean-ctx telemetry off` or `DO_NOT_TRACK=1` |
 | `huggingface.co` | Embedding model download | Pre-provision models, set `LEAN_CTX_EMBEDDING_MODEL_DIR` |
 | `localhost:PORT` | Dashboard (local TCP) | Don't start dashboard, or bind to loopback only |
 | UDS socket | Daemon IPC | Permissions `0o600`, owner-only access |

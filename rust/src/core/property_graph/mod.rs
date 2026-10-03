@@ -561,6 +561,43 @@ mod tests {
         assert!(deep.affected_files.contains(&"d.rs".to_string()));
     }
 
+    /// Weighted propagation is exact and separates name-match-only reach:
+    /// a heavier path found later still propagates, and a guess on a pair
+    /// never lends its weight to that pair's evidence-backed edge.
+    #[test]
+    #[allow(clippy::many_single_char_names)] // graph test nodes
+    fn impact_propagates_the_heaviest_path_and_marks_guess_only_reach() {
+        use crate::core::semantic::{EdgeEvidence, EvidenceGrade, EvidenceOrigin};
+        let g = test_graph();
+        let id = |p: &str| g.upsert_node(&Node::file(p)).unwrap();
+        let (a, b, c, x, y, z) = (id("a"), id("b"), id("c"), id("x"), id("y"), id("z"));
+        let edge = |from, to, kind| g.upsert_edge(&Edge::new(from, to, kind)).unwrap();
+        // b → a: a name-match call guess (0.8 × 0.5 = 0.4) plus a fact
+        // (sibling, 0.25); c → b: co-change (0.35). Over all edges c gets
+        // 0.4 × 0.35 = 0.14, over facts only 0.25 × 0.35 < 0.1.
+        let guess = EdgeEvidence::new(
+            EvidenceGrade::HeuristicStructural,
+            EvidenceOrigin::Enrichment,
+            None,
+            1,
+        );
+        g.upsert_edge_with_evidence(b, a, &EdgeKind::Calls, &guess)
+            .unwrap();
+        edge(b, a, EdgeKind::Sibling);
+        edge(c, b, EdgeKind::Cochange);
+        // x is first reached lightly (sibling, 0.25), then fully via y at
+        // depth 2; only the full weight carries on to z (0.35).
+        edge(x, a, EdgeKind::Sibling);
+        edge(y, a, EdgeKind::Imports);
+        edge(x, y, EdgeKind::Imports);
+        edge(z, x, EdgeKind::Cochange);
+
+        let impact = g.impact_analysis("a", 5).unwrap();
+        assert_eq!(impact.affected_files, ["b", "c", "x", "y", "z"]);
+        assert_eq!(impact.weak_files, ["c"]);
+        assert_eq!(impact.max_depth_reached, 3);
+    }
+
     #[test]
     fn upsert_idempotent() {
         let g = test_graph();
