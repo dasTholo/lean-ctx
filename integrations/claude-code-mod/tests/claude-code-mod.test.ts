@@ -51,6 +51,21 @@ test("hook attachments drop only lean-ctx blocks on the main loop and subagents"
   });
   expect(mainLoop).toEqual({ text: null });
 
+  // As captured from Claude Code 2.1.287: the engine prefixes the hook's
+  // context with "<Event> hook additional context: " on the same line.
+  const framed = await $.prompt.attachment({
+    type: "hook_additional_context",
+    text: `SessionStart hook additional context: ${SHARED_HOOK_CONTEXT}`,
+    origin: { kind: "hook", event: "SessionStart" },
+  });
+  expect(framed).toEqual({ text: null });
+  const framedJoined = await $.prompt.attachment({
+    type: "hook_additional_context",
+    text: `Other hook before\nUserPromptSubmit hook additional context: ${SHARED_HOOK_CONTEXT}`,
+    origin: { kind: "hook", event: "UserPromptSubmit" },
+  });
+  expect(framedJoined).toEqual({ text: "Other hook before" });
+
   for (const origin of [
     { kind: "engine" as const },
     { kind: "plugin" as const, event: "prompt.submit" },
