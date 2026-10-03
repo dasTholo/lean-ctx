@@ -35,6 +35,19 @@ const CAPTURE_RULE: &str = "The rule: output capture (`>`, `>>`, `| tee`) may on
      project root stays refused even when listed. Commands that do not capture output are \
      not restricted.";
 
+/// Why the capture rule exists, shared by every write refusal (#1992). The
+/// refusals used to say ctx_shell's compression could land in the file as
+/// markers. That stopped being true with #1303 (v3.9.14): the child shell
+/// performs the redirect, so the file receives the command's own bytes and
+/// only the MCP return channel is compressed. A caller who knew their output
+/// was tiny plain text read the old rationale as a risk that did not apply to
+/// them and retried with `raw=true` or a smaller command — neither changes
+/// the verdict, because the reason is the write path, not the bytes.
+const WRITE_REASON: &str = "Files you keep are written with ctx_patch or the native Write/Edit \
+     tool, so the read-before-write gate and the edit checks apply to them; ctx_shell does not \
+     write them through output capture. This is unconditional: the redirect itself is not \
+     compressed, so a smaller command or `raw=true` does not change the verdict.";
+
 /// Validate against the directory the command will actually run in (#1811).
 ///
 /// The write guard classifies the *destination*, so a relative redirect target
@@ -73,22 +86,17 @@ pub(crate) fn validate_command_in_cwd(
     // payloads" while the guard allows a megabyte into /tmp and blocks two
     // bytes into a project file — so the stated reason argued *against* the
     // verdict in both directions, and steered callers to retry smaller (no
-    // effect) or to avoid the sanctioned scratch capture. The reasons that
-    // actually hold are the ones #1303 and #1142 established: ctx_shell
-    // compresses what it returns, so output redirected into a file you keep
-    // can land there with compression markers instead of the command's own
-    // bytes; and a scratch capture is precisely how a large payload stays out
-    // of the MCP channel.
+    // effect) or to avoid the sanctioned scratch capture. #1992: the
+    // compression-marker rationale that replaced it was stale too — see
+    // WRITE_REASON for the reason that holds.
     if let Some(target) = segments.iter().find_map(|(segment, here)| {
         disallowed_write_redirect_target(segment, write_allow_paths, project_root, here.as_deref())
     }) {
         return Some(format!(
             "ERROR: ctx_shell refuses the redirect into `{target}` — the destination decides, \
-             not the size of the output. ctx_shell compresses what it returns, so capturing \
-             that output into a file you keep can write compression markers instead of the \
-             command's own bytes. {CAPTURE_RULE} \
-             Write the file with the native Write tool or ctx_patch, or capture to a scratch \
-             path, which keeps the output out of the MCP channel entirely.{}",
+             not the size or content of the output. {WRITE_REASON} {CAPTURE_RULE} \
+             Write the file with ctx_patch or the native Write tool, or capture to a scratch \
+             path.{}",
             relative_target_note(&target)
         ));
     }
@@ -107,22 +115,20 @@ pub(crate) fn validate_command_in_cwd(
         disallowed_tee_target(segment, write_allow_paths, project_root, here.as_deref())
     }) {
         return Some(format!(
-            "ERROR: ctx_shell refuses `tee {target}` — ctx_shell compresses what it returns, \
-             so the captured bytes may not be the command's own. \
-             Piping makes no difference: the destination decides. {CAPTURE_RULE} \
-             Write the file with the native Write tool, or tee to a scratch path.{}",
+            "ERROR: ctx_shell refuses `tee {target}`. Piping makes no difference: the \
+             destination decides. {WRITE_REASON} {CAPTURE_RULE} \
+             Write the file with ctx_patch or the native Write tool, or tee to a scratch \
+             path.{}",
             relative_target_note(&target)
         ));
     }
 
     if is_heredoc_file_write(command, &segments, write_allow_paths, project_root) {
-        return Some(
-            "ERROR: ctx_shell detected a heredoc writing to a file. \
-             ctx_shell compresses what it returns, so content it captures into a file may \
-             not be the bytes you wrote. Use the native Write tool to create the file. \
+        return Some(format!(
+            "ERROR: ctx_shell detected a heredoc writing to a file. {WRITE_REASON} \
+             Create the file with ctx_patch (op=create) or the native Write tool. \
              Note: heredocs for input piping (e.g. psql <<EOF) are allowed."
-                .to_string(),
-        );
+        ));
     }
 
     // #1672: on the heredoc-stripped text, for the same reason as #931 and
@@ -133,9 +139,8 @@ pub(crate) fn validate_command_in_cwd(
     if let Some(reason) = download_to_file_reason(&cmd_no_heredoc) {
         return Some(format!(
             "ERROR: ctx_shell detected a file download/write ({reason}). \
-             Writing fetched bytes through ctx_shell risks capturing compressed output \
-             instead of the payload — redirect-free flags bypass the redirect check, so \
-             they are blocked too (GH #391). \
+             Download flags write a file without a redirect, so the capture rule applies \
+             to them as well (GH #391). \
              For text, fetch to stdout: curl <url> / wget -qO- <url>. \
              For a binary (image, PDF, archive) neither stdout nor the editor's Write \
              tool can carry the bytes — download to an absolute scratch path instead, \

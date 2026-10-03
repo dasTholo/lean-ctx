@@ -180,8 +180,20 @@ pub fn handle_with_task_fresh_result(
     } else {
         format!("Read {n} files")
     };
+    // #1993: kernel context is task-scoped, so it follows the summary as one
+    // delimited trailer — never inside a file's section, where a caller
+    // splitting on `---` took it for the tail of file 1. `raw` promises exact
+    // bytes and gets none.
+    let trailer = if mode == "raw" {
+        None
+    } else {
+        ctx_read::kernel_trailer(task)
+    };
     MultiReadResult {
-        text: format!("{body}\n---\n{summary}"),
+        text: match trailer {
+            Some(trailer) => format!("{body}\n---\n{summary}\n\n{trailer}"),
+            None => format!("{body}\n---\n{summary}"),
+        },
         original_tokens: total_original,
     }
 }

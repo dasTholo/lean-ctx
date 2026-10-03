@@ -872,6 +872,43 @@ fn redirect_refusal_names_the_destination_not_a_size() {
     );
 }
 
+/// #1992: the child shell performs the redirect, so a captured file receives
+/// the command's own bytes — compression only touches the MCP return channel
+/// (#1303, v3.9.14). No write refusal may justify itself with compression
+/// markers any more; each states the write-path reason and that the verdict
+/// does not depend on the output.
+#[test]
+fn write_refusals_state_the_write_path_reason_not_compression() {
+    let allow = vec!["/tmp".to_string()];
+    let commands = [
+        "cat > /project/util/zz_test.go <<'EOF'\npackage util\nEOF",
+        "printf 'x\n' > /project/out.txt",
+        "seq 1 5 | tee /project/out.txt",
+        "curl -sL -o /project/shot.png https://example.com/x.png",
+    ];
+    for command in commands {
+        let message = validate_command_with_write_allow_paths(command, &allow, Some("/project"))
+            .unwrap_or_else(|| panic!("a project write is refused: {command}"));
+        for stale in [
+            "compression markers",
+            "compresses what it returns",
+            "compressed output",
+            "may not be the bytes",
+        ] {
+            assert!(
+                !message.contains(stale),
+                "stale compression rationale `{stale}` in refusal for {command}: {message}"
+            );
+        }
+        if !command.starts_with("curl") {
+            assert!(
+                message.contains("ctx_patch") && message.contains("read-before-write"),
+                "the refusal must name the real write path for {command}: {message}"
+            );
+        }
+    }
+}
+
 /// #1946: a destination outside the project — and outside every root — is
 /// refused like a project path, so the refusal must not call the rule
 /// "into a project path". The reporter believed that wording, tried another

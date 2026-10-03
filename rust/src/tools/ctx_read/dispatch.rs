@@ -1,6 +1,6 @@
 use super::{
     CrpMode, ReadMode, ReadOutput, ReadTuning, SessionCache, count_tokens, dedup_hook,
-    handle_with_options_inner, kernel, protocol,
+    handle_with_options_inner, protocol,
 };
 const MAX_RELAY_CONTENT_BYTES: usize = 8192;
 
@@ -70,7 +70,9 @@ pub fn handle_with_task_result(
         task,
         ReadTuning::resolve(None, &[]),
     );
-    kernel::enrich_with_kernel(&mut result.content, task);
+    // #1993: a file's section carries the file and nothing else. Kernel
+    // context is task-scoped, not file-scoped, so a batch appends it once as
+    // its own trailer (see `kernel_trailer`) instead of inside file 1.
     result.output_tokens = count_tokens(&result.content);
     result
 }

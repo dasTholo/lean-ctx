@@ -17,6 +17,7 @@ use helpers::{detect_project_root, find_similar_and_update_semantic_index};
 pub use helpers::{graph_related_hint, is_instruction_file};
 mod fallback_banner;
 mod kernel;
+pub(crate) use kernel::kernel_trailer;
 pub(crate) mod render;
 pub(crate) use render::*;
 /// Type-safe read-mode vocabulary (#528): single source of truth for which

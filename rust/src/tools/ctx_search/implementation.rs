@@ -207,12 +207,20 @@ pub fn handle_filtered(
     // are still verified line-by-line with the same regex — so results are
     // identical. Missing/stale index → returns None and triggers a background
     // (re)build; this call uses the walk fallback.
+    // Files the filters admit when the index narrowed the candidates; the
+    // walk and the full-list path scan their whole scope, so `None` there.
+    let mut narrowed_scope: Option<usize> = None;
     let used_index = if let Some(idx) =
         crate::core::search_index::get_fresh(dir, respect_gitignore, allow_secret_paths)
     {
-        files = idx
-            .candidate_paths(pattern, &include_patterns, root)
-            .into_paths();
+        let candidates = idx.candidate_paths(pattern, &include_patterns, root);
+        if matches!(
+            candidates,
+            crate::core::search_index::CandidateSet::Narrowed(_)
+        ) {
+            narrowed_scope = Some(idx.scope_count(&include_patterns, &exclude_patterns, root));
+        }
+        files = candidates.into_paths();
         if !allow_secret_paths {
             skipped_boundary_files = crate::core::search_index::boundary_skipped_files(
                 dir,
@@ -297,6 +305,14 @@ pub fn handle_filtered(
 
     // Deterministic search: stable file ordering makes max_results truncation reproducible.
     files.sort_unstable_by(|a, b| a.as_os_str().cmp(b.as_os_str()));
+
+    // #1994: the scope is every file the filters admit. Files the trigram
+    // index ruled out provably lack the literal, so they count as covered:
+    // "scanned" then means the same thing with or without a warm index, and
+    // `scanned 0` can only mean the filters left nothing to search.
+    let files_in_scope = narrowed_scope.unwrap_or(files.len());
+    let index_pruned =
+        u32::try_from(files_in_scope.saturating_sub(files.len())).unwrap_or(u32::MAX);
 
     let root_str = root.to_string_lossy();
     let deadline = search_deadline().map(|budget| Instant::now() + budget);
@@ -440,8 +456,15 @@ pub fn handle_filtered(
         });
     }
 
+    let files_covered = files_searched.saturating_add(index_pruned);
+
     if matches.is_empty() {
-        let mut msg = format!("0 matches for '{pattern}' in {files_searched} files");
+        // #1994: same "(scanned N)" as a hit, so an empty filter and a
+        // genuine miss no longer print byte-identical lines.
+        let mut msg = format!("0 matches for '{pattern}' (scanned {files_covered} files)");
+        if files_in_scope == 0 {
+            msg.push_str(&empty_scope_note(dir, include, exclude));
+        }
         if files_skipped_size > 0 {
             msg.push_str(&format!(
                 " ({files_skipped_size} large files skipped: {})",
@@ -485,7 +508,7 @@ pub fn handle_filtered(
     // number of files *searched*. Report what matched; keep the scanned count as
     // a clearly-labelled secondary number so scope is still visible.
     let mut result = format!(
-        "{} matches in {} files (scanned {files_searched})",
+        "{} matches in {} files (scanned {files_covered})",
         matches.len(),
         matched_files.len()
     );
@@ -538,7 +561,7 @@ pub fn handle_filtered(
     }
     if deadline_hit {
         result.push_str(&format!(
-            "\n(search stopped after the {}s budget — {files_searched} files scanned; \
+            "\n(search stopped after the {}s budget — {files_covered} files scanned; \
              refine the pattern or scope with path= for full coverage)",
             search_deadline().map_or(0, |d| d.as_secs())
         ));
@@ -548,9 +571,8 @@ pub fn handle_filtered(
     // "10 matches in 1 files (scanned 1)" as an exhaustive answer when the
     // scan had in fact stopped after the first file of 32.
     if cap_hit {
-        let candidates = files.len();
         result.push_str(&format!(
-            "\n(stopped at the max_results={max_results} cap — {files_searched} of {candidates} \
+            "\n(stopped at the max_results={max_results} cap — {files_covered} of {files_in_scope} \
              files scanned; the counts above are a floor, not a total. Raise max_results, \
              narrow with include=/path=, or split the pattern.)"
         ));
@@ -746,12 +768,17 @@ const MAX_INCLUDE_GLOBS: usize = 64;
 /// with `**/` to match at any directory depth — matching `rg --glob` and
 /// `git grep` behaviour. Globs that already contain `/` are used as-is, so
 /// `src/**/*.rs` only matches under `src/`.
+///
+/// A comma outside braces separates globs (`*.go,*.yaml`), the list form
+/// callers reach for first (#1994). It used to compile to one glob no file
+/// could match, so the search reported a clean miss over an empty scope.
 fn compile_include(include: Option<&str>) -> Vec<Pattern> {
     let Some(raw) = include else {
         return Vec::new();
     };
-    expand_braces(raw)
+    split_top_level_commas(raw)
         .into_iter()
+        .flat_map(expand_braces)
         .take(MAX_INCLUDE_GLOBS)
         .filter(|g| !g.is_empty())
         .map(|g| {
@@ -763,6 +790,41 @@ fn compile_include(include: Option<&str>) -> Vec<Pattern> {
         })
         .filter_map(|g| Pattern::new(&g).ok())
         .collect()
+}
+
+/// Split a glob list at commas outside `{…}` groups, trimming each piece.
+fn split_top_level_commas(raw: &str) -> Vec<&str> {
+    let mut pieces = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0;
+    for (i, c) in raw.char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                pieces.push(raw[start..i].trim());
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    pieces.push(raw[start..].trim());
+    pieces
+}
+
+/// Why a search had nothing to scan (#1994), appended to a zero-hit result so
+/// it cannot be read as "the pattern is not in the codebase".
+fn empty_scope_note(dir: &str, include: Option<&str>, exclude: Option<&str>) -> String {
+    match (include, exclude) {
+        (Some(include), _) => format!(
+            " — include=`{include}` admits no file under {dir}, so nothing was searched. \
+             Check the glob; a list is `*.{{go,yaml}}` or `*.go,*.yaml`."
+        ),
+        (None, Some(exclude)) => format!(
+            " — exclude=`{exclude}` removes every file under {dir}, so nothing was searched."
+        ),
+        (None, None) => format!(" — {dir} holds no searchable text file."),
+    }
 }
 
 /// Expand one or more `{a,b,c}` brace groups into the cartesian set of concrete
@@ -803,9 +865,16 @@ fn expand_braces(pattern: &str) -> Vec<String> {
 /// `symbol_map::is_keyword` simply treats them as "no keywords", so no allowlist
 /// has to be kept in sync here.
 fn extract_extensions(include: Option<&str>) -> Vec<String> {
-    let Some(pattern) = include else {
+    let Some(list) = include else {
         return Vec::new();
     };
+    split_top_level_commas(list)
+        .into_iter()
+        .flat_map(extensions_of_glob)
+        .collect()
+}
+
+fn extensions_of_glob(pattern: &str) -> Vec<String> {
     let filename = pattern.rsplit('/').next().unwrap_or(pattern);
     let Some(dot) = filename.rfind('.') else {
         return Vec::new();

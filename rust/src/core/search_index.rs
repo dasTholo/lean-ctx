@@ -283,6 +283,18 @@ impl SearchIndex {
         }
     }
 
+    /// How many indexed files the `include`/`exclude` filters admit — the
+    /// search's scope before trigram narrowing. #1994: a narrowed miss scans
+    /// no file at all, so without this a genuine miss and a filter that
+    /// matched nothing both reported zero files.
+    pub fn scope_count(&self, includes: &[Pattern], excludes: &[Pattern], root: &Path) -> usize {
+        self.files
+            .iter()
+            .filter(|p| glob_matches(p, includes, root))
+            .filter(|p| excludes.is_empty() || !glob_matches(p, excludes, root))
+            .count()
+    }
+
     /// Returns candidate file ids for a pure-literal query, or `None` if the
     /// query is not a trigram-narrowable pure `[A-Za-z0-9_]` literal. Both tiers
     /// return a *superset* of true matches (zero false negatives).
