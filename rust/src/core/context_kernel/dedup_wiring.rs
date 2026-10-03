@@ -178,19 +178,21 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 #[cfg(test)]
 pub mod tests {
-    use std::sync::{Mutex, MutexGuard};
+    use std::sync::MutexGuard;
 
     use super::{
         DedupAction, apply_dedup_enabled, check_content_enabled, dedup_stats, invalidate,
         reset_dedup,
     };
 
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
+    use crate::core::context_kernel::kernel_config::{KERNEL_TEST_LOCK, reset_features};
 
     fn isolated() -> MutexGuard<'static, ()> {
-        let guard = TEST_LOCK
+        // Other kernel suites reset this same process-global ledger.
+        let guard = KERNEL_TEST_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        reset_features();
         reset_dedup();
         guard
     }
