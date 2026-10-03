@@ -30,7 +30,10 @@ pub(crate) fn write_mcp_json(
     // Prefer the official CLI integration when available.
     // Skip when LEAN_CTX_QUIET=1 (bootstrap --json / setup --json) to avoid
     // spawning `claude mcp add-json` which can stall in non-interactive CI.
+    // Never from unit tests: on a machine with a trusted native install it
+    // would rewrite the developer's real ~/.claude.json.
     if is_claude
+        && !cfg!(test)
         && !matches!(std::env::var("LEAN_CTX_QUIET"), Ok(v) if v.trim() == "1")
         && let Ok(result) = try_claude_mcp_add(&desired)
     {
@@ -101,22 +104,45 @@ pub(crate) fn validate_claude_binary() -> Result<std::path::PathBuf, String> {
         std::fs::canonicalize(&path).map_err(|e| format!("cannot resolve claude path: {e}"))?;
 
     let canonical_str = canonical.to_string_lossy();
-    let is_trusted = canonical_str.contains("/.claude/")
-        || canonical_str.contains("\\AppData\\")
-        || canonical_str.contains("/usr/local/bin/")
-        || canonical_str.contains("/opt/homebrew/")
-        || canonical_str.contains("/nix/store/")
-        || canonical_str.contains("/.npm/")
-        || canonical_str.contains("/.nvm/")
-        || canonical_str.contains("/node_modules/.bin/")
-        || std::env::var("LEAN_CTX_TRUST_CLAUDE_PATH").is_ok();
-
-    if !is_trusted {
+    if !is_trusted_claude_path(&canonical_str)
+        && std::env::var("LEAN_CTX_TRUST_CLAUDE_PATH").is_err()
+    {
         return Err(format!(
             "claude binary resolved to untrusted path: {canonical_str} — set LEAN_CTX_TRUST_CLAUDE_PATH=1 to override"
         ));
     }
     Ok(canonical)
+}
+
+/// Install locations of genuine Claude Code builds. The official native
+/// installer links `~/.local/bin/claude` to `~/.local/share/claude/versions/<v>`;
+/// without that entry every `claude mcp add-json` on a native install silently
+/// fell back to editing `~/.claude.json` by hand.
+fn is_trusted_claude_path(canonical: &str) -> bool {
+    [
+        "/.claude/",
+        "/.local/share/claude/",
+        "\\AppData\\",
+        "/usr/local/bin/",
+        "/opt/homebrew/",
+        "/nix/store/",
+        "/.npm/",
+        "/.nvm/",
+        "/node_modules/.bin/",
+    ]
+    .iter()
+    .any(|marker| canonical.contains(marker))
+}
+
+/// The trusted `claude` executable for running Claude Code's own CLI
+/// (`claude plugin …`). Windows ships `claude.exe`; an npm `claude.cmd` shim
+/// cannot be spawned directly, so it is reported as unsupported.
+pub(crate) fn claude_binary_for_exec() -> Result<std::path::PathBuf, String> {
+    if cfg!(windows) {
+        return find_in_path("claude.exe")
+            .ok_or_else(|| "claude.exe not found in PATH".to_string());
+    }
+    validate_claude_binary()
 }
 
 pub(crate) fn try_claude_mcp_add(desired: &Value) -> Result<WriteResult, String> {
@@ -195,4 +221,17 @@ pub(crate) fn write_mcp_json_fresh(
         },
         note,
     })
+}
+
+#[cfg(test)]
+mod trust_tests {
+    /// The official native installer path was missing, so every
+    /// `claude mcp add-json` on a native install silently fell back.
+    #[test]
+    fn native_installer_path_is_trusted() {
+        assert!(super::is_trusted_claude_path(
+            "/Users/u/.local/share/claude/versions/2.1.287"
+        ));
+        assert!(!super::is_trusted_claude_path("/tmp/evil/claude"));
+    }
 }

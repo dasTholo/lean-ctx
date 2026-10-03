@@ -84,6 +84,20 @@ pub fn compress_tool_result_for(
     attach_ccr(content, compressed, CcrAudience::Local)
 }
 
+/// Shape the output of a host-native shell command whose exact command line is
+/// known (`ctx_shape`, fed by a host mod after the native tool ran). Unlike the
+/// wire funnel, the real command reaches the engine, so its command-gated
+/// policies (protected/verbatim commands, build/test guards, per-tool patterns)
+/// apply exactly as for `ctx_shell`. Lossy results carry the same deterministic
+/// CCR recovery handle (#482, #498).
+pub fn shape_command_output(command: &str, output: &str) -> String {
+    if output.trim().is_empty() || output.len() < 200 {
+        return output.to_string();
+    }
+    let compressed = crate::shell::compress::engine::compress_if_beneficial_pub(command, output);
+    attach_ccr(output, compressed, CcrAudience::Local)
+}
+
 /// [`compress_tool_result`] for the `/v1/compress` gateway contract (#702):
 /// identical compression, but a lossy result advertises its retrieval hash in
 /// LiteLLM's regex-locked `hash=<24hex>` form, so a gateway running the

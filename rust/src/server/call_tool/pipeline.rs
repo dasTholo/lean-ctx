@@ -1046,6 +1046,7 @@ pub(in crate::server) async fn dispatch_and_post_process(
                 | "ctx_smells"
                 | "ctx_quality"
                 | "ctx_workflow"
+                | "ctx_shape"
         );
 
     // Output-echo nudge (#501): when the agent keeps re-quoting delivered
