@@ -13,6 +13,8 @@ pub enum SemanticBackendKind {
     Lsp,
     /// Live JetBrains IDE over the plugin's HTTP bridge.
     JetBrains,
+    /// Editor extension's semantic bridge (VS Code, Cursor, Windsurf).
+    Editor,
 }
 
 impl SemanticBackendKind {
@@ -20,6 +22,7 @@ impl SemanticBackendKind {
         match self {
             Self::Lsp => "lsp",
             Self::JetBrains => "jetbrains",
+            Self::Editor => "editor",
         }
     }
 }
@@ -69,8 +72,8 @@ impl SemanticCapabilities {
                     lsp_types::ImplementationProviderCapability::Simple(false)
                 )
             }),
-            // lsp-types exposes no server-side type-hierarchy provider; the
-            // stdio client does not implement the request either.
+            // lsp-types has no `typeHierarchyProvider` field: the stdio
+            // client reads it from the raw `initialize` answer.
             type_hierarchy: false,
             call_hierarchy: caps.call_hierarchy_provider.as_ref().is_some_and(|p| {
                 !matches!(p, lsp_types::CallHierarchyServerCapability::Simple(false))

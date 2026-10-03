@@ -16,7 +16,7 @@
 pub mod coverage;
 pub mod enrich;
 pub mod evidence;
-pub mod implementations;
+pub mod relations;
 pub mod resolve;
 
 #[cfg(test)]
@@ -29,7 +29,7 @@ use crate::core::config::SemanticMode;
 use crate::core::property_graph::{CodeGraph, EdgeKind};
 
 /// One-line evidence summary of the file-level graph, e.g.
-/// `Semantic: mode=auto | calls 120 verified · 340 resolved · 45 heuristic | implements 12`.
+/// `Semantic: mode=auto | calls 120 verified · 340 resolved · 45 heuristic | implements 12 · extends 3 · references 40`.
 /// Edges without typed evidence (older graphs, other producers) are counted
 /// as `unannotated` only when present.
 pub fn status_line(graph: &CodeGraph, mode: SemanticMode, project_root: &str) -> String {
@@ -46,16 +46,19 @@ pub fn status_line(graph: &CodeGraph, mode: SemanticMode, project_root: &str) ->
         all.heuristic += c.heuristic;
         all.unannotated += c.unannotated;
     }
-    let implements = graph
-        .file_edges_of_kind(&EdgeKind::Implements)
-        .map_or(0, |e| e.len());
+    let count = |kind: EdgeKind| graph.file_edges_of_kind(&kind).map_or(0, |e| e.len());
+    let (implements, extends, references) = (
+        count(EdgeKind::Implements),
+        count(EdgeKind::Extends),
+        count(EdgeKind::References),
+    );
     let extra = if all.unannotated > 0 {
         format!(" · {} unannotated", all.unannotated)
     } else {
         String::new()
     };
     let mut out = format!(
-        "Semantic: mode={mode} | calls {} verified · {} resolved · {} heuristic{extra} | implements {implements}",
+        "Semantic: mode={mode} | calls {} verified · {} resolved · {} heuristic{extra} | implements {implements} · extends {extends} · references {references}",
         all.verified, all.resolved, all.heuristic
     );
     for line in coverage::coverage_lines(&coverage, project_root) {

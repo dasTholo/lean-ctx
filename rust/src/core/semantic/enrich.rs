@@ -32,10 +32,13 @@ pub struct EscalationBudget {
 }
 
 impl EscalationBudget {
-    /// Background enrichment after a graph build.
+    /// Background enrichment (after a graph build, or while a backend is in
+    /// use). Measured ~65 ms per warm rust-analyzer lookup on a 2.4k-file
+    /// crate, so one pass decides ~1000 file-pair groups in about a minute,
+    /// off every interactive path.
     pub const BACKGROUND: Self = Self {
-        max_live_queries: 200,
-        wall: Duration::from_secs(20),
+        max_live_queries: 1000,
+        wall: Duration::from_mins(1),
         per_request: Duration::from_secs(5),
     };
     /// An interactive tool call (`ctx_callgraph`): must answer promptly.
@@ -234,8 +237,44 @@ fn ext_of(file: &str) -> String {
         .to_string()
 }
 
-/// Escalates every uncertain call edge, in sorted `(file, position)` order so
-/// a budget-limited run always covers the same subset.
+/// Order in which uncertain sites are asked: a budget-limited run must decide
+/// as many file-level edges as possible, so it takes one site of every
+/// `(caller file, structural target)` group before a second site of any —
+/// guessed edges (a name match that may be false) before ambiguous calls
+/// (an edge that is missing). Deterministic: ties break by file and position.
+fn escalation_order(
+    edges: &[CallEdge],
+    structural: &[StructuralTarget],
+    candidates: Vec<usize>,
+) -> Vec<usize> {
+    let group = |i: usize| match &structural[i] {
+        StructuralTarget::Resolved { file, .. } => (0u8, file.as_str()),
+        _ => (1u8, edges[i].callee_name.as_str()),
+    };
+    let mut by_site = candidates;
+    by_site.sort_by(|&a, &b| {
+        (&edges[a].caller_file, edges[a].callee_pos)
+            .cmp(&(&edges[b].caller_file, edges[b].callee_pos))
+    });
+    let mut seen: HashMap<(&str, (u8, &str)), usize> = HashMap::new();
+    let mut ranked: Vec<(usize, u8, usize)> = by_site
+        .iter()
+        .map(|&i| {
+            let (class, key) = group(i);
+            let rank = seen
+                .entry((edges[i].caller_file.as_str(), (class, key)))
+                .or_insert(0);
+            *rank += 1;
+            (*rank, class, i)
+        })
+        .collect();
+    // Stable: equal (rank, class) keep the file/position order.
+    ranked.sort_by_key(|&(rank, class, _)| (rank, class));
+    ranked.into_iter().map(|(_, _, i)| i).collect()
+}
+
+/// Escalates every uncertain call edge, in `escalation_order` so a
+/// budget-limited run always covers the same, most decisive subset.
 pub fn escalate_calls(
     graph: &CodeGraph,
     project_root: &str,
@@ -251,18 +290,15 @@ pub fn escalate_calls(
         unsettled: vec![false; edges.len()],
         stats: EscalationStats::default(),
     };
-    let mut order: Vec<usize> = (0..edges.len())
+    let candidates: Vec<usize> = (0..edges.len())
         .filter(|&i| needs_escalation(&edges[i], &structural[i]))
         .collect();
-    out.stats.candidates = order.len();
+    out.stats.candidates = candidates.len();
     if mode == SemanticMode::Off {
         // Off is a deliberate choice, not missing evidence: nothing pending.
         return out;
     }
-    order.sort_by(|&a, &b| {
-        let (ea, eb) = (&edges[a], &edges[b]);
-        (&ea.caller_file, ea.callee_pos).cmp(&(&eb.caller_file, eb.callee_pos))
-    });
+    let order = escalation_order(edges, structural, candidates);
 
     let access = Access {
         policy: if mode == SemanticMode::Eager {
@@ -281,7 +317,9 @@ pub fn escalate_calls(
             .insert(s.file.as_str());
     }
 
-    let _ = graph.semantic_prune(file_hashes);
+    // Stale cache rows are pruned by the background pass, never here: an
+    // interactive call must not queue for the write lock, and lookups are
+    // keyed by the caller's content hash anyway.
     let deps = dependency_revision(project_root);
     let started = Instant::now();
     // Per language: identity of the live backend (a cheap registry peek,
@@ -373,6 +411,16 @@ pub fn escalate_calls(
         }
     }
     out.stats.unresolved = out.stats.candidates - out.stats.verified - out.stats.not_in_project;
+    tracing::debug!(
+        target: "lean_ctx::semantic",
+        "escalate: {} candidates, {} cached, {} live, {} verified, {} external in {} ms",
+        out.stats.candidates,
+        out.stats.cache_hits,
+        out.stats.live_queries,
+        out.stats.verified,
+        out.stats.not_in_project,
+        started.elapsed().as_millis()
+    );
     out
 }
 

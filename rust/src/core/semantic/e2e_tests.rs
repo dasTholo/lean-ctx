@@ -27,7 +27,7 @@ use crate::core::call_graph::{
 use crate::core::config::SemanticMode;
 use crate::core::property_graph::CodeGraph;
 
-use super::implementations::resolve_implements_edges;
+use super::relations::{Relation, RelationBudget, resolve_relation_edges};
 use super::{EscalationBudget, SemanticVerdict, escalate_calls};
 
 struct Fixture {
@@ -39,6 +39,9 @@ struct Fixture {
     decoy: &'static str,
     /// `(declaring file, sorted implementor files)`, when supported.
     implements: Option<(&'static str, &'static [&'static str])>,
+    /// `(subtype file, sorted supertype files)`, asked where the server
+    /// offers a type hierarchy.
+    extends: Option<(&'static str, &'static [&'static str])>,
 }
 
 const RUST: Fixture = Fixture {
@@ -81,11 +84,13 @@ const RUST: Fixture = Fixture {
         ("src/app.rs", "checkout", 1, 5, "fn"),
         ("src/util.rs", "parse", 1, 3, "fn"),
         ("src/store.rs", "Store", 1, 3, "trait"),
+        ("src/mem.rs", "Mem", 1, 1, "struct"),
     ],
     ambiguous: "save",
     expect_target: "src/b.rs",
     decoy: "parse",
     implements: Some(("src/store.rs", &["src/mem.rs", "src/pg.rs"])),
+    extends: Some(("src/mem.rs", &["src/store.rs"])),
 };
 
 const TYPESCRIPT: Fixture = Fixture {
@@ -121,7 +126,11 @@ const TYPESCRIPT: Fixture = Fixture {
         ),
         (
             "src/mem.ts",
-            "import { Store } from \"./store\";\nexport class Mem implements Store {\n  put(): void {}\n}\n",
+            "import { Base } from \"./base\";\nimport { Store } from \"./store\";\nexport class Mem extends Base implements Store {\n  put(): void {}\n}\n",
+        ),
+        (
+            "src/base.ts",
+            "export class Base {\n  id(): number {\n    return 1;\n  }\n}\n",
         ),
     ],
     symbols: &[
@@ -130,11 +139,13 @@ const TYPESCRIPT: Fixture = Fixture {
         ("src/app.ts", "checkout", 2, 5, "fn"),
         ("src/util.ts", "parseInt", 1, 3, "fn"),
         ("src/store.ts", "Store", 1, 3, "interface"),
+        ("src/mem.ts", "Mem", 3, 5, "class"),
     ],
     ambiguous: "save",
     expect_target: "src/b.ts",
     decoy: "parseInt",
     implements: Some(("src/store.ts", &["src/mem.ts", "src/pg.ts"])),
+    extends: Some(("src/mem.ts", &["src/base.ts", "src/store.ts"])),
 };
 
 const PYTHON: Fixture = Fixture {
@@ -165,6 +176,7 @@ const PYTHON: Fixture = Fixture {
     decoy: "loads",
     // pylsp offers no textDocument/implementation.
     implements: None,
+    extends: None,
 };
 
 const GO: Fixture = Fixture {
@@ -206,11 +218,13 @@ const GO: Fixture = Fixture {
         ("app.go", "Checkout", 5, 8, "fn"),
         ("util.go", "Itoa", 3, 5, "fn"),
         ("store.go", "Store", 3, 5, "interface"),
+        ("mem.go", "Mem", 3, 3, "struct"),
     ],
     ambiguous: "Save",
     expect_target: "b.go",
     decoy: "Itoa",
     implements: Some(("store.go", &["mem.go", "pg.go"])),
+    extends: Some(("mem.go", &["store.go"])),
 };
 
 /// Writes the fixture into a fresh project and returns `(dir guard, inputs)`.
@@ -287,18 +301,116 @@ fn verdict_for<'a>(
         .and_then(|i| verdicts[i].as_ref())
 }
 
-/// `node_modules`: linked into the fixture as the project's own packages.
-fn evaluate(f: &Fixture, node_modules: Option<&std::path::Path>) {
-    // `shutdown_all` below drains the process-wide backend registry.
+/// What answers the fixture's questions.
+#[derive(Clone, Copy)]
+enum Engine<'a> {
+    /// A language server lean-ctx starts (`eager`). `node_modules` is linked
+    /// into the fixture as the project's own packages.
+    Server {
+        node_modules: Option<&'a std::path::Path>,
+    },
+    /// A real editor running the lean-ctx extension's semantic bridge; lean-ctx
+    /// starts nothing (`auto`). `cli` launches the editor (`code`, `cursor`).
+    Editor {
+        cli: &'a std::path::Path,
+        extension: &'a std::path::Path,
+    },
+}
+
+/// An editor window launched for one evaluation, closed again on drop.
+struct EditorWindow {
+    user_data_dir: tempfile::TempDir,
+    _extensions_dir: tempfile::TempDir,
+}
+
+impl EditorWindow {
+    fn open(
+        cli: &std::path::Path,
+        extension: &std::path::Path,
+        root: &str,
+        data_dir: &std::path::Path,
+    ) -> Self {
+        let user_data_dir = tempfile::tempdir().unwrap();
+        let extensions_dir = tempfile::tempdir().unwrap();
+        // A fresh user-data-dir forces a new editor instance, which inherits
+        // this environment (and so `LEAN_CTX_DATA_DIR`).
+        let status = std::process::Command::new(cli)
+            .args([
+                "--new-window",
+                "--disable-workspace-trust",
+                "--skip-welcome",
+            ])
+            .args(["--skip-release-notes", "--disable-telemetry"])
+            .arg("--user-data-dir")
+            .arg(user_data_dir.path())
+            .arg("--extensions-dir")
+            .arg(extensions_dir.path())
+            .arg(format!(
+                "--extensionDevelopmentPath={}",
+                extension.display()
+            ))
+            .arg(root)
+            .env("LEAN_CTX_DATA_DIR", data_dir)
+            .status()
+            .expect("editor CLI starts");
+        assert!(status.success(), "editor CLI failed: {status}");
+        Self {
+            user_data_dir,
+            _extensions_dir: extensions_dir,
+        }
+    }
+}
+
+impl Drop for EditorWindow {
+    fn drop(&mut self) {
+        // Every process of this instance carries its unique user-data-dir.
+        let marker = self.user_data_dir.path().to_string_lossy().to_string();
+        #[cfg(unix)]
+        let _ = std::process::Command::new("pkill")
+            .arg("-f")
+            .arg(&marker)
+            .status();
+        #[cfg(windows)]
+        let _ = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command"])
+            .arg(format!(
+                "Get-CimInstance Win32_Process | Where-Object {{ $_.CommandLine -like '*{}*' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}",
+                marker.replace('\'', "''")
+            ))
+            .status();
+    }
+}
+
+fn evaluate(f: &Fixture, engine: Engine) {
+    // `shutdown_all` below drains the process-wide backend registry; the
+    // editor case also points the data dir at its own announcement dir.
+    let _env = crate::core::data_dir::test_env_lock();
     let _registry = crate::lsp::router::stub_test_lock();
     let (_dir, root, inputs) = materialize(f);
-    if let Some(nm) = node_modules {
-        let link = std::path::Path::new(&root).join("node_modules");
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(nm, link).unwrap();
-        #[cfg(windows)]
-        std::os::windows::fs::symlink_dir(nm, link).unwrap();
-    }
+    let data_dir = tempfile::tempdir().unwrap();
+    let (mode, _window) = match engine {
+        Engine::Server { node_modules } => {
+            if let Some(nm) = node_modules {
+                let link = std::path::Path::new(&root).join("node_modules");
+                #[cfg(unix)]
+                std::os::unix::fs::symlink(nm, link).unwrap();
+                #[cfg(windows)]
+                std::os::windows::fs::symlink_dir(nm, link).unwrap();
+            }
+            (SemanticMode::Eager, None)
+        }
+        Engine::Editor { cli, extension } => {
+            crate::test_env::set_var("LEAN_CTX_DATA_DIR", data_dir.path());
+            let window = EditorWindow::open(cli, extension, &root, data_dir.path());
+            let until = Instant::now() + Duration::from_mins(2);
+            while crate::lsp::editor_bridge::discover(&root).is_none() {
+                assert!(Instant::now() < until, "{}: no bridge announced", f.lang);
+                crate::lsp::editor_bridge::forget(&root);
+                std::thread::sleep(Duration::from_millis(500));
+            }
+            (SemanticMode::Auto, Some(window))
+        }
+    };
     let call_graph = CallGraph::build(&inputs);
     let edges: Vec<CallEdge> = call_graph
         .edges
@@ -327,7 +439,7 @@ fn evaluate(f: &Fixture, node_modules: Option<&std::path::Path>) {
             &edges,
             &structural,
             hashes,
-            SemanticMode::Eager,
+            mode,
             EscalationBudget::BACKGROUND,
         )
     };
@@ -394,51 +506,144 @@ fn evaluate(f: &Fixture, node_modules: Option<&std::path::Path>) {
         f.lang
     );
 
+    // One relation pass, repeated until `done` holds or the cold deadline
+    // passes (a server still indexing answers nothing definitive).
+    let relation_pass =
+        |relation, only_file, done: &dyn Fn(&super::relations::RelationPass) -> bool| loop {
+            let pass = resolve_relation_edges(
+                &warm_graph,
+                &root,
+                &inputs,
+                hashes,
+                mode,
+                relation,
+                only_file,
+                RelationBudget::BACKGROUND,
+            );
+            if done(&pass) || Instant::now() > deadline {
+                break pass;
+            }
+            std::thread::sleep(Duration::from_millis(500));
+        };
+
     let implements = match f.implements {
         None => "n/a".to_string(),
         Some((declaring, expected)) => {
-            let pass = loop {
-                let pass = resolve_implements_edges(
-                    &warm_graph,
-                    &root,
-                    &inputs,
-                    hashes,
-                    SemanticMode::Eager,
-                );
-                if !pass.edges.is_empty() || Instant::now() > deadline {
-                    break pass;
-                }
-                std::thread::sleep(Duration::from_millis(500));
-            };
+            let pass = relation_pass(Relation::Implements, None, &|p| !p.edges.is_empty());
             let found: Vec<&str> = pass
                 .edges
                 .iter()
-                .inspect(|e| assert_eq!(e.abstract_file, declaring))
-                .map(|e| e.impl_file.as_str())
+                .inspect(|e| assert_eq!(e.to, declaring))
+                .map(|e| e.from.as_str())
                 .collect();
             assert_eq!(found, expected, "{}: implementors", f.lang);
             "ok".to_string()
         }
     };
 
-    let rss = server_rss_mib();
+    // `references`: the caller is verified as a user of the ambiguous
+    // target's file, and — the decoy — not of the file whose same-named
+    // symbol it never touches.
+    let caller = edges
+        .iter()
+        .find(|e| e.callee_name == f.ambiguous)
+        .map(|e| e.caller_file.clone())
+        .unwrap();
+    let decoy_file = f.symbols.iter().find(|s| s.1 == f.decoy).unwrap().0;
+    let target_refs = relation_pass(Relation::References, Some(f.expect_target), &|p| {
+        p.edges.iter().any(|e| e.from == caller)
+    });
+    assert!(
+        target_refs
+            .edges
+            .iter()
+            .any(|e| e.from == caller && e.to == f.expect_target),
+        "{}: {caller} references {}: {:?}",
+        f.lang,
+        f.expect_target,
+        target_refs.edges
+    );
+    let decoy_refs = relation_pass(Relation::References, Some(decoy_file), &|p| {
+        p.settled.contains(decoy_file)
+    });
+    assert!(
+        decoy_refs.settled.contains(decoy_file)
+            && decoy_refs.edges.iter().all(|e| e.from != caller),
+        "{}: no reference to the decoy's file: {decoy_refs:?}",
+        f.lang
+    );
+
+    // `extends`: asked once the backend is warm. A backend without a type
+    // hierarchy for the language leaves the subtype unsettled — reported,
+    // not failed; a settled answer must name exactly the supertypes.
+    let extends = match f.extends {
+        None => "n/a".to_string(),
+        Some((sub, expected)) => {
+            let warm_deadline = Instant::now() + Duration::from_secs(20);
+            let pass = loop {
+                let pass = relation_pass(Relation::Extends, None, &|_| true);
+                if pass.settled.contains(sub) || Instant::now() > warm_deadline {
+                    break pass;
+                }
+                std::thread::sleep(Duration::from_millis(500));
+            };
+            if pass.settled.contains(sub) {
+                let found: Vec<&str> = pass
+                    .edges
+                    .iter()
+                    .filter(|e| e.from == sub)
+                    .map(|e| e.to.as_str())
+                    .collect();
+                assert_eq!(found, expected, "{}: supertypes of {sub}", f.lang);
+                "ok".to_string()
+            } else {
+                "no-type-hierarchy".to_string()
+            }
+        }
+    };
+
+    // An editor is no child of this test: its memory is not measured.
+    let rss = if _window.is_some() {
+        "n/a".to_string()
+    } else {
+        server_rss_mib().to_string()
+    };
     println!(
-        "SEMANTIC_EVAL|{}|{backend}|ambiguous=ok|decoy_veto=ok|implements={implements}|false_edges=0|cold_ms={cold_ms}|live_queries={}|warm_query_ms={warm_query_ms:.2}|cached_ms={cached_ms:.2}|server_rss_mib={rss}",
+        "SEMANTIC_EVAL|{}|{backend}|ambiguous=ok|decoy_veto=ok|implements={implements}|references=ok|extends={extends}|false_edges=0|cold_ms={cold_ms}|live_queries={}|warm_query_ms={warm_query_ms:.2}|cached_ms={cached_ms:.2}|server_rss_mib={rss}",
         f.lang, warm.stats.live_queries
     );
     crate::lsp::router::shutdown_all();
+    crate::test_env::remove_var("LEAN_CTX_DATA_DIR");
 }
 
 #[test]
 #[ignore = "needs rust-analyzer"]
 fn eval_rust_analyzer() {
-    evaluate(&RUST, None);
+    evaluate(&RUST, Engine::Server { node_modules: None });
 }
 
 #[test]
 #[ignore = "needs TypeScript ≥ 7, or ≤ 6 with typescript-language-server"]
 fn eval_typescript() {
-    evaluate(&TYPESCRIPT, None);
+    evaluate(&TYPESCRIPT, Engine::Server { node_modules: None });
+}
+
+/// The editor path end to end: a real VS Code / Cursor window running the
+/// extension under `LEAN_CTX_EVAL_EXTENSION` (compiled), launched through
+/// the CLI in `LEAN_CTX_EVAL_EDITOR` (`code`, `cursor`); its built-in
+/// TypeScript support answers. lean-ctx starts nothing (`auto`).
+#[test]
+#[ignore = "needs VS Code or Cursor + LEAN_CTX_EVAL_EDITOR/LEAN_CTX_EVAL_EXTENSION"]
+fn eval_editor_bridge() {
+    let cli = std::env::var_os("LEAN_CTX_EVAL_EDITOR").expect("LEAN_CTX_EVAL_EDITOR");
+    let extension = std::env::var_os("LEAN_CTX_EVAL_EXTENSION").expect("LEAN_CTX_EVAL_EXTENSION");
+    evaluate(
+        &TYPESCRIPT,
+        Engine::Editor {
+            cli: cli.as_ref(),
+            extension: extension.as_ref(),
+        },
+    );
 }
 
 #[test]
@@ -446,19 +651,24 @@ fn eval_typescript() {
 fn eval_typescript_language_server_with_project_typescript() {
     let node_modules = std::env::var_os("LEAN_CTX_EVAL_TS_NODE_MODULES")
         .expect("LEAN_CTX_EVAL_TS_NODE_MODULES: a node_modules dir with typescript ≤ 6");
-    evaluate(&TYPESCRIPT, Some(node_modules.as_ref()));
+    evaluate(
+        &TYPESCRIPT,
+        Engine::Server {
+            node_modules: Some(node_modules.as_ref()),
+        },
+    );
 }
 
 #[test]
 #[ignore = "needs pylsp"]
 fn eval_pylsp() {
-    evaluate(&PYTHON, None);
+    evaluate(&PYTHON, Engine::Server { node_modules: None });
 }
 
 #[test]
 #[ignore = "needs gopls + go"]
 fn eval_gopls() {
-    evaluate(&GO, None);
+    evaluate(&GO, Engine::Server { node_modules: None });
 }
 
 /// A minimal JetBrains bridge: `/health` plus `/definition` answering the
@@ -535,6 +745,11 @@ impl FakeBridge {
                     .push(path);
             }
             r#"{"locations":[{"path":"src/b.rs","range":{"start":{"line":2,"character":11},"end":{"line":2,"character":15}}}]}"#
+        } else if req.starts_with(b"POST /references") {
+            // A capped list: the IDE found more users than it returned.
+            r#"{"locations":[{"path":"src/app.rs","range":{"start":{"line":1,"character":9},"end":{"line":1,"character":13}}}],"truncated":true,"total":9}"#
+        } else if req.starts_with(b"GET /health") {
+            r#"{"status":"ok","editor":"vscode"}"#
         } else {
             "{}"
         };
@@ -562,12 +777,11 @@ impl Drop for FakeBridge {
     }
 }
 
-/// `auto` mode with a live IDE: the router attaches to the bridge (never
-/// spawning a server), the call site goes out as a project-relative path
-/// (on Windows too, where the root uses `\`), and the answer flows through
-/// location mapping into a verified edge carrying the IDE's identity.
-#[test]
-fn auto_mode_verifies_through_a_live_jetbrains_bridge() {
+/// Runs the RUST fixture's ambiguous call in `auto` mode against a fake
+/// bridge that `announce(root, port, data_dir)` makes discoverable, and
+/// checks the outcome: verified to `src/b.rs` by `backend`, with the call
+/// site sent project-relative (on Windows too, where the root uses `\`).
+fn verifies_through_fake_bridge(announce: impl FnOnce(&str, u16, &std::path::Path), backend: &str) {
     let _env = crate::core::data_dir::test_env_lock();
     // `shutdown_all` below drains the process-wide backend registry.
     let _registry = crate::lsp::router::stub_test_lock();
@@ -576,20 +790,7 @@ fn auto_mode_verifies_through_a_live_jetbrains_bridge() {
 
     let (_dir, root, inputs) = materialize(&RUST);
     let bridge = FakeBridge::start();
-    let port_file = crate::lsp::port_discovery::port_file_path(&root).unwrap();
-    std::fs::create_dir_all(port_file.parent().unwrap()).unwrap();
-    std::fs::write(
-        &port_file,
-        serde_json::json!({
-            "port": bridge.port,
-            "token": "tok",
-            "pid": std::process::id(),
-            "project_root": root,
-            "ide_version": "2026.2",
-        })
-        .to_string(),
-    )
-    .unwrap();
+    announce(&root, bridge.port, data.path());
 
     let call_graph = CallGraph::build(&inputs);
     let edges: Vec<CallEdge> = call_graph
@@ -629,22 +830,24 @@ fn auto_mode_verifies_through_a_live_jetbrains_bridge() {
         )
     });
     let diagnosis = format!(
-        "port file read: {}, health: {}, stats: {:?}, unsettled: {:?}, direct: {direct:?}",
+        "port file read: {}, health: {}, editor bridge: {}, stats: {:?}, unsettled: {:?}, direct: {direct:?}",
         port.is_some(),
         port.as_ref()
             .is_some_and(crate::lsp::port_discovery::health_ok),
+        crate::lsp::editor_bridge::discover(&root).is_some(),
         out.stats,
         out.unsettled
     );
     let sent = bridge.definition_paths();
     crate::lsp::router::shutdown_all();
+    crate::lsp::editor_bridge::forget(&root);
     drop(bridge);
     crate::test_env::remove_var("LEAN_CTX_DATA_DIR");
     assert_eq!(
         out.verdicts,
         vec![Some(SemanticVerdict::Verified {
             file: "src/b.rs".into(),
-            backend: "jetbrains:jetbrains@2026.2".into(),
+            backend: backend.into(),
         })],
         "{diagnosis}"
     );
@@ -653,4 +856,139 @@ fn auto_mode_verifies_through_a_live_jetbrains_bridge() {
         !sent.is_empty() && sent.iter().all(|p| p == "src/app.rs"),
         "the call site goes out project-relative: {sent:?}"
     );
+}
+
+/// `auto` mode with a live IDE: the router attaches to the JetBrains plugin
+/// found through its port file (never spawning a server).
+#[test]
+fn auto_mode_verifies_through_a_live_jetbrains_bridge() {
+    verifies_through_fake_bridge(
+        |root, port, _| {
+            let port_file = crate::lsp::port_discovery::port_file_path(root).unwrap();
+            std::fs::create_dir_all(port_file.parent().unwrap()).unwrap();
+            std::fs::write(
+                &port_file,
+                serde_json::json!({
+                    "port": port, "token": "tok", "pid": std::process::id(),
+                    "project_root": root, "ide_version": "2026.2",
+                })
+                .to_string(),
+            )
+            .unwrap();
+        },
+        "jetbrains:jetbrains@2026.2",
+    );
+}
+
+/// `auto` mode with an editor extension's semantic bridge, announced in the
+/// bridge directory under another spelling of the project root (trailing
+/// separator): matched by canonical root, answered under the editor's
+/// identity.
+#[test]
+fn auto_mode_verifies_through_an_editor_bridge() {
+    verifies_through_fake_bridge(announce_editor_bridge, "editor:vscode@1.99.0+abc123def456");
+}
+
+/// Announces a fake bridge as the editor extension would — under another
+/// spelling of the project root (trailing separator), with a provider
+/// fingerprint that becomes part of the backend identity.
+fn announce_editor_bridge(root: &str, port: u16, data: &std::path::Path) {
+    let dir = data.join("editor-bridges");
+    std::fs::create_dir_all(&dir).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    std::fs::write(
+        dir.join("vscode-test.json"),
+        serde_json::json!({
+            "port": port, "token": "tok", "pid": std::process::id(),
+            "project_root": format!("{root}{}", std::path::MAIN_SEPARATOR),
+            "editor": "vscode", "editor_version": "1.99.0",
+            "provider_fingerprint": "abc123def4567890",
+        })
+        .to_string(),
+    )
+    .unwrap();
+}
+
+/// A capped `references` answer names real users — their edges are added —
+/// but is not the whole answer: it neither settles the file nor withdraws
+/// an earlier edge the cap may have hidden, and is not cached.
+#[test]
+fn truncated_references_add_edges_but_never_prune() {
+    use super::{EdgeEvidence, EvidenceGrade, EvidenceOrigin};
+    use crate::core::graph_enricher::apply_relation_edges;
+    use crate::core::property_graph::{EdgeKind, Node};
+
+    let _env = crate::core::data_dir::test_env_lock();
+    let _registry = crate::lsp::router::stub_test_lock();
+    let data = tempfile::tempdir().unwrap();
+    crate::test_env::set_var("LEAN_CTX_DATA_DIR", data.path());
+    let (_dir, root, inputs) = materialize(&RUST);
+    let bridge = FakeBridge::start();
+    announce_editor_bridge(&root, bridge.port, data.path());
+
+    let graph = CodeGraph::open_in_memory().unwrap();
+    let id = |p: &str| graph.upsert_node(&Node::file(p)).unwrap();
+    let (a, b) = (id("src/a.rs"), id("src/b.rs"));
+    id("src/app.rs");
+    // An earlier, complete answer had verified src/a.rs as a user.
+    let earlier = EdgeEvidence::new(
+        EvidenceGrade::VerifiedSemantic,
+        EvidenceOrigin::Enrichment,
+        Some("editor:vscode@1.99.0".into()),
+        1,
+    );
+    graph
+        .upsert_edge_with_evidence(a, b, &EdgeKind::References, &earlier)
+        .unwrap();
+
+    let hashes = CallGraph::build(&inputs).file_hashes;
+    let pass = resolve_relation_edges(
+        &graph,
+        &root,
+        &inputs,
+        &hashes,
+        SemanticMode::Auto,
+        Relation::References,
+        Some("src/b.rs"),
+        RelationBudget::INTERACTIVE,
+    );
+    apply_relation_edges(&graph, Relation::References, &pass, |_, _| false).unwrap();
+    let again = resolve_relation_edges(
+        &graph,
+        &root,
+        &inputs,
+        &hashes,
+        SemanticMode::Auto,
+        Relation::References,
+        Some("src/b.rs"),
+        RelationBudget::INTERACTIVE,
+    );
+    crate::lsp::editor_bridge::forget(&root);
+    drop(bridge);
+    crate::test_env::remove_var("LEAN_CTX_DATA_DIR");
+
+    assert_eq!(pass.answered, 1);
+    assert!(
+        !pass.settled.contains("src/b.rs"),
+        "a capped answer settles nothing"
+    );
+    let pairs: Vec<(String, String)> = graph
+        .file_edges_of_kind(&EdgeKind::References)
+        .unwrap()
+        .into_iter()
+        .map(|(s, t, _)| (s, t))
+        .collect();
+    assert_eq!(
+        pairs,
+        [
+            ("src/a.rs".to_string(), "src/b.rs".to_string()),
+            ("src/app.rs".to_string(), "src/b.rs".to_string()),
+        ],
+        "the named user is added, the earlier one kept"
+    );
+    assert_eq!((again.cache_hits, again.live_queries), (0, 1), "not cached");
 }

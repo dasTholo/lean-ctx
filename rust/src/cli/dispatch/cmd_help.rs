@@ -168,6 +168,7 @@ const GUARDED: &[&[&str]] = &[
     &["debug-log"],
     &["editor-signal"],
     &["editor-session"],
+    &["editor-bridge"],
     &["restart"],
     &["stop"],
     &["dev-install"],

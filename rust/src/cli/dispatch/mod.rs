@@ -664,6 +664,22 @@ pub fn run() {
                 handle_editor_session(&rest);
                 return;
             }
+            // Editor semantic bridge (VS Code/Cursor/Windsurf extension):
+            // where the extension announces its loopback bridge.
+            "editor-bridge" => {
+                if rest.first().map(String::as_str) != Some("dir") {
+                    eprintln!("usage: lean-ctx editor-bridge dir");
+                    std::process::exit(2);
+                }
+                match crate::lsp::editor_bridge::ensure_bridge_dir() {
+                    Ok(dir) => println!("{}", dir.display()),
+                    Err(e) => {
+                        eprintln!("editor-bridge: {e}");
+                        std::process::exit(1);
+                    }
+                }
+                return;
+            }
             "update" | "--self-update" => {
                 core::updater::run(&rest);
                 return;

@@ -81,12 +81,30 @@ product, privacy, and evidence boundaries, use the
   installed automatically.
 - Language servers verify ambiguous calls, veto name-match guesses that
   actually target a library, and add `implements` edges. Answers are cached
-  per call site and reused until the code they depend on changes.
+  per call site and reused until the code they depend on changes. On large
+  repositories a background pass (1000 lookups / 60 s) asks one call site
+  of every caller-file/target pair before a second one, guessed edges
+  first, so coverage grows as fast as the budget allows.
 - `ctx_graph status`, `lean-ctx doctor` and the dashboard graph legend show
   the verified share per language and whether its server can run.
 - `ctx_impact` marks files reachable only through name matches
   (`(name match only)`, JSON `weak_files`); its propagation is now exact and
   deterministic.
+- `extends` edges (subclass → base class, type → supertype) where the backend
+  offers a type hierarchy; language servers now answer type-hierarchy
+  requests too (`ctx_refactor action=type_hierarchy` no longer needs a
+  JetBrains IDE).
+- `ctx_impact` asks the backend who really uses the symbols of the analysed
+  file (`textDocument/references`, bounded, cached) and records verified
+  `references` edges; the answer appears as a `Semantic check:` line (JSON
+  `semantic_references`).
+- **Editor bridge:** the VS Code / Cursor / Windsurf extension (0.4.0) serves
+  the editor's go-to-definition, references, implementations and type
+  hierarchy to lean-ctx on `127.0.0.1` behind a per-window token, so `auto`
+  mode verifies with whatever language extensions are installed — no language
+  server setup. Read-only, confined to the workspace folder, off with
+  `leanctx.semanticBridge.enabled = false`. New CLI: `lean-ctx editor-bridge
+  dir`.
 - Guide: [docs/guides/semantic-intelligence.md](docs/guides/semantic-intelligence.md).
 
 ### Fixed — JetBrains bridge on Windows
@@ -95,6 +113,17 @@ product, privacy, and evidence boundaries, use the
   Windows: the backend kept the project root in verbatim form (`\\?\C:\…`),
   so no returned location mapped back to a project file, and call sites
   went out as absolute instead of project-relative paths.
+- IDE locations outside the project (libraries, SDKs) arrive as absolute
+  paths and were rejoined onto the project root, so a call into a library
+  read as "no answer" instead of "external" and its name-match guess was not
+  vetoed.
+
+### Fixed — paths with spaces or non-ASCII characters in semantic lookups
+
+- File URIs were built without percent-encoding, so any path with a space or
+  a non-ASCII character (a project in "My Projects", an editor installed as
+  "Visual Studio Code.app") produced an invalid URI: language-server and IDE
+  answers for such files were silently dropped.
 
 ### Changed — quality evidence states what it can prove (#1905)
 

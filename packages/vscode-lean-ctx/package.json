@@ -1,8 +1,8 @@
 {
   "name": "lean-ctx",
   "displayName": "lean-ctx",
-  "description": "Inspect LeanCTX Engine activity in VS Code: observed context reduction, recorded redactions, and command-policy decisions. Part of the Context Gateway for AI Systems.",
-  "version": "0.3.0",
+  "description": "Inspect LeanCTX Engine activity in VS Code: observed context reduction, recorded redactions, and command-policy decisions — and let LeanCTX verify code relationships with this editor's language features. Part of the Context Gateway for AI Systems.",
+  "version": "0.4.0",
   "publisher": "LeanCTX",
   "license": "Apache-2.0",
   "icon": "resources/icon.png",
@@ -64,6 +64,11 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Show what lean-ctx did in this project in the status bar. `value_display.mode = \"off\"` in the lean-ctx config hides it as well."
+        },
+        "leanctx.semanticBridge.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Let lean-ctx ask this editor's language features (go to definition, references, implementations, type hierarchy) to verify code relationships in its graph. Read-only, served on `127.0.0.1` behind a per-window token; nothing leaves the machine."
         }
       }
     }
@@ -71,7 +76,7 @@
   "scripts": {
     "compile": "tsc -p .",
     "typecheck": "tsc -p . --noEmit",
-    "test": "tsc -p . && node --test out/test/value.test.js out/test/binary.test.js",
+    "test": "tsc -p . && node --test out/test/value.test.js out/test/binary.test.js out/test/bridge.test.js",
     "vscode:prepublish": "tsc -p ."
   },
   "devDependencies": {
