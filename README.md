@@ -646,10 +646,14 @@ can reduce repeated context; their token cost depends on the emitted result and 
 
 Measure the Engine's own advertised schema, instruction, and briefing overhead
 with `lean-ctx doctor overhead --gate`. The deterministic
-`lean-ctx benchmark dual-arm --json` replay reports a counterfactual comparison
-priced with its declared model assumptions; it is not a provider invoice or
-an outcome-quality evaluation. The [historical experiment record](_archive/bench/agent-task/r2/README.md)
-is retained separately from current product claims.
+`lean-ctx benchmark dual-arm --json` replay reports a **synthetic upper bound**:
+its baseline never uses the provider's prompt cache, while agent hosts can cache
+the prefix with or without LeanCTX. It is not a provider invoice, an on/off
+comparison or an outcome-quality evaluation. Available comparison methods include
+the `lean-ctx eval ab` subcommand (requires a suite file via `--suite`), the
+injected-context footprint comparison in `lean-ctx eval footprint` (requires a
+suite via `--suite` and a baseline via `--compare`), and the proxy's opt-in compression holdout
+(`[proxy] compression_holdout`).
 
 Accuracy is gated, within stated limits. A model-free A/B gate checks that the JSON
 crusher keeps every gold answer in its fixtures while cutting tokens, and proxy
@@ -664,7 +668,10 @@ that compression preserves answer quality. Every eval report states its evidence
 tier (A mechanism … E production); a run below 30 paired tasks is
 `UNDERPOWERED` and fails `--gate` unless run as an explicit `--mechanism` check — see
 [context-quality-v1](docs/contracts/context-quality-v1.md).
-A powered quality study is still open ([#1905](https://github.com/yvgude/lean-ctx/issues/1905)).
+A powered with/without quality study has not been run yet; the proxy's
+compression holdout measures prompt size on real traffic and reports answer
+quality as `unknown`. What each number can and cannot show, per data path:
+[measurement scope](docs/concepts/measurement-scope.md).
 
 - **Latest snapshot**: [BENCHMARKS.md](BENCHMARKS.md)
 - **Reproduce**: `lean-ctx benchmark report .`
