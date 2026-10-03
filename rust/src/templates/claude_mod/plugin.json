@@ -1,7 +1,7 @@
 {
   "name": "lean-ctx",
   "version": "0.2.0",
-  "description": "Wake on background job completion, shape native Bash output, keep lean-ctx's core tools in front, and show per-session request usage.",
+  "description": "Wake on background job completion, remove redundant lean-ctx hook context, shape native Bash output, keep core tools in front, and show per-session usage.",
   "author": {
     "name": "Thinkery / Yves Gugger"
   },
@@ -26,6 +26,12 @@
       "title": "Shape native Bash output",
       "description": "Compress large native Bash stdout through lean-ctx (recoverable); off keeps it byte-for-byte.",
       "default": true
+    },
+    "keep_hook_context": {
+      "type": "boolean",
+      "title": "Keep lean-ctx hook context",
+      "description": "Keep lean-ctx SessionStart and UserPromptSubmit context from settings hooks.",
+      "default": false
     }
   }
 }

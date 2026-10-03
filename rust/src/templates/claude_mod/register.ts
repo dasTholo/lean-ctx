@@ -35,6 +35,79 @@ const SHAPE_MIN_CHARS = 2_000;
 const RAW_INTENT = /\bLEAN_CTX_(?:RAW|DISABLED)=1\b|\blean-ctx\s+raw\b/;
 // Upper bound for the session state injected after a compaction (~500 tokens).
 const MAX_RESUME_CHARS = 2_000;
+type LeanCtxHookTextEnd = { end: string; continues?: readonly string[] };
+type LeanCtxHookTextSignature = { start: string; ends: readonly LeanCtxHookTextEnd[] };
+// Exact leading signatures emitted by observe.rs. Keep these stable and update
+// the cross-language drift test there whenever an authored hook text changes.
+const LEAN_CTX_HOOK_TEXT_SIGNATURES: readonly LeanCtxHookTextSignature[] = [
+  {
+    start: "lean-ctx active: ALWAYS use ctx_* MCP tools instead of native equivalents.",
+    ends: [
+      { end: "Exclusive tools: ctx_compose, ctx_callgraph, ctx_knowledge, ctx_session." },
+    ],
+  },
+  {
+    start: "CRITICAL: ALWAYS use lean-ctx ctx_* tools as mapped below.",
+    ends: [
+      {
+        end: "Use native Read for out-of-root; `lean-ctx doctor` shows effective roots.",
+        continues: [
+          "Advanced tools not in your profile are available via ctx_call(tool=<name>) gateway.",
+          "Prefer stdlib and native platform alternatives before adding code or dependencies.",
+          "Solution efficiency ladder:",
+          "challenge every requirement, prefer deletion.",
+        ],
+      },
+      {
+        end: "Advanced tools not in your profile are available via ctx_call(tool=<name>) gateway.",
+        continues: [
+          "Prefer stdlib and native platform alternatives before adding code or dependencies.",
+          "Solution efficiency ladder:",
+          "challenge every requirement, prefer deletion.",
+        ],
+      },
+      { end: "Prefer stdlib and native platform alternatives before adding code or dependencies." },
+      { end: "Preserve validation, security, and error-handling." },
+    ],
+  },
+  {
+    start: "lean-ctx shadow mode: native read/search/shell calls auto-route to ctx_* — no tool-mapping needed.",
+    ends: [
+      {
+        end: "ctx_search(action=semantic) (by meaning).",
+        continues: [
+          "Prefer stdlib and native platform alternatives before adding code or dependencies.",
+          "Solution efficiency ladder:",
+          "challenge every requirement, prefer deletion.",
+        ],
+      },
+      {
+        end: "ctx_callgraph (callers).",
+        continues: [
+          "Prefer stdlib and native platform alternatives before adding code or dependencies.",
+          "Solution efficiency ladder:",
+          "challenge every requirement, prefer deletion.",
+        ],
+      },
+      {
+        end: "ctx_knowledge / ctx_session (memory).",
+        continues: [
+          "Prefer stdlib and native platform alternatives before adding code or dependencies.",
+          "Solution efficiency ladder:",
+          "challenge every requirement, prefer deletion.",
+        ],
+      },
+      { end: "Prefer stdlib and native platform alternatives before adding code or dependencies." },
+      { end: "Preserve validation, security, and error-handling." },
+    ],
+  },
+  {
+    start: "lean-ctx policy (mechanically enforced):",
+    ends: [
+      { end: "are overruled by this policy." },
+    ],
+  },
+] as const;
 
 type JsonRecord = Record<string, unknown>;
 type WatchJob = { server: string; id: string; contextSent: boolean; misses: number };
@@ -58,6 +131,8 @@ type Metrics = {
   wakesDelivered: number;
   shapedCalls: number;
   shapedCharsSaved: number;
+  droppedHookAttachments: number;
+  droppedHookChars: number;
   compactions: number;
 };
 
@@ -74,6 +149,8 @@ const metrics: Metrics = {
   wakesDelivered: 0,
   shapedCalls: 0,
   shapedCharsSaved: 0,
+  droppedHookAttachments: 0,
+  droppedHookChars: 0,
   compactions: 0,
 };
 let watcher: Timer | undefined;
@@ -89,6 +166,7 @@ let resumePending = false;
 export const register: Register = (on, options) => {
   const frontLoaded = getFrontLoadedTools(options);
   const shapeNative = asRecord(options).shape_native_output !== false;
+  const keepHookContext = asRecord(options).keep_hook_context === true;
 
   on("tool.describe", { tool: LEAN_CTX_TOOL_PATTERN }, async ($, event) => {
     const match = getLeanCtxTool(event.tool);
@@ -110,6 +188,25 @@ export const register: Register = (on, options) => {
   on("skill.prompt", { skill: "lean-ctx" }, async ($, event, next) => {
     const base = await next(event);
     return { text: `${liveSkillHeader(frontLoaded, shapeNative)}\n\n${base.text}` };
+  });
+
+  // The MCP instructions and live skill carry the durable guidance. Drop only
+  // exact lean-ctx SessionStart/UserPromptSubmit hook blocks; other authors and
+  // other hook events pass through unchanged. No agentId check keeps this
+  // channel diet active in both the main loop and subagents.
+  on("prompt.attachment", async ($, event, next) => {
+    if (
+      keepHookContext ||
+      event.origin.kind !== "hook" ||
+      (event.origin.event !== "SessionStart" && event.origin.event !== "UserPromptSubmit")
+    ) {
+      return next(event);
+    }
+    const stripped = stripLeanCtxHookText(event.text);
+    if (stripped.removedChars === 0) return next(event);
+    metrics.droppedHookAttachments += 1;
+    metrics.droppedHookChars += stripped.removedChars;
+    return { text: stripped.text || null };
   });
 
   on("session.start", async ($, event, next) => {
@@ -527,6 +624,88 @@ function mcpText(response: McpToolResult): string {
     .join("\n");
 }
 
+type LeanCtxHookTextBlock = { start: number; end: number };
+
+function stripLeanCtxHookText(text: string): { text: string; removedChars: number } {
+  let remaining = text;
+  let removedChars = 0;
+  while (true) {
+    const block = LEAN_CTX_HOOK_TEXT_SIGNATURES
+      .map((signature) => findLeanCtxHookTextBlock(remaining, signature))
+      .find((candidate) => candidate !== undefined);
+    if (!block) break;
+    const next = removeJoinedTextBlock(remaining, block);
+    if (next === remaining) break;
+    removedChars += remaining.length - next.length;
+    remaining = next;
+  }
+  return { text: remaining, removedChars };
+}
+
+function findLeanCtxHookTextBlock(
+  text: string,
+  signature: LeanCtxHookTextSignature,
+): LeanCtxHookTextBlock | undefined {
+  let start = text.indexOf(signature.start);
+  while (start !== -1) {
+    if (start === 0 || text[start - 1] === "\n") {
+      const end = findLeanCtxHookTextEnd(text, start, signature);
+      if (end !== undefined) return { start, end };
+    }
+    start = text.indexOf(signature.start, start + 1);
+  }
+  return undefined;
+}
+
+function findLeanCtxHookTextEnd(
+  text: string,
+  start: number,
+  signature: LeanCtxHookTextSignature,
+): number | undefined {
+  let lineStart = start;
+  while (lineStart <= text.length) {
+    const end = lineEnd(text, lineStart);
+    const line = text.slice(lineStart, end);
+    const ending = signature.ends.find((marker) => line.endsWith(marker.end));
+    if (ending) {
+      const nextLine = nextNonEmptyLineStart(text, end);
+      const next = text.slice(nextLine, lineEnd(text, nextLine));
+      if (!ending.continues?.some((marker) => next.startsWith(marker))) return end;
+      lineStart = nextLine;
+      continue;
+    }
+    if (end === text.length) break;
+    lineStart = text.startsWith("\r\n", end) ? end + 2 : end + 1;
+  }
+}
+
+function nextNonEmptyLineStart(text: string, end: number): number {
+  let next = end;
+  while (next < text.length) {
+    if (text.startsWith("\r\n", next)) next += 2;
+    else if (text[next] === "\n") next += 1;
+    else break;
+    if (text.slice(next, lineEnd(text, next)) !== "") break;
+  }
+  return next;
+}
+
+function lineEnd(text: string, from: number): number {
+  const newline = text.indexOf("\n", from);
+  if (newline === -1) return text.length;
+  return newline > from && text[newline - 1] === "\r" ? newline - 1 : newline;
+}
+
+function removeJoinedTextBlock(text: string, block: LeanCtxHookTextBlock): string {
+  let before = text.slice(0, block.start);
+  let after = text.slice(block.end);
+  if (before.endsWith("\r\n")) before = before.slice(0, -2);
+  else if (before.endsWith("\n")) before = before.slice(0, -1);
+  else if (after.startsWith("\r\n")) after = after.slice(2);
+  else if (after.startsWith("\n")) after = after.slice(1);
+  return `${before}${after}`;
+}
+
 function submitWake($: EngineInterface, text: string): void {
   try {
     void $.prompt
@@ -614,6 +793,7 @@ function formatMetrics(): string {
     `sleeps answered ${metrics.sleepsAnswered}`,
     `wakes delivered ${metrics.wakesDelivered}`,
     `Bash outputs shaped ${metrics.shapedCalls} (−${metrics.shapedCharsSaved} chars)`,
+    `hook attachments dropped ${metrics.droppedHookAttachments} (−${metrics.droppedHookChars} chars)`,
     `compactions ${metrics.compactions}`,
   ].join(" · ");
 }
@@ -648,6 +828,8 @@ function resetSessionState(): void {
   metrics.wakesDelivered = 0;
   metrics.shapedCalls = 0;
   metrics.shapedCharsSaved = 0;
+  metrics.droppedHookAttachments = 0;
+  metrics.droppedHookChars = 0;
   metrics.compactions = 0;
   resumePending = false;
   watchedJobs.clear();

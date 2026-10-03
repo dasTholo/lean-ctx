@@ -46,6 +46,14 @@ were waiting** — 7,551 status polls for 1,030 background jobs plus 1,770
   and defers every other lean-ctx tool — including the `shell` alias — behind
   ToolSearch, with descriptions byte-identical. Verified by capturing the real
   `/v1/messages` request: exactly the configured six keep their schema.
+- **One channel for session guidance.** By default, removes lean-ctx-authored
+  settings-hook context from `SessionStart` and `UserPromptSubmit` attachments,
+  including matching lean-ctx blocks when Claude joins several hooks' text.
+  Exact leading signatures keep engine and plugin attachments, other hooks'
+  output, and unrelated security or policy reminders intact. The MCP server
+  instructions and live `lean-ctx` skill remain the guidance channel. Set
+  `keep_hook_context` to `true` to keep the hook context; its default is `false`.
+  `/leanctx` reports how many attachments and characters the mod removed.
 - **Live skill.** Prefixes the `lean-ctx` skill with what is true in this
   session (wake, front-loaded tools, shaping), so it never contradicts the mod.
 - **Compaction that keeps lean-ctx usable.** Before Claude Code compacts the
@@ -56,7 +64,8 @@ were waiting** — 7,551 status polls for 1,030 background jobs plus 1,770
   findings) once, capped at ~500 tokens. Subagent compactions are untouched.
 - **`/leanctx`.** This session's requests, input/output/cache tokens,
   ToolSearch-only requests, lean-ctx calls, answered sleeps, wakes and shaped
-  Bash outputs — from Claude Code's own `turn.step` usage, not estimates.
+  Bash outputs, and dropped hook attachments/characters — from Claude Code's
+  own `turn.step` usage and hook text, not estimates.
 
 It keeps nothing after the session, sends no telemetry, sets no gateway policy
 and stays inert when no lean-ctx MCP server is connected.
@@ -88,6 +97,6 @@ tsc -p integrations/claude-code-mod/tsconfig.json
 `--plugin-dir`. The validator reports:
 
 ```text
-  ❯ ./register.ts hooks: tool.describe{tool=/"^mcp__lean[-_]ctx__[A-Za-z0-9_-]+$"/}, skill.prompt{skill=lean-ctx}, session.start, tool.call, session.compact, prompt.submit, turn.step, command.run{command=leanctx}
+  ❯ ./register.ts hooks: tool.describe{tool=/"^mcp__lean[-_]ctx__[A-Za-z0-9_-]+$"/}, skill.prompt{skill=lean-ctx}, prompt.attachment, session.start, tool.call, session.compact, prompt.submit, turn.step, command.run{command=leanctx}
   ❯ ./register.ts calls: $.clock.every (via startWatcher), $.command.register (via ensureMeterCommand), $.mcp.call (via pollWatchedJobs, shapeBash), $.prompt.submit (via submitWake)
 ```
