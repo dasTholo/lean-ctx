@@ -74,6 +74,75 @@ test("native Bash stdout is shaped through ctx_shape and fails open", async ($, 
   expect(shapeCalls.length).toBe(3);
 });
 
+// K8: a main-loop compaction saves lean-ctx's session, keeps the user's own
+// /compact instructions and adds lean-ctx's; the next prompt — and only that
+// one — carries the restored session state. Subagent compactions are untouched.
+test("compaction keeps lean-ctx state and restores it once", async ($, on) => {
+  const mcpCalls: Record<string, unknown>[] = [];
+  const instructionsSeen: (string | undefined)[] = [];
+  const contexts: (readonly string[] | undefined)[] = [];
+  on("command.register", ($, event) => ({ value: { command: event.name } }));
+  on("tool.describe", ($, event) => ({ description: event.description }));
+  on("mcp.call", ($, event) => {
+    const args = event.args as Record<string, unknown>;
+    mcpCalls.push(args);
+    return mcpResult(args.action === "status" ? "Task: ship the mod\nDecision: wake, don't poll" : "saved");
+  });
+  on("session.compact", ($, event) => {
+    instructionsSeen.push(event.instructions);
+    return { messages: [{ role: "assistant", text: "summary", toolUses: [] }] };
+  });
+  on("prompt.submit", ($, event) => {
+    contexts.push(event.context);
+    return { text: event.text };
+  });
+
+  await $.tool.describe({
+    tool: "mcp__lean-ctx__ctx_read",
+    description: "read",
+    provider: { plugin: "mcp:lean-ctx", tier: "user" },
+  });
+
+  const transcript = [{ role: "user" as const, text: "build the mod", toolUses: [] }];
+  await $.session.compact({ trigger: "manual", messages: transcript, instructions: "keep the API design" });
+  expect(mcpCalls[0]).toEqual({ action: "save" });
+  expect(instructionsSeen[0]).toContain("keep the API design");
+  expect(instructionsSeen[0]).toContain("lean-ctx: keep, verbatim, any lean-ctx recovery handles");
+
+  await $.prompt.submit({ text: "continue", wait: false, origin: { kind: "composer" } });
+  expect(String(contexts[0]?.join("\n"))).toContain("lean-ctx session state, restored after compaction");
+  expect(String(contexts[0]?.join("\n"))).toContain("Task: ship the mod");
+
+  await $.prompt.submit({ text: "and again", wait: false, origin: { kind: "composer" } });
+  expect(contexts[1] ?? []).toEqual([]);
+
+  await $.session.compact({ trigger: "auto", messages: transcript, agentId: "sub-1" });
+  await $.prompt.submit({ text: "after subagent compaction", wait: false, origin: { kind: "composer" } });
+  expect(contexts[2] ?? []).toEqual([]);
+  expect(mcpCalls.filter((c) => c.action === "save").length).toBe(1);
+});
+
+// Live finding: `claude -p "/leanctx"` had no command, because lean-ctx was
+// only detected once a model request rendered the tools.
+test("/leanctx exists right after session start when lean-ctx is connected", async ($, on) => {
+  on("session.start", () => ({ cwd: "/work" }));
+  on("tool.list", () => ({
+    value: [
+      { name: "Bash", description: "shell", mcp: false },
+      { name: "mcp__lean-ctx__ctx_read", description: "read", mcp: true },
+    ],
+  }));
+  on("command.register", ($, event) => ({ value: { command: event.name } }));
+  await $.session.start({ surface: "terminal", isInteractive: false, cwd: "/work" });
+  const answer = await $.command.run({
+    command: "leanctx",
+    args: "",
+    origin: { kind: "sdk" },
+    presentation: { isFullscreen: false, columns: 80 },
+  });
+  expect(answer.text).toContain("Requests 0");
+});
+
 test("the lean-ctx skill is prefixed with this session's live facts", async ($, on) => {
   on("skill.prompt", () => ({ text: "STATIC SKILL BODY" }));
   const out = await $.skill.prompt({ skill: "lean-ctx", text: "STATIC SKILL BODY" });
@@ -349,6 +418,6 @@ test("/leanctx reports per-session request, token, tool, sleep, and wake counts"
     presentation: { isFullscreen: false, columns: 80 },
   });
   expect(answer.text).toBe(
-    "Requests 1 · input 12 · output 3 · cache read 4 · cache creation 2 · ToolSearch-only 1 · lean-ctx calls 1 · sleeps answered 1 · wakes delivered 1 · Bash outputs shaped 0 (−0 chars)",
+    "Requests 1 · input 12 · output 3 · cache read 4 · cache creation 2 · ToolSearch-only 1 · lean-ctx calls 1 · sleeps answered 1 · wakes delivered 1 · Bash outputs shaped 0 (−0 chars) · compactions 0",
   );
 });
