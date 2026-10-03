@@ -276,7 +276,9 @@ fn episode_belongs_to(episode: &crate::core::episodic_memory::Episode, root: &st
     episode.affected_files.is_empty()
         || episode.affected_files.iter().any(|file| {
             let file = std::path::Path::new(file);
-            file.is_relative() || file.starts_with(root)
+            // `has_root`, not `is_absolute`: on Windows `/home/u/x` has no
+            // drive and is not absolute, yet it is no project-relative path.
+            !file.has_root() || file.starts_with(root)
         })
 }
 
