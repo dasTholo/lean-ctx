@@ -107,7 +107,7 @@ impl RtkConfig {
     }
 
     /// Extend the version-probe deadline only for process-level test fixtures.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     #[must_use]
     pub(crate) fn with_test_version_probe_timeout_ms(mut self, timeout_ms: u64) -> Self {
         assert!(timeout_ms > 0, "test version-probe timeout must be bounded");
