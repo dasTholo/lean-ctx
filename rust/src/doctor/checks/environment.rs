@@ -542,7 +542,7 @@ pub(crate) fn claude_mod_outcome() -> Option<Outcome> {
     }
     let versions = claude_mod::cached_versions(&claude_dir);
     let want = claude_mod::mod_version();
-    let line = if versions.contains(&want) {
+    let line = if versions.contains(&claude_mod::cache_dir_name(&want)) {
         format!("{BOLD}Claude Code mod{RST}  {GREEN}installed ({want}){RST}")
     } else if let Some(old) = versions.last() {
         format!(

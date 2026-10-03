@@ -213,7 +213,9 @@ pub fn install() -> Result<String, String> {
 
 /// Installed plugin versions read from Claude Code's plugin cache
 /// (`<claude dir>/plugins/cache/lean-ctx/lean-ctx/<version>/`) — a file-only
-/// probe for `doctor`, which must not spawn `claude`.
+/// probe for `doctor`, which must not spawn `claude`. Directory names are as
+/// Claude Code writes them: it replaces the `+` of build metadata with `-`
+/// (`3.10.5+5ed30c51` is cached as `3.10.5-5ed30c51`), see [`cache_dir_name`].
 #[must_use]
 pub fn cached_versions(claude_dir: &Path) -> Vec<String> {
     let mut versions: Vec<String> = std::fs::read_dir(
@@ -232,6 +234,13 @@ pub fn cached_versions(claude_dir: &Path) -> Vec<String> {
     .unwrap_or_default();
     versions.sort();
     versions
+}
+
+/// The cache directory Claude Code (2.1.287) creates for a plugin version:
+/// `+` is not kept in the path, so build metadata appears as `-…`.
+#[must_use]
+pub fn cache_dir_name(version: &str) -> String {
+    version.replace('+', "-")
 }
 
 /// Remove the plugin, the marketplace, and the materialized files.
@@ -337,6 +346,21 @@ fn run_claude(args: &[&str]) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Observed on a real install (2.1.287): Claude Code caches
+    /// `3.10.5+5ed30c51` as `…/3.10.5-5ed30c51/` next to the older `3.10.5/`;
+    /// doctor compared against the `+` form and reported a current mod stale.
+    #[test]
+    fn cache_dir_matches_the_installed_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = dir.path().join("plugins/cache/lean-ctx/lean-ctx");
+        let current = cache_dir_name(&mod_version());
+        for v in ["3.10.5", current.as_str()] {
+            std::fs::create_dir_all(cache.join(v)).unwrap();
+        }
+        assert!(cached_versions(dir.path()).contains(&current));
+        assert!(!current.contains('+'), "{current}");
+    }
 
     #[test]
     fn version_gate_parses_claude_output() {
