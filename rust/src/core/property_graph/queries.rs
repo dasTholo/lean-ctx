@@ -30,15 +30,14 @@ pub struct DependencyChain {
 }
 
 /// Edge kinds considered structural (code connectivity).
-const STRUCTURAL_EDGE_KINDS: &str =
-    "'imports','calls','implements','exports','type_ref','tested_by','module','cochange','sibling'";
+const STRUCTURAL_EDGE_KINDS: &str = "'imports','calls','references','implements','extends','exports','type_ref','tested_by','module','cochange','sibling'";
 
 /// Weight multiplier per edge kind for impact scoring.
 pub fn edge_weight(kind: &str) -> f64 {
     match kind {
         "imports" => 1.0,
-        "calls" => 0.8,
-        "exports" | "implements" => 0.7,
+        "calls" | "references" => 0.8,
+        "exports" | "implements" | "extends" => 0.7,
         "module" => 0.6,
         "type_ref" => 0.5,
         "tested_by" => 0.4,

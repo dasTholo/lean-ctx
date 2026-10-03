@@ -1,9 +1,12 @@
 // One quiet status bar item: what lean-ctx did in this project.
 // Numbers come from `lean-ctx prompt-segment --json`; nothing is computed here.
+// Plus the semantic bridge: lean-ctx asks this editor's language features
+// where code relationships really go (see `bridge/`).
 
 import * as fs from "fs";
 import * as vscode from "vscode";
 import { resolveBinary, run } from "./binary";
+import { BridgeManager } from "./bridge/manager";
 import { parsePayload, statusText, tooltipMarkdown } from "./value";
 
 /** Also re-checks staleness: the binary drops numbers older than 12 h. */
@@ -103,14 +106,28 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   const interval = setInterval(() => void refresh(), FALLBACK_REFRESH_MS);
+  const log = vscode.window.createOutputChannel("lean-ctx");
+  const bridges = new BridgeManager(
+    binary,
+    String((context.extension.packageJSON as { version?: string }).version ?? ""),
+    log,
+  );
   context.subscriptions.push(
+    log,
+    bridges,
     vscode.commands.registerCommand("leanctx.showProof", () => inTerminal("lean-ctx proof", ["value"])),
     vscode.commands.registerCommand("leanctx.openDashboard", () => inTerminal("lean-ctx dashboard", ["dashboard"])),
     vscode.commands.registerCommand("leanctx.refresh", () => void refresh()),
     vscode.window.onDidChangeActiveTextEditor(schedule),
-    vscode.workspace.onDidChangeWorkspaceFolders(schedule),
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      schedule();
+      void bridges.sync();
+    }),
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration("leanctx")) schedule();
+      if (e.affectsConfiguration("leanctx")) {
+        schedule();
+        void bridges.sync();
+      }
     }),
     {
       dispose: () => {
@@ -121,6 +138,7 @@ export function activate(context: vscode.ExtensionContext): void {
     },
   );
   void refresh();
+  void bridges.sync();
 }
 
 export function deactivate(): void {}

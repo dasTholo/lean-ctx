@@ -71,6 +71,8 @@ impl LeanCtxServer {
         if name.starts_with("ctx_") {
             crate::server::tool_visibility::mark_auto_ctx_tool_used();
         }
+        // Background semantic passes yield to tool calls in flight.
+        let _activity = crate::core::graph_enricher::ToolActivity::begin();
 
         match name {
             "ctx_call" => {

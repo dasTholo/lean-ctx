@@ -874,6 +874,21 @@ fn simple_hash(content: &str) -> String {
     format!("{:x}", hasher.finish())
 }
 
+/// Current content hashes of the indexed files — the same values a
+/// [`CallGraph`] records in `file_hashes` — without building or loading a
+/// call graph. For callers that need only the hashes (semantic cache keys
+/// and project revision), which is a fraction of a call-graph build.
+pub(crate) fn current_file_hashes(inputs: &CallGraphInputs) -> HashMap<String, String> {
+    inputs
+        .file_paths
+        .par_iter()
+        .filter_map(|rel| {
+            let content = std::fs::read_to_string(resolve_path(rel, &inputs.project_root)).ok()?;
+            Some((rel.clone(), simple_hash(&content)))
+        })
+        .collect()
+}
+
 // ---------------------------------------------------------------------------
 // Scope-aware callee resolution (#321)
 //

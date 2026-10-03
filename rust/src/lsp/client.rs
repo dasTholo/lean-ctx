@@ -26,7 +26,7 @@ pub fn file_path_to_uri(path: &str) -> Result<Uri, String> {
             .map(|p| p.to_string_lossy().to_string())
             .map_err(|e| format!("Cannot resolve path '{path}': {e}"))?
     };
-    let normalized = abs.replace('\\', "/");
+    let normalized = percent_encode_path(&abs.replace('\\', "/"));
     let uri_str = if normalized.starts_with('/') {
         format!("file://{normalized}")
     } else {
@@ -35,6 +35,21 @@ pub fn file_path_to_uri(path: &str) -> Result<Uri, String> {
     uri_str
         .parse::<Uri>()
         .map_err(|e| format!("Invalid URI: {e}"))
+}
+
+/// Percent-encodes everything a URI path may not carry literally — spaces,
+/// non-ASCII, `#`, `?`, `%` … — byte by byte (RFC 3986 `pchar` plus `/`).
+/// `uri_to_file_path` decodes it again.
+fn percent_encode_path(path: &str) -> String {
+    let mut out = String::with_capacity(path.len());
+    for b in path.bytes() {
+        if b.is_ascii_alphanumeric() || b"-._~/!$&'()*+,;=:@".contains(&b) {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
 }
 
 pub fn uri_to_file_path(uri: &Uri) -> Option<String> {
@@ -67,6 +82,8 @@ pub struct LspClient {
     documents: DocumentStore,
     /// Per-request timeout; see `LspBackend::set_request_timeout`.
     request_timeout: Duration,
+    /// Workspace root path; type-hierarchy answers are made relative to it.
+    root_path: String,
 }
 
 /// Open documents: URI → (version, content hash). Keeps repeated queries from
@@ -338,6 +355,7 @@ impl LspClient {
             },
             documents: DocumentStore::default(),
             request_timeout: Duration::from_secs(REQUEST_TIMEOUT_SECS),
+            root_path: String::new(),
         };
 
         client.initialize(
@@ -389,6 +407,9 @@ impl LspClient {
                         dynamic_registration: Some(false),
                         link_support: Some(false),
                     }),
+                    type_hierarchy: Some(DynamicRegistrationClientCapabilities {
+                        dynamic_registration: Some(false),
+                    }),
                     ..Default::default()
                 }),
                 // Prefer UTF-8 so tree-sitter byte columns map 1:1; servers
@@ -405,7 +426,21 @@ impl LspClient {
             ..Default::default()
         };
 
-        let result = self.request_with_timeout::<request::Initialize>(params, timeout)?;
+        // Raw first: `lsp-types` has no field for `typeHierarchyProvider`.
+        let raw = self
+            .request_raw_with_timeout(
+                <request::Initialize as request::Request>::METHOD,
+                serde_json::to_value(params).map_err(|e| e.to_string())?,
+                timeout,
+            )?
+            .unwrap_or(Value::Null);
+        let result: InitializeResult =
+            serde_json::from_value(raw.clone()).map_err(|e| format!("Deserialize error: {e}"))?;
+        let mut capabilities = SemanticCapabilities::from_server(&result.capabilities);
+        capabilities.type_hierarchy = raw
+            .pointer("/capabilities/typeHierarchyProvider")
+            .is_some_and(|p| p.as_bool() != Some(false) && !p.is_null());
+        self.root_path = uri_to_file_path(root_uri).unwrap_or_default();
         self.info = SemanticBackendInfo {
             kind: SemanticBackendKind::Lsp,
             server_name: result.server_info.as_ref().map(|s| s.name.clone()),
@@ -413,7 +448,7 @@ impl LspClient {
                 .server_info
                 .and_then(|s| s.version)
                 .map(|v| crate::lsp::capabilities::compact_server_version(&v)),
-            capabilities: SemanticCapabilities::from_server(&result.capabilities),
+            capabilities,
             utf8_positions: result.capabilities.position_encoding
                 == Some(PositionEncodingKind::UTF8),
         };
@@ -537,6 +572,74 @@ impl LspClient {
             work_done_progress_params: Default::default(),
         };
         self.request_with_timeout::<request::Rename>(params, self.request_timeout)
+    }
+
+    /// Direct super- or subtypes of the type at `position` (LSP 3.17
+    /// `prepareTypeHierarchy` + `typeHierarchy/supertypes|subtypes`), shaped
+    /// like the JetBrains bridge answer: root = the type itself, children =
+    /// one level of related types. Paths inside the project root are
+    /// project-relative, others absolute; lines are 1-based.
+    pub fn type_hierarchy(
+        &mut self,
+        uri: &Uri,
+        position: Position,
+        direction: crate::lsp::backend::HierarchyDirection,
+    ) -> Result<crate::lsp::backend::TypeHierarchyNode, String> {
+        use crate::lsp::backend::{HierarchyDirection, TypeHierarchyNode};
+        self.check_alive()?;
+        self.require(
+            self.info.capabilities.type_hierarchy,
+            "textDocument/prepareTypeHierarchy",
+        )?;
+        let items = self
+            .request_with_timeout::<request::TypeHierarchyPrepare>(
+                TypeHierarchyPrepareParams {
+                    text_document_position_params: TextDocumentPositionParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        position,
+                    },
+                    work_done_progress_params: Default::default(),
+                },
+                self.request_timeout,
+            )?
+            .unwrap_or_default();
+        let Some(item) = items.into_iter().next() else {
+            return Ok(TypeHierarchyNode {
+                name: String::new(),
+                path: String::new(),
+                line: 0,
+                children: vec![],
+            });
+        };
+        let related = match direction {
+            HierarchyDirection::Supertypes => self
+                .request_with_timeout::<request::TypeHierarchySupertypes>(
+                    TypeHierarchySupertypesParams {
+                        item: item.clone(),
+                        work_done_progress_params: Default::default(),
+                        partial_result_params: Default::default(),
+                    },
+                    self.request_timeout,
+                )?,
+            HierarchyDirection::Subtypes => self
+                .request_with_timeout::<request::TypeHierarchySubtypes>(
+                    TypeHierarchySubtypesParams {
+                        item: item.clone(),
+                        work_done_progress_params: Default::default(),
+                        partial_result_params: Default::default(),
+                    },
+                    self.request_timeout,
+                )?,
+        }
+        .unwrap_or_default();
+        let node = |i: &TypeHierarchyItem, children| TypeHierarchyNode {
+            name: i.name.clone(),
+            path: relative_to_root(&self.root_path, &i.uri),
+            line: i.selection_range.start.line + 1,
+            children,
+        };
+        let children = related.iter().map(|r| node(r, vec![])).collect();
+        Ok(node(&item, children))
     }
 
     pub fn implementations(
@@ -766,13 +869,48 @@ impl crate::lsp::backend::LspBackend for LspClient {
     fn backend_info(&self) -> SemanticBackendInfo {
         self.info.clone()
     }
-    // declaration/type_hierarchy/symbols_overview/format/inspections: Default-Err (Backing A).
+    fn type_hierarchy(
+        &mut self,
+        uri: &lsp_types::Uri,
+        position: lsp_types::Position,
+        direction: crate::lsp::backend::HierarchyDirection,
+    ) -> Result<crate::lsp::backend::TypeHierarchyNode, String> {
+        LspClient::type_hierarchy(self, uri, position, direction)
+    }
+    // declaration/symbols_overview/format/inspections: Default-Err (Backing A).
+}
+
+/// `uri`'s file path relative to `root` (with `/`), or absolute when it lies
+/// outside the root.
+fn relative_to_root(root: &str, uri: &Uri) -> String {
+    let path = uri_to_file_path(uri).unwrap_or_default().replace('\\', "/");
+    let root = root.replace('\\', "/");
+    path.strip_prefix(root.trim_end_matches('/'))
+        .and_then(|rest| rest.strip_prefix('/'))
+        .map_or_else(|| path.clone(), str::to_string)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{DocumentStore, DocumentSync, MAX_OPEN_DOCUMENTS, is_credential_env};
     use super::{Incoming, route_incoming, server_request_reply};
+
+    /// Paths with spaces, non-ASCII or URI delimiters (a project in
+    /// "My Projects", an editor bundled under "Visual Studio Code.app")
+    /// must still become valid URIs and map back unchanged.
+    #[test]
+    fn file_uris_round_trip_paths_with_special_characters() {
+        use super::{file_path_to_uri, uri_to_file_path};
+        for path in [
+            "/Applications/Visual Studio Code.app/lib.es5.d.ts",
+            "/Users/zoë/My Projects/a#1 (copy)%.rs",
+            "C:/Users/A B/src/main.rs",
+        ] {
+            let uri = file_path_to_uri(path).expect(path);
+            assert!(!uri.as_str().contains(' '), "{}", uri.as_str());
+            assert_eq!(uri_to_file_path(&uri).as_deref(), Some(path));
+        }
+    }
 
     #[test]
     fn document_store_opens_once_changes_on_edit_and_stays_bounded() {

@@ -21,6 +21,11 @@ pub enum EdgeKind {
     Cochange,
     /// Implementation → interface/trait it implements (semantic backend)
     Implements,
+    /// Subtype → supertype it extends (semantic backend, type hierarchy)
+    Extends,
+    /// File → file whose symbols it uses (semantic backend `references`,
+    /// verified on demand by `ctx_impact`)
+    References,
     /// Sibling/orphan rescue edge (fallback connectivity)
     Sibling,
 }
@@ -43,6 +48,8 @@ impl EdgeKind {
             Self::Cochange => "cochange",
             Self::Sibling => "sibling",
             Self::Implements => "implements",
+            Self::Extends => "extends",
+            Self::References => "references",
         }
     }
 
@@ -62,6 +69,8 @@ impl EdgeKind {
             "cochange" => Self::Cochange,
             "sibling" => Self::Sibling,
             "implements" => Self::Implements,
+            "extends" => Self::Extends,
+            "references" => Self::References,
             _ => Self::Imports,
         }
     }

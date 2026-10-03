@@ -2,6 +2,11 @@
 //! Synchronous (`ureq`) — matches the synchronous `McpTool::handle` path and does
 //! not block the Tokio runtime. Phase 1 implements references/definition/
 //! implementations; rename + the degrading ops follow in later phases.
+//!
+//! The same wire protocol is served by the editor extension's semantic
+//! bridge (VS Code, Cursor, Windsurf — see `lsp::editor_bridge`); such a
+//! backend is built with [`JetBrainsHttpBackend::editor`] and answers the
+//! read-only navigation endpoints only.
 
 use std::time::Duration;
 
@@ -15,6 +20,15 @@ use crate::lsp::backend::{
 use crate::lsp::client::file_path_to_uri;
 
 const REQUEST_TIMEOUT_SECS: u64 = 30;
+
+/// Who serves the HTTP protocol.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Flavor {
+    /// The JetBrains plugin: full PSI feature set, port file per project.
+    JetBrains,
+    /// An editor extension's semantic bridge: navigation only.
+    Editor { name: String, version: String },
+}
 
 pub struct JetBrainsHttpBackend {
     base_url: String,
@@ -30,6 +44,7 @@ pub struct JetBrainsHttpBackend {
     last_meta: Option<crate::lsp::backend::Truncation>,
     /// Per-request HTTP timeout; see `LspBackend::set_request_timeout`.
     request_timeout: Duration,
+    flavor: Flavor,
 }
 
 impl JetBrainsHttpBackend {
@@ -63,6 +78,26 @@ impl JetBrainsHttpBackend {
             port,
             last_meta: None,
             request_timeout: Duration::from_secs(REQUEST_TIMEOUT_SECS),
+            flavor: Flavor::JetBrains,
+        }
+    }
+
+    /// A backend for an editor extension's semantic bridge (`name` =
+    /// `vscode`, `cursor`, …; `version` = the editor's version).
+    pub fn editor(
+        port: u16,
+        token: String,
+        project_root: &str,
+        pid: u32,
+        name: &str,
+        version: &str,
+    ) -> Self {
+        Self {
+            flavor: Flavor::Editor {
+                name: name.to_string(),
+                version: version.to_string(),
+            },
+            ..Self::new(port, token, project_root.to_string(), pid)
         }
     }
 
@@ -92,9 +127,19 @@ impl JetBrainsHttpBackend {
         serde_json::from_str(&text).map_err(|e| format!("JetBrains backend: parse response: {e}"))
     }
 
-    /// Project-relative path → absolute file URI (Rust rejoins, spec §6).
+    /// Wire path → absolute file URI (spec §6): project-relative paths are
+    /// rejoined onto the root; paths outside the project (libraries, SDKs)
+    /// already arrive absolute and must stay as they are, so a definition in
+    /// a dependency reads as external rather than vanishing.
     fn rel_to_uri(&self, rel: &str) -> Option<Uri> {
-        let abs = format!("{}/{}", self.project_root, rel);
+        let is_absolute = std::path::Path::new(rel).is_absolute()
+            || rel.starts_with('/')
+            || rel.as_bytes().get(1) == Some(&b':');
+        let abs = if is_absolute {
+            rel.to_string()
+        } else {
+            format!("{}/{}", self.project_root, rel)
+        };
         file_path_to_uri(&abs).ok()
     }
 
@@ -787,6 +832,24 @@ impl LspBackend for JetBrainsHttpBackend {
         use crate::lsp::capabilities::{
             SemanticBackendInfo, SemanticBackendKind, SemanticCapabilities,
         };
+        if let Flavor::Editor { name, version } = &self.flavor {
+            return SemanticBackendInfo {
+                kind: SemanticBackendKind::Editor,
+                server_name: Some(name.clone()),
+                server_version: Some(crate::lsp::capabilities::compact_server_version(version)),
+                // What the bridge serves from the editor's language features.
+                capabilities: SemanticCapabilities {
+                    definition: true,
+                    declaration: true,
+                    references: true,
+                    implementations: true,
+                    type_hierarchy: true,
+                    ..SemanticCapabilities::default()
+                },
+                // Editor positions are UTF-16 code units.
+                utf8_positions: false,
+            };
+        }
         SemanticBackendInfo {
             kind: SemanticBackendKind::JetBrains,
             server_name: Some("jetbrains".to_string()),
@@ -878,7 +941,9 @@ mod tests {
 
     #[test]
     fn references_parses_wire_locations() {
-        let body = r#"{"locations":[{"path":"src/main.rs","range":{"start":{"line":5,"character":13},"end":{"line":5,"character":18}}}]}"#;
+        // The second location lies outside the project (a library): the IDE
+        // reports it absolute, and it must stay that path, not be rejoined.
+        let body = r#"{"locations":[{"path":"src/main.rs","range":{"start":{"line":5,"character":13},"end":{"line":5,"character":18}}},{"path":"/opt/sdk/lib.rs","range":{"start":{"line":1,"character":0},"end":{"line":1,"character":3}}}]}"#;
         let port = mock_once(body);
         let mut backend = JetBrainsHttpBackend::new(
             port,
@@ -897,10 +962,11 @@ mod tests {
                 "project",
             )
             .expect("should parse");
-        assert_eq!(locs.len(), 1);
+        assert_eq!(locs.len(), 2);
         assert_eq!(locs[0].range.start.line, 5);
         assert_eq!(locs[0].range.start.character, 13);
         assert!(locs[0].uri.as_str().ends_with("/proj/src/main.rs"));
+        assert_eq!(locs[1].uri.as_str(), "file:///opt/sdk/lib.rs");
     }
 
     #[test]

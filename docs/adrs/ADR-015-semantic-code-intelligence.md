@@ -109,8 +109,9 @@ In `auto` the graph build usually runs in the daemon, while the live server
 lives in the MCP process that `ctx_refactor` started it in. So the router
 itself schedules a background pass whenever a backend is used in a process:
 at most one per project every 5 minutes, only for a current graph (otherwise
-retried on a use 30 s later), and only after the call using the server has
-released it.
+retried on a use 30 s later), and only once the server is free and no tool
+call has run in that process for 5 s — measured on a 2.4k-file crate, a pass
+running alongside a tool call slowed it from ~3 s to ~30 s.
 
 ### 6. One backend per (project root, language)
 
@@ -139,13 +140,60 @@ package's bin entry>`, as the shim would. Doctor and the coverage surfaces
 report the same resolution, including a binary configured as
 `[lsp] <language> = "<path>"`.
 
-### 7. `implements` edges
+### 7. Symbol relations: `implements`, `extends`, `references`
 
-For each trait/interface the backend's `textDocument/implementation` yields
-`implementor file → declaring file` edges (verified, budget-bounded, cached).
-`references` and type-hierarchy edges are deliberately not stored: they would
-duplicate import/type-ref connectivity at a large storage cost without a
-consumer that needs them.
+One generic pass (`core/semantic/relations.rs`) asks the backend about each
+indexed symbol of the relevant kinds and lifts the answers to verified file
+edges — budget-bounded, cached per site and project revision, pruned only
+for declaring files whose every symbol got a definitive answer:
+
+| Edge | Asked for | Backend request | When |
+|---|---|---|---|
+| `implements` (implementor → declaring file) | traits, interfaces | `textDocument/implementation` | background pass |
+| `extends` (subtype → supertype file) | classes, structs, interfaces, traits | `prepareTypeHierarchy` + `typeHierarchy/supertypes` | background pass, where the backend offers a type hierarchy |
+| `references` (user → declaring file) | every definition in one file | `textDocument/references` | on demand, for the file `ctx_impact` analyses |
+
+A class's supertypes include the interfaces it implements; such a pair keeps
+only the more specific `implements` edge. `references` costs one request per
+symbol, so it runs where the question is exactly "who uses this?" — impact
+analysis — rather than for the whole repository; its verified edges then
+serve ranking and later analyses too. An empty or missing answer is never
+definitive (a cold server reports nothing); a type hierarchy answer with a
+type but no supertypes is.
+
+### 8. Editor bridge (VS Code, Cursor, Windsurf)
+
+The lean-ctx editor extension serves the JetBrains plugin's loopback HTTP
+protocol — its read-only navigation subset (`/health`, `/definition`,
+`/declaration`, `/references`, `/implementations`, `/type_hierarchy`) — from
+the editor's own language features, so whatever language extensions a user
+has installed answer, and lean-ctx reuses one client for both. Each
+workspace folder gets its own server on `127.0.0.1:0` behind a random
+per-window token, announced by an owner-only JSON file in
+`<data dir>/editor-bridges` (`lean-ctx editor-bridge dir`; the extension
+asks the binary instead of re-deriving the data-dir layouts). lean-ctx
+matches a bridge by its `project_root`, canonicalized on the Rust side,
+rather than a hash both languages would have to compute identically.
+
+A bridge answers only when the router has no backend running for the
+language and no JetBrains IDE is attached; it never displaces a live server
+and never starts anything. It is not a router backend, so `ctx_refactor`
+edits never go to it. Requests are confined to the workspace folder — after
+resolving symlinks and junctions; locations outside it travel as absolute
+paths and read as external.
+
+An announcement names an endpoint lean-ctx will trust, so both sides refuse
+one another local user could have planted: the directory and each file must
+belong to the current user and be writable by nobody else, and an
+announcement must not be a symlink; the extension writes through an
+exclusively created random temp file. `/health` must answer with the
+announced editor, not merely any 2xx. The backend identity — the key of
+cached answers — is the editor version plus a digest of the installed
+extensions, so updating a language extension retires its cached answers.
+
+A capped answer (`truncated` — an IDE limits large result sets) is never
+complete: its files become edges, but it is not cached, settles nothing and
+prunes nothing.
 
 ## Consequences
 
@@ -153,8 +201,12 @@ consumer that needs them.
   with one. Ranking counts a relationship once per kind at its strongest
   evidence instead of summing file- and symbol-level duplicates.
 - Background cost is zero unless a backend is live (`auto`) and otherwise
-  bounded per run (200 definition lookups / 20 s, 100 implementation lookups /
-  10 s).
+  bounded per run (1000 definition lookups / 60 s — measured ~65 ms per warm
+  rust-analyzer lookup on a 2.4k-file crate — and 100 lookups / 10 s each for
+  `implements` and `extends`). A budget-limited run asks one site of every
+  `(caller file, structural target)` group before a second site of any, and
+  guessed edges before ambiguous ones, so each pass decides as many file
+  edges as it can; answers accumulate in the cache across passes.
 - `ctx_graph status` and `ctx_graph enrich` report verified / resolved /
   heuristic counts; `lean-ctx doctor` reports the mode and which servers can
   actually run (a rustup proxy without the component no longer counts).
@@ -171,30 +223,39 @@ consumer that needs them.
 
 `core::semantic::e2e_tests` (ignored; needs the servers installed) builds a
 fixture per language with an ambiguous call (two same-named methods), a
-decoy (a library call whose name also exists in the project) and, where the
-language has them, an interface with two implementors. It asserts the
+decoy (a library call whose name also exists in the project), an interface
+with two implementors and — in TypeScript — a subclass. It asserts the
 ambiguous call is verified to the right file, the decoy is vetoed, no false
-edge is written, and a second pass is answered entirely from the cache.
+edge is written, a second pass is answered entirely from the cache,
+`references` names the caller as a user of the target's file but not of the
+decoy's, and `extends` names exactly the supertypes where the backend offers
+a type hierarchy. The editor rows run a real editor window with the
+extension; lean-ctx starts nothing (`auto`).
 
-Measured on 2026-10-02 (Apple Silicon, macOS; small fixtures, so the cold
-time is server start plus first indexing, not a large-repository figure):
+Measured on 2026-10-03 (Apple Silicon, macOS; small fixtures, so the cold
+time is backend start plus first indexing, not a large-repository figure):
 
-| Language | Server | Ambiguous call | Decoy vetoed | `implements` | False edges | Cold | Warm / query | Cached pass | Server RSS |
-|---|---|---|---|---|---|---|---|---|---|
-| Rust | rust-analyzer 1.97.1 | verified | yes | yes | 0 | 4.9 s | 1.5 ms | 0.3 ms | 420 MiB |
-| TypeScript 7 | `tsc --lsp` (typescript-go 7.0.2) | verified | yes | yes | 0 | 0.27 s | 1.5 ms | 0.1 ms | 92 MiB |
-| TypeScript 5 | typescript-language-server + project TS 5.9.3 | verified | yes | yes | 0 | 2.0 s | 6.4 ms | 0.3 ms | 448 MiB |
-| Python | pylsp 1.15.0 | verified | yes | n/a | 0 | 2.4 s | 1.4 ms | 0.1 ms | 212 MiB |
-| Go | gopls v0.23.0 | verified | yes | yes | 0 | 0.4 s | 1.1 ms | 0.1 ms | 186 MiB |
+| Language | Backend | Ambiguous call | Decoy vetoed | `implements` | `references` | `extends` | False edges | Cold | Warm / query | Cached pass | RSS |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Rust | rust-analyzer 1.97.1 | verified | yes | yes | yes | no type hierarchy | 0 | 2.4 s | 1.0 ms | 0.1 ms | 592 MiB |
+| TypeScript 7 | `tsc --lsp` (typescript-go 7.0.2) | verified | yes | yes | yes | no type hierarchy | 0 | 0.16 s | 0.3 ms | 0.1 ms | 49 MiB |
+| TypeScript 5 | typescript-language-server + project TS 5.9.3 | verified | yes | yes | yes | no type hierarchy | 0 | 1.0 s | 0.8 ms | 0.1 ms | 134 MiB |
+| Python | pylsp 1.15.0 | verified | yes | n/a | yes | n/a | 0 | 2.3 s | 1.2 ms | 0.1 ms | 212 MiB |
+| Go | gopls v0.23.0 | verified | yes | yes | yes | yes | 0 | 0.35 s | 0.3 ms | 0.6 ms | 187 MiB |
+| TypeScript | VS Code 1.140.0 editor bridge | verified | yes | yes | yes | no type hierarchy | 0 | 1.3 s | 11.4 ms | 0.3 ms | n/a |
+| TypeScript | Cursor 1.128.0 editor bridge | verified | yes | yes | yes | no type hierarchy | 0 | 3.4 s | 7.3 ms | 0.3 ms | n/a |
 
 "Cached pass" answers every question from `semantic_resolutions` without a
-server request. RSS is the server process tree. The JetBrains path is
-covered by a non-ignored test against a local fake bridge (port file,
-`/health`, `/definition`), since no IDE runs in CI.
+backend request. RSS is the server process tree (an editor is not a child of
+the test). "No type hierarchy": the backend offers none for the language —
+reported, not failed. The JetBrains path and the Rust side of the editor
+bridge are covered by non-ignored tests against a local fake bridge (port
+file / announcement, `/health`, `/definition`), since no IDE runs in CI; the
+extension's server, confinement and announcement logic by its own tests.
 
 ## Not built
 
 No bundled or auto-installed language servers, no external or LLM-based
 resolution, no separate semantic graph, no synchronous whole-repo semantic
-indexing at startup, no editor bridge (VS Code/Cursor) — the last is a
-separate decision once the core has proven itself.
+indexing at startup, no whole-repository `references` pass (see §7), and no
+edits through the editor bridge (navigation only, §8).

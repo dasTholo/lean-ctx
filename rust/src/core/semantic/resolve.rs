@@ -133,14 +133,42 @@ impl Access {
     }
 }
 
-/// Identity of the backend already cached for `file`'s language — a pure
-/// registry peek (see [`router::live_identity`]). Used to retire cached
-/// answers produced by a different server or server version.
+/// Identity of the backend that answers for `file`'s language — a registry
+/// peek (see [`router::live_identity`]), else an editor bridge announced for
+/// the project. Used to retire cached answers produced by a different server
+/// or server version.
 pub fn live_backend_identity(project_root: &str, file: &str) -> router::LiveIdentity {
-    router::live_identity(
+    let live = router::live_identity(
         &Path::new(project_root).join(file).to_string_lossy(),
         project_root,
-    )
+    );
+    if live == router::LiveIdentity::NotRunning
+        && let Some(bridge) = editor_bridge_for(project_root)
+    {
+        return router::LiveIdentity::Known(bridge.identity(project_root));
+    }
+    live
+}
+
+/// The editor bridge that answers for `project_root` when the router has no
+/// backend to offer: no JetBrains IDE attached (it would take precedence),
+/// and an editor announced a live bridge for exactly this project.
+fn editor_bridge_for(project_root: &str) -> Option<crate::lsp::editor_bridge::BridgeFile> {
+    if crate::lsp::port_discovery::read_port_file(project_root).is_some() {
+        return None;
+    }
+    crate::lsp::editor_bridge::discover(project_root)
+}
+
+/// Whether a semantic question for `file` can get an answer without
+/// starting anything — or may start a server (`eager`). Lets on-demand
+/// callers skip the work of preparing a query that would only fail.
+pub fn backend_may_answer(project_root: &str, file: &str, policy: StartPolicy) -> bool {
+    use crate::lsp::port_discovery::{health_ok, pid_alive, read_port_file};
+    policy == StartPolicy::Lazy
+        // A port file an IDE crash left behind does not count.
+        || read_port_file(project_root).is_some_and(|pf| pid_alive(pf.pid) && health_ok(&pf))
+        || live_backend_identity(project_root, file) != router::LiveIdentity::NotRunning
 }
 
 /// Why a lookup produced no answer.
@@ -158,7 +186,7 @@ pub enum ResolveError {
 /// file to the project, syncs its content, encodes the position for the
 /// backend's negotiated encoding, and classifies failures. `supported` checks
 /// the needed capability; `op` performs the request. Returns the backend
-/// identity with the result.
+/// identity with the result, and whether the backend capped (truncated) it.
 fn query_at<T>(
     project_root: &str,
     file: &str,
@@ -166,7 +194,7 @@ fn query_at<T>(
     access: Access,
     supported: impl FnOnce(&SemanticCapabilities) -> bool,
     op: impl FnOnce(&mut dyn LspBackend, &Uri, Position) -> Result<T, String>,
-) -> Result<(String, T), ResolveError> {
+) -> Result<(String, T, bool), ResolveError> {
     let abs = Path::new(project_root).join(file);
     let abs_str = abs.to_string_lossy().to_string();
     if project_key(&abs_str, project_root).is_none() {
@@ -183,42 +211,65 @@ fn query_at<T>(
         return Err(ResolveError::Site("semantic budget exhausted".into()));
     }
 
-    // Set once the router handed us a backend: an error before that point is
+    // Set once a backend was handed to us: an error before that point is
     // about backend availability, not about this site.
     let mut reached = false;
     let mut unsupported = false;
-    let result = router::with_backend_opts(
-        &abs_str,
-        project_root,
-        access.policy,
-        router::BackendOpts {
-            wait: access.wait,
-            start_timeout: access.remaining(),
-        },
-        |b, lang| {
-            reached = true;
-            let info = b.backend_info();
-            if !supported(&info.capabilities) {
-                unsupported = true;
-                return Err(format!("{} lacks the required capability", info.identity()));
+    let run = |b: &mut dyn LspBackend, lang: &str| {
+        reached = true;
+        let info = b.backend_info();
+        if !supported(&info.capabilities) {
+            unsupported = true;
+            return Err(format!("{} lacks the required capability", info.identity()));
+        }
+        // Recomputed after a possible start-up, which consumed budget too.
+        let timeout = access.request_timeout();
+        if timeout.is_some_and(|t| t.is_zero()) {
+            return Err("semantic budget exhausted during start-up".into());
+        }
+        let uri: Uri = file_path_to_uri(&abs_str)?;
+        b.open_file(&uri, lang, &content)?;
+        let position = Position {
+            line: u32::try_from(pos.0.saturating_sub(1)).unwrap_or(u32::MAX),
+            character: encode_column(line_text, pos.1, info.utf8_positions),
+        };
+        b.set_request_timeout(timeout);
+        let answer = op(b, &uri, position);
+        b.set_request_timeout(None);
+        let truncated = b.last_truncation().is_some_and(|t| t.truncated);
+        Ok((info.identity(), answer?, truncated))
+    };
+    // An editor bridge answers only when the router has nothing running for
+    // this language; it never displaces a live server or IDE.
+    let bridge = (router::live_identity(&abs_str, project_root)
+        == router::LiveIdentity::NotRunning)
+        .then(|| editor_bridge_for(project_root))
+        .flatten();
+    let result = match bridge {
+        Some(bridge) => {
+            let lang = Path::new(file)
+                .extension()
+                .and_then(|e| e.to_str())
+                .and_then(crate::lsp::config::language_for_extension)
+                .unwrap_or("");
+            let result = run(&mut bridge.backend(project_root), lang);
+            if result.is_err() {
+                // The editor may have closed: rediscover next time.
+                crate::lsp::editor_bridge::forget(project_root);
             }
-            // Recomputed after a possible start-up, which consumed budget too.
-            let timeout = access.request_timeout();
-            if timeout.is_some_and(|t| t.is_zero()) {
-                return Err("semantic budget exhausted during start-up".into());
-            }
-            let uri: Uri = file_path_to_uri(&abs_str)?;
-            b.open_file(&uri, lang, &content)?;
-            let position = Position {
-                line: u32::try_from(pos.0.saturating_sub(1)).unwrap_or(u32::MAX),
-                character: encode_column(line_text, pos.1, info.utf8_positions),
-            };
-            b.set_request_timeout(timeout);
-            let answer = op(b, &uri, position);
-            b.set_request_timeout(None);
-            Ok((info.identity(), answer?))
-        },
-    );
+            result
+        }
+        None => router::with_backend_opts(
+            &abs_str,
+            project_root,
+            access.policy,
+            router::BackendOpts {
+                wait: access.wait,
+                start_timeout: access.remaining(),
+            },
+            run,
+        ),
+    };
     result.map_err(|e| {
         if reached && !unsupported {
             ResolveError::Site(e)
@@ -237,7 +288,7 @@ pub fn resolve_definition(
     access: Access,
     inputs: &CallGraphInputs,
 ) -> Result<SemanticAnswer, ResolveError> {
-    let (backend, resp) = query_at(
+    let (backend, resp, _) = query_at(
         project_root,
         caller_file,
         pos,
@@ -251,16 +302,27 @@ pub fn resolve_definition(
     })
 }
 
+/// A relation answer: the related indexed files (the asking file excluded,
+/// sorted, deduplicated), and whether the answer is complete. Only a
+/// complete answer may be cached and may settle the asking file — a capped
+/// list, or nothing from a server still indexing, may not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelatedFiles {
+    pub files: Vec<String>,
+    pub definitive: bool,
+}
+
 /// Indexed project files implementing the trait/interface declared at `pos`
-/// in `file` (excluding `file` itself), sorted and deduplicated.
+/// in `file`. An empty answer is not definitive: a cold server reports none
+/// while it indexes.
 pub fn resolve_implementations(
     project_root: &str,
     file: &str,
     pos: (usize, usize),
     access: Access,
     inputs: &CallGraphInputs,
-) -> Result<(String, Vec<String>), ResolveError> {
-    let (backend, locs) = query_at(
+) -> Result<(String, RelatedFiles), ResolveError> {
+    let (backend, locs, truncated) = query_at(
         project_root,
         file,
         pos,
@@ -268,25 +330,102 @@ pub fn resolve_implementations(
         |c| c.implementations,
         |b, uri, p| b.implementations(uri, p, "project"),
     )?;
-    let mut files: Vec<String> = locs
-        .iter()
-        .filter_map(|l| indexed_key(&l.uri, project_root, inputs))
-        .filter(|f| f != file)
-        .collect();
-    files.sort();
-    files.dedup();
-    Ok((backend, files))
+    let files = other_indexed(
+        locs.iter()
+            .map(|l| indexed_key(&l.uri, project_root, inputs)),
+        file,
+    );
+    let definitive = !truncated && !files.is_empty();
+    Ok((backend, RelatedFiles { files, definitive }))
 }
 
 /// Index spelling of the project file behind `uri`, if it is indexed.
 fn indexed_key(uri: &Uri, project_root: &str, inputs: &CallGraphInputs) -> Option<String> {
     let path = uri_to_file_path(uri)?;
-    let key = project_key(&path, project_root)?.replace('\\', "/");
+    indexed_path(&path, project_root, inputs)
+}
+
+/// Index spelling of `path` — absolute, or relative to the project root as
+/// IDE bridges report it — if it is an indexed project file.
+fn indexed_path(path: &str, project_root: &str, inputs: &CallGraphInputs) -> Option<String> {
+    let absolute = if Path::new(path).is_absolute() {
+        path.to_string()
+    } else {
+        Path::new(project_root)
+            .join(path)
+            .to_string_lossy()
+            .to_string()
+    };
+    let key = project_key(&absolute, project_root)?.replace('\\', "/");
     inputs
         .file_paths
         .iter()
         .find(|f| f.replace('\\', "/") == key)
         .cloned()
+}
+
+/// Sorted, deduplicated indexed files other than `file`.
+fn other_indexed(paths: impl Iterator<Item = Option<String>>, file: &str) -> Vec<String> {
+    let set: std::collections::BTreeSet<String> = paths.flatten().filter(|f| f != file).collect();
+    set.into_iter().collect()
+}
+
+/// Indexed project files declaring a direct supertype of the type declared
+/// at `pos` in `file`. Not definitive when the backend could not place a
+/// type there (a cold or still-indexing server) or capped the tree; a type
+/// with no supertypes in the project is a definitive empty answer.
+pub fn resolve_supertypes(
+    project_root: &str,
+    file: &str,
+    pos: (usize, usize),
+    access: Access,
+    inputs: &CallGraphInputs,
+) -> Result<(String, RelatedFiles), ResolveError> {
+    let (backend, node, truncated) = query_at(
+        project_root,
+        file,
+        pos,
+        access,
+        |c| c.type_hierarchy,
+        |b, uri, p| b.type_hierarchy(uri, p, crate::lsp::backend::HierarchyDirection::Supertypes),
+    )?;
+    let files = other_indexed(
+        node.children
+            .iter()
+            .map(|c| indexed_path(&c.path, project_root, inputs)),
+        file,
+    );
+    let definitive = !truncated && !node.name.is_empty();
+    Ok((backend, RelatedFiles { files, definitive }))
+}
+
+/// Indexed project files that reference the symbol declared at `pos` in
+/// `file` (its own file excluded). The answer includes the declaration
+/// itself, so an empty one means the server had nothing yet; an answer
+/// naming only `file` is definitive: nothing else uses the symbol. A capped
+/// list is never definitive.
+pub fn resolve_references(
+    project_root: &str,
+    file: &str,
+    pos: (usize, usize),
+    access: Access,
+    inputs: &CallGraphInputs,
+) -> Result<(String, RelatedFiles), ResolveError> {
+    let (backend, locs, truncated) = query_at(
+        project_root,
+        file,
+        pos,
+        access,
+        |c| c.references,
+        |b, uri, p| b.references(uri, p, "project"),
+    )?;
+    let definitive = !truncated && !locs.is_empty();
+    let files = other_indexed(
+        locs.iter()
+            .map(|l| indexed_key(&l.uri, project_root, inputs)),
+        file,
+    );
+    Ok((backend, RelatedFiles { files, definitive }))
 }
 
 #[cfg(test)]

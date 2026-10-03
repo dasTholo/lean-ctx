@@ -397,6 +397,48 @@ pub(crate) fn refresh_semantic_edges_in_background(project_root: &str) {
     }
 }
 
+/// How long no tool call may have run before a backend-triggered pass starts.
+const IDLE_BEFORE_REFRESH: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Tool calls in flight in this process, and when the last one ended — so
+/// background semantic passes run in the agent's pauses, not alongside its
+/// calls. Lock-free: two atomics.
+pub(crate) struct ToolActivity;
+
+static IN_FLIGHT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+/// Milliseconds since `ACTIVITY_EPOCH` at the last call's end.
+static LAST_END_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static ACTIVITY_EPOCH: std::sync::LazyLock<std::time::Instant> =
+    std::sync::LazyLock::new(std::time::Instant::now);
+
+/// Ends one tool call on drop (also on panic or early return).
+pub(crate) struct ToolActivityGuard;
+
+impl ToolActivity {
+    pub(crate) fn begin() -> ToolActivityGuard {
+        IN_FLIGHT.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        ToolActivityGuard
+    }
+
+    /// No call in flight, and none ended within `quiet`.
+    fn quiet_for(quiet: std::time::Duration) -> bool {
+        use std::sync::atomic::Ordering;
+        let now = u64::try_from(ACTIVITY_EPOCH.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let quiet_ms = u64::try_from(quiet.as_millis()).unwrap_or(u64::MAX);
+        IN_FLIGHT.load(Ordering::Acquire) == 0
+            && now.saturating_sub(LAST_END_MS.load(Ordering::Acquire)) >= quiet_ms
+    }
+}
+
+impl Drop for ToolActivityGuard {
+    fn drop(&mut self) {
+        use std::sync::atomic::Ordering;
+        let now = u64::try_from(ACTIVITY_EPOCH.elapsed().as_millis()).unwrap_or(u64::MAX);
+        LAST_END_MS.store(now, Ordering::Release);
+        IN_FLIGHT.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 /// Minimum spacing of backend-triggered refreshes per project: a burst of
 /// `ctx_refactor` calls warming several languages yields one pass.
 const BACKEND_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_mins(5);
@@ -449,7 +491,11 @@ pub(crate) fn schedule_semantic_refresh(project_root: &str) {
             let give_up = Instant::now() + Duration::from_mins(2);
             loop {
                 std::thread::sleep(Duration::from_secs(2));
-                if !crate::lsp::router::backend_busy(&root) {
+                // Never compete with the agent: the pass reads every indexed
+                // file and keeps the server busy for up to a minute.
+                if !crate::lsp::router::backend_busy(&root)
+                    && ToolActivity::quiet_for(IDLE_BEFORE_REFRESH)
+                {
                     break;
                 }
                 if Instant::now() > give_up {
@@ -473,12 +519,23 @@ pub(crate) fn schedule_semantic_refresh(project_root: &str) {
 
 fn consolidate_callgraph(graph: &CodeGraph, project_root: &str) -> anyhow::Result<EnrichmentStats> {
     use crate::core::call_graph::{CallGraph, CallGraphInputs, resolve_edge_callee_targets};
-    use crate::core::semantic::{escalate_calls, implementations::resolve_implements_edges};
+    use crate::core::semantic::escalate_calls;
+    use crate::core::semantic::relations::{Relation, RelationBudget, resolve_relation_edges};
 
+    let started = std::time::Instant::now();
     let inputs = CallGraphInputs::open(project_root);
     let call_graph = CallGraph::load_or_build(project_root, &inputs);
     let structural = resolve_edge_callee_targets(&inputs, &call_graph.edges);
+    tracing::debug!(
+        target: "lean_ctx::semantic",
+        "consolidate: call graph of {} files, {} edges ready in {} ms",
+        call_graph.file_hashes.len(),
+        call_graph.edges.len(),
+        started.elapsed().as_millis()
+    );
     let mode = crate::core::config::SemanticMode::for_project(project_root);
+    // Cache maintenance belongs here, off every interactive path.
+    let _ = graph.semantic_prune(&call_graph.file_hashes);
     let escalation = escalate_calls(
         graph,
         project_root,
@@ -492,9 +549,43 @@ fn consolidate_callgraph(graph: &CodeGraph, project_root: &str) -> anyhow::Resul
     let mut stats = consolidate_call_edges(graph, &call_graph.edges, &structural, &escalation)?;
     stats.semantic = escalation.stats;
 
-    let implements =
-        resolve_implements_edges(graph, project_root, &inputs, &call_graph.file_hashes, mode);
-    stats.merge(&apply_implements_edges(graph, &implements)?);
+    let pass = |relation| {
+        resolve_relation_edges(
+            graph,
+            project_root,
+            &inputs,
+            &call_graph.file_hashes,
+            mode,
+            relation,
+            None,
+            RelationBudget::BACKGROUND,
+        )
+    };
+    let implements = pass(Relation::Implements);
+    stats.merge(&apply_relation_edges(
+        graph,
+        Relation::Implements,
+        &implements,
+        |_, _| false,
+    )?);
+    // A class's supertypes include the interfaces it implements: keep one
+    // edge per file pair, the more specific `implements`.
+    let implemented: std::collections::BTreeSet<(&str, &str)> = implements
+        .edges
+        .iter()
+        .map(|e| (e.from.as_str(), e.to.as_str()))
+        .collect();
+    stats.merge(&apply_relation_edges(
+        graph,
+        Relation::Extends,
+        &pass(Relation::Extends),
+        |from, to| implemented.contains(&(from, to)),
+    )?);
+    tracing::debug!(
+        target: "lean_ctx::semantic",
+        "consolidate: done in {} ms",
+        started.elapsed().as_millis()
+    );
     Ok(stats)
 }
 
@@ -581,35 +672,35 @@ fn consolidate_call_edges(
     Ok(stats)
 }
 
-/// Writes `implements` edges and withdraws the ones this producer no longer
-/// derives — for settled declaring files only.
-fn apply_implements_edges(
+/// Writes a relation pass's edges (except those `skip` rejects) and
+/// withdraws the ones this producer no longer derives — for settled
+/// declaring files only.
+pub(crate) fn apply_relation_edges(
     graph: &CodeGraph,
-    pass: &crate::core::semantic::implementations::ImplementsPass,
+    relation: crate::core::semantic::relations::Relation,
+    pass: &crate::core::semantic::relations::RelationPass,
+    skip: impl Fn(&str, &str) -> bool,
 ) -> anyhow::Result<EnrichmentStats> {
+    let kind = relation.edge_kind();
     let mut stats = EnrichmentStats::default();
-    for e in &pass.edges {
+    let mut live: std::collections::BTreeSet<(&str, &str)> = std::collections::BTreeSet::new();
+    for e in pass.edges.iter().filter(|e| !skip(&e.from, &e.to)) {
         let evidence = EdgeEvidence::new(
             EvidenceGrade::VerifiedSemantic,
             EvidenceOrigin::Enrichment,
             Some(e.backend.clone()),
             1,
         );
-        if let (Some(from_id), Some(to_id)) = (
-            file_node_id(graph, &e.impl_file)?,
-            file_node_id(graph, &e.abstract_file)?,
-        ) {
-            graph.upsert_edge_with_evidence(from_id, to_id, &EdgeKind::Implements, &evidence)?;
+        if let (Some(from_id), Some(to_id)) =
+            (file_node_id(graph, &e.from)?, file_node_id(graph, &e.to)?)
+        {
+            graph.upsert_edge_with_evidence(from_id, to_id, &kind, &evidence)?;
             stats.edges_created += 1;
         }
+        live.insert((e.from.as_str(), e.to.as_str()));
     }
-    let live: std::collections::BTreeSet<(&str, &str)> = pass
-        .edges
-        .iter()
-        .map(|e| (e.impl_file.as_str(), e.abstract_file.as_str()))
-        .collect();
-    withdraw_own_file_edges(graph, &EdgeKind::Implements, |s, t| {
-        live.contains(&(s, t)) || !pass.settled.contains(t)
+    withdraw_own_file_edges(graph, &kind, |s, t| {
+        live.contains(&(s, t)) || !pass.may_prune(relation, s, t)
     })?;
     Ok(stats)
 }

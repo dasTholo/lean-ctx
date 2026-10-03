@@ -153,6 +153,7 @@ All `std::sync::Mutex` unless noted otherwise.
 | L116 | `FOLDED` | `core/telemetry_aggregate.rs:600` | `OnceLock<Mutex<HashMap<PathBuf, CounterCheckpoint>>>` | Per-process tool counters already folded into each telemetry one-shot sidecar; taken under the one-shot OS file lock but never nested with another Rust static lock, guard dropped before any I/O |
 | L117 | `NEXT` | `core/graph_enricher.rs:419` | `LazyLock<Mutex<HashMap<String, Instant>>>` | Earliest next backend-triggered semantic refresh per project root (`schedule_semantic_refresh`). Leaf lock: taken briefly under a router backend *slot* lock (never under L22 `BACKENDS`) and in the refresh worker; never held across I/O, thread spawn or another lock |
 | L118 | `CACHE` | `core/semantic/coverage.rs:101` | `LazyLock<Mutex<HashMap<(String, String), (Option<String>, Instant)>>>` | Per (language, project root) language-server availability for status surfaces (60 s TTL). Leaf lock: released before server resolution (config load, `PATH` probe) and re-taken only to store the answer |
+| L119 | `DISCOVERED` | `lsp/editor_bridge.rs:204` | `LazyLock<Mutex<HashMap<PathBuf, (Option<BridgeFile>, Instant)>>>` | Editor semantic-bridge discovery per canonical project root (10 s TTL). Leaf lock: released before the directory scan and `/health` ping, re-taken only to store or drop an answer |
 
 ### Test / Environment Locks (serialise env-var mutations)
 

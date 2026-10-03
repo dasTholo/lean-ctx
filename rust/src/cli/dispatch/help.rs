@@ -331,6 +331,7 @@ INTEGRATION ENTRY POINTS (called by editors and hooks, not by hand):
     editor-signal --file <path>    Report the file an editor has open
     editor-session --event <open|heartbeat|close> --source <editor> --workspace <path> --session-id <id>
                                    Record editor session presence
+    editor-bridge dir              Print the directory an editor's semantic bridge announces itself in
     git-trailer <msg-file> [source]  Add the lean-ctx commit trailer (prepare-commit-msg hook)
 
 RESEARCH & RENAMED:
