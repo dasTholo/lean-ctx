@@ -109,6 +109,8 @@ const LEAN_CTX_HOOK_TEXT_SIGNATURES: readonly LeanCtxHookTextSignature[] = [
   },
 ] as const;
 
+const HOOK_CONTEXT_FRAME = /(?:^|\n)([A-Za-z]+ hook additional context: )$/;
+
 type JsonRecord = Record<string, unknown>;
 type WatchJob = { server: string; id: string; contextSent: boolean; misses: number };
 type JobStatus = { state: "running" | "terminal" | "unknown"; exitCode?: number; archiveId?: string; summary?: string };
@@ -648,9 +650,12 @@ function findLeanCtxHookTextBlock(
 ): LeanCtxHookTextBlock | undefined {
   let start = text.indexOf(signature.start);
   while (start !== -1) {
-    if (start === 0 || text[start - 1] === "\n") {
+    // Claude Code frames hook context as "<Event> hook additional context: "
+    // on the same line; the frame goes with the block it introduces.
+    const frame = start === 0 || text[start - 1] === "\n" ? "" : HOOK_CONTEXT_FRAME.exec(text.slice(0, start))?.[1];
+    if (frame !== undefined) {
       const end = findLeanCtxHookTextEnd(text, start, signature);
-      if (end !== undefined) return { start, end };
+      if (end !== undefined) return { start: start - frame.length, end };
     }
     start = text.indexOf(signature.start, start + 1);
   }
