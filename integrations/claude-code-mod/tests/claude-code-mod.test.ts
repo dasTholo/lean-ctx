@@ -3,6 +3,9 @@ import { expect, mock, test } from "claude-code/testing";
 const SHELL = "mcp__lean-ctx__ctx_shell";
 const WATCH_CONTEXT =
   "This background job is being watched; you will be woken automatically on completion, so do not poll or sleep.";
+const SHARED_HOOK_CONTEXT =
+  "lean-ctx active: ALWAYS use ctx_* MCP tools instead of native equivalents.\n" +
+  "Exclusive tools: ctx_compose, ctx_callgraph, ctx_knowledge, ctx_session.";
 
 function toolResult(text: string) {
   return {
@@ -24,6 +27,45 @@ async function flushMicrotasks() {
 function bashResult(stdout: string, extra: Record<string, unknown> = {}) {
   return { result: { stdout, stderr: "warning: kept", interrupted: false, ...extra }, text: stdout };
 }
+
+test("hook attachments drop only lean-ctx blocks on the main loop and subagents", async ($, on) => {
+  const forwarded: string[] = [];
+  on("prompt.attachment", ($, event) => {
+    forwarded.push(event.text);
+    return { text: event.text };
+  });
+
+  const joined = `Other hook before\n${SHARED_HOOK_CONTEXT}\nSecurity reminder: keep secrets out.`;
+  const subagent = await $.prompt.attachment({
+    type: "hook_context",
+    text: joined,
+    origin: { kind: "hook", event: "SessionStart" },
+    agentId: "sub-1",
+  });
+  expect(subagent).toEqual({ text: "Other hook before\nSecurity reminder: keep secrets out." });
+
+  const mainLoop = await $.prompt.attachment({
+    type: "hook_context",
+    text: SHARED_HOOK_CONTEXT,
+    origin: { kind: "hook", event: "UserPromptSubmit" },
+  });
+  expect(mainLoop).toEqual({ text: null });
+
+  for (const origin of [
+    { kind: "engine" as const },
+    { kind: "plugin" as const, event: "prompt.submit" },
+    { kind: "hook" as const, event: "PostToolUse" },
+  ]) {
+    const untouched = await $.prompt.attachment({ type: "hook_context", text: SHARED_HOOK_CONTEXT, origin });
+    expect(untouched).toEqual({ text: SHARED_HOOK_CONTEXT });
+  }
+
+  expect(forwarded).toEqual([
+    SHARED_HOOK_CONTEXT,
+    SHARED_HOOK_CONTEXT,
+    SHARED_HOOK_CONTEXT,
+  ]);
+});
 
 // Shape, don't redirect: large native Bash stdout is replaced by ctx_shape's
 // shorter answer; everything else (stderr, small output, raw intent, errors,
@@ -401,6 +443,12 @@ test("/leanctx reports per-session request, token, tool, sleep, and wake counts"
   });
 
   await $.session.start({ surface: "terminal", isInteractive: true, cwd: "/work" });
+  const droppedAttachment = await $.prompt.attachment({
+    type: "hook_context",
+    text: SHARED_HOOK_CONTEXT,
+    origin: { kind: "hook", event: "SessionStart" },
+  });
+  expect(droppedAttachment).toEqual({ text: null });
   await $.tool.call({ tool: SHELL, command: "echo work", run_in_background: true });
   await $.tool.call({ tool: "Bash", command: "sleep 1" });
 
@@ -418,6 +466,6 @@ test("/leanctx reports per-session request, token, tool, sleep, and wake counts"
     presentation: { isFullscreen: false, columns: 80 },
   });
   expect(answer.text).toBe(
-    "Requests 1 · input 12 · output 3 · cache read 4 · cache creation 2 · ToolSearch-only 1 · lean-ctx calls 1 · sleeps answered 1 · wakes delivered 1 · Bash outputs shaped 0 (−0 chars) · compactions 0",
+    `Requests 1 · input 12 · output 3 · cache read 4 · cache creation 2 · ToolSearch-only 1 · lean-ctx calls 1 · sleeps answered 1 · wakes delivered 1 · Bash outputs shaped 0 (−0 chars) · hook attachments dropped 1 (−${SHARED_HOOK_CONTEXT.length} chars) · compactions 0`,
   );
 });

@@ -495,6 +495,21 @@ pub fn render(
     level: CompressionLevel,
     tool_profile: &super::tool_profiles::ToolProfile,
 ) -> String {
+    let cfg = crate::core::config::Config::load();
+    render_with_solution(shadow, wrapper, level, tool_profile, &cfg.solution)
+}
+
+/// Render with an explicit solution-efficiency configuration.
+///
+/// The dedicated hook context uses this seam to exercise every rendered
+/// solution variant in its cross-language boundary drift test.
+pub(crate) fn render_with_solution(
+    shadow: bool,
+    wrapper: Wrapper,
+    level: CompressionLevel,
+    tool_profile: &super::tool_profiles::ToolProfile,
+    solution: &super::config::solution::SolutionConfig,
+) -> String {
     use super::rules_sections as rs;
 
     let sections: Vec<String> = match (wrapper, shadow) {
@@ -535,24 +550,19 @@ pub fn render(
         }
     }
 
-    // Solution Intelligence block: inject efficiency ladder when enabled
-    {
-        let cfg = crate::core::config::Config::load();
-        if cfg.solution.enabled {
-            let ladder = cfg.solution.ladder_text();
-            if !ladder.is_empty() {
-                body.push('\n');
-                if matches!(wrapper, Wrapper::Bare) {
-                    body.push_str(ladder);
-                } else {
-                    body.push_str(SOLUTION_BLOCK_START);
-                    body.push('\n');
-                    body.push_str("SOLUTION EFFICIENCY: stop at first level that applies:\n");
-                    body.push_str("skip (YAGNI) → reuse codebase → stdlib → native platform → installed dep → one-line → minimum code.\n");
-                    body.push_str("Never skip: validation, security, error handling.\n");
-                    body.push_str(SOLUTION_BLOCK_END);
-                }
-            }
+    // Solution Intelligence block: inject efficiency ladder when enabled.
+    let ladder = solution.ladder_text();
+    if !ladder.is_empty() {
+        body.push('\n');
+        if matches!(wrapper, Wrapper::Bare) {
+            body.push_str(ladder);
+        } else {
+            body.push_str(SOLUTION_BLOCK_START);
+            body.push('\n');
+            body.push_str("SOLUTION EFFICIENCY: stop at first level that applies:\n");
+            body.push_str("skip (YAGNI) → reuse codebase → stdlib → native platform → installed dep → one-line → minimum code.\n");
+            body.push_str("Never skip: validation, security, error handling.\n");
+            body.push_str(SOLUTION_BLOCK_END);
         }
     }
 
