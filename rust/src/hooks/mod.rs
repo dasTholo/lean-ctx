@@ -961,7 +961,7 @@ pub fn kiro_steering_content() -> String {
         "---\n\
 inclusion: always\n\
 ---\n\n\
-# Context Engineering Layer\n\n\
+# LeanCTX — Context Gateway for AI Systems\n\n\
 {start}\n\
 <!-- version: {version} -->\n\n\
 The workspace has the `lean-ctx` MCP server installed. \

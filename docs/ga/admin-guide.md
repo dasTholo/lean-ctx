@@ -1,10 +1,9 @@
 # Administrator Guide
 
-> **Status: historical operations guide — not an organization-product promise.**
-> Follow only behavior supported by the installed local Runtime. LeanCTX is **The
-> Context SDK for AI Agents**; Cloud, managed/team, SSO, and control-plane
-> surfaces are not current availability. See
-> `docs/internal/README.md` (internal, not in this repository).
+> **Status: Historical / Research.** This retained record is not current
+> onboarding or a release claim. LeanCTX is the **Context Gateway for AI Systems**.
+> See [current positioning](../POSITIONING_CANONICAL.md) and the relevant edition's
+> released contract; older definitions and availability below are historical.
 
 ## Overview
 

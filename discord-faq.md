@@ -1,5 +1,8 @@
 # lean-ctx FAQ
 
+**LeanCTX — Context Gateway for AI Systems. Control what your AI can see.**
+See the [current product definition](docs/POSITIONING_CANONICAL.md).
+
 > **Latest version: 3.10.5** — complete MCP tool set · 16 read modes · 85+ shell patterns
 > Docs: https://leanctx.com/docs/getting-started
 
@@ -50,7 +53,7 @@ for local observations and Shadow Mode for a comparable baseline.
 - **Shell Hook**: Compresses output of regular shell commands (git status, ls, npm test, etc.). Works automatically once installed. No code changes needed.
 - **MCP Server**: Provides specialized `ctx_*` tools (ctx_read, ctx_shell, ctx_search, etc.) that your AI tool calls instead of native file/shell tools. Offers caching, read modes, and intelligence features.
 
-Both work together for maximum savings.
+Both can reduce repeated context on supported integration paths; measure the effect on your own workload.
 
 **Q: What are the 16 read modes?**
 | Mode | Use when... |
@@ -73,7 +76,7 @@ Both work together for maximum savings.
 | `density:X` | Highest-entropy lines until ~X of the tokens remain |
 
 **Q: Does lean-ctx send my code anywhere?**
-No. lean-ctx runs 100% locally. Zero telemetry. Your code never leaves your machine. The only exception is if you explicitly opt into `lean-ctx cloud` for cross-device sync.
+Core context processing runs locally. Configured providers, model requests, update checks, telemetry, and optional services have separate network paths. Your AI client may send prepared context to its model provider. Review the actual configuration and [security documentation](SECURITY.md) for outbound connections, telemetry fields, and opt-outs.
 
 ---
 

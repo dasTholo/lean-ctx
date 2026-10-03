@@ -3,6 +3,10 @@
 All notable changes to lean-ctx are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+Published release entries preserve historical wording and behavior. For current
+product, privacy, and evidence boundaries, use the
+[canonical positioning](docs/POSITIONING_CANONICAL.md) and [security policy](SECURITY.md).
+
 ## [Unreleased]
 
 ### Fixed — hooks no longer re-parse every saved session in projects without one

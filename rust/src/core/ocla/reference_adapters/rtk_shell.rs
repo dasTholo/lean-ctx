@@ -46,6 +46,10 @@ pub struct RtkConfig {
     pub args: Vec<String>,
     /// Maximum duration for the RTK subprocess; zero means no local cap.
     pub timeout_ms: u64,
+    /// Test-only extension for the version-probe deadline under process-heavy test load.
+    #[cfg(test)]
+    #[serde(skip)]
+    pub(crate) test_version_probe_timeout_ms: Option<u64>,
     /// Optional default working directory, overridden by the invocation.
     pub working_dir: Option<PathBuf>,
     /// Exact output of `rtk --version` that must be present in the probe.
@@ -66,6 +70,8 @@ impl Default for RtkConfig {
             executable: PathBuf::from("rtk"),
             args: Vec::new(),
             timeout_ms: 5_000,
+            #[cfg(test)]
+            test_version_probe_timeout_ms: None,
             working_dir: None,
             pinned_version: None,
             pinned_sha256: None,
@@ -97,6 +103,15 @@ impl RtkConfig {
     #[must_use]
     pub const fn with_timeout_ms(mut self, timeout_ms: u64) -> Self {
         self.timeout_ms = timeout_ms;
+        self
+    }
+
+    /// Extend the version-probe deadline only for process-level test fixtures.
+    #[cfg(all(test, unix))]
+    #[must_use]
+    pub(crate) fn with_test_version_probe_timeout_ms(mut self, timeout_ms: u64) -> Self {
+        assert!(timeout_ms > 0, "test version-probe timeout must be bounded");
+        self.test_version_probe_timeout_ms = Some(timeout_ms);
         self
     }
 
@@ -293,6 +308,13 @@ impl RtkShellAdapter {
             Ok(path) => path,
             Err(reason) => return unavailable_health(executable, &reason),
         };
+        #[cfg(test)]
+        let version_probe_timeout_ms = self
+            .config
+            .test_version_probe_timeout_ms
+            .unwrap_or_else(|| bounded_probe_timeout(self.config.timeout_ms));
+        #[cfg(not(test))]
+        let version_probe_timeout_ms = bounded_probe_timeout(self.config.timeout_ms);
         let version_probe = match run_bounded_process(
             &resolved,
             &["--version".to_string()],
@@ -300,7 +322,7 @@ impl RtkShellAdapter {
                 .working_dir
                 .as_deref()
                 .unwrap_or_else(|| Path::new(".")),
-            bounded_probe_timeout(self.config.timeout_ms),
+            version_probe_timeout_ms,
             self.config.max_capture_bytes.min(16 * 1024),
         ) {
             Ok(output) => output,
@@ -976,6 +998,7 @@ fn kill_process_tree(child: &mut Child) {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::path::Path;
 
     use super::{CAPABILITY_ID, CapabilityFailure, RtkConfig, RtkShellAdapter};
     use crate::core::ocla::invocation::{
@@ -993,6 +1016,16 @@ mod tests {
             },
             policy_constraints: PolicyConstraints::default(),
             timeout_ms: 500,
+        }
+    }
+
+    fn invocation_at(command: &str, workdir: &Path) -> CapabilityInvocation {
+        CapabilityInvocation {
+            input: CapabilityInput::ShellCommand {
+                command: command.to_string(),
+                workdir: Some(workdir.to_string_lossy().into_owned()),
+            },
+            ..invocation(command)
         }
     }
 
@@ -1014,9 +1047,12 @@ mod tests {
 
     #[test]
     fn missing_binary_is_evidenced_and_falls_back() {
-        let adapter = RtkShellAdapter::new(RtkConfig::new("definitely-not-installed"));
+        let sandbox_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let adapter = RtkShellAdapter::new(
+            RtkConfig::new("definitely-not-installed").with_sandbox_root(sandbox_root),
+        );
         let result = adapter
-            .invoke_with_fallback(&invocation("printf fallback"))
+            .invoke_with_fallback(&invocation_at("printf fallback", sandbox_root))
             .expect("native fallback");
         assert!(
             result.success,

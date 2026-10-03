@@ -1,13 +1,15 @@
 # lean-ctx for VS Code, Cursor and Windsurf
 
-One quiet status bar item that shows what lean-ctx did in the project you have open:
+Inspect **LeanCTX Engine** activity in the project you have open. The extension
+is part of LeanCTX, the **Context Gateway for AI Systems**.
+**Control what your AI can see.** Its status item reports recorded activity:
 
 ```
 ◆ −1.2M tok ⛨ 3
 ```
 
-- **◆ −1.2M tok**: tokens lean-ctx kept out of your agent's context
-- **⛨ 3**: guards that fired (secrets kept out of context, risky commands blocked, paths outside the project blocked, prompt-injection patterns flagged)
+- **◆ −1.2M tok**: reported context-token reduction
+- **⛨ 3**: recorded guard events, such as redactions, blocked commands or paths, and flagged patterns
 
 Hover the item for the breakdown. Each line is labelled by where its number comes from:
 
@@ -16,11 +18,14 @@ Hover the item for the breakdown. Each line is labelled by where its number come
 
 If you ran `lean-ctx prove speed`, the tooltip also shows the signed A/B result. The extension never shows a speed claim you haven't measured.
 
-## Every number is provable
+## Inspect the recorded evidence
 
 The extension computes nothing. It asks the lean-ctx binary (`lean-ctx prompt-segment --json`), which reads the same snapshot as your shell prompt.
 
-To re-check any number, click the item (or run **lean-ctx: Show proof**). It runs `lean-ctx value`, which recomputes everything from the hash-chained ledger and audit trail and reports `TAMPERED` if anything was edited.
+To inspect a number's source, click the item (or run **lean-ctx: Show proof**).
+It runs `lean-ctx value`, which recomputes recorded values from the ledger and
+audit trail and checks their integrity. A valid chain does not establish complete
+detector coverage, a complete model prompt, answer quality, or paid-invoice savings.
 
 ## Quiet by design
 

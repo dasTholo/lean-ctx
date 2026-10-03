@@ -30,7 +30,8 @@ scripts, for inspection, and to understand what your AI is doing).
 ### `lean-ctx read <file>` / `ctx_read`
 
 **What it does:** Reads a file with compression and a session cache. The first
-read compresses; an unchanged re-read costs ~13 tokens instead of the whole file.
+read compresses; an eligible unchanged re-read returns a compact reference instead
+of repeating the file. Its token count depends on the emitted text and tokenizer.
 
 ```bash
 lean-ctx read src/main.rs            # auto mode

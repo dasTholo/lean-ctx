@@ -3,7 +3,13 @@ name: lean-ctx
 description: Pick the right lean-ctx tool for reading, searching, understanding and running code with fewer tokens and fewer round trips. Use when lean-ctx MCP tools (ctx_*) are available or when a command output, file read or search would be large.
 ---
 
-# lean-ctx — which tool, when
+# LeanCTX — Context Gateway for AI Systems
+
+Control what your AI can see. LeanCTX Engine provides local context selection,
+supported access and content controls, and evidence of observed context operations
+for existing agents: Select → Control → Prove. Recovery depends on source or
+archive availability and access permissions. LeanCTX SDK is the separate
+integration surface for applications.
 
 lean-ctx shapes context before it reaches you: cached reads, compressed shell
 output, focused search, recovery to exact source. Two rules beat every detail:

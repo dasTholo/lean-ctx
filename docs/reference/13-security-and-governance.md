@@ -1,8 +1,8 @@
 # Journey 13 — Security & Governance
 
 > You're putting lean-ctx in front of real code — possibly on a shared machine,
-> in CI, or under a security policy. This journey covers every guardrail lean-ctx
-> applies by default and every dial you can tighten: filesystem jail, shell
+> in CI, or under a security policy. This journey covers supported controls
+> and their configuration boundaries: filesystem jail, shell
 > allowlist, secret redaction, OS sandboxing, harden mode, and role policies.
 
 Source files:
@@ -19,28 +19,30 @@ Source files:
 
 ## 0. The defense-in-depth model
 
-Every file read and shell command flows through layered guardrails, **on by
-default** — you don't opt in:
+Supported paths apply layered controls according to the integration, role,
+configuration, and platform. The diagram names the layers; it does not assert
+that every path traverses every layer or that all layers are enabled:
 
 ```mermaid
 flowchart LR
   R[ctx_read / ctx_shell] --> PJ[PathJail<br/>stay in project root]
   PJ --> AL[Shell allowlist<br/>~200 known binaries]
-  AL --> SB[OS sandbox<br/>Seatbelt / Landlock]
-  SB --> SD[Secret redaction<br/>before output leaves]
+  AL --> SB[Configured execution isolation<br/>platform-dependent]
+  SB --> SD[Configured detection / redaction<br/>supported patterns and paths]
   SD --> OUT[result to the agent]
 ```
 
-You can tighten each layer (stricter shell parsing, harden mode, role policies)
-but you cannot accidentally turn off the baseline.
+Review the effective posture with `lean-ctx security status` and `lean-ctx doctor`.
+Allow roots, roles, warning modes, and disabled controls can widen the boundary.
 
 ---
 
 ## 0.1 See and flip the whole posture — `lean-ctx security`
 
 lean-ctx's guardrails fall into **two independent planes**. Keeping them separate
-is deliberate: a usability-first user can let the agent do anything on a trusted
-machine **without** ever leaking secrets to the model provider.
+is deliberate: changing containment does not itself change secret-redaction
+configuration. Detection still has coverage limits and cannot guarantee that
+no secret reaches a model provider.
 
 | Plane | Protects | Controls |
 |-------|----------|----------|
@@ -228,11 +230,11 @@ shell_security = "enforce"   # default — secure
 
 ## 3. OS sandboxing for executed code
 
-**What it does:** when lean-ctx executes code (`ctx_execute`), it runs under the
-OS sandbox — **Seatbelt** on macOS and **Landlock** on Linux — so the executed
-process gets a restricted filesystem/network view, not your full user
-privileges. On platforms without a supported sandbox, execution is gated rather
-than run unconfined.
+**What it does:** `ctx_execute` supports OS isolation when configured with
+`sandbox_level >= 1`: **Seatbelt** on macOS and **Landlock** on Linux.
+Level 0 provides timeout/output limits without that OS boundary. Unsupported
+platforms can fall back to level 0; verify the effective platform and settings
+before depending on isolation.
 
 This is separate from PathJail (which guards lean-ctx's *own* reads); the sandbox
 guards *child processes* lean-ctx spawns on your behalf.
@@ -259,11 +261,12 @@ stays permitted, so the processes keep full functionality. The path guards
 
 ---
 
-## 4. Secret redaction — nothing leaks to the model
+## 4. Secret redaction — configured detection coverage
 
-**What it does:** before any shell output or file content is returned, lean-ctx
-scans it for credentials (AWS keys, tokens, etc.) and replaces matches with
-`[REDACTED:<kind>]`. It is **on by default**.
+**What it does:** supported output paths scan for configured credential patterns
+and can replace matches with `[REDACTED:<kind>]`. Coverage depends on the active
+configuration, role, detector patterns, and integration path. Unknown formats
+or excluded matches may pass through; warning does not redact or block.
 
 ```toml
 [secret_detection]

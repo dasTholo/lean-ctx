@@ -1,7 +1,8 @@
 # Seeing what lean-ctx did
 
-lean-ctx keeps tokens, secrets and risky commands out of your agent's context.
-The local web view (`lean-ctx dashboard`) shows all of it. This guide covers
+LeanCTX selects context and applies configured controls on supported paths; it
+records the measurements and events those paths expose. The local web view
+(`lean-ctx dashboard`) shows those records. This guide covers
 the smaller surfaces that show it where you already are: your agent, your
 shell prompt, your editor, your commits.
 
@@ -12,9 +13,10 @@ Every one of them follows three rules:
   notifications and commit trailers.
 - **Nothing when there is nothing to say.** No zeros, no placeholders. Data
   older than 12 hours or from another project shows nothing.
-- **Every number can be proven.** `lean-ctx value` recomputes it from the
-  hash-chained savings ledger and the signed audit trail (see
-  [Proof](#proof)).
+- **Every number has a source and label.** `lean-ctx value` derives displayed
+  values from the local savings ledger and audit trail (see [Proof](#proof)).
+  Hashes and signatures establish record integrity; they do not turn a local
+  estimate into provider usage, invoice savings or answer-quality evidence.
 
 ## Configuration
 
@@ -259,7 +261,9 @@ at most every 1.5 seconds, plus once a minute. The item is hidden when:
 - `mode = off` is set, or
 - the binary is missing or older than 3.10.3.
 
-The payload is also a stable contract (`schema: 1`) for other editors:
+The payload is also a stable contract (`schema: 1`) for other editors. The
+values below are illustrative; actual values depend on the local activity that
+was recorded and are not expected savings:
 
 ```json
 {

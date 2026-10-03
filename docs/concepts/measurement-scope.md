@@ -42,9 +42,13 @@ saving and never as zero.
 
 ## Recorded savings
 
-The savings ledger (`lean-ctx savings`, `lean-ctx roi`) is hash-chained and
-signed, so a record cannot be altered unnoticed. Its numbers are local token
-counts (before vs. after lean-ctx), not provider-billed usage.
+The local savings ledger is an append-only SHA-256 hash chain.
+`lean-ctx savings verify` checks its chain integrity; the chain alone does not
+authenticate its author or prevent someone with write access from rebuilding it.
+`lean-ctx savings sign` explicitly exports a portable Ed25519-signed batch;
+`lean-ctx savings verify-batch <file>` checks that batch offline. Unsigned batches
+are possible. The savings and ROI figures are based on local token counts
+(before vs. after LeanCTX), not provider-billed usage.
 
 ## Reach
 
@@ -68,5 +72,8 @@ E production — and a verdict (`improved`, `non-inferior`, `regressed`,
 claim. Details: [context-quality-v1](../contracts/context-quality-v1.md).
 
 `lean-ctx benchmark dual-arm` is a synthetic upper bound: its baseline never uses
-the provider's prompt cache. For on/off evidence use `lean-ctx eval ab`,
-`lean-ctx eval footprint --compare` or the compression holdout.
+the provider's prompt cache. Other comparison methods include the `lean-ctx eval ab`
+subcommand (requires a suite file via `--suite`), the injected-context footprint
+comparison in `lean-ctx eval footprint` (requires a suite via `--suite` and a baseline
+via `--compare`),
+and the compression holdout. Each method reports its own measurement scope.

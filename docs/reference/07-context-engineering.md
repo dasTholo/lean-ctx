@@ -151,9 +151,9 @@ Beyond `ctx_read` (Journey 2):
 | `ctx_compress_memory` | Compress memory/config files (CLAUDE.md, .cursorrules) |
 | `ctx_expand` | Zero-loss retrieval of an archived tool output by id |
 
-`ctx_expand` is the escape hatch: any large tool output that was archived can be
-fully recovered later (`retrieve`, `list`, `search_all`) — nothing is ever lost,
-only deferred.
+`ctx_expand` retrieves archived tool output (`retrieve`, `list`, `search_all`)
+while the archive remains available and the caller retains permission. Expired,
+deleted, or inaccessible sources and archives cannot be recovered by this path.
 
 ---
 
