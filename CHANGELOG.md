@@ -5,6 +5,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — lean-ctx inside Claude Code (turn economy)
+
+- `lean-ctx claude-mod install|status|uninstall`: installs the lean-ctx Claude
+  Code mod (Claude Code 2.1.287+) from a local marketplace the binary writes —
+  no download, version-locked to the engine. `lean-ctx setup` offers it
+  interactively and refreshes an existing install; unattended runs and updates
+  never install it. `lean-ctx doctor` shows its state.
+- The mod wakes the model when `ctx_shell` background jobs finish instead of
+  leaving it to `sleep`/status polling (~19 % of all model requests in a
+  30-day corpus), shapes large native Bash stdout through lean-ctx, keeps a
+  configurable core of lean-ctx tools in front of ToolSearch, prefixes the
+  lean-ctx skill with the session's live facts, and adds `/leanctx`.
+- `ctx_shape`: internal host hook that compresses a native tool's output with
+  the real command line (command-aware patterns, secret redaction, policy
+  filters, recovery handle). Callable, never advertised.
+
+### Fixed
+
+- Claude Code native installs (`~/.local/share/claude/versions/…`) are now a
+  trusted `claude` location, so `claude mcp add-json` is used there instead of
+  silently falling back to editing `~/.claude.json`.
+
 ### Added — evidence-aware semantic code intelligence (ADR-015)
 
 - Every call edge in the property graph now records how it is known:
