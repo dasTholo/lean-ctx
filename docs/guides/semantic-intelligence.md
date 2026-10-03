@@ -92,13 +92,17 @@ rustup proxy without the installed component is reported as missing.
 ## Reading the results
 
 - `ctx_graph action=status` — mode, evidence counts, and per language the
-  verified share plus whether its server can run:
+  verified share, whether its server can run, and what the last server started
+  for it negotiated (also in `lean-ctx doctor` and the dashboard legend):
 
   ```
   Semantic: mode=auto | calls 96 verified · 310 resolved · 24 heuristic | implements 12 · extends 3 · references 40
-    rust        96/120 verified (80%) · rust-analyzer ✓
+    rust        96/120 verified (80%) · rust-analyzer ✓ · offers definition, references, implementations; no type hierarchy
     typescript  0/310 verified (0%) · typescript-language-server not installed (npm install -g typescript …)
   ```
+
+- `ctx_repomap` ranks files over the same call edges as the graph — verified
+  where a backend answered, never linked by a bare name match.
 
 - `ctx_graph action=enrich` — runs a pass now and reports what it resolved.
 - `ctx_callgraph action=callees symbol=checkout` — each call shows its target:

@@ -158,6 +158,38 @@ fn resolve_callee_files_drops_cross_scope_ambiguity() {
     assert_eq!(map.get("Unique").map(String::as_str), Some("u.rs"));
 }
 
+/// Regression: a call bound to a same-named definition in a language the
+/// caller cannot call — a Rust `measure()` landing on a shell script's
+/// `measure`. Only same-family definitions are candidates; JS calls TS.
+#[test]
+fn calls_never_bind_across_language_families() {
+    let inputs = CallGraphInputs {
+        project_root: "/p".to_string(),
+        symbols: vec![
+            sym("measure", "scripts/bench.sh"),
+            sym("render", "web/view.ts"),
+        ],
+        ..Default::default()
+    };
+    let call = |file: &str, callee: &str| CallEdge {
+        caller_file: file.into(),
+        caller_symbol: "f".into(),
+        caller_line: 1,
+        callee_name: callee.into(),
+        ..Default::default()
+    };
+    let targets = resolve_edge_callee_targets(
+        &inputs,
+        &[call("src/main.rs", "measure"), call("web/app.js", "render")],
+    );
+    assert_eq!(
+        targets[0],
+        StructuralTarget::Unknown,
+        "no Rust → shell edge"
+    );
+    assert_eq!(targets[1].file(), Some("web/view.ts"), "JS → TS binds");
+}
+
 /// Regression: call lines were shifted by one (`CallSite.line` is already
 /// 1-based), so a call in a one-line function was attributed to the next
 /// symbol; and the edge carried no callee position for semantic lookup.

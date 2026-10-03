@@ -65,6 +65,13 @@ A verified target binds the edge; a definition outside the indexed project
 vetoes a structural guess. "No definition found" is **not** evidence — a cold
 server answers it while indexing — so it is neither cached nor used as a veto.
 
+The question asked is `textDocument/definition` at the callee, not the call
+hierarchy: one request per site answers exactly "where does this call go",
+every backend offers it (pylsp has no call hierarchy, the JetBrains bridge no
+endpoint for it), and the evals verify every ambiguous call with it.
+`callHierarchy/outgoingCalls` would answer per *caller* — all its calls,
+certain ones included — at several times the cost for the same edges.
+
 ### 4. Cache definitive answers, validate on reuse
 
 Answers are cached per call site in the property graph. A row is reused only
@@ -87,7 +94,10 @@ backend's identity is a pure registry peek.
 
 `GRAPH_ENGINE_VERSION` 6 forces existing property graphs — which may hold
 unannotated, guessed `calls` edges — to rebuild once; until then an outdated
-graph is never served (the index extractor bridges the gap).
+graph is never served (the index extractor bridges the gap). Version 7 does
+the same for edges that bound a call across language families (a Rust call
+landing on a same-named shell function): a callee now only resolves to
+definitions the caller's language can actually call.
 
 ### 5. `semantic_mode` decides who may start a server
 
@@ -161,6 +171,22 @@ serve ranking and later analyses too. An empty or missing answer is never
 definitive (a cold server reports nothing); a type hierarchy answer with a
 type but no supertypes is.
 
+`overrides` is evaluated and deliberately **not** stored as its own edge:
+at file level every override is already an existing relation. A method
+overriding a trait method lives in the `impl Trait for T` block that yields
+the `implements` edge; a method overriding a base-class or interface method
+lives in a class whose `extends`/`implements` edge links the same pair, and
+an override of a grand-base method is reached through the chain of `extends`
+edges. A separate `overrides` edge would duplicate those pairs and count
+the same coupling twice in ranking — the double weighting this design rules
+out. The per-method question ("which implementations override this?") is
+answered on demand by `ctx_refactor action=implementations` on the method.
+
+The repo map (`ctx_repomap`) uses the same call edges: those of a current
+property graph (scope-bound, semantically verified, vetoed guesses removed),
+else the caller-scope resolution — never the bare callee name, which used to
+link a call to whichever same-named definition it saw first.
+
 ### 8. Editor bridge (VS Code, Cursor, Windsurf)
 
 The lean-ctx editor extension serves the JetBrains plugin's loopback HTTP
@@ -211,8 +237,12 @@ prunes nothing.
   heuristic counts; `lean-ctx doctor` reports the mode and which servers can
   actually run (a rustup proxy without the component no longer counts).
 - Coverage is reported per language (verified share of the caller files'
-  `calls` edges plus whether that language's server can run) in
-  `ctx_graph status`, `lean-ctx doctor` and the dashboard's capability legend.
+  `calls` edges, whether that language's server can run, and what the last
+  backend started for it negotiated — e.g. "offers definition, references,
+  implementations; no type hierarchy") in `ctx_graph status`, `lean-ctx
+  doctor` and the dashboard's capability legend. The negotiated features are
+  recorded at backend start in `<data dir>/semantic-backends.json`, so a
+  doctor run sees what the MCP server's backend can do.
 - `ctx_impact` propagates twice — over all edges and over edges that are not
   heuristic (each file pair weighted by its strongest edge of that class) —
   and lists files reachable only through name matches as `weak_files` ("name

@@ -342,6 +342,8 @@ where
     let backend = ensure_backend(&mut guard, project_root, || {
         let backend = select_backend(language, project_root, policy, opts.start_timeout)?;
         start_idle_reaper();
+        // What it negotiated, for status surfaces in other processes too.
+        crate::core::semantic::coverage::record_negotiated(language, &backend.backend_info());
         Ok(backend)
     })?;
     // A backend is live here: let `auto` mode put it to use for the graph

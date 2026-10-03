@@ -9,6 +9,29 @@ product, privacy, and evidence boundaries, use the
 
 ## [Unreleased]
 
+### Fixed — the repo map no longer links calls by bare name
+
+- `ctx_repomap` bound every call to the first same-named definition it saw,
+  so five `save()` methods produced arbitrary file dependencies. It now uses
+  the property graph's call edges (scope-bound, semantically verified, vetoed
+  guesses removed), or the caller-scope resolution without a graph; an
+  ambiguous name yields no edge.
+
+### Fixed — calls no longer bind across languages
+
+- A call resolved by name could land on a same-named definition in another
+  language (a Rust `measure()` call on a shell function). Callees now resolve
+  only to definitions in the caller's language family (TypeScript/JavaScript/
+  Vue/Svelte, C/C++, JVM, Lua/Luau count as one each); with none, the call
+  stays unresolved. `GRAPH_ENGINE_VERSION` 7 rebuilds graphs holding such edges.
+
+### Added — negotiated semantic features in status, doctor and dashboard
+
+- Per language, `ctx_graph status`, `lean-ctx doctor` and the dashboard graph
+  legend show what the last language server or IDE started for it actually
+  offered (`offers definition, references, implementations; no type
+  hierarchy`), recorded at backend start.
+
 ### Fixed — hooks no longer re-parse every saved session in projects without one
 
 - In a project with no saved session, every `hook rewrite` / `hook redirect`

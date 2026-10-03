@@ -421,12 +421,19 @@ class CockpitGraph extends HTMLElement {
     // hint) and, when the graph carries evidence, "verified / call edges".
     var semantic = function (r) {
       var s = r.semantic_server;
-      var server = !s
+      var n = r.semantic_negotiated;
+      // What the last backend actually negotiated, as a hover hint.
+      var negotiated = n
+        ? ' <span style="color:var(--muted)" title="' + esc(String(n.identity)) + ' offers: ' +
+          esc(n.features.join(', ')) + (n.missing.length ? ' — not: ' + esc(n.missing.join(', ')) : '') +
+          '">ⓘ</span>'
+        : '';
+      var server = (!s
         ? '<span style="color:var(--muted)" title="No standalone language server; a JetBrains IDE can still serve it">IDE only</span>'
         : s.runnable
           ? '<span style="color:var(--green)">✓</span> ' + esc(String(s.binary))
           : '<span style="color:var(--muted)" title="' + esc(String(s.install_hint || '')) + '">' +
-            esc(String(s.binary)) + ' not installed</span>';
+            esc(String(s.binary)) + ' not installed</span>') + negotiated;
       if (r.calls_with_evidence === null || r.calls_with_evidence === undefined) return server;
       var pct = r.calls_with_evidence > 0
         ? Math.floor((100 * r.calls_verified) / r.calls_with_evidence)
