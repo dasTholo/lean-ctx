@@ -1461,11 +1461,13 @@ use uncached::{PrepareOutcome, cache_lock_deadline, prepare_uncached};
 
 #[path = "ctx_read_window.rs"]
 mod window;
+// #1993: the batch read resolves `raw=true` the same way.
+pub(super) use window::resolve_explicit_mode;
 #[allow(unused_imports)]
 // lines_mode + resolve_line_window used in #[cfg(test)] ctx_read_inline_tests
 use window::{
-    apply_line_window, hint_intersects_ranges, lines_mode, resolve_explicit_mode,
-    resolve_instruction_file_mode, resolve_line_window, resolve_raw_alias, scoped_read_ranges,
+    apply_line_window, hint_intersects_ranges, lines_mode, resolve_instruction_file_mode,
+    resolve_line_window, resolve_raw_alias, scoped_read_ranges,
 };
 
 // #660 LOC gate: inline tests split out to keep this file under the line cap.

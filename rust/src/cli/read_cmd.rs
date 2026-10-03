@@ -1228,15 +1228,15 @@ mod grep_exit_status_tests {
 
     #[test]
     fn complete_miss_exits_one() {
-        assert_eq!(grep_exit_status("0 matches for 'x' in 12 files"), 1);
+        assert_eq!(grep_exit_status("0 matches for 'x' (scanned 12 files)"), 1);
     }
 
     #[test]
     fn incomplete_miss_exits_two() {
         for out in [
-            "0 matches for 'x' in 1 files (1 large files skipped: big.log)",
-            "0 matches for 'x' in 4 files\n(2 files skipped: binary/encoding)",
-            "0 matches for 'x' in 9 files (search stopped at the time budget)",
+            "0 matches for 'x' (scanned 1 files) (1 large files skipped: big.log)",
+            "0 matches for 'x' (scanned 4 files)\n(2 files skipped: binary/encoding)",
+            "0 matches for 'x' (scanned 9 files) (search stopped at the time budget)",
         ] {
             assert_eq!(grep_exit_status(out), 2, "{out}");
         }

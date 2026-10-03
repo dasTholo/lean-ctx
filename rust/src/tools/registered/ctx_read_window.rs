@@ -187,7 +187,10 @@ pub(super) fn canonicalize_tail_mode(mode_arg: Option<String>) -> Option<String>
 /// raw alias looks at the mode, so `mode="-3", raw=true` keeps its window like
 /// `lines:-3` does (#1490). The other way round, raw saw a bare `-3`, did not
 /// recognise it as a window, and replaced it with the whole file — silently.
-pub(super) fn resolve_explicit_mode(arg_raw: bool, mode_arg: Option<String>) -> Option<String> {
+pub(in crate::tools::registered) fn resolve_explicit_mode(
+    arg_raw: bool,
+    mode_arg: Option<String>,
+) -> Option<String> {
     resolve_raw_alias(arg_raw, canonicalize_tail_mode(mode_arg))
 }
 

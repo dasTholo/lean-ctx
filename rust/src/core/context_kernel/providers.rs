@@ -238,6 +238,7 @@ impl CandidateProvider for EpisodicProvider {
         store
             .search(&ctx.query)
             .into_iter()
+            .filter(|episode| episode_belongs_to(episode, &self.project_root))
             .take(ctx.max_candidates)
             .map(|episode| {
                 let mut metadata = HashMap::new();
@@ -264,6 +265,21 @@ impl CandidateProvider for EpisodicProvider {
     fn side_effect_policy(&self) -> SideEffectPolicy {
         SideEffectPolicy::ReadOnly
     }
+}
+
+/// #1993: a store is keyed by project, but an agent session can touch files in
+/// several projects, so an episode recorded under one root may be about
+/// another entirely. Such an episode is history from a different codebase;
+/// it is kept only when it names no files or at least one under `root`.
+fn episode_belongs_to(episode: &crate::core::episodic_memory::Episode, root: &str) -> bool {
+    let root = std::path::Path::new(root);
+    episode.affected_files.is_empty()
+        || episode.affected_files.iter().any(|file| {
+            let file = std::path::Path::new(file);
+            // `has_root`, not `is_absolute`: on Windows `/home/u/x` has no
+            // drive and is not absolute, yet it is no project-relative path.
+            !file.has_root() || file.starts_with(root)
+        })
 }
 
 /// Supplies task-matched procedures from persistent procedural memory.
@@ -545,5 +561,41 @@ mod tests {
     fn knowledge_candidates_are_empty_for_a_missing_project() {
         let provider = KnowledgeProvider::new("/__context_kernel_missing_project__");
         assert!(provider.candidates(&retrieval_context()).is_empty());
+    }
+
+    /// #1993: reading files under one project surfaced an episode whose files
+    /// all lay in another project.
+    #[test]
+    fn episodes_about_another_project_are_not_candidates() {
+        use crate::core::episodic_memory::{Episode, Outcome};
+        let episode = |files: &[&str]| Episode {
+            id: "e".to_string(),
+            session_id: "s".to_string(),
+            timestamp: chrono::Utc::now(),
+            task_description: String::new(),
+            actions: Vec::new(),
+            outcome: Outcome::Unknown,
+            affected_files: files.iter().map(ToString::to_string).collect(),
+            summary: String::new(),
+            duration_secs: 0,
+            tokens_used: 0,
+            agent_id: None,
+        };
+        let root = "/home/u/htdocs/evcc";
+        assert!(!episode_belongs_to(
+            &episode(&["/home/u/htdocs/edifact/a.go", "/home/u/htdocs/edifact/b.go"]),
+            root
+        ));
+        // A sibling whose name merely starts with the root's is still foreign.
+        assert!(!episode_belongs_to(
+            &episode(&["/home/u/htdocs/evcc-old/a.go"]),
+            root
+        ));
+        assert!(episode_belongs_to(
+            &episode(&["/home/u/htdocs/edifact/a.go", "/home/u/htdocs/evcc/c.go"]),
+            root
+        ));
+        assert!(episode_belongs_to(&episode(&["src/main.rs"]), root));
+        assert!(episode_belongs_to(&episode(&[]), root));
     }
 }

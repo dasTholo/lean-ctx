@@ -128,7 +128,11 @@ fn handle_inner(args: &Map<String, Value>, ctx: &ToolContext) -> Result<ToolOutp
 
     // Share single-read precedence: explicit > config > learned > default.
     // `auto` delegates the learned per-file decision to ctx_read below.
-    let explicit_mode = get_str(args, "mode");
+    // #1993: `raw=true` means exact bytes here too, as it does for a single read.
+    let explicit_mode = super::ctx_read::resolve_explicit_mode(
+        get_bool(args, "raw").unwrap_or(false),
+        get_str(args, "mode"),
+    );
     let configured_mode = explicit_mode
         .is_none()
         .then(crate::core::auto_mode_resolver::configured_default_mode)

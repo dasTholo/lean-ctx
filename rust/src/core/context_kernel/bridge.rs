@@ -132,6 +132,9 @@ fn truncate_to_token_budget(mut text: String, budget: usize) -> String {
         }
     }
     text.truncate(text.floor_char_boundary(low));
+    // #1993: whole entries only. A byte cut left a bullet ending mid-path
+    // (`files:[/Users/<me>`), a record that no longer described itself.
+    text.truncate(text.rfind('\n').map_or(0, |end| end + 1));
     text
 }
 
@@ -234,7 +237,7 @@ pub mod tests {
     use super::super::types::PlanBudget;
     use super::{
         ContextPlanV1, PlanEntry, enforce_plan_for_mode, enrichment_from_plan,
-        format_enrichment_blocks, kernel_gate, verdict_from_blocks,
+        format_enrichment_blocks, kernel_gate, truncate_to_token_budget, verdict_from_blocks,
     };
 
     fn plan(selected: Vec<PlanEntry>) -> ContextPlanV1 {
@@ -272,6 +275,16 @@ pub mod tests {
             .expect("long enrichment should be truncated, not removed");
         assert!(enrichment.verdict.budget_used <= 150);
     }
+    #[test]
+    fn truncation_keeps_whole_entries_only() {
+        let line = "- [success] files:[/Users/me/htdocs/evcc/docs/agents/a.md] (phi=0.25)\n";
+        let text = format!("\n## Relevant Episodes\n{}", line.repeat(40));
+        let cut = truncate_to_token_budget(text, 150);
+        assert!(!cut.is_empty());
+        assert!(cut.ends_with('\n'), "a partial entry survived: {cut:?}");
+        assert!(cut.lines().skip(2).all(|l| l == line.trim_end()));
+    }
+
     #[test]
     fn empty_supplement_when_no_candidates() {
         let verdict = verdict_from_blocks(String::new(), 150);
