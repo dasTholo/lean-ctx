@@ -91,6 +91,16 @@ pub(super) fn store(
     )?;
     Ok(())
 }
+/// Whether any semantic answer is stored — evidence that enrichment has
+/// consolidated this graph's call edges at least once.
+pub(super) fn any(conn: &Connection) -> anyhow::Result<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM semantic_resolutions)",
+        [],
+        |r| r.get(0),
+    )?)
+}
+
 /// Drops rows whose caller file is no longer indexed, and rows for indexed
 /// files whose content changed (stale hash). Returns the number removed.
 pub(super) fn prune(

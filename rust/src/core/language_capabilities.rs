@@ -246,6 +246,9 @@ pub struct LanguageCapabilityRow {
     pub calls_verified: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub calls_with_evidence: Option<usize>,
+    /// What the last backend started for this language negotiated.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_negotiated: Option<crate::core::semantic::coverage::NegotiatedBackend>,
 }
 
 /// Build a capability matrix for the languages actually present in `file_paths`,
@@ -276,6 +279,7 @@ where
                 imports_found: None,
                 calls_found: None,
                 semantic_server: None,
+                semantic_negotiated: None,
                 calls_verified: None,
                 calls_with_evidence: None,
             }
@@ -342,6 +346,7 @@ pub fn language_capability_matrix_realized(
                 imports_found: Some(imports.get(&lang).copied().unwrap_or(0)),
                 calls_found: call_caller_files.map(|_| calls.get(&lang).copied().unwrap_or(0)),
                 semantic_server: None,
+                semantic_negotiated: None,
                 calls_verified: None,
                 calls_with_evidence: None,
             }

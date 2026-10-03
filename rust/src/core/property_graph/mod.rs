@@ -83,7 +83,10 @@ fn migrate_if_needed(project_root: &str, new_dir: &Path) {
 /// - `6`: `calls` edges carry typed evidence and are no longer guessed (the
 ///   `ctx_impact` builder bound ambiguous callees to the alphabetically first
 ///   definition); graphs holding unannotated guessed edges must rebuild.
-pub const GRAPH_ENGINE_VERSION: u32 = 6;
+/// - `7`: `calls` edges bind only within the caller's language family (a Rust
+///   call no longer lands on a same-named shell function); graphs holding
+///   such cross-language edges must rebuild.
+pub const GRAPH_ENGINE_VERSION: u32 = 7;
 
 /// `true` when the persisted graph was built by an engine older than
 /// [`GRAPH_ENGINE_VERSION`] — or predates the version stamp entirely (missing or
@@ -262,6 +265,11 @@ impl CodeGraph {
         value: &CachedResolution,
     ) -> anyhow::Result<()> {
         semantic_cache::store(&self.conn, site, caller_hash, value)
+    }
+
+    /// Whether a semantic backend has answered for this graph at all.
+    pub fn has_semantic_answers(&self) -> anyhow::Result<bool> {
+        semantic_cache::any(&self.conn)
     }
 
     /// Removes cached answers for vanished or changed caller files.

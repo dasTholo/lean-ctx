@@ -66,6 +66,7 @@ fn annotate_semantic(
     };
     for row in rows {
         row.semantic_server = server_status(row.language, project_root);
+        row.semantic_negotiated = crate::core::semantic::coverage::negotiated(row.language);
         if let Some(cov) = &coverage {
             let c = cov.get(row.language).copied().unwrap_or_default();
             row.calls_verified = Some(c.verified);

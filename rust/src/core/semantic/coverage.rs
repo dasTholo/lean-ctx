@@ -121,13 +121,105 @@ fn resolved_binary_cached(language: &str, project_root: &str) -> Option<String> 
     binary
 }
 
+/// What a backend negotiated for a language at its last start (the
+/// `initialize` handshake), as recorded in `<data dir>/semantic-backends.json`
+/// — across processes, so `lean-ctx doctor` sees what the MCP server's
+/// backend can do.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+pub struct NegotiatedBackend {
+    /// Backend identity (`lsp:rust-analyzer@1.97.1`, `jetbrains:…`).
+    pub identity: String,
+    /// Semantic features the backend offered, among those lean-ctx uses.
+    pub features: Vec<String>,
+    /// Features lean-ctx uses that the backend did not offer.
+    pub missing: Vec<String>,
+}
+
+/// The features lean-ctx's semantic layer uses, in display order.
+fn used_features(
+    caps: &crate::lsp::capabilities::SemanticCapabilities,
+) -> [(&'static str, bool); 4] {
+    [
+        ("definition", caps.definition),
+        ("references", caps.references),
+        ("implementations", caps.implementations),
+        ("type hierarchy", caps.type_hierarchy),
+    ]
+}
+
+fn negotiated_path() -> Option<std::path::PathBuf> {
+    crate::core::data_dir::lean_ctx_data_dir()
+        .ok()
+        .map(|d| d.join("semantic-backends.json"))
+}
+
+fn read_negotiated() -> BTreeMap<String, NegotiatedBackend> {
+    negotiated_path()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default()
+}
+
+/// Records what a freshly started backend negotiated for `language`.
+/// Written only when it changed; best effort (a status display, not state
+/// anything depends on).
+pub fn record_negotiated(language: &str, info: &crate::lsp::capabilities::SemanticBackendInfo) {
+    let (offered, absent): (Vec<_>, Vec<_>) = used_features(&info.capabilities)
+        .into_iter()
+        .partition(|(_, on)| *on);
+    let entry = NegotiatedBackend {
+        identity: info.identity(),
+        features: offered.into_iter().map(|(n, _)| n.to_string()).collect(),
+        missing: absent.into_iter().map(|(n, _)| n.to_string()).collect(),
+    };
+    if read_negotiated().get(language) == Some(&entry) {
+        return;
+    }
+    let Some(path) = negotiated_path() else {
+        return;
+    };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    // Backends for several languages (or in several processes) may start at
+    // once: the read-modify-write runs under a cross-process lock so no
+    // start drops another language's entry.
+    let Ok(lock) = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(path.with_extension("json.lock"))
+    else {
+        return;
+    };
+    if crate::core::file_lock::acquire_exclusive_timeout(&lock, std::time::Duration::from_secs(2))
+        .is_err()
+    {
+        return;
+    }
+    let mut all = read_negotiated();
+    if all.get(language) != Some(&entry) {
+        all.insert(language.to_string(), entry);
+        if let Ok(json) = serde_json::to_vec_pretty(&all) {
+            let _ = crate::core::atomic_fs::try_atomic_write(&path, &json, None);
+        }
+    }
+    let _ = fs2::FileExt::unlock(&lock);
+}
+
+/// What the last backend started for `language` negotiated, if one ever ran.
+pub fn negotiated(language: &str) -> Option<NegotiatedBackend> {
+    read_negotiated().remove(language)
+}
+
 /// One line per language for terminal output, e.g.
-/// `  rust        96/120 verified (80%) · rust-analyzer ✓`, from
-/// [`coverage_by_language`]. Sorted by language; deterministic.
+/// `  rust        96/120 verified (80%) · rust-analyzer ✓ · offers definition, references, implementations; no type hierarchy`,
+/// from [`coverage_by_language`]. Sorted by language; deterministic.
 pub fn coverage_lines(
     coverage: &BTreeMap<&'static str, GradeCounts>,
     project_root: &str,
 ) -> Vec<String> {
+    let negotiated = read_negotiated();
     coverage
         .iter()
         .map(|(lang, c)| {
@@ -140,8 +232,18 @@ pub fn coverage_lines(
                 ),
                 None => "no standalone server (JetBrains IDE only)".to_string(),
             };
+            let features = negotiated
+                .get(*lang)
+                .map(|n| {
+                    let mut s = format!(" · offers {}", n.features.join(", "));
+                    if !n.missing.is_empty() {
+                        s.push_str(&format!("; no {}", n.missing.join(", no ")));
+                    }
+                    s
+                })
+                .unwrap_or_default();
             format!(
-                "  {lang:<11} {}/{} verified ({}%) · {server}",
+                "  {lang:<11} {}/{} verified ({}%) · {server}{features}",
                 c.verified,
                 c.total(),
                 c.verified_percent()
@@ -195,5 +297,51 @@ mod tests {
             0,
             "no division by zero"
         );
+    }
+
+    /// What a backend negotiated survives the process that started it and
+    /// shows up on the coverage line — including what it lacks.
+    #[test]
+    fn negotiated_features_are_recorded_and_shown() {
+        use crate::lsp::capabilities::{
+            SemanticBackendInfo, SemanticBackendKind, SemanticCapabilities,
+        };
+        let _isolated = crate::core::data_dir::isolated_data_dir();
+        let info = SemanticBackendInfo {
+            kind: SemanticBackendKind::Lsp,
+            server_name: Some("rust-analyzer".into()),
+            server_version: Some("1.97.1".into()),
+            capabilities: SemanticCapabilities {
+                definition: true,
+                references: true,
+                implementations: true,
+                ..SemanticCapabilities::default()
+            },
+            utf8_positions: true,
+        };
+        record_negotiated("rust", &info);
+        let n = negotiated("rust").expect("recorded");
+        assert_eq!(n.identity, "lsp:rust-analyzer@1.97.1");
+        assert_eq!(n.missing, ["type hierarchy"]);
+        assert_eq!(negotiated("go"), None);
+
+        let coverage = BTreeMap::from([("rust", GradeCounts::default())]);
+        let line = &coverage_lines(&coverage, "/nonexistent/project")[0];
+        assert!(
+            line.ends_with("· offers definition, references, implementations; no type hierarchy"),
+            "{line}"
+        );
+
+        // Backends starting at once must not drop each other's entries.
+        let langs = ["go", "python", "typescript", "java", "c", "lua"];
+        std::thread::scope(|s| {
+            for lang in langs {
+                let info = info.clone();
+                s.spawn(move || record_negotiated(lang, &info));
+            }
+        });
+        for lang in langs.iter().chain(&["rust"]) {
+            assert!(negotiated(lang).is_some(), "{lang} entry lost");
+        }
     }
 }

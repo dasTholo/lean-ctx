@@ -1055,15 +1055,41 @@ pub fn resolve_edge_callee_targets(
     let imports = build_import_adjacency(inputs);
     edges
         .iter()
-        .map(|e| match name_files.get(e.callee_name.as_str()) {
-            None if last_segment(&e.callee_name).is_some() => StructuralTarget::Ambiguous,
-            None => StructuralTarget::Unknown,
-            Some(defs) => match rank_callee_def_file(defs, &e.caller_file, &imports) {
-                Some((file, via)) => StructuralTarget::Resolved { file, via },
-                None => StructuralTarget::Ambiguous,
-            },
+        .map(|e| {
+            // Only definitions the caller's language can call directly: a Rust
+            // `run()` never binds to a shell script's `run`.
+            let family = call_family(&e.caller_file);
+            let defs: Option<Vec<&str>> = name_files.get(e.callee_name.as_str()).map(|defs| {
+                defs.iter()
+                    .copied()
+                    .filter(|d| {
+                        family.is_none() || call_family(d).is_none_or(|f| Some(f) == family)
+                    })
+                    .collect()
+            });
+            match defs.filter(|d| !d.is_empty()) {
+                None if last_segment(&e.callee_name).is_some() => StructuralTarget::Ambiguous,
+                None => StructuralTarget::Unknown,
+                Some(defs) => match rank_callee_def_file(&defs, &e.caller_file, &imports) {
+                    Some((file, via)) => StructuralTarget::Resolved { file, via },
+                    None => StructuralTarget::Ambiguous,
+                },
+            }
         })
         .collect()
+}
+
+/// Languages that call each other's definitions directly, by file; `None`
+/// for files whose language is unknown (never filtered out).
+fn call_family(path: &str) -> Option<&'static str> {
+    let id = crate::core::language_capabilities::language_for_path(path)?.id_str();
+    Some(match id {
+        "typescript" | "javascript" | "vue" | "svelte" => "js",
+        "c" | "cpp" => "c",
+        "java" | "kotlin" | "scala" => "jvm",
+        "lua" | "luau" => "lua",
+        other => other,
+    })
 }
 
 /// Resolve callee names to a single defining file *when scope makes it

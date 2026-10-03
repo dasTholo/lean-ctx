@@ -466,6 +466,17 @@ fn evaluate(f: &Fixture, engine: Engine) {
         }
         other => panic!("{}: ambiguous call not verified: {other:?}", f.lang),
     };
+    if _window.is_none() {
+        // The server's handshake is recorded for status, doctor and dashboard.
+        let negotiated = super::coverage::negotiated(f.lang)
+            .unwrap_or_else(|| panic!("{}: negotiated features not recorded", f.lang));
+        assert!(
+            negotiated.features.iter().any(|f| f == "definition"),
+            "{}: {negotiated:?}",
+            f.lang
+        );
+        println!("SEMANTIC_NEGOTIATED|{}|{negotiated:?}", f.lang);
+    }
     assert_eq!(
         verdict_for(&edges, &cold.verdicts, f.decoy),
         Some(&SemanticVerdict::NotInProject),
