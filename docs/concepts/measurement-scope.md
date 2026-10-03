@@ -45,10 +45,10 @@ saving and never as zero.
 The local savings ledger is an append-only SHA-256 hash chain.
 `lean-ctx savings verify` checks its chain integrity; the chain alone does not
 authenticate its author or prevent someone with write access from rebuilding it.
-Signing is an explicit export step: `lean-ctx savings sign` creates a portable
-Ed25519-signed batch, and `lean-ctx savings verify-batch <file>` checks that batch
-offline. Unsigned batches are possible. The savings and ROI figures are local
-token counts (before vs. after LeanCTX), not provider-billed usage.
+`lean-ctx savings sign` explicitly exports a portable Ed25519-signed batch;
+`lean-ctx savings verify-batch <file>` checks that batch offline. Unsigned batches
+are possible. The savings and ROI figures are based on local token counts
+(before vs. after LeanCTX), not provider-billed usage.
 
 ## Reach
 
