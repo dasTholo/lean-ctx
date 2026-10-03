@@ -73,6 +73,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   auto-dictionary legend) count as kept.
 - Contract: [docs/contracts/context-quality-v1.md](docs/contracts/context-quality-v1.md).
 
+### Fixed — wide source directories inside a project are searchable (#1984)
+
+- `ctx_search`, `ctx_tree` and `ctx_glob` refused a directory with more than
+  50 subdirectories and no project marker of its own as "broad or
+  privacy-protected", even when it sat inside a project (for example
+  `rust/src/core`, whose markers live in `rust/` and the repo root). A
+  project marker in an ancestor now counts. Directories outside any project
+  keep the protection.
+
 ### Fixed — tool output is never served stale or replaced by a dead reference (#1980)
 
 - `ctx_shell` no longer replays results from its opt-in result cache
