@@ -274,7 +274,7 @@ extend its context capabilities; they are not supported product commitments.
 
 The full roadmap lives in **[VISION.md](VISION.md)**.
 
-## How it works (30 seconds)
+## How it works
 
 LeanCTX works on **two planes** — what your agents *read* and what they *send to the model*:
 
@@ -372,14 +372,14 @@ tools are documented there).
 <tr>
 <td width="50%" valign="top">
 
-### 🟢 Your first 30 seconds
+### 🟢 Your first setup
 *"I just installed it — now what?"*
 
 ```bash
 lean-ctx wrap cursor  # one-command setup for your agent
 lean-ctx doctor       # confirm you're wired up
 ```
-One command installs hooks, MCP registration, and verifies the connection.
+`wrap` configures the supported integration; `doctor` checks the resulting setup.
 → **[Journey 1 — Setup & Onboarding](docs/reference/01-setup-and-onboarding.md)**
 
 </td>
@@ -543,7 +543,9 @@ appendices for the [CLI map](docs/reference/appendix-cli-map.md),
 
 ## Supported IDEs & AI tools
 
-LeanCTX is a standard **MCP server**, so it works with any MCP-compatible client. Two integration modes are auto-selected per agent:
+LeanCTX provides an **MCP server**. Client support depends on transport, tool
+handling, and configuration; the matrix below records the integration scope.
+Two integration modes are selected for supported agents:
 
 | Mode | How it works | Best for |
 |---|---|---|

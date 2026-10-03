@@ -66,7 +66,9 @@ outcome quality.
     "docs/what-is-leanctx.md"
   ],
   "required_text": {
-    "README.md": ["Get started", "Real-world scenarios"]
+    "README.md": ["Get started", "Real-world scenarios"],
+    ".github/workflows/release.yml": ["desc \"Local engine for the LeanCTX Context Gateway for AI Systems\""],
+    "aur/lean-ctx/.SRCINFO": ["pkgdesc = LeanCTX Engine — open-source Context Gateway for AI Systems. Context selection, supported controls, and evidence through local integration paths."]
   },
   "status_guarded_records": [
     "docs/cognition-interface.md",
