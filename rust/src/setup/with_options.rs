@@ -484,7 +484,13 @@ fn build_claude_mod_step(opts: SetupOptions, targets: &[EditorTarget]) -> Option
             .map(|p| p.to_string_lossy().to_string()),
         note: Some(note),
     };
-    let unattended = opts.non_interactive || opts.json;
+    // `--yes` approves the setup's own changes, not running new code inside
+    // Claude Code; without a TTY there is nobody to ask (and the generic
+    // refusal would wrongly suggest `--yes`).
+    let unattended = opts.non_interactive
+        || opts.json
+        || opts.yes
+        || !std::io::IsTerminal::is_terminal(&std::io::stdin());
     match claude_mod::status() {
         status @ (ModStatus::ClaudeMissing | ModStatus::ClaudeTooOld(_)) => {
             step.items.push(item("skipped", status.describe()));

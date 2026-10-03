@@ -56,7 +56,7 @@ test("native Bash stdout is shaped through ctx_shape and fails open", async ($, 
   const shapedRecord = shaped.result as Record<string, unknown>;
   expect(String(shapedRecord.stdout)).toContain("Compiling 200 crates");
   expect(shapedRecord.stderr).toBe("warning: kept");
-  expect(shapeCalls[0]).toEqual({ tool: "Bash", command: "cargo build", output: big });
+  expect(shapeCalls[0]).toEqual({ tool: "Bash", command: "cargo build", output: big, exit_code: 0 });
 
   const small = await $.tool.call({ tool: "Bash", command: "small" });
   expect((small.result as Record<string, unknown>).stdout).toBe("ok\n");
@@ -293,7 +293,9 @@ test("sleep waits are answered only while watched and MCP errors fail open", asy
     await clock.advance(2_000);
     await flushMicrotasks();
   }
-  expect(wakes).toEqual([]);
+  // The model was told it would be woken: handing the job back is explicit.
+  expect(wakes.length).toBe(1);
+  expect(wakes[0]).toContain("can no longer watch background job(s) shell_error");
 
   const sleepAfterError = await $.tool.call({ tool: "Bash", command: "sleep 1" });
   expect(sleepAfterError.result).toBe("executed");

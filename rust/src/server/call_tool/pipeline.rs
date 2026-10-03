@@ -1021,7 +1021,12 @@ pub(in crate::server) async fn dispatch_and_post_process(
         result_text = rendered;
     }
 
+    // Machine-readable bodies are restored byte-exact further down, but the
+    // auto-checkpoint returns before that restore — so it (and the once-per-
+    // session nudges, which would be thrown away) must not run for them. The
+    // flag is computed from the inner tool, so this also covers `ctx_call`.
     let skip_checkpoint = minimal
+        || machine_readable
         || matches!(
             name,
             "ctx_compress"
@@ -1046,7 +1051,6 @@ pub(in crate::server) async fn dispatch_and_post_process(
                 | "ctx_smells"
                 | "ctx_quality"
                 | "ctx_workflow"
-                | "ctx_shape"
         );
 
     // Output-echo nudge (#501): when the agent keeps re-quoting delivered

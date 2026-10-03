@@ -220,14 +220,27 @@ pub fn cached_versions(claude_dir: &Path) -> Vec<String> {
 }
 
 /// Remove the plugin, the marketplace, and the materialized files.
+///
+/// Success is verified, not assumed: the local files are only deleted once
+/// Claude Code no longer lists the plugin — deleting them first would leave a
+/// registered plugin pointing at a missing directory.
 pub fn uninstall() -> Result<String, String> {
     if matches!(status(), ModStatus::ClaudeMissing) {
         return Err(ModStatus::ClaudeMissing.describe());
     }
-    // Removing the marketplace also uninstalls what came from it; the explicit
-    // uninstall first keeps the message accurate when the marketplace is gone.
-    let _ = run_claude(&["plugin", "uninstall", PLUGIN_ID, "--scope", "user"]);
-    let _ = run_claude(&["plugin", "marketplace", "remove", MARKETPLACE]);
+    let uninstall = run_claude(&["plugin", "uninstall", PLUGIN_ID, "--scope", "user"]);
+    let remove = run_claude(&["plugin", "marketplace", "remove", MARKETPLACE]);
+    let still_installed =
+        run_claude(&["plugin", "list", "--json"]).map(|out| installed_version(&out).is_some())?;
+    let marketplace_listed = run_claude(&["plugin", "marketplace", "list", "--json"])
+        .map(|out| marketplace_listed(&out))?;
+    if still_installed || marketplace_listed {
+        let cause = uninstall.err().or(remove.err()).unwrap_or_default();
+        return Err(format!(
+            "{PLUGIN_ID} is still registered with Claude Code{}{cause} — local files kept",
+            if cause.is_empty() { "" } else { ": " }
+        ));
+    }
     if let Ok(root) = marketplace_dir()
         && root.exists()
     {
@@ -236,44 +249,73 @@ pub fn uninstall() -> Result<String, String> {
     Ok(format!("removed {PLUGIN_ID}"))
 }
 
-/// Run `claude <args>` with a hard timeout; stdout on success.
+/// Whether `claude plugin marketplace list --json` names our marketplace.
+#[must_use]
+pub fn marketplace_listed(list_json: &str) -> bool {
+    serde_json::from_str::<Vec<serde_json::Value>>(list_json).is_ok_and(|entries| {
+        entries
+            .iter()
+            .any(|e| e.get("name").and_then(serde_json::Value::as_str) == Some(MARKETPLACE))
+    })
+}
+
+/// Run `claude <args>` with a hard timeout; stdout on success. stdout/stderr
+/// are drained on their own threads (a full pipe would otherwise stall the
+/// child until the timeout), and the child is killed and reaped on every
+/// failure path so no zombie outlives the call.
 fn run_claude(args: &[&str]) -> Result<String, String> {
-    let binary = crate::core::editor_registry::claude_binary_for_exec()?;
+    use std::io::Read as _;
+    let label = || format!("claude {}", args.join(" "));
+    let binary = crate::core::editor_registry::validate_claude_binary()?;
     let mut child = Command::new(&binary)
         .args(args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .map_err(|e| format!("claude {}: {e}", args.join(" ")))?;
+        .map_err(|e| format!("{}: {e}", label()))?;
+    let drain = |pipe: Option<Box<dyn std::io::Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut p) = pipe {
+                let _ = p.read_to_end(&mut buf);
+            }
+            String::from_utf8_lossy(&buf).into_owned()
+        })
+    };
+    let stdout = drain(child.stdout.take().map(|p| Box::new(p) as Box<_>));
+    let stderr = drain(child.stderr.take().map(|p| Box::new(p) as Box<_>));
     let start = Instant::now();
-    loop {
+    let status = loop {
         match child.try_wait() {
-            Ok(Some(_)) => break,
+            Ok(Some(status)) => break Ok(status),
             Ok(None) if start.elapsed() > CLAUDE_TIMEOUT => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(format!("claude {} timed out", args.join(" ")));
+                break Err(format!("{} timed out", label()));
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(50)),
-            Err(e) => return Err(e.to_string()),
+            Err(e) => break Err(format!("{}: {e}", label())),
         }
-    }
-    let out = child
-        .wait_with_output()
-        .map_err(|e| format!("claude {}: {e}", args.join(" ")))?;
-    if out.status.success() {
-        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    };
+    let status = match status {
+        Ok(status) => status,
+        Err(e) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(e);
+        }
+    };
+    let stdout = stdout.join().unwrap_or_default();
+    let stderr = stderr.join().unwrap_or_default();
+    if status.success() {
+        Ok(stdout)
     } else {
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        let stdout = String::from_utf8_lossy(&out.stdout);
         let detail = stderr
             .trim()
             .lines()
             .chain(stdout.trim().lines())
             .last()
             .unwrap_or("");
-        Err(format!("claude {} failed: {detail}", args.join(" ")))
+        Err(format!("{} failed: {detail}", label()))
     }
 }
 
@@ -300,6 +342,12 @@ mod tests {
         assert_eq!(installed_version(list).as_deref(), Some("3.10.5"));
         assert_eq!(installed_version("[]"), None);
         assert_eq!(installed_version("not json"), None);
+        // `claude plugin marketplace list --json` (2.1.287); uninstall only
+        // deletes local files once this no longer names our marketplace.
+        let markets = r#"[{"name":"lean-ctx","source":"directory","path":"/d"}]"#;
+        assert!(marketplace_listed(markets));
+        assert!(!marketplace_listed(r#"[{"name":"other"}]"#));
+        assert!(!marketplace_listed("garbage"));
     }
 
     /// The installed manifest must carry the engine version (Claude caches

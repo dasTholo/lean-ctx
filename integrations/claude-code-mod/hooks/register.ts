@@ -202,7 +202,16 @@ async function shapeBash(
     return result;
   }
   try {
-    const shaped = await $.mcp.call(leanServer, "ctx_shape", { tool: "Bash", command, output: stdout });
+    // A non-error result without a special-exit interpretation exited 0, so the
+    // engine takes its success path (folds build/test noise); otherwise it gets
+    // no exit code and keeps the unknown-outcome guard.
+    const exitCode = record.returnCodeInterpretation ? {} : { exit_code: 0 };
+    const shaped = await $.mcp.call(leanServer, "ctx_shape", {
+      tool: "Bash",
+      command,
+      output: stdout,
+      ...exitCode,
+    });
     if (shaped.isError) return result;
     const text = mcpText(shaped);
     if (!text || text.length >= stdout.length) return result;
@@ -372,6 +381,7 @@ async function pollWatchedJobs($: EngineInterface): Promise<void> {
     );
 
     const finished: FinishedJob[] = [];
+    const lost: WatchJob[] = [];
     for (const check of checks) {
       if (watchedJobs.get(check.key) !== check.job) continue;
       if (!check.status || check.status.state === "running") {
@@ -380,21 +390,37 @@ async function pollWatchedJobs($: EngineInterface): Promise<void> {
       }
       if (check.status.state === "unknown") {
         check.job.misses += 1;
-        if (check.job.misses >= MAX_STATUS_MISSES) watchedJobs.delete(check.key);
+        if (check.job.misses >= MAX_STATUS_MISSES) {
+          watchedJobs.delete(check.key);
+          lost.push(check.job);
+        }
         continue;
       }
       watchedJobs.delete(check.key);
       if (check.response) finished.push({ job: check.job, status: check.status, response: check.response });
     }
     stopWatcherWhenIdle();
-    if (finished.length > 0) submitWake($, finished);
+    const text = [
+      finished.length > 0 ? formatWakeSummary(finished) : "",
+      lost.length > 0 ? formatLostNotice(lost) : "",
+    ].filter(Boolean).join("\n\n");
+    if (text) submitWake($, text);
   } catch {
+    // The watcher can no longer read job state: hand every watched job back
+    // to the model explicitly — it was told it would be woken, so a silent
+    // drop would leave it waiting forever.
+    const lost = [...watchedJobs.values()];
     watchedJobs.clear();
     stopWatcherWhenIdle();
-    // Restore native status polling when the watcher cannot safely read a job.
+    if (lost.length > 0) submitWake($, formatLostNotice(lost));
   } finally {
     watcherTickInProgress = false;
   }
+}
+
+function formatLostNotice(lost: WatchJob[]): string {
+  const ids = lost.map((job) => job.id).sort();
+  return `lean-ctx can no longer watch background job(s) ${ids.join(", ")}: check each once with ctx_shell(background_action="status", job_id=…) when you need its result.`;
 }
 
 function inspectJobStatus(response: McpToolResult, jobId: string): JobStatus {
@@ -420,8 +446,7 @@ function mcpText(response: McpToolResult): string {
     .join("\n");
 }
 
-function submitWake($: EngineInterface, finished: FinishedJob[]): void {
-  const text = formatWakeSummary(finished);
+function submitWake($: EngineInterface, text: string): void {
   try {
     void $.prompt
       .submit({ text })
