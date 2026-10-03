@@ -33,6 +33,8 @@ const MAX_TAIL_LINE_CHARS = 300;
 const SHAPE_MIN_CHARS = 2_000;
 // Commands that explicitly ask for exact bytes are never shaped.
 const RAW_INTENT = /\bLEAN_CTX_(?:RAW|DISABLED)=1\b|\blean-ctx\s+raw\b/;
+// Upper bound for the session state injected after a compaction (~500 tokens).
+const MAX_RESUME_CHARS = 2_000;
 
 type JsonRecord = Record<string, unknown>;
 type WatchJob = { server: string; id: string; contextSent: boolean; misses: number };
@@ -56,6 +58,7 @@ type Metrics = {
   wakesDelivered: number;
   shapedCalls: number;
   shapedCharsSaved: number;
+  compactions: number;
 };
 
 const watchedJobs = new Map<string, WatchJob>();
@@ -71,6 +74,7 @@ const metrics: Metrics = {
   wakesDelivered: 0,
   shapedCalls: 0,
   shapedCharsSaved: 0,
+  compactions: 0,
 };
 let watcher: Timer | undefined;
 let watcherTickInProgress = false;
@@ -79,6 +83,8 @@ let leanCtxSeen = false;
 let leanServer: string | undefined;
 let commandAttempted = false;
 let commandRegistered = false;
+// Set by a main-loop compaction; the next prompt carries the lean-ctx session state once.
+let resumePending = false;
 
 export const register: Register = (on, options) => {
   const frontLoaded = getFrontLoadedTools(options);
@@ -108,6 +114,22 @@ export const register: Register = (on, options) => {
 
   on("session.start", async ($, event, next) => {
     resetSessionState();
+    // Detect lean-ctx up front so `/leanctx` exists before the first model
+    // request (tool.describe only fires once a request renders the tools).
+    // A server still connecting is picked up later by the tool hooks.
+    if (!leanCtxSeen) {
+      try {
+        const match = (await $.tool.list())
+          .map((tool) => getLeanCtxTool(tool.name))
+          .find((found) => found !== undefined);
+        if (match) {
+          leanCtxSeen = true;
+          leanServer = match.server;
+        }
+      } catch {
+        // Listing is best-effort; the tool hooks still detect lean-ctx.
+      }
+    }
     if (leanCtxSeen) await ensureMeterCommand($);
     return next(event);
   });
@@ -168,6 +190,34 @@ export const register: Register = (on, options) => {
     return next(event);
   });
 
+  // K8 compaction coordination: before the main conversation is compacted,
+  // lean-ctx persists its session state and the summarizer is told what lean-ctx
+  // still depends on; afterwards the next prompt carries that state once.
+  // Subagent compactions and every failure pass through untouched.
+  on("session.compact", async ($, event, next) => {
+    if (!leanServer || event.agentId) return next(event);
+    const server = leanServer;
+    try {
+      await $.mcp.call(server, "ctx_session", { action: "save" });
+    } catch {
+      // Saving is best-effort; compaction proceeds regardless.
+    }
+    const instructions = [event.instructions, compactionInstructions()].filter(Boolean).join("\n\n");
+    const result = await next({ ...event, instructions });
+    if (!result.skip) {
+      metrics.compactions += 1;
+      resumePending = true;
+    }
+    return result;
+  });
+
+  on("prompt.submit", async ($, event, next) => {
+    if (!resumePending || !leanServer) return next(event);
+    resumePending = false;
+    const state = await sessionState($, leanServer);
+    return state ? next({ ...event, context: [...(event.context ?? []), state] }) : next(event);
+  });
+
   on("turn.step", async function* ($, event, next) {
     const result = yield* next(event);
     if (leanCtxSeen) recordRequest(result);
@@ -220,6 +270,37 @@ async function shapeBash(
     return { result: { ...record, stdout: text }, context: result.context } as ToolCallResult;
   } catch {
     return result;
+  }
+}
+
+// What the compaction summary must keep for lean-ctx to stay usable: ids of
+// jobs that will still wake the model, and recovery handles of compressed
+// output the ongoing work refers to. Deterministic for a given watch set.
+function compactionInstructions(): string {
+  const ids = [...watchedJobs.values()].map((job) => job.id).sort();
+  const lines = [
+    "lean-ctx: keep, verbatim, any lean-ctx recovery handles the ongoing work still relies on (ctx_expand ids and `full original at …` paths).",
+  ];
+  if (ids.length > 0) {
+    lines.push(
+      `lean-ctx: background job(s) ${ids.join(", ")} are still running and will report when done — keep their ids and do not plan to poll them.`,
+    );
+  }
+  return lines.join("\n");
+}
+
+// The lean-ctx session state (task, decisions, findings) for the first prompt
+// after a compaction, bounded so it can never crowd out the conversation.
+async function sessionState($: EngineInterface, server: string): Promise<string | undefined> {
+  try {
+    const response = await $.mcp.call(server, "ctx_session", { action: "status" });
+    if (response.isError) return undefined;
+    const text = mcpText(response).trim();
+    if (!text) return undefined;
+    const bounded = text.length <= MAX_RESUME_CHARS ? text : `${text.slice(0, MAX_RESUME_CHARS)}…`;
+    return `lean-ctx session state, restored after compaction:\n${bounded}`;
+  } catch {
+    return undefined;
   }
 }
 
@@ -533,6 +614,7 @@ function formatMetrics(): string {
     `sleeps answered ${metrics.sleepsAnswered}`,
     `wakes delivered ${metrics.wakesDelivered}`,
     `Bash outputs shaped ${metrics.shapedCalls} (−${metrics.shapedCharsSaved} chars)`,
+    `compactions ${metrics.compactions}`,
   ].join(" · ");
 }
 
@@ -566,6 +648,8 @@ function resetSessionState(): void {
   metrics.wakesDelivered = 0;
   metrics.shapedCalls = 0;
   metrics.shapedCharsSaved = 0;
+  metrics.compactions = 0;
+  resumePending = false;
   watchedJobs.clear();
   stopWatcherWhenIdle();
 }

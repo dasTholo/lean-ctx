@@ -541,12 +541,12 @@ pub(crate) fn claude_mod_outcome() -> Option<Outcome> {
         return None;
     }
     let versions = claude_mod::cached_versions(&claude_dir);
-    let want = env!("CARGO_PKG_VERSION");
-    let line = if versions.iter().any(|v| v == want) {
+    let want = claude_mod::mod_version();
+    let line = if versions.contains(&want) {
         format!("{BOLD}Claude Code mod{RST}  {GREEN}installed ({want}){RST}")
     } else if let Some(old) = versions.last() {
         format!(
-            "{BOLD}Claude Code mod{RST}  {YELLOW}{old} — older than this engine{RST}  {DIM}(run: lean-ctx claude-mod install){RST}"
+            "{BOLD}Claude Code mod{RST}  {YELLOW}{old} — this engine ships {want}{RST}  {DIM}(run: lean-ctx claude-mod install){RST}"
         )
     } else {
         format!(

@@ -43,15 +43,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   30-day corpus), shapes large native Bash stdout through lean-ctx, keeps a
   configurable core of lean-ctx tools in front of ToolSearch, prefixes the
   lean-ctx skill with the session's live facts, and adds `/leanctx`.
+- The mod coordinates compaction: lean-ctx saves its session first, the
+  summarizer is told to keep lean-ctx's recovery handles and running job ids
+  (alongside your own `/compact` instructions), and the next prompt carries the
+  lean-ctx session state once.
 - `ctx_shape`: internal host hook that compresses a native tool's output with
   the real command line (command-aware patterns, secret redaction, policy
-  filters, recovery handle). Callable, never advertised.
+  filters, recovery handle). Never advertised and refused through `ctx_call`.
 
 ### Fixed
 
+- A successful build (e.g. `cargo build`) now has its progress lines folded
+  like a failing one; it used to ship every `Compiling …` line, also through
+  `ctx_shell`.
 - Claude Code native installs (`~/.local/share/claude/versions/…`) are now a
   trusted `claude` location, so `claude mcp add-json` is used there instead of
-  silently falling back to editing `~/.claude.json`.
+  silently falling back to editing `~/.claude.json`. The trust check matches
+  path components under the home directory or fixed system prefixes on every
+  platform; a project-local `node_modules/.bin/claude` is no longer trusted.
 
 ### Added — evidence-aware semantic code intelligence (ADR-015)
 

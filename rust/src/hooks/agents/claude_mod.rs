@@ -3,11 +3,14 @@
 //!
 //! The binary carries the mod and installs it from a local marketplace in the
 //! lean-ctx data dir, so the installed mod always matches the engine that
-//! serves it (plugin version = lean-ctx version; Claude Code caches plugins by
-//! version, so every engine update rolls the mod forward) and nothing is
-//! fetched from the network. The lifecycle is driven through Claude Code's own
-//! `claude plugin` CLI — verified against 2.1.287: `marketplace add` and
-//! `install` are idempotent, `marketplace update` + `update` bump the version.
+//! serves it and nothing is fetched from the network. Claude Code caches a
+//! plugin per version string, so the version is the engine version plus a
+//! content hash (`3.10.5+1a2b3c4d`, semver build metadata): any change to the
+//! mod's sources — a release or a `dev-install` — rolls it forward, an
+//! unchanged mod never churns. The lifecycle is driven through Claude Code's
+//! own `claude plugin` CLI — verified against 2.1.287: `marketplace add` and
+//! `install` are idempotent, `marketplace update` + `update` move between
+//! versions, including ones that differ only in build metadata.
 //!
 //! The mod is code that runs inside Claude Code with the user's permissions, so
 //! it is never installed silently: `lean-ctx claude-mod install`, or a `yes` in
@@ -46,7 +49,7 @@ pub enum ModStatus {
 impl ModStatus {
     #[must_use]
     pub fn describe(&self) -> String {
-        let want = env!("CARGO_PKG_VERSION");
+        let want = mod_version();
         match self {
             Self::ClaudeMissing => "Claude Code not found on PATH".to_string(),
             Self::ClaudeTooOld(v) => format!(
@@ -55,9 +58,24 @@ impl ModStatus {
             ),
             Self::NotInstalled => "not installed".to_string(),
             Self::Current(v) => format!("installed ({v})"),
-            Self::Stale(v) => format!("installed ({v}), engine is {want} — refresh pending"),
+            Self::Stale(v) => {
+                format!("installed ({v}), this engine ships {want} — refresh pending")
+            }
         }
     }
+}
+
+/// The installed plugin version: engine version + 8 hex of the mod sources'
+/// BLAKE3 (`3.10.5+1a2b3c4d`). Deterministic per build.
+#[must_use]
+pub fn mod_version() -> String {
+    let mut hasher = blake3::Hasher::new();
+    for part in [REGISTER_TS, HOOKS_JSON, PLUGIN_JSON] {
+        hasher.update(part.as_bytes());
+        hasher.update(&[0]);
+    }
+    let hash = hasher.finalize().to_hex();
+    format!("{}+{}", env!("CARGO_PKG_VERSION"), &hash[..8])
 }
 
 /// `<data dir>/claude-mod` — the local marketplace root.
@@ -65,11 +83,11 @@ pub fn marketplace_dir() -> Result<PathBuf, String> {
     crate::core::data_dir::lean_ctx_data_dir().map(|d| d.join("claude-mod"))
 }
 
-/// The plugin manifest with `version` set to this engine's version.
+/// The plugin manifest with `version` set to [`mod_version`].
 pub fn plugin_manifest() -> String {
     let mut manifest: serde_json::Value =
         serde_json::from_str(PLUGIN_JSON).expect("templates/claude_mod/plugin.json is valid JSON");
-    manifest["version"] = serde_json::json!(env!("CARGO_PKG_VERSION"));
+    manifest["version"] = serde_json::json!(mod_version());
     serde_json::to_string_pretty(&manifest).expect("manifest serializes") + "\n"
 }
 
@@ -153,7 +171,7 @@ pub fn status() -> ModStatus {
         .and_then(|out| installed_version(&out))
     {
         None => ModStatus::NotInstalled,
-        Some(v) if v == env!("CARGO_PKG_VERSION") => ModStatus::Current(v),
+        Some(v) if v == mod_version() => ModStatus::Current(v),
         Some(v) => ModStatus::Stale(v),
     }
 }
@@ -178,7 +196,7 @@ pub fn install() -> Result<String, String> {
             run_claude(&["plugin", "install", PLUGIN_ID, "--scope", "user"])?;
             Ok(format!(
                 "installed {PLUGIN_ID} {} — active in new Claude Code sessions (or /reload-plugins)",
-                env!("CARGO_PKG_VERSION")
+                mod_version()
             ))
         }
         ModStatus::Stale(old) => {
@@ -186,13 +204,10 @@ pub fn install() -> Result<String, String> {
             run_claude(&["plugin", "update", PLUGIN_ID, "--scope", "user"])?;
             Ok(format!(
                 "updated {PLUGIN_ID} {old} → {} — applies in new sessions",
-                env!("CARGO_PKG_VERSION")
+                mod_version()
             ))
         }
-        _ => Ok(format!(
-            "{PLUGIN_ID} is current ({})",
-            env!("CARGO_PKG_VERSION")
-        )),
+        _ => Ok(format!("{PLUGIN_ID} is current ({})", mod_version())),
     }
 }
 
@@ -350,8 +365,9 @@ mod tests {
         assert!(!marketplace_listed("garbage"));
     }
 
-    /// The installed manifest must carry the engine version (Claude caches
-    /// plugins by version; a fixed version would freeze the mod forever), and a
+    /// The installed manifest must carry the engine version plus a content
+    /// hash (Claude caches plugins by version string; a version that ignores
+    /// the mod's sources froze dev-installs and same-version patches), and a
     /// second materialize must be a no-op.
     #[test]
     fn materialize_stamps_engine_version_and_is_idempotent() {
@@ -365,7 +381,13 @@ mod tests {
             .unwrap(),
         )
         .unwrap();
-        assert_eq!(manifest["version"], env!("CARGO_PKG_VERSION"));
+        let version = manifest["version"].as_str().unwrap();
+        let (engine, hash) = version.split_once('+').expect("engine+hash version");
+        assert_eq!(engine, env!("CARGO_PKG_VERSION"));
+        assert!(
+            hash.len() == 8 && hash.chars().all(|c| c.is_ascii_hexdigit()),
+            "{version}"
+        );
         assert_eq!(manifest["name"], "lean-ctx");
         assert!(
             std::fs::read_to_string(dir.path().join("plugins/lean-ctx/hooks/register.ts"))
