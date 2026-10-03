@@ -126,16 +126,9 @@ export async function handle(
   if (method === "GET" && route === "/health") {
     return { status: 200, body: { status: "ok", ...info } };
   }
-  // A Map, not an object: a client-chosen route must never reach a
-  // prototype property.
-  const ops = new Map<string, (file: string, pos: Position) => Promise<Location[]>>([
-    ["/definition", (f, p) => nav.definition(f, p)],
-    ["/declaration", (f, p) => nav.declaration(f, p)],
-    ["/references", (f, p) => nav.references(f, p)],
-    ["/implementations", (f, p) => nav.implementations(f, p)],
-  ]);
-  const op = ops.get(route);
-  if (method !== "POST" || (!op && route !== "/type_hierarchy")) {
+  // Fixed routes only: a client-chosen string never selects what is called.
+  const known = ["/definition", "/declaration", "/references", "/implementations", "/type_hierarchy"];
+  if (method !== "POST" || !known.includes(route)) {
     return error("NOT_FOUND", `no route ${method} ${route}`, 404);
   }
   const file = typeof body.path === "string" ? requestFile(root, body.path) : null;
@@ -143,22 +136,40 @@ export async function handle(
   const pos = position(body);
   if (!pos) return error("POSITION_OUT_OF_RANGE", "line/character must be non-negative integers");
 
-  if (!op) {
-    const direction: Direction = body.direction === "subtypes" ? "subtypes" : "supertypes";
-    const tree = await nav.typeHierarchy(file, pos, direction);
-    // No `tree` key at all for "nothing here": lean-ctx reads that as "not
-    // answered yet", whereas a tree without children is a definitive answer.
-    if (!tree) return { status: 200, body: { truncated: false } };
-    const node = (n: TypeNode, children: unknown[]) => ({
-      name: n.name,
-      path: wirePath(root, n.file),
-      line: n.line + 1,
-      children,
-    });
-    return {
-      status: 200,
-      body: { tree: node(tree.root, tree.related.map((r) => node(r, []))), truncated: false },
-    };
+  switch (route) {
+    case "/definition":
+      return locationsReply(root, await nav.definition(file, pos));
+    case "/declaration":
+      return locationsReply(root, await nav.declaration(file, pos));
+    case "/references":
+      return locationsReply(root, await nav.references(file, pos));
+    case "/implementations":
+      return locationsReply(root, await nav.implementations(file, pos));
+    default:
+      return typeHierarchyReply(nav, root, file, pos, body);
   }
-  return locationsReply(root, await op(file, pos));
+}
+
+async function typeHierarchyReply(
+  nav: Navigator,
+  root: string,
+  file: string,
+  pos: Position,
+  body: Record<string, unknown>,
+): Promise<Reply> {
+  const direction: Direction = body.direction === "subtypes" ? "subtypes" : "supertypes";
+  const tree = await nav.typeHierarchy(file, pos, direction);
+  // No `tree` key at all for "nothing here": lean-ctx reads that as "not
+  // answered yet", whereas a tree without children is a definitive answer.
+  if (!tree) return { status: 200, body: { truncated: false } };
+  const node = (n: TypeNode, children: unknown[]) => ({
+    name: n.name,
+    path: wirePath(root, n.file),
+    line: n.line + 1,
+    children,
+  });
+  return {
+    status: 200,
+    body: { tree: node(tree.root, tree.related.map((r) => node(r, []))), truncated: false },
+  };
 }
