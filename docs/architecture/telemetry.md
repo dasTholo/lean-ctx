@@ -193,12 +193,25 @@ geschrieben werden kann; daraus folgt keine Exactly-once-Garantie.
 - Der Backend-Vertrag (`POST /api/telemetry/v2/batch`,
   `DELETE /api/telemetry/v2/installations/{id}`) liegt ausserhalb dieses
   Repositories und ist hier nicht abgenommen.
-- **Serverseitige Aufbewahrungsfristen sind hier nicht festgelegt** und dürfen
-  ohne Rechtsprüfung nicht behauptet werden.
-- Die Prüfliste für Schweizer DSG- und DSGVO-Anwendbarkeit ist noch zu
-  erstellen (§28).
-- Ob `delete-remote` eine bestätigte serverseitige Löschung erreicht, ist nicht
-  belegt.
+
+## Rechtsgrundlage (Owner-Entscheid 2026-10-05)
+
+Verantwortlich ist die Thinkery AG, Wädenswil (Schweiz). Die Bearbeitung
+erfolgt nach dem Schweizer DSG und, soweit anwendbar, nach der DSGVO, gestützt
+auf das berechtigte Interesse an Wartung und Verbesserung (Art. 6 Abs. 1 lit. f
+DSGVO): wie viele Installationen LeanCTX nutzen, welche Funktionen und
+KI-Clients, wo Fehler auftreten. Widerspruch jederzeit (Art. 30 DSG, Art. 21
+DSGVO) über `telemetry off`, `DO_NOT_TRACK=1` oder `LEAN_CTX_TELEMETRY=off`;
+`telemetry delete-remote` löscht Gespeichertes. Grundsätze, die jede
+Erweiterung einhalten muss: nur pseudonyme Tageszählungen, keine
+Identifikation oder Profilbildung, Speicherung in der Schweiz, keine Weitergabe
+an Dritte für deren Zwecke, Offenlegung in `DISCLOSURE` und auf
+leanctx.com/privacy.
+
+Belegt im Server-Code (`lean-ctx-cloud`): Aufbewahrung 90 Tage
+(`telemetry_retention_job`, täglich); `DELETE
+/api/telemetry/v2/installations/{id}` löscht mit gültigem Löschtoken die
+Installation samt aller abhängigen Tabellen (Kaskade) und setzt einen Tombstone.
 
 ## Mindestabnahme
 
