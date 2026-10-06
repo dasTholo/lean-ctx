@@ -315,6 +315,16 @@ pub(crate) fn remove_for_test(id: &str) {
         .remove(id);
 }
 
+/// Jobs whose command is still running. An idle MCP server with one of these
+/// is not idle: it holds the child and the output the agent will poll for.
+pub fn running_count() -> usize {
+    JOBS.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .values()
+        .filter(|job| matches!(job.state, JobState::Running { .. }))
+        .count()
+}
+
 pub fn status(id: &str) -> Option<JobState> {
     let jobs = JOBS
         .lock()

@@ -19,6 +19,14 @@ pub(super) fn run_mcp_server() -> Result<()> {
 
     crate::core::runtime_flags::enable_mcp_server();
 
+    // Per-process RSS target, installed before the server starts the memory
+    // guardian. Long-lived hosts keep many of these servers alive at once.
+    crate::core::memory_guard::set_process_rss_cap(
+        crate::core::config::Config::load()
+            .mcp_max_rss_mb_effective()
+            .saturating_mul(1024 * 1024),
+    );
+
     crate::core::startup_guard::crash_loop_backoff(crate::core::startup_guard::MCP_PROCESS_NAME);
 
     // Commit to the XDG layout (and drain any residual ~/.lean-ctx) once per
@@ -175,6 +183,10 @@ pub(super) fn run_mcp_server() -> Result<()> {
         // the client timeouts it was meant to prevent. True crash loops die
         // before this line, so their detection is unaffected.
         core::startup_guard::reset_crash_loop(core::startup_guard::MCP_PROCESS_NAME);
+        // Hosts that keep stdin open and outlive the thread (Codex app-server)
+        // trigger neither EOF nor the parent watchdog: release memory when
+        // idle, and exit when the operator opted in.
+        crate::server::mcp_idle::spawn(server_handle.clone());
         match service.waiting().await {
             Ok(reason) => {
                 tracing::info!("MCP server stopped: {reason:?}");

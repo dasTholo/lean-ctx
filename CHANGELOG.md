@@ -6,6 +6,36 @@ Current positioning: [LeanCTX Engine — Context Gateway for AI Systems](docs/PO
 
 ## [Unreleased]
 
+### Changed
+
+- **Bounded memory for long-lived MCP servers.** Each stdio MCP server now
+  has a per-process RSS target, `mcp_max_rss_mb` (default 512 MB,
+  `LEAN_CTX_MCP_MAX_RSS_MB`). The guardian uses the lower of it and
+  `max_ram_percent`, which on large machines was several GB per process. A
+  Codex app-server that keeps one server per loaded thread therefore no longer
+  accumulates ~1 GB instances.
+- **Idle MCP servers release their caches.** After the `memory_cleanup` TTL
+  without a tool call, a server drops its read cache and resident indexes
+  without waiting for the next call. A running call or background job keeps
+  it busy. The release logs process memory and live heap before and after.
+- **macOS: the memory guard measures physical footprint.** It now uses the
+  figure Activity Monitor shows instead of resident size, which leaves out
+  pages the memory compressor has taken. An idle server measured 40 MB
+  resident while still holding a ~180 MB heap. Footprint is read through
+  `proc_pid_rusage`, which also replaces a `ps` spawn per sample.
+- **Quieter, cheaper guardian.** Eviction rounds that reclaim nothing back off
+  (1 s → 60 s, then a five-minute pause) at every pressure level, not only
+  Critical. Sampling stays at one second, so a rise to a higher level still
+  evicts at once. Pressure lines log on a level change and at most once a
+  minute after that; a baseline above a small cap used to log every second.
+
+### Added
+
+- `mcp_idle_exit_minutes` (`LEAN_CTX_MCP_IDLE_EXIT_MINUTES`, default `0` =
+  off) ends a stdio MCP server after that many idle minutes. It is opt-in
+  because Codex does not restart exited MCP servers. stdin EOF and a dead
+  parent already end the server.
+
 ## [3.11.0] — 2026-10-04
 
 ### Highlights

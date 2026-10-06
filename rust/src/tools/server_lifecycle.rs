@@ -307,25 +307,67 @@ impl LeanCtxServer {
         }
         let last = *self.last_call.read().await;
         if last.elapsed().as_secs() >= self.cache_ttl_secs {
-            tokio::spawn(crate::core::session::SessionState::save_shared_logged(
-                self.session.clone(),
-            ));
-            let mut cache = self.cache.write().await;
-            let redelivered = cache.count_full_delivered();
-            let count = cache.clear();
-            crate::core::cache_telemetry::record_idle(redelivered as u64);
-            // The persisted stub index outlives the warm-cache clear, so a
-            // same-conversation re-read after idle still collapses to the stub
-            // via the cold fallback (#955). Flush it now for durability.
-            crate::core::read_stub_index::persist();
-            if count > 0 {
-                tracing::info!(
-                    "Cache auto-cleared after {}s idle ({count} file(s), {redelivered} forced re-delivery)",
-                    self.cache_ttl_secs
-                );
-            }
+            self.clear_idle_cache().await;
         }
         *self.last_call.write().await = Instant::now();
+    }
+
+    /// Idle TTL of the read cache (`memory_cleanup` / `LEAN_CTX_CACHE_TTL`); 0 = off.
+    pub fn idle_ttl(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.cache_ttl_secs)
+    }
+
+    async fn clear_idle_cache(&self) {
+        tokio::spawn(crate::core::session::SessionState::save_shared_logged(
+            self.session.clone(),
+        ));
+        let mut cache = self.cache.write().await;
+        let redelivered = cache.count_full_delivered();
+        let count = cache.clear();
+        crate::core::cache_telemetry::record_idle(redelivered as u64);
+        // The persisted stub index outlives the warm-cache clear, so a
+        // same-conversation re-read after idle still collapses to the stub
+        // via the cold fallback (#955). Flush it now for durability.
+        crate::core::read_stub_index::persist();
+        if count > 0 {
+            tracing::info!(
+                "Cache auto-cleared after {}s idle ({count} file(s), {redelivered} forced re-delivery)",
+                self.cache_ttl_secs
+            );
+        }
+    }
+
+    /// Release what an idle server holds without waiting for the next call:
+    /// the read cache (as `check_idle_expiry` would), the resident indexes and
+    /// the allocator's free pages. Everything reloads on demand. Restarts the
+    /// TTL so the next call does not clear (and count) the cache a second time.
+    pub async fn release_idle_memory(&self) {
+        use crate::core::memory_guard;
+        let before = (
+            memory_guard::get_rss_bytes(),
+            memory_guard::allocator_stats(),
+        );
+        self.clear_idle_cache().await;
+        *self.last_call.write().await = Instant::now();
+        let _ = tokio::task::spawn_blocking(|| {
+            crate::core::eviction_orchestrator::on_memory_pressure(
+                memory_guard::PressureLevel::Hard,
+            );
+            memory_guard::jemalloc_purge();
+        })
+        .await;
+        let after = (
+            memory_guard::get_rss_bytes(),
+            memory_guard::allocator_stats(),
+        );
+        let mb = |bytes: Option<u64>| bytes.map_or_else(|| "?".into(), |b| format!("{}", b >> 20));
+        tracing::info!(
+            "[mcp-idle] released: RSS {} → {} MB, heap {} → {} MB",
+            mb(before.0),
+            mb(after.0),
+            mb(before.1.map(|s| s.0)),
+            mb(after.1.map(|s| s.0)),
+        );
     }
 
     async fn record_shutdown_episode(&self) {

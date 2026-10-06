@@ -57,6 +57,10 @@ pub(super) fn default_max_ram_percent() -> u8 {
     5
 }
 
+pub(super) fn default_mcp_max_rss_mb() -> u64 {
+    512
+}
+
 pub(super) fn default_session_retention_days() -> u32 {
     7
 }
