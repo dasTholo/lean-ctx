@@ -35,7 +35,14 @@ fn persist_entry_at(path: &Path, mut entry: LedgerEntry) -> Result<(), String> {
     }
     // fs2 uses the same advisory flock as the existing Unix ledger writer,
     // and also provides a real lock on Windows. Lock failure prevents writes.
-    let _lock = crate::core::agents::FileLock::acquire(&path.with_extension("json.lock"))?;
+    // Every completed read waits here before it is acknowledged, so N parallel
+    // reads queue N read-merge-write cycles. 750 ms (the FileLock default) was
+    // not enough for 16 on windows-latest; the wait is bounded, not removed.
+    const LEDGER_LOCK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+    let _lock = crate::core::agents::FileLock::acquire_with_timeout(
+        &path.with_extension("json.lock"),
+        LEDGER_LOCK_TIMEOUT,
+    )?;
     let mut current: ContextLedger = match std::fs::symlink_metadata(path) {
         Ok(meta) => {
             if !meta.is_file() || meta.len() > 8 * 1024 * 1024 {
