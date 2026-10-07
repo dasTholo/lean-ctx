@@ -6,37 +6,7 @@ Current positioning: [LeanCTX Engine — Context Gateway for AI Systems](docs/PO
 
 ## [Unreleased]
 
-### Changed
-
-- **Bounded memory for long-lived MCP servers.** Each stdio MCP server now
-  has a per-process RSS target, `mcp_max_rss_mb` (default 512 MB,
-  `LEAN_CTX_MCP_MAX_RSS_MB`). The guardian uses the lower of it and
-  `max_ram_percent`, which on large machines was several GB per process. A
-  Codex app-server that keeps one server per loaded thread therefore no longer
-  accumulates ~1 GB instances.
-- **Idle MCP servers release their caches.** After the `memory_cleanup` TTL
-  without a tool call, a server drops its read cache and resident indexes
-  without waiting for the next call. A running call or background job keeps
-  it busy. The release logs process memory and live heap before and after.
-- **macOS: the memory guard measures physical footprint.** It now uses the
-  figure Activity Monitor shows instead of resident size, which leaves out
-  pages the memory compressor has taken. An idle server measured 40 MB
-  resident while still holding a ~180 MB heap. Footprint is read through
-  `proc_pid_rusage`, which also replaces a `ps` spawn per sample.
-- **Quieter, cheaper guardian.** Eviction rounds that reclaim nothing back off
-  (1 s → 60 s, then a five-minute pause) at every pressure level, not only
-  Critical. Sampling stays at one second, so a rise to a higher level still
-  evicts at once. Pressure lines log on a level change and at most once a
-  minute after that; a baseline above a small cap used to log every second.
-
-### Added
-
-- `mcp_idle_exit_minutes` (`LEAN_CTX_MCP_IDLE_EXIT_MINUTES`, default `0` =
-  off) ends a stdio MCP server after that many idle minutes. It is opt-in
-  because Codex does not restart exited MCP servers. stdin EOF and a dead
-  parent already end the server.
-
-## [3.11.0] — 2026-10-04
+## [3.11.0] — 2026-10-07
 
 ### Highlights
 
@@ -56,7 +26,7 @@ Current positioning: [LeanCTX Engine — Context Gateway for AI Systems](docs/PO
 - **Indexes:** `GRAPH_ENGINE_VERSION` and graph `INDEX_VERSION` are now 7. Existing graph indexes rebuild before use; do not reuse a version 6 graph.
 - **Semantic mode:** `semantic_mode = "auto"` is the default. It uses running language servers or a live IDE; it does not start servers unless `semantic_mode = "eager"` is selected in a trusted workspace. Use `semantic_mode = "off"` to disable semantic enrichment.
 - **Shell allowlist:** multi-word entries now match the exact command unless they end in *. For example, use `"git status *"` for prefix matching. Set `shell_allowlist_subcommand_scoping = false` to restore the former base-binary matching.
-- **Other new defaults:** `intelligence_runtime.context_policy_apply = false`. The `engine-context-store-v1` contract and `context-gateway-v1` vocabulary are experimental, not stable compatibility promises.
+- **Other new defaults:** `intelligence_runtime.context_policy_apply = false`. Each stdio MCP server targets `mcp_max_rss_mb = 512` (raise it, or set `LEAN_CTX_MCP_MAX_RSS_MB`, for very large indexes); `mcp_idle_exit_minutes = 0` keeps idle servers running. The `engine-context-store-v1` contract and `context-gateway-v1` vocabulary are experimental, not stable compatibility promises.
 - **Claude Code mod:** the mod is installed explicitly. When active, set its `keep_hook_context` option to retain lean-ctx hook context, or `shape_native_output` to disable native Bash shaping.
 - **Removed runtime paths:** automatic model routing is gone; a leftover `proxy.routing.tiers` table is ignored and reported by `lean-ctx doctor`. Rust embedders importing removed internal modules must move to `ContextEngine` or `lean-ctx-sdk`.
 - **Removed shell cache:** the opt-in shell output cache was removed; legacy config files still load, but `shell_cache_enabled` no longer enables cached results.
@@ -79,6 +49,10 @@ Current positioning: [LeanCTX Engine — Context Gateway for AI Systems](docs/PO
 
 ### Added
 
+- `mcp_idle_exit_minutes` (`LEAN_CTX_MCP_IDLE_EXIT_MINUTES`, default `0` =
+  off) ends a stdio MCP server after that many idle minutes. It is opt-in
+  because Codex does not restart exited MCP servers. stdin EOF and a dead
+  parent already end the server.
 - **Gateway proof registry and source planning.** A proof registry maps admission cases and bypass checks to their tests, and the release gate can refuse while a proof entry is open. engine context-plan-sources omits caller-supplied sources unrelated to the task even when budget remains; it drops stop words, splits identifiers, and keeps sources related by task terms. lean-ctx inspect shows receipt-derived redaction, withholding, and source-use facts. A local claims catalog records what the release can say and what it does not claim.
 - **Per-host gateway coverage.** lean-ctx doctor reports whether each configured host is enforced, partial, MCP-only/not observable, or unsupported; partial means lean-ctx tools and rewritten shell commands are covered while host-native file tools can bypass admission, and not_observable means MCP-only. lean-ctx inspect shows the same coverage. The generated matrix does not claim observation without an integration that provides it. Claude Code traffic is enforced only with an Anthropic API key; Pro/Max sign-in cannot be proxied. Credential-forwarding journeys for Claude Code /v1/messages and Codex subscription /backend-api/codex/responses show a tool-result credential withheld while the rest of the turn proceeds.
 - **Claude Code mod (#1981, #1986, #1989, #1991, #1997, #1998).** lean-ctx claude-mod install|status|uninstall manages an embedded local plugin for Claude Code 2.1.287 or later; interactive setup offers installation, while non-interactive setup and update only refresh an existing install. MCP is marked always-load, and the mod shapes native Bash output of at least 2,000 characters with fail-open behavior. The shell deny lets Bash(run_in_background) through only when the exact command passes the enforced allowlist; ctx_shape remains an internal hook rather than a listed tool.
@@ -101,6 +75,27 @@ Current positioning: [LeanCTX Engine — Context Gateway for AI Systems](docs/PO
 
 ### Changed
 
+- **Bounded memory for long-lived MCP servers.** Each stdio MCP server now
+  has a per-process RSS target, `mcp_max_rss_mb` (default 512 MB,
+  `LEAN_CTX_MCP_MAX_RSS_MB`). The guardian uses the lower of it and
+  `max_ram_percent`, which on large machines was several GB per process. A
+  Codex app-server that keeps one server per loaded thread therefore no longer
+  accumulates ~1 GB instances.
+- **Idle MCP servers release their caches.** After the `memory_cleanup` TTL
+  without a tool call, a server drops its read cache and resident indexes
+  without waiting for the next call. A running call or background job keeps
+  it busy. The release logs process memory and live heap before and after.
+- **macOS: the memory guard measures physical footprint.** It now uses the
+  figure Activity Monitor shows instead of resident size, which leaves out
+  pages the memory compressor has taken. An idle server measured 40 MB
+  resident while still holding a ~180 MB heap. Footprint is read through
+  `proc_pid_rusage`, which also replaces a `ps` spawn per sample.
+- **Quieter, cheaper guardian.** Eviction rounds that reclaim nothing back off
+  (1 s → 60 s, then a five-minute pause) at every pressure level, not only
+  Critical. Sampling stays at one second, so a rise to a higher level still
+  evicts at once. Pressure lines log on a level change and at most once a
+  minute after that; a baseline above a small cap used to log every second.
+- **Bundled MCP SDK 1.32.1 in the pi extension (#2017).** `@modelcontextprotocol/sdk` 1.30.0 → 1.32.1, `proxy-addr` 2.0.8 and `source-map-js` 1.2.2; THIRD_PARTY_NOTICES and the asset manifest record the new versions and digests.
 - **One capability registry.** Capability IDs remain stable lookup names, while one registry determines which capabilities are backed by the local source tree and how their availability is described.
 - **Local use remains accountless.** Signing in alone no longer enables shared agent-presence or lease paths; a single developer's local Runtime remains available without an account.
 - **Quality evidence reports its limits (#1905).** Eval/A-B/footprint/frontier reports label runs with fewer than 30 paired tasks or without bootstrap as underpowered; --gate fails those runs. --mechanism is for small wiring fixtures, fails only on regression, and cannot support a quality claim. Non-regression is reported as NON-INFERIOR, and schema v2 reports evidence tiers from mechanism through production; fixture recordings are mechanism evidence only. Shadow reports identify their baseline as simulated and describe outcome acceptance relative to that baseline.
@@ -123,6 +118,7 @@ Current positioning: [LeanCTX Engine — Context Gateway for AI Systems](docs/PO
 
 ### Fixed
 
+- **Parallel reads no longer time out on file locks (#2016).** Every completed ctx_read persists its ledger entry before it is acknowledged; 16 parallel reads on Windows queued past the 750 ms lock wait and failed with a misleading "agent registry lock" error. Ledger persistence now waits up to 10 s, lock errors name the lock file, and concurrent first tool calls register the session's bus presence once instead of racing.
 - **ctx_read honours the documented bare multi-select (#2000).** mode="3,7-9" selects those lines like lines:3,7-9 instead of falling through to a full read; malformed comma payloads still reach the unknown-mode path.
 - **Control flow inside a shell function body passes the allowlist (#2002).** A function body is expanded like a top-level line, so for, if, while and case are control flow and only the commands inside them are checked; the block message no longer contains a stray run of spaces.
 - **A heredoc after a multi-line quoted string is recognised (#2003).** The heredoc scanner keeps the quote state across lines, so `echo "a⏎b"; cat <<'EOF'` no longer gates the heredoc body as commands; an apostrophe in a comment cannot hide a later heredoc.
