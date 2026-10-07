@@ -301,11 +301,23 @@ fn concurrent_mutations_do_not_lose_tasks() {
         .map(|index| {
             let path = path.clone();
             std::thread::spawn(move || {
-                TaskStore::mutate_locked(&path, |store| {
-                    store.create_task("sender", "receiver", &format!("task-{index}"));
-                    Ok::<_, std::io::Error>(())
-                })
-                .unwrap();
+                // The guarantee under test is "no lost update", not "no lock
+                // timeout": twelve writers can outlast the 750 ms wait on a
+                // loaded runner. A timeout fails before the store is loaded,
+                // so retrying it cannot create a task twice.
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+                loop {
+                    match TaskStore::mutate_locked(&path, |store| {
+                        store.create_task("sender", "receiver", &format!("task-{index}"));
+                        Ok::<_, std::io::Error>(())
+                    }) {
+                        Ok(()) => break,
+                        Err(error)
+                            if error.to_string().contains("timed out")
+                                && std::time::Instant::now() < deadline => {}
+                        Err(error) => panic!("task mutation failed: {error}"),
+                    }
+                }
             })
         })
         .collect::<Vec<_>>();
