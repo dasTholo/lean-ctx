@@ -109,6 +109,10 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      # The checker invokes the notices generator (`cargo metadata --locked
+      # --offline`); fetch the locked crate set so it stays offline.
+      - name: Fetch locked crates
+        run: cargo fetch --locked --manifest-path rust/Cargo.toml
       - name: Verify provenance checker contract
         run: python3 -m unittest discover -s scripts/tests -v
       - name: Strict IP provenance audit
@@ -557,6 +561,9 @@ jobs:
             SHA256SUMS
         env:
           COSIGN_EXPERIMENTAL: "1"
+
+      - name: Fetch locked crates
+        run: cargo fetch --locked --manifest-path rust/Cargo.toml
 
       - name: Verify release SBOM artifact
         run: |
