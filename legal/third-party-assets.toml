@@ -8,7 +8,7 @@ cargo_lock_sha256 = "a9d8b3bb6d65830fb64bad579692ec7819b0c4b0948923e22f6c2b701aa
 sbom = "SBOM.cdx.json"
 sbom_sha256 = "0340707e27976af0cb67d49928f13129e4b21dcbea6ebdb11c23f795d90cb1df"
 npm_lock = "packages/pi-lean-ctx/package-lock.json"
-npm_lock_sha256 = "5c17b70299afe706d3c5c4d3e74ada73987eaceddcd164fa1b004a9a74419a32"
+npm_lock_sha256 = "3ca97565d7f519821a03e2360293ab11312a72d3efd1c7b5d81674e4dffba361"
 
 [license_texts]
 isc = """
@@ -246,9 +246,9 @@ evidence_paths = [
 [[assets]]
 id = "mcp-sdk-bundle"
 path = "packages/pi-lean-ctx/extensions/vendor/mcp-sdk.cjs"
-sha256 = "88b196da41b4e0878d91e8e6103d6fa74f639d49b8081349446326d134f182e1"
-version = "1.30.0"
-source = "https://registry.npmjs.org/@modelcontextprotocol/sdk/-/sdk-1.30.0.tgz"
+sha256 = "6a30e0f16413dd59f3b56eb5aabbe4afb60dbf8f2ffb0a9f83f79b9a8f97714e"
+version = "1.32.1"
+source = "https://registry.npmjs.org/@modelcontextprotocol/sdk/-/sdk-1.32.1.tgz"
 spdx = "MIT"
 license_text_path = "legal/third-party-assets.toml"
 license_text_key = "license_texts.mit"
@@ -264,8 +264,8 @@ evidence_paths = [
 id = "mcp-sdk-declaration"
 path = "packages/pi-lean-ctx/extensions/vendor/mcp-sdk.d.cts"
 sha256 = "f2a8c3bc241c206d93610ac3597206f88f0ac19ade8b1a43e439ad043f48167b"
-version = "1.30.0"
-source = "https://registry.npmjs.org/@modelcontextprotocol/sdk/-/sdk-1.30.0.tgz"
+version = "1.32.1"
+source = "https://registry.npmjs.org/@modelcontextprotocol/sdk/-/sdk-1.32.1.tgz"
 spdx = "MIT"
 license_text_path = "legal/third-party-assets.toml"
 license_text_key = "license_texts.mit"
