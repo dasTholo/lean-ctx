@@ -120,7 +120,10 @@ pub(crate) struct FileLock {
 
 impl FileLock {
     pub(crate) fn acquire(path: &std::path::Path) -> Result<Self, String> {
-        const TIMEOUT: std::time::Duration = std::time::Duration::from_millis(750);
+        // Holders run one read-merge-write each. 750 ms failed real callers
+        // behind a dozen writers on slow runners (Windows, coverage builds);
+        // 5 s matches the DLQ store and still bounds a stuck holder.
+        const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
         Self::acquire_with_timeout(path, TIMEOUT)
     }
 
