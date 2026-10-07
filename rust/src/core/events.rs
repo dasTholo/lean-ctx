@@ -664,16 +664,26 @@ mod tests {
     /// `LockTimeout` is retried; any other persistence failure still fails.
     fn emit_persisted(kind: &EventKind) -> u64 {
         use crate::core::context_os::ObservationPersistenceError;
-        for attempt in 0..5u32 {
+        // Five backoff attempts (~3 s) still lost the queue on a loaded
+        // windows-latest lib run (2026-10-07, 12k tests in parallel); bound
+        // the retry by wall clock instead.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let mut attempt = 0u32;
+        loop {
             match try_emit(kind.clone()) {
                 Ok(id) => return id,
+                Err(ObservationPersistenceError::LockTimeout)
+                    if std::time::Instant::now() < deadline =>
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(100 << attempt.min(4)));
+                    attempt += 1;
+                }
                 Err(ObservationPersistenceError::LockTimeout) => {
-                    std::thread::sleep(std::time::Duration::from_millis(100 << attempt));
+                    panic!("canonical persistence: write lock still contended after 30 s");
                 }
                 Err(error) => panic!("canonical persistence: {error:?}"),
             }
         }
-        panic!("canonical persistence: write lock still contended after 5 attempts");
     }
 
     #[test]

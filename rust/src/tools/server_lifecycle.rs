@@ -94,6 +94,13 @@ impl LeanCtxServer {
         if self.presence_agent_id.read().await.is_some() {
             return Ok(());
         }
+        // Concurrent first calls (16 parallel reads on a fresh engine) each
+        // registered their own agent and timed out on the registry file lock
+        // on Windows. One registers; the rest wait and reuse its id.
+        let _init = self.presence_init.lock().await;
+        if self.presence_agent_id.read().await.is_some() {
+            return Ok(());
+        }
 
         let project_root = self.presence_root();
         // #1766: once `initialize` has resolved the session's role, the retry
@@ -246,6 +253,7 @@ impl LeanCtxServer {
             task_envelope: Arc::new(RwLock::new(None)),
             native_receipt_authority: None,
             presence_agent_id: Arc::new(RwLock::new(presence_agent_id)),
+            presence_init: Arc::new(tokio::sync::Mutex::new(())),
             presence_role: Arc::new(RwLock::new(None)),
             client_name: Arc::new(RwLock::new(String::new())),
             autonomy: Arc::new(crate::core::autonomy::AutonomyState::new()),
@@ -434,6 +442,46 @@ mod tests {
             .clone()
             .expect("presence id is retained");
         let registry = crate::core::agents::AgentRegistry::load().expect("registry persisted");
+        assert!(
+            registry
+                .agents
+                .iter()
+                .any(|agent| agent.agent_id == agent_id)
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_presence_retries_register_once() {
+        let _isolated_data_dir = crate::core::data_dir::isolated_data_dir();
+        let server = LeanCtxServer::new_shared_with_context("/workspace/lean-ctx", "ws", "ch");
+        *server.presence_agent_id.write().await = None;
+        let before = crate::core::agents::AgentRegistry::load()
+            .map(|registry| registry.agents.len())
+            .unwrap_or(0);
+
+        let calls: Vec<_> = (0..16)
+            .map(|_| {
+                let server = server.clone();
+                tokio::spawn(async move { server.ensure_session_presence().await })
+            })
+            .collect();
+        for call in calls {
+            call.await
+                .expect("task joined")
+                .expect("presence retry succeeds");
+        }
+
+        let agent_id = server
+            .presence_agent_id
+            .read()
+            .await
+            .clone()
+            .expect("presence id is retained");
+        let registry = crate::core::agents::AgentRegistry::load().expect("registry persisted");
+        assert!(
+            registry.agents.len() <= before + 1,
+            "no duplicate registrations"
+        );
         assert!(
             registry
                 .agents
