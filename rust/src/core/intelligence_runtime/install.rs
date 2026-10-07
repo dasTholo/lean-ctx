@@ -40,6 +40,22 @@ struct Store {
     _packages_authority: Directory,
 }
 
+/// `Busy` only after a short bounded wait. A child forked by another thread
+/// shares the open lock until it execs, so a lock this process just released
+/// can still read as held for a moment (seen in the parallel test suite).
+fn lock_exclusive_bounded(lock: &File) -> Result<()> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        match lock.try_lock_exclusive() {
+            Ok(()) => return Ok(()),
+            Err(_) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            Err(_) => return Err(InstallError::Busy),
+        }
+    }
+}
+
 #[cfg(not(windows))]
 fn lock_file(path: &Path) -> Result<File> {
     let mut options = OpenOptions::new();
@@ -55,7 +71,7 @@ fn lock_file(path: &Path) -> Result<File> {
     if !lock.metadata()?.is_file() {
         return Err(InstallError::Input);
     }
-    lock.try_lock_exclusive().map_err(|_| InstallError::Busy)?;
+    lock_exclusive_bounded(&lock)?;
     Ok(lock)
 }
 
@@ -66,7 +82,7 @@ fn lock_file(path: &Path) -> Result<File> {
         Privacy::Private,
     )?;
     let lock = directory.open_lock(file_name(path)?)?;
-    lock.try_lock_exclusive().map_err(|_| InstallError::Busy)?;
+    lock_exclusive_bounded(&lock)?;
     Ok(lock)
 }
 

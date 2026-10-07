@@ -324,7 +324,15 @@ fn concurrent_host_calls_publish_only_one_task() {
         let second = scope.spawn(|| run(&args, &mut settings.as_slice()));
         [first.join().unwrap(), second.join().unwrap()]
     });
-    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+    let codes: Vec<&str> = results
+        .iter()
+        .map(|result| result.as_ref().map_or_else(EngineCliError::code, |_| "ok"))
+        .collect();
+    assert_eq!(
+        results.iter().filter(|result| result.is_ok()).count(),
+        1,
+        "exactly one call publishes: {codes:?}"
+    );
     let error = results.into_iter().find_map(Result::err).unwrap();
     assert!(
         matches!(
