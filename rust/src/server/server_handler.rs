@@ -652,6 +652,9 @@ impl ServerHandler for LeanCtxServer {
     ) -> Result<CallToolResult, ErrorData> {
         use std::panic::AssertUnwindSafe;
 
+        // In flight until this call returns — the idle policy never releases
+        // or exits under a running call.
+        let _activity = crate::server::mcp_idle::begin_call();
         restore_tool_meta(&mut request, &context.meta);
 
         let progress_token = request

@@ -9,6 +9,7 @@ pub mod elicitation;
 pub(crate) mod execute;
 mod file_resource;
 pub mod helpers;
+pub(crate) mod mcp_idle;
 pub mod multi_path;
 pub(crate) mod native_receipts;
 pub mod notifications;

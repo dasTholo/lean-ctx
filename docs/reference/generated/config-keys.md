@@ -47,6 +47,8 @@ Top-level configuration keys
 - `max_index_threads` (usize, default `0` — env `LEANCTX_INDEX_THREADS`) — Cap rayon threads for the CPU-heavy index build (0 = all cores). Bounds per-instance CPU so concurrent sessions don't saturate the host on startup
 - `max_ram_percent` (u8, default `5` — env `LEAN_CTX_MAX_RAM_PERCENT`) — Soft process-RSS target as % of system RAM (1-50, default 5); eviction/throttling policy, not an OS hard cap
 - `max_staleness_days` (u32, default `0` — env `LEAN_CTX_MAX_STALENESS_DAYS`) — Auto-purge data older than N days (0 = disabled). Flows into archive.max_age_hours
+- `mcp_idle_exit_minutes` (u64, default `0` — env `LEAN_CTX_MCP_IDLE_EXIT_MINUTES`) — Exit a stdio MCP server after this many minutes without a tool call (0 = never, default). Hosts that do not restart servers (Codex) lose lean-ctx in a resumed thread
+- `mcp_max_rss_mb` (u64, default `512` — env `LEAN_CTX_MCP_MAX_RSS_MB`) — Per-process RSS target (MB) of each stdio MCP server; the guardian evicts above the lower of this and max_ram_percent (default 512, 0 = percent only)
 - `memory_cleanup` (enum: aggressive | shared, default `aggressive` — env `LEAN_CTX_MEMORY_CLEANUP`) — Controls how aggressively memory is freed when idle
 - `memory_profile` (enum: low | balanced | performance, default `performance` — env `LEAN_CTX_MEMORY_PROFILE`) — Controls RAM vs feature trade-off (performance = max quality)
 - `minimal_overhead` (bool, default `true` — env `LEAN_CTX_MINIMAL`) — Skip session/knowledge/gotcha blocks in MCP instructions

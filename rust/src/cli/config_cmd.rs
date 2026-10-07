@@ -1123,6 +1123,14 @@ memory_profile = "balanced"
 # Maximum % of system RAM lean-ctx may use (1-50)
 max_ram_percent = 5
 
+# Per-process RSS target (MB) of each stdio MCP server; the lower of this and
+# max_ram_percent applies (0 = percent only).
+# mcp_max_rss_mb = 512
+
+# Exit a stdio MCP server after N minutes without a tool call (0 = never).
+# Codex does not restart exited servers, so leave this off for Codex.
+# mcp_idle_exit_minutes = 0
+
 # Total disk budget in MB (0 = use individual limits).
 # Distributes proportionally: archive ~25%, BM25 cache ~10%.
 # max_disk_mb = 2000
@@ -1177,6 +1185,19 @@ fn cmd_show_effective() {
         " max_ram_percent     = {:10}  {}",
         cfg.max_ram_percent,
         source_hint("LEAN_CTX_MAX_RAM_PERCENT", cfg.max_ram_percent != 5)
+    ));
+    box_row(&format!(
+        " mcp_max_rss_mb      = {:10}  {}",
+        cfg.mcp_max_rss_mb_effective(),
+        source_hint("LEAN_CTX_MCP_MAX_RSS_MB", cfg.mcp_max_rss_mb != 512)
+    ));
+    box_row(&format!(
+        " mcp_idle_exit_minutes = {:8}  {}",
+        cfg.mcp_idle_exit_minutes_effective(),
+        source_hint(
+            "LEAN_CTX_MCP_IDLE_EXIT_MINUTES",
+            cfg.mcp_idle_exit_minutes > 0
+        )
     ));
     box_row(&format!(
         " session_retention_days = {:8}  {}",
