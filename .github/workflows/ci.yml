@@ -235,6 +235,22 @@ jobs:
             /usr/local/share/boost /usr/lib/jvm /usr/local/julia* || true
           sudo docker system prune -af --volumes >/dev/null 2>&1 || true
           df -h /
+      # The all-features test build peaks above the runner's 16 GB RAM + 4 GB
+      # swap. On 2026-10-07 three ubuntu runs in a row lost the runner itself
+      # ("received a shutdown signal", exit 143) 4-5 min into compiling the
+      # crate, on code that had passed an hour earlier. Extra swap turns the
+      # peak into a slowdown instead of a killed runner.
+      - name: Add swap
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo swapoff -a || true
+          sudo rm -f /mnt/swapfile
+          sudo fallocate -l 16G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile >/dev/null
+          sudo swapon /mnt/swapfile
+          free -h
       # mold is a much faster drop-in ELF linker. The ~50 integration-test
       # binaries each statically link the full lib (tree-sitter ×18, rten,
       # aws-lc, resvg, …), so linking — not compilation — dominates the Linux
