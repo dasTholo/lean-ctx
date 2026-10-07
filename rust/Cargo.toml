@@ -490,8 +490,10 @@ keyring = { version = "3.6.3", default-features = false, features = ["windows-na
 # jemalloc's bundled C build requires atomics that are not consistently exposed
 # by the supported musl toolchains. Musl releases deliberately use the system
 # allocator; glibc and macOS releases retain jemalloc.
-tikv-jemallocator = { version = "0.7", optional = true }
-tikv-jemalloc-ctl = { version = "0.7", optional = true }
+# `stats` (upstream jemalloc's default) lets memory_guard::allocator_stats
+# separate live heap from allocator retention when reporting idle release.
+tikv-jemallocator = { version = "0.7", optional = true, features = ["stats"] }
+tikv-jemalloc-ctl = { version = "0.7", optional = true, features = ["stats"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3.6.3", default-features = false, features = ["apple-native"] }

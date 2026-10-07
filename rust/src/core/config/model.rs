@@ -557,6 +557,20 @@ pub struct Config {
     /// Override via LEAN_CTX_MAX_RAM_PERCENT env var.
     #[serde(default = "serde_defaults::default_max_ram_percent")]
     pub max_ram_percent: u8,
+    /// Per-process RSS target (MB) of each stdio MCP server; the guardian uses
+    /// the lower of this and `max_ram_percent` (default 512, 0 = percent only).
+    /// Hosts like the Codex app-server keep one server per loaded thread alive
+    /// for days, so a percentage of a large machine's RAM alone is too loose.
+    /// Override via LEAN_CTX_MCP_MAX_RSS_MB env var.
+    #[serde(default = "serde_defaults::default_mcp_max_rss_mb")]
+    pub mcp_max_rss_mb: u64,
+    /// Exit a stdio MCP server after this many minutes without a tool call
+    /// (0 = never, the default). Off by default because some hosts (Codex)
+    /// do not restart an exited server: the resumed thread then loses
+    /// lean-ctx until the host restarts. Idle servers release their caches
+    /// either way (`memory_cleanup`). Override via LEAN_CTX_MCP_IDLE_EXIT_MINUTES.
+    #[serde(default)]
+    pub mcp_idle_exit_minutes: u64,
     /// Simplified disk budget (MB). When set and detail values are at defaults,
     /// distributes proportionally: archive=25%, bm25=10%, remainder for stores.
     /// 0 = disabled (use individual settings). Override via LEAN_CTX_MAX_DISK_MB.

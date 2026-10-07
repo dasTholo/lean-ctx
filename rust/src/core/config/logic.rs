@@ -490,6 +490,22 @@ impl Config {
             .unwrap_or(self.max_disk_mb)
     }
 
+    /// Effective per-process RSS target of a stdio MCP server (MB) from env or config.
+    pub fn mcp_max_rss_mb_effective(&self) -> u64 {
+        std::env::var("LEAN_CTX_MCP_MAX_RSS_MB")
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(self.mcp_max_rss_mb)
+    }
+
+    /// Effective idle-exit window of a stdio MCP server (minutes, 0 = never).
+    pub fn mcp_idle_exit_minutes_effective(&self) -> u64 {
+        std::env::var("LEAN_CTX_MCP_IDLE_EXIT_MINUTES")
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(self.mcp_idle_exit_minutes)
+    }
+
     /// Effective max_staleness_days from env or config.
     pub fn max_staleness_days_effective(&self) -> u32 {
         std::env::var("LEAN_CTX_MAX_STALENESS_DAYS")

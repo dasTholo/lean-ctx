@@ -610,6 +610,24 @@ pub(super) fn build(sections: &mut BTreeMap<String, SectionSchema>) {
         ),
     );
     root.insert(
+        "mcp_max_rss_mb".into(),
+        key_with_env(
+            "u64",
+            serde_json::json!(cfg.mcp_max_rss_mb),
+            "Per-process RSS target (MB) of each stdio MCP server; the guardian evicts above the lower of this and max_ram_percent (default 512, 0 = percent only)",
+            "LEAN_CTX_MCP_MAX_RSS_MB",
+        ),
+    );
+    root.insert(
+        "mcp_idle_exit_minutes".into(),
+        key_with_env(
+            "u64",
+            serde_json::json!(cfg.mcp_idle_exit_minutes),
+            "Exit a stdio MCP server after this many minutes without a tool call (0 = never, default). Hosts that do not restart servers (Codex) lose lean-ctx in a resumed thread",
+            "LEAN_CTX_MCP_IDLE_EXIT_MINUTES",
+        ),
+    );
+    root.insert(
         "max_disk_mb".into(),
         key_with_env(
             "u64",

@@ -911,6 +911,9 @@ mod tests {
 
     #[test]
     fn allows_nonexistent_child_under_root() {
+        // jail_path reads the protected-session env, which the macOS
+        // write_guard tests set process-wide under this lock.
+        let _env = crate::core::data_dir::test_env_lock();
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().join("root");
         std::fs::create_dir_all(&root).unwrap();
@@ -1040,6 +1043,7 @@ mod tests {
 
     #[test]
     fn jail_path_accepts_same_dir_different_format() {
+        let _env = crate::core::data_dir::test_env_lock();
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().join("project");
         std::fs::create_dir_all(&root).unwrap();
@@ -1264,6 +1268,7 @@ mod tests {
 
     #[test]
     fn rejects_null_byte_in_path() {
+        let _env = crate::core::data_dir::test_env_lock();
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().join("root");
         std::fs::create_dir_all(&root).unwrap();
