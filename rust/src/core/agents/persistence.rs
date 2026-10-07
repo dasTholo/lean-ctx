@@ -141,7 +141,7 @@ impl FileLock {
         }
         let file = options
             .open(path)
-            .map_err(|error| format!("agent registry lock {}: {error}", path.display()))?;
+            .map_err(|error| format!("lock {}: {error}", path.display()))?;
         let deadline = std::time::Instant::now() + timeout;
         loop {
             match file.try_lock_exclusive() {
@@ -154,11 +154,12 @@ impl FileLock {
                 }
                 Err(error) if crate::core::file_lock::is_contended(&error) => {
                     return Err(format!(
-                        "agent registry lock timed out after {}ms",
+                        "lock {} timed out after {}ms",
+                        path.display(),
                         timeout.as_millis()
                     ));
                 }
-                Err(error) => return Err(format!("agent registry lock: {error}")),
+                Err(error) => return Err(format!("lock {}: {error}", path.display())),
             }
         }
     }

@@ -108,6 +108,9 @@ pub struct LeanCtxServer {
     pub(crate) native_receipt_authority:
         Option<Arc<crate::core::execution_ledger::host::HostReceiptAuthority>>,
     pub(crate) presence_agent_id: Arc<RwLock<Option<String>>>,
+    /// Single-flight for the fail-closed presence retry: concurrent first
+    /// calls register once instead of racing N writers on the registry lock.
+    pub(crate) presence_init: Arc<tokio::sync::Mutex<()>>,
     /// The role this session resolved at `initialize` (#1766). The fail-closed
     /// presence retry re-registers with it instead of the construction-time
     /// `context-engine` placeholder, which silently turned a `reviewer` (or a
