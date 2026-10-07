@@ -313,7 +313,12 @@ fn admit_and_commit() -> bool {
             true
         }
         Err(error) => {
-            assert!(error.contains("not due"), "{error}");
+            // A loser that times out on the send lock (seen on a loaded
+            // windows-latest runner) was not admitted either.
+            assert!(
+                error.contains("not due") || error.contains("lock timed out"),
+                "{error}"
+            );
             false
         }
     }

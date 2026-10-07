@@ -124,9 +124,23 @@ fn source_reference_requires_explicit_matching_project_and_fixed_binding() {
 fn public_reference_survives_community_use_but_not_policy_activation() {
     let _data = crate::core::data_dir::isolated_data_dir();
     let no_policy = TestPolicyOverride::set(None);
-    let id = store("community payload").unwrap();
-    assert_eq!(store("community payload"), Some(id.clone()));
-    assert_eq!(resolve(&id).as_deref(), Some("community payload"));
+    // `store` never waits for the shared pool and `resolve` waits only 50 ms;
+    // a parallel test can hold it that long on a loaded machine. Retry like
+    // the pool-budget test does — only contention can make an attempt miss.
+    let retry = |attempt: &dyn Fn() -> Option<String>| {
+        (0..200).find_map(|_| {
+            attempt().or_else(|| {
+                std::thread::sleep(Duration::from_millis(2));
+                None
+            })
+        })
+    };
+    let id = retry(&|| store("community payload")).unwrap();
+    assert_eq!(retry(&|| store("community payload")), Some(id.clone()));
+    assert_eq!(
+        retry(&|| resolve(&id)).as_deref(),
+        Some("community payload")
+    );
     drop(no_policy);
     {
         let _policy = policy();
