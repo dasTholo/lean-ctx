@@ -14,8 +14,10 @@ use crate::core::telemetry_v2::{
 };
 
 /// History for the batch, or `None` when the installation never recorded use.
+/// Summed over the user's data directories, like `lean-ctx gain`: the
+/// installation ID is shared across them, so the record must be too.
 pub(super) fn usage_history(today: chrono::NaiveDate) -> Option<UsageHistoryMetrics> {
-    usage_history_from(&crate::core::stats::load(), today)
+    usage_history_from(&crate::core::stats::load_for_display(), today)
 }
 
 pub(super) fn usage_history_from(
