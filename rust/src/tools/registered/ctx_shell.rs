@@ -403,6 +403,11 @@ impl McpTool for CtxShellTool {
             crate::core::diagnostics_store::record_from_shell(&cmd_clone, &raw_output, exit_code);
 
             let output = redact_shell_output_secrets(&raw_output);
+            let output = if raw {
+                crate::server::walk_hint::strip_walk_hint(&output).to_string()
+            } else {
+                output
+            };
 
             let (result_out, original, saved, tee_hint) = if raw || inline {
                 let tokens = crate::core::tokens::count_tokens(&output);
