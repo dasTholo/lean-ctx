@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! `lean-ctx allow-path` — let the path jail admit one more directory.
 //!
 //! The sibling of `lean-ctx allow` (shell commands): appends to the additive

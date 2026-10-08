@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! Project pins in user-global agent MCP configs.
 //!
 //! Builds that baked the installing session's `LEAN_CTX_PROJECT_ROOT` /

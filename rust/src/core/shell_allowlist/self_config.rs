@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! Agent shells must not loosen lean-ctx's own guardrails.
 //!
 //! `lean-ctx` is on the default allowlist (agents legitimately run `doctor`,

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! Path-jail scope: which directories the jail treats as the user's own code.
 //!
 //! The jail used to admit only the session's project root (plus allow-lists).
