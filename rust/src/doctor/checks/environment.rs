@@ -702,6 +702,34 @@ pub(crate) fn config_parity_outcome() -> Outcome {
         }
     }
 }
+/// A user-global agent MCP entry that pins `LEAN_CTX_PROJECT_ROOT` /
+/// `LEAN_CTX_EXTRA_ROOTS` binds every session of that agent — in any repo — to
+/// one project. Builds before the pin heal wrote these themselves.
+pub(crate) fn project_pin_outcome() -> Outcome {
+    let pinned = dirs::home_dir()
+        .map(|home| crate::hooks::project_pins::pinned_agent_configs(&home))
+        .unwrap_or_default();
+    if pinned.is_empty() {
+        return Outcome {
+            ok: true,
+            line: format!(
+                "{BOLD}Project binding{RST}  {GREEN}per session{RST}  {DIM}(no agent config pins a project){RST}"
+            ),
+        };
+    }
+    let list = pinned
+        .iter()
+        .map(|(agent, path)| format!("{agent} ({})", path.display()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Outcome {
+        ok: false,
+        line: format!(
+            "{BOLD}Project binding{RST}  {YELLOW}pinned globally in {list}{RST}  {DIM}-> every session of that agent opens the same project; run: lean-ctx doctor --fix, then restart the agent{RST}"
+        ),
+    }
+}
+
 /// How the code graph uses the language servers listed below.
 pub(crate) fn semantic_mode_outcome() -> Outcome {
     use crate::core::config::{Config, SemanticMode};

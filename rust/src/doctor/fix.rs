@@ -365,6 +365,36 @@ fn build_and_persist_fix_report(
     });
     steps.push(bm25_step);
 
+    // A project pinned into a user-global agent MCP config binds every session
+    // of that agent to one repo; earlier builds wrote these pins themselves.
+    let (healed, manual) = crate::hooks::project_pins::heal_global_project_pins(&home);
+    let pin_items = healed
+        .iter()
+        .map(|p| SetupItem {
+            name: "project_pin".to_string(),
+            status: "removed — restart the agent once".to_string(),
+            path: Some(p.display().to_string()),
+            note: None,
+        })
+        .collect();
+    let pin_warnings = manual
+        .iter()
+        .map(|p| {
+            format!(
+                "{}: remove LEAN_CTX_PROJECT_ROOT / LEAN_CTX_EXTRA_ROOTS from the lean-ctx entry by hand \
+                 (file has comments or does not parse)",
+                p.display()
+            )
+        })
+        .collect();
+    steps.push(SetupStepReport {
+        name: "project_pins".to_string(),
+        ok: true,
+        items: pin_items,
+        warnings: pin_warnings,
+        errors: Vec::new(),
+    });
+
     let mut proxy_env_step = SetupStepReport {
         name: "proxy_env".to_string(),
         ok: true,

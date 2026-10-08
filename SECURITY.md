@@ -40,11 +40,24 @@ operations, not prompts or delivery outside the integration's visibility.
 
 ### I/O Boundary (PathJail + Roles)
 
-lean-ctx enforces a **project boundary** for filesystem I/O:
+lean-ctx enforces a **filesystem boundary** for tool I/O:
 
-- **PathJail**: all tool path inputs are resolved and jailed under the current `project_root`.
-  - If a path would escape, the call fails with a clear hint to explicitly allow additional roots.
-- **Explicit allow roots**:
+- **PathJail**: all tool path inputs are resolved (symlinks and `..` included) and checked
+  against the jail scope (`path_jail_scope`, global-only):
+  - `home` (default since v3.11.1): every path below the user's home directory is readable,
+    except the protected zones — every top-level dot entry (`~/.ssh`, `~/.aws`, `~/.gnupg`,
+    `~/.config`, shell rc files, other agents' `~/.claude` / `~/.codex` / `~/.cursor`),
+    `~/Library`, `~/AppData` / `NTUSER.DAT*` and `~/snap`. Writes stay limited to the session's
+    project, host-declared roots and explicit allow entries. Everything outside `~` stays jailed.
+    Zones are a hard deny: a root or allow entry that merely contains a zone does not open it.
+    An implausible `$HOME` (`/`, `/root`, `/tmp`, not owned by the user) disables the scope.
+  - `project`: only the current `project_root` plus the explicit allow roots below.
+  - If a path would escape, the call fails naming the single command that admits it
+    (`lean-ctx allow-path <dir>`) and asks the agent to defer to the user.
+- **Per-session project binding**: the project root comes from the host session (MCP roots,
+  host project env, working directory). Global agent configs no longer carry a
+  `LEAN_CTX_PROJECT_ROOT` pin; `lean-ctx doctor` reports and `doctor --fix` removes old ones.
+- **Explicit allow roots** (`lean-ctx allow-path <dir>` writes `allow_paths`):
   - Env: `LEAN_CTX_ALLOW_PATH` (or `LCTX_ALLOW_PATH`) — a path list (`:` on Unix, `;` on Windows)
   - Config: `allow_paths` in `~/.lean-ctx/config.toml` (whitelist only); `extra_roots` (whitelist + multi-root scanning)
   - `~`, `$VAR` and `${VAR}` are expanded in these entries (no shell runs for config files)
@@ -233,7 +246,8 @@ proof of OS isolation. Inspect `rust/src/core/sandbox.rs` for the release in use
 - `eval`/`exec`/`source` unconditionally blocked; `$()`/backticks blocked at command position,
 - **interpreter inline-code blocking**: `bash -c`, `sh -c`, `python -c`, `node -e`, … are rejected (including via delegation wrappers like `env`, `timeout`, `xargs`) — quoting a payload inside `bash -c '…'` does not bypass the file-write or allowlist checks because the interpreter call itself is refused,
 - file-write detection (`>`, `>>`, `tee`, heredoc-to-file, `dd of=`, `curl -o/-O`, `wget` to file) — writes belong to the editor's native Write/Edit tools where the agent's permission UI governs them,
-- dangerous-flag blocking (`git --upload-pack`, `tar --to-command`, `find -exec`, `awk system()`), inline env hijack blocking (`PATH=`, `LD_PRELOAD=`, `GIT_SSH_COMMAND=`, …), and dangerous env-key filtering on the MCP `env` parameter.
+- dangerous-flag blocking (`git --upload-pack`, `tar --to-command`, `find -exec`, `awk system()`), inline env hijack blocking (`PATH=`, `LD_PRELOAD=`, `GIT_SSH_COMMAND=`, …), and dangerous env-key filtering on the MCP `env` parameter,
+- **no self-loosening** (allowlist mode, the default): lean-ctx subcommands that widen its own guardrails — `yolo`, `allow <cmd>`, `allow-path <dir>`, `trust`, `security open`, `security secrets off`, `config set` of a security or path/allowlist key — are refused, so an agent cannot undo a refusal it just received. Listing, `--remove`, `secure`, `untrust` and `security secrets on` still run. The user runs the blocked commands in their own terminal (warn-only there, see below). `ctx_execute` is not covered — see the next paragraph.
 
 Enforcement applies to the MCP path, hook-child mode and every non-interactive CLI invocation; an interactive human terminal gets a warning instead (`LEAN_CTX_ALLOWLIST_WARN_ONLY=1` opts out explicitly). Cloud/infra mutation CLIs (terraform, kubectl, aws, …) are excluded from the default allowlist and require per-tool opt-in (`lean-ctx allow <cmd>`). `shell_strict_mode = true` upgrades the warn-only heuristics (command substitution in arguments, pipe-to-bare-interpreter) to hard blocks.
 
@@ -305,6 +319,7 @@ policy — per-session I/O limits live on the active role, which is selected via
 ```toml
 update_check_disabled = true   # no daily update check
 path_jail = true               # keep the filesystem jail on (default)
+path_jail_scope = "project"    # only the active project (default "home": all projects below ~)
 
 [telemetry]
 enabled = false                # explicitly disable telemetry

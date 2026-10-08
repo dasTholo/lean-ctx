@@ -321,26 +321,21 @@ fn vscode_instruction_setting_respects_explicit_user_value() {
 }
 
 #[test]
-fn mcp_env_pairs_propagate_project_and_extra_roots_from_env() {
-    // #403: init must bake the captured project/worktree scope into the MCP
-    // server entry, otherwise the long-lived server rejects explicit paths
-    // under sibling worktrees as jail escapes.
+fn mcp_env_pairs_never_pin_the_installing_sessions_project() {
+    // Agent MCP configs are user-global. Copying the installing process's
+    // project scope in pinned one project for every later session (the #403
+    // regression this replaces), so even a set env must not leak into them.
     let _iso = crate::core::data_dir::isolated_data_dir();
     crate::test_env::set_var("LEAN_CTX_PROJECT_ROOT", "/work/main");
     crate::test_env::set_var("LEAN_CTX_EXTRA_ROOTS", "/work/wt-a:/work/wt-b");
 
     let pairs = mcp_server_env_pairs();
-    let get = |k: &str| pairs.iter().find(|(p, _)| p == k).map(|(_, v)| v.as_str());
-    assert!(
-        get("LEAN_CTX_DATA_DIR").is_none(),
-        "data dir is auto-detected at runtime, never pinned into the config (GH #408)"
-    );
-    assert_eq!(get("LEAN_CTX_PROJECT_ROOT"), Some("/work/main"));
-    assert_eq!(get("LEAN_CTX_EXTRA_ROOTS"), Some("/work/wt-a:/work/wt-b"));
-
-    // The JSON view mirrors the pairs for the JSON-config agents.
-    let json = mcp_server_env_json();
-    assert_eq!(json["LEAN_CTX_PROJECT_ROOT"].as_str(), Some("/work/main"));
+    let keys: Vec<&str> = pairs.iter().map(|(k, _)| k.as_str()).collect();
+    for key in project_pins::PROJECT_SCOPED_ENV_KEYS {
+        assert!(!keys.contains(key), "{key} must not be written: {keys:?}");
+    }
+    assert!(!keys.contains(&"LEAN_CTX_DATA_DIR"), "GH #408");
+    assert!(mcp_server_env_json().as_object().unwrap().is_empty());
 
     crate::test_env::remove_var("LEAN_CTX_PROJECT_ROOT");
     crate::test_env::remove_var("LEAN_CTX_EXTRA_ROOTS");

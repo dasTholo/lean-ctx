@@ -91,23 +91,56 @@ lean-ctx security secrets on    # re-enable masking
 
 ---
 
-## 1. PathJail — stay inside the project
+## 1. PathJail — your projects, not your secrets
 
-**What it does:** confines file access to the resolved project root. Absolute
-paths outside the jail are rejected, so a stray `read /etc/passwd` or a
-path-traversal `../../` cannot escape the workspace.
+**What it does:** confines lean-ctx's file tools to your code. Since v3.11.1 the
+default scope is **`home`**: every project below your home directory is
+**readable** at once, so working across several repositories needs no
+configuration. **Writes** stay where they were: the session's own project,
+host-declared roots, and explicit allow entries — an agent in repo A cannot plant
+`~/code/B/.git/hooks/pre-commit` or `~/bin/git`. What stays jailed entirely:
 
-- Re-rooting to a different project root is **off by default**
-  (`allow_auto_reroot = false`) — lean-ctx will not silently follow an absolute
-  path into another tree.
-- Multi-root setups (`lean-ctx serve --root a:A --root b:B`) jail each root
-  independently (`server/multi_path.rs`).
-- **Widen it (array):** add trusted roots with `allow_paths` / `extra_roots`
-  (or `LEAN_CTX_ALLOW_PATH`) — reads/writes resolve under those prefixes too.
-- **Disable it (blanket):** set `path_jail = false` to allow *any* path — the
-  blanket equivalent of `allow_paths = ["/"]`, for containers/sandboxes where the
-  boundary is already external. `lean-ctx yolo` sets this for you, and
-  `lean-ctx doctor` flags it loudly while it is active.
+| Zone | Examples | Why |
+|------|----------|-----|
+| Top-level dot entries in `~` | `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config`, `~/.zshrc`, `~/.claude`, `~/.codex`, `~/.cursor` | credentials, shell startup files, other agents' sessions |
+| OS app-data stores | `~/Library` (macOS), `~/AppData` + `NTUSER.DAT*` (Windows), `~/snap` (Linux) | keychains, browser profiles, mail |
+| Everything outside `~` | `/etc`, `/opt`, `/srv`, `/tmp` | system files, other users |
+
+A dot entry *inside* a project (`repo/.git`, `repo/.github`) is ordinary code.
+Protected zones are a hard deny: a project root or allow entry that merely
+*contains* one (a dotfiles repo at `~`, an `extra_roots = ["~"]`) does not open
+it — only a root or allow entry *inside* the zone does (`~/.codex/worktrees/x`,
+`lean-ctx allow-path ~/.config/myapp`). Path traversal (`../../`) and symlinks
+are resolved before every check. If `$HOME` is implausible (`/`, a single
+component like `/root` or `/tmp`, or not owned by you), the `home` scope stays
+off and the project boundary applies.
+
+- **Classic single-project boundary:** `lean-ctx config set path_jail_scope project`
+  confines tools to the active project plus your allow-lists.
+- **Open one more directory:** `lean-ctx allow-path <dir>` — read *and* write
+  for a directory outside `~` (`/opt/src/sdk`), a sibling project you want to
+  edit, or one protected location (`~/.config/myapp`). Takes effect immediately;
+  no restart. `--list` / `--remove` manage entries; it refuses `/`, `~` and any
+  directory containing `~`. (`allow_paths`, `extra_roots` and `read_only_roots`
+  in config.toml still work.)
+- **Disable it (blanket):** `path_jail = false` allows *any* path — for
+  containers/sandboxes where the boundary is already external. `lean-ctx yolo`
+  sets this for you, and `lean-ctx doctor` flags it loudly while it is active.
+- `path_jail_scope` is **global-only**: a cloned repo's `.lean-ctx.toml` cannot
+  change it.
+
+**Project binding is per session.** Each agent session binds to the project it
+was started in — the host's workspace roots, its project env (`CLAUDE_PROJECT_DIR`,
+…) or the working directory. A `LEAN_CTX_PROJECT_ROOT` pin in an agent's *global*
+MCP config used to bind every session of that agent to one repository (and was
+written by older `setup` runs). lean-ctx no longer writes it, removes it on the
+next agent refresh, and `lean-ctx doctor` reports any left (`doctor --fix`
+removes them). If a stale pin is still present, a session started inside a
+different real project uses that project anyway.
+
+**When a path is refused**, the error names the one command that fixes it — e.g.
+`lean-ctx allow-path /opt/src/sdk` — for you to run in your terminal (agent
+shells refuse it, see §2); it takes effect without a restart.
 
 This is the foundation every other layer assumes.
 
@@ -160,6 +193,16 @@ Entry grammar (`shell_allowlist_subcommand_scoping = true`, the default):
 Set `shell_allowlist_subcommand_scoping = false` to fall back to matching
 only the base binary (the behavior before this grammar existed) as a
 compat/rollback path; a trusted workspace only, since it widens access.
+
+**No self-loosening (since v3.11.1).** `lean-ctx` itself is allowlisted, but the
+subcommands that widen its guardrails are refused from agent shells (ctx_shell
+and hook-rewritten Bash): `yolo`, `allow <cmd>`, `allow-path <dir>`, `trust`,
+`security open`, `security secrets off`, and `config set` of a security, path or
+allowlist key. Otherwise an agent could undo the refusal it just received.
+Listing (`--list`, `status`, `config show`), narrowing (`--remove`) and tightening
+(`secure`, `untrust`, `security secrets on`) still work. Run the blocked commands
+in your own terminal. `ctx_execute` runs scripts outside the allowlist by design
+and is not covered; deny it by role where that matters.
 
 **Pipelines & chains (`|`, `&&`, `||`, `;`):** a compound command is wrapped as a
 *single* `lean-ctx -c "<whole>"` only when **every** stage is gate-clean — then

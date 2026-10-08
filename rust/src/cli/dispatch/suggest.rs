@@ -106,6 +106,7 @@ pub(crate) const KNOWN_COMMANDS: &[&str] = &[
     "tools",
     "config",
     "allow",
+    "allow-path",
     "security",
     "yolo",
     "secure",

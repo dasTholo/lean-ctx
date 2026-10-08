@@ -102,7 +102,7 @@ impl ServerHandler for LeanCtxServer {
 
         let env_root = roots::root_from_env().or_else(roots::root_from_workspace_env);
         let derived_root = derive_project_root_from_cwd();
-        let effective_root = env_root.or(derived_root);
+        let effective_root = roots::session_root(env_root, derived_root);
 
         let cwd_str = std::env::current_dir()
             .ok()

@@ -892,6 +892,7 @@ pub(super) fn check_all_segments(command: &str, allowlist: &Allowlist) -> Result
                 }
                 check_interpreter_abuse(body_seg, allowlist)?;
                 check_dangerous_flags(body_seg)?;
+                super::self_config::check_self_reconfiguration(&body_tokens)?;
             }
             continue;
         }
@@ -940,6 +941,7 @@ pub(super) fn check_all_segments(command: &str, allowlist: &Allowlist) -> Result
         }
         check_interpreter_abuse(seg, allowlist)?;
         check_dangerous_flags(seg)?;
+        super::self_config::check_self_reconfiguration(&tokens)?;
         if !matches_allowlist_entry(&tokens, allowlist) {
             // #813: auto-allow binaries that resolve to existing files under
             // the project root. The first token (before rsplit) carries the

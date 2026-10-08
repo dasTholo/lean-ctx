@@ -6,6 +6,7 @@ mod agent_cmd;
 mod agent_tools_cmd;
 mod allow_cmd;
 pub(crate) mod allow_fix;
+mod allow_path_cmd;
 pub mod audit_report;
 mod autopilot_cmd;
 #[allow(warnings)]
@@ -107,6 +108,8 @@ pub(crate) mod wrapped_publish;
 
 pub(crate) use agent_cmd::cmd_agent;
 pub use allow_cmd::cmd_allow;
+pub use allow_path_cmd::cmd_allow_path;
+pub(crate) use allow_path_cmd::global_string_list;
 #[allow(unused_imports)]
 pub(crate) use badge_cmd::cmd_badge;
 pub(crate) use benchmark_cmd::cmd_benchmark_real;

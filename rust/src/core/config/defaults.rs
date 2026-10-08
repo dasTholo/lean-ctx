@@ -195,6 +195,7 @@ impl Default for Config {
             allow_auto_reroot: true,
             hook_binary: None,
             path_jail: None,
+            path_jail_scope: None,
             sandbox_level: 0,
             reference_results: false,
             agent_token_budget: 0,

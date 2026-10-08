@@ -231,6 +231,7 @@ COMMANDS:
     secure                         Restore secure defaults (path jail + shell gating + secret redaction)
     security secrets <on|off>      Toggle secret/.env redaction (separate from containment)
     allow <cmd>                    Allow one shell command (additive; granular re-enable after yolo)
+    allow-path <dir>               Let tools reach a dir outside ~ or a protected one (no restart)
     tools [minimal|standard|power|show|list]  How many MCP tools your agent sees
     profile [list|show|diff|create|set|suggest]  Manage local context configuration profiles
     kit [list|load|show|unload] [name]  Manage available local TOML/.ctxpkg substrate; first-class Kit semantics are Research
