@@ -113,7 +113,7 @@ pub(super) fn build(sections: &mut BTreeMap<String, SectionSchema>) {
         key(
             "string[]",
             serde_json::json!(cfg.redirect_exclude),
-            "URL patterns to exclude from proxy redirection",
+            "File globs lean-ctx delivers verbatim: native reads skip the hook redirect and automatic ctx_read modes return them in full (e.g. [\"docs/**\", \"*.json\"]). LEAN_CTX_HOOK_EXCLUDE (comma-separated) takes precedence.",
         ),
     );
     root.insert(

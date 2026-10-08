@@ -213,6 +213,15 @@ fn dense_index_outcome(
             ),
         };
     }
+    if let Some(total) = disk.partial_of {
+        return Outcome {
+            ok: true,
+            line: format!(
+                "{BOLD}Semantic index{RST}  {YELLOW}partial{RST} {DIM}({}/{total} chunks embedded — resume: lean-ctx index build-semantic){RST}",
+                disk.file_count.unwrap_or(0)
+            ),
+        };
+    }
     let mut details = Vec::new();
     if let Some(b) = disk.size_bytes {
         details.push(format!("{:.1} MB", b as f64 / 1_048_576.0));
@@ -721,12 +730,25 @@ mod tests {
             size_bytes: Some(3 * 1_048_576),
             file_count: None,
             modified_at: Some("2026-09-28 10:00".into()),
+            partial_of: None,
         };
         let ready = dense_index_outcome(&built, true);
         assert!(ready.ok);
         assert!(ready.line.contains("ready"));
         assert!(ready.line.contains("3.0 MB"));
         assert!(ready.line.contains("built 2026-09-28 10:00"));
+
+        let checkpoint = DiskStatus {
+            exists: true,
+            file_count: Some(1200),
+            partial_of: Some(5000),
+            ..DiskStatus::default()
+        };
+        let partial = dense_index_outcome(&checkpoint, true);
+        assert!(partial.line.contains("partial"));
+        assert!(partial.line.contains("1200/5000"));
+        assert!(partial.line.contains("build-semantic"));
+        assert!(!partial.line.contains("ready"));
 
         let no_feature = dense_index_outcome(&built, false);
         assert!(no_feature.line.contains("built without embeddings"));

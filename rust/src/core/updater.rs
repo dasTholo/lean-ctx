@@ -19,6 +19,8 @@ use transaction::{cleanup_orphaned_prepared_files, orphan_prepared_paths, write_
 
 mod platform;
 use platform::{gpu_next_steps, gpu_platform_asset_name, platform_asset_name};
+#[cfg(feature = "secure-update")]
+mod sigstore;
 
 const GITHUB_API_RELEASES: &str = "https://api.github.com/repos/yvgude/lean-ctx/releases/latest";
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -295,7 +297,7 @@ fn verify_download_integrity(
             .ok_or_else(|| {
                 "release-manifest.json.pem is required for binary updates".to_string()
             })?;
-        verify_cosign_signature(
+        sigstore::verify_release_signature(
             &manifest_bytes,
             &download_bytes(&manifest_signature_url)?,
             &download_bytes(&manifest_certificate_url)?,
@@ -333,7 +335,7 @@ fn verify_download_integrity(
         let certificate_url = find_asset_url(release, "SHA256SUMS.pem")
             .ok_or_else(|| "SHA256SUMS.pem is required for binary updates".to_string())?;
         let certificate_bytes = download_bytes(&certificate_url)?;
-        verify_cosign_signature(
+        sigstore::verify_release_signature(
             &checksum_bytes,
             &signature_bytes,
             &certificate_bytes,
@@ -374,51 +376,6 @@ fn verify_download_integrity(
             })?,
         })
     }
-}
-
-fn cosign_identity_for_tag(release_tag: &str) -> String {
-    let escaped_tag = regex::escape(release_tag);
-    format!(
-        "^https://github\\.com/yvgude/lean-ctx/\\.github/workflows/release\\.yml@refs/tags/{escaped_tag}$"
-    )
-}
-
-fn verify_cosign_signature(
-    checksums: &[u8],
-    signature: &[u8],
-    certificate: &[u8],
-    release_tag: &str,
-) -> Result<(), String> {
-    let directory =
-        tempfile::tempdir().map_err(|e| format!("cannot create signature workspace: {e}"))?;
-    let checksum_path = directory.path().join("SHA256SUMS");
-    let signature_path = directory.path().join("SHA256SUMS.sig");
-    let certificate_path = directory.path().join("SHA256SUMS.pem");
-    std::fs::write(&checksum_path, checksums).map_err(|e| e.to_string())?;
-    std::fs::write(&signature_path, signature).map_err(|e| e.to_string())?;
-    std::fs::write(&certificate_path, certificate).map_err(|e| e.to_string())?;
-    let output = std::process::Command::new("cosign")
-        .args([
-            "verify-blob",
-            "--signature",
-            signature_path.to_str().unwrap_or(""),
-            "--certificate",
-            certificate_path.to_str().unwrap_or(""),
-            "--certificate-identity-regexp",
-            &cosign_identity_for_tag(release_tag),
-            "--certificate-oidc-issuer",
-            "https://token.actions.githubusercontent.com",
-            checksum_path.to_str().unwrap_or(""),
-        ])
-        .output()
-        .map_err(|e| format!("cosign is unavailable; refusing unsigned release: {e}"))?;
-    if !output.status.success() {
-        let detail = String::from_utf8_lossy(&output.stderr);
-        return Err(format!(
-            "cosign release signature verification failed: {detail}"
-        ));
-    }
-    Ok(())
 }
 
 fn fetch_api_json(url: &str) -> Result<serde_json::Value, String> {

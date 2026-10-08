@@ -371,6 +371,80 @@ fn instruction_file_detection() {
     assert!(!is_instruction_file("/project/data/report.csv"));
 }
 
+/// A plain `ctx_read` of a large CLAUDE.md returned headings only: the
+/// standing instruction files of every supported agent are read in full.
+#[test]
+fn agent_instruction_files_are_read_in_full() {
+    for path in [
+        "/project/CLAUDE.md",
+        "/project/sub/claude.md",
+        "/project/CLAUDE.local.md",
+        "/home/user/.claude/CLAUDE.md",
+        "/project/GEMINI.md",
+        "/project/.github/copilot-instructions.md",
+        "/project/.windsurfrules",
+        "/project/.claude/agents/reviewer.md",
+        "/project/.claude/commands/release.md",
+        r"C:\Users\nina\project\CLAUDE.md",
+    ] {
+        assert!(is_instruction_file(path), "{path} carries instructions");
+    }
+    assert!(!is_instruction_file("/project/docs/claude-notes.md"));
+    assert!(!is_instruction_file("/project/.claude/commands/run.sh"));
+}
+
+/// #60: `redirect_exclude` was parsed but never applied, so listing CLAUDE.md
+/// there changed nothing. Globs match trailing path components.
+#[test]
+fn redirect_exclude_globs_match_trailing_components() {
+    use super::helpers::excluded_by;
+    let configured = || {
+        vec![
+            "docs/**".to_string(),
+            "*.json".to_string(),
+            "./NOTES.md".to_string(),
+            ".claude/**".to_string(),
+        ]
+    };
+    for path in [
+        "/project/docs/guide.md",
+        "/project/docs/deep/nested/spec.md",
+        "/project/package.json",
+        "/project/sub/NOTES.md",
+        "/home/user/.claude/settings.local.json",
+        r"C:\work\project\docs\guide.md",
+    ] {
+        assert!(excluded_by(path, None, configured), "{path} is excluded");
+    }
+    for path in [
+        "/project/src/docs.rs",
+        "/project/src/main.rs",
+        "/project/NOTES.txt",
+    ] {
+        assert!(
+            !excluded_by(path, None, configured),
+            "{path} is not excluded"
+        );
+    }
+    // Nothing configured: nothing excluded.
+    assert!(!excluded_by("/project/CLAUDE.md", None, Vec::new));
+}
+
+#[test]
+fn hook_exclude_env_takes_precedence_over_config() {
+    use super::helpers::excluded_by;
+    let configured = || vec!["*.json".to_string()];
+    let env = Some(" docs/** , NOTES.md ");
+    assert!(excluded_by("/p/docs/a.md", env, configured));
+    assert!(excluded_by("/p/NOTES.md", env, configured));
+    assert!(
+        !excluded_by("/p/package.json", env, configured),
+        "env replaces config"
+    );
+    // A blank env value falls back to the configured globs.
+    assert!(excluded_by("/p/package.json", Some("  "), configured));
+}
+
 /// #1794: classification is by file, not by ancestor directory. A skill ships
 /// its instructions as documents and its implementation as source; forcing the
 /// latter to `full` turned a bounded `map` request into a truncated dump.
@@ -422,4 +496,8 @@ fn resolve_auto_mode_returns_full_for_instruction_files() {
 
     let mode = resolve_auto_mode(None, "/workspace/.cursorrules", 2000, None, None);
     assert_eq!(mode, "full", ".cursorrules must always be read in full");
+
+    // A large CLAUDE.md used to resolve to `map` (headings only).
+    let mode = resolve_auto_mode(None, "/workspace/CLAUDE.md", 6000, None, None);
+    assert_eq!(mode, "full", "CLAUDE.md must always be read in full");
 }
