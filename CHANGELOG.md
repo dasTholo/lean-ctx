@@ -39,7 +39,7 @@ Current positioning: [LeanCTX Engine — Context Gateway for AI Systems](docs/PO
 - **`ctx_index` builds the semantic index in the background.** `build-semantic` and `build-full` no longer block the tool call, wait for the BM25 index instead of embedding an empty or stale one, and a per-project lock keeps two processes from building the same semantic index at once.
 - **CLAUDE.md is read in full.** Automatic `ctx_read` modes (and redirected native reads) returned a large CLAUDE.md as a headings-only map, because only SKILL.md, AGENTS.md and a few rule files were treated as instructions. `CLAUDE.md`, `CLAUDE.local.md`, `GEMINI.md`, `copilot-instructions.md`, `.windsurfrules`, and documents under `.claude/agents/` and `.claude/commands/` are now always delivered complete.
 - **`redirect_exclude` works again.** The key was loaded but never applied, so listing a file there changed nothing. Matching paths (globs on the trailing path components, e.g. `CLAUDE.md`, `*.json`, `docs/**`) now skip the native-read hook redirect and are returned in full by automatic `ctx_read` modes; `LEAN_CTX_HOOK_EXCLUDE` (comma-separated) takes precedence, as documented since 2.17.4.
-- **`lean-ctx index build` / `build-full` no longer stop after 5 minutes** while graph and BM25 are still building, which ended the process before the index was saved.
+- **`lean-ctx index build` / `build-full` no longer stop after 5 minutes** while graph and BM25 are still building, which ended the process before the index was saved. A build worker that fails unexpectedly now always releases its slot, so the command reports the failure instead of waiting.
 
 
 ## [3.11.0] — 2026-10-07
