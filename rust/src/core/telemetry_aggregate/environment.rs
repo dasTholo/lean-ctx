@@ -181,7 +181,9 @@ fn embeddings_state() -> EmbeddingsState {
 
 /// Client that drives this installation: the MCP handshake of this process,
 /// then the last handshake persisted by any process (the daemon and CLI never
-/// see one themselves), then the host's environment variables.
+/// see one themselves), then the host's environment variables. `None` means no
+/// MCP client was seen at all (CLI and shell hooks only); `Other` is an MCP
+/// client LeanCTX does not recognise.
 pub(super) fn client_family() -> ClientFamily {
     const PERSISTED_MAX_AGE_SECS: u64 = 7 * 24 * 60 * 60;
     let handshake = Some(crate::core::client_capabilities::current().client_id)
@@ -201,8 +203,12 @@ pub(super) fn client_family() -> ClientFamily {
         ClientFamily::Cursor
     } else if std::env::var_os("GEMINI_CLI").is_some() {
         ClientFamily::Gemini
-    } else {
+    } else if handshake.is_some()
+        || crate::core::client_capabilities::handshake_seen(PERSISTED_MAX_AGE_SECS)
+    {
         ClientFamily::Other
+    } else {
+        ClientFamily::None
     }
 }
 

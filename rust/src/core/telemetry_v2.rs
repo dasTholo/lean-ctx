@@ -156,6 +156,8 @@ pub enum TelemetryEventV2 {
     VersionUpgrade(VersionUpgradeMetrics),
     OrchestrationAggregate(Box<OrchestrationMetrics>),
     UsageHistory(UsageHistoryMetrics),
+    /// Daily use of CLI commands and background features (3.11.1+).
+    FeatureAggregate(FeatureMetrics),
 }
 
 impl TelemetryEventV2 {
@@ -184,6 +186,7 @@ impl TelemetryEventV2 {
             Self::VersionUpgrade(_) => "version_upgrade",
             Self::OrchestrationAggregate(_) => "orchestration_aggregate",
             Self::UsageHistory(_) => "usage_history",
+            Self::FeatureAggregate(_) => "feature_aggregate",
         }
     }
 
@@ -213,6 +216,7 @@ impl TelemetryEventV2 {
             Self::VersionUpgrade(metrics) => metrics.validate(),
             Self::OrchestrationAggregate(metrics) => metrics.validate(),
             Self::UsageHistory(metrics) => metrics.validate(),
+            Self::FeatureAggregate(metrics) => metrics.validate(),
         }
     }
 }
@@ -615,6 +619,69 @@ pub fn valid_tool_name(name: &str) -> bool {
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'_')
 }
 
+/// Most distinct feature codes per day; extra codes are dropped on the client.
+pub const MAX_FEATURE_ENTRIES: usize = 96;
+
+/// Daily counts per feature code from the closed registry in
+/// `core::telemetry_features` (e.g. `cli.pack.export`, `index.graph`).
+/// Sorted by code; a code never carries arguments, paths or user input.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FeatureMetrics {
+    pub features: Vec<FeatureCount>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FeatureCount {
+    pub feature: String,
+    pub count: u64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub failures: u64,
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
+}
+
+/// `segment(.segment){0,2}`, each `[a-z][a-z0-9_]{0,23}`.
+#[must_use]
+pub fn valid_feature_code(code: &str) -> bool {
+    let segments: Vec<&str> = code.split('.').collect();
+    (1..=3).contains(&segments.len())
+        && segments.iter().all(|segment| {
+            let mut bytes = segment.bytes();
+            segment.len() <= 24
+                && bytes.next().is_some_and(|byte| byte.is_ascii_lowercase())
+                && bytes
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+        })
+}
+
+impl FeatureMetrics {
+    fn validate(&self) -> Result<(), TelemetryValidationError> {
+        if self.features.is_empty()
+            || self.features.len() > MAX_FEATURE_ENTRIES
+            || !self
+                .features
+                .windows(2)
+                .all(|pair| pair[0].feature < pair[1].feature)
+        {
+            return Err(TelemetryValidationError::FeatureEntries);
+        }
+        for entry in &self.features {
+            bounded_many(&[entry.count, entry.failures])?;
+            if !valid_feature_code(&entry.feature) {
+                return Err(TelemetryValidationError::FeatureCode);
+            }
+            if entry.count == 0 || entry.failures > entry.count {
+                return Err(TelemetryValidationError::InconsistentCounts);
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DecisionMetrics {
@@ -764,6 +831,31 @@ pub enum ClientFamily {
     Antigravity,
     Codebuddy,
     Codewhale,
+    // 3.11.1: more MCP hosts. The server accepts these from 3.11.1 on.
+    Cline,
+    RooCode,
+    KiloCode,
+    ContinueDev,
+    Opencode,
+    Goose,
+    Amp,
+    Augment,
+    Jetbrains,
+    Warp,
+    Trae,
+    QwenCode,
+    Crush,
+    ClaudeDesktop,
+    Chatgpt,
+    LmStudio,
+    CopilotCli,
+    VisualStudio,
+    Neovim,
+    Emacs,
+    Factory,
+    /// No MCP client was seen: LeanCTX runs only through the CLI or shell hooks.
+    None,
+    /// An MCP client LeanCTX does not recognise.
     Other,
 }
 
@@ -784,6 +876,27 @@ impl ClientFamily {
             "antigravity" => Self::Antigravity,
             "codebuddy" => Self::Codebuddy,
             "codewhale" => Self::Codewhale,
+            "cline" => Self::Cline,
+            "roo-code" => Self::RooCode,
+            "kilo-code" => Self::KiloCode,
+            "continue" => Self::ContinueDev,
+            "opencode" => Self::Opencode,
+            "goose" => Self::Goose,
+            "amp" => Self::Amp,
+            "augment" => Self::Augment,
+            "jetbrains" => Self::Jetbrains,
+            "warp" => Self::Warp,
+            "trae" => Self::Trae,
+            "qwen-code" => Self::QwenCode,
+            "crush" => Self::Crush,
+            "claude-desktop" => Self::ClaudeDesktop,
+            "chatgpt" => Self::Chatgpt,
+            "lm-studio" => Self::LmStudio,
+            "copilot-cli" => Self::CopilotCli,
+            "visual-studio" => Self::VisualStudio,
+            "neovim" => Self::Neovim,
+            "emacs" => Self::Emacs,
+            "factory" => Self::Factory,
             _ => return None,
         })
     }
@@ -861,6 +974,8 @@ pub enum TelemetryValidationError {
     ToolEntries,
     ToolName,
     History,
+    FeatureEntries,
+    FeatureCode,
 }
 
 fn bounded(value: u64) -> Result<(), TelemetryValidationError> {

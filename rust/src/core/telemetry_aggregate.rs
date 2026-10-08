@@ -22,15 +22,17 @@ use super::telemetry_v2::{
     HeartbeatMetrics, Histogram, MAX_BATCH_EVENTS, MAX_COUNT, MAX_TOOL_ENTRIES, OccurrenceMetrics,
     OperatingSystem, SCHEMA_VERSION, SessionMetrics, SyncMetrics, TelemetryBatchV2,
     TelemetryEnvelopeV2, TelemetryEventV2, TokenMetrics, ToolCallCount, ToolCallMetrics,
-    ToolUsageMetrics, VersionUpgradeMetrics, valid_tool_name,
+    ToolUsageMetrics, VersionUpgradeMetrics, valid_feature_code, valid_tool_name,
 };
 
 mod counters;
 mod environment;
+mod features;
 mod history;
 use super::telemetry_failure::{KindCounts, sub_kinds, wire_kinds, wire_messages};
 use counters::{add_counters, counter_delta};
 use environment::{client_family, distribution_channel, setup_profile};
+use features::{FeatureTally, add_feature, feature_metrics};
 
 /// Most send attempts per installation and UTC day. The server admits ten;
 /// two stay in reserve for clock skew between client and server.
@@ -166,6 +168,9 @@ struct QueuedOneShots {
     /// server even when the process exits before the next send.
     #[serde(default)]
     counters: CounterCheckpoint,
+    /// CLI commands and background features by registry code (3.11.1).
+    #[serde(default)]
+    features: BTreeMap<String, FeatureTally>,
 }
 
 impl QueuedOneShots {
@@ -216,6 +221,9 @@ impl QueuedOneShots {
             .saturating_add(extra.command_errors)
             .min(MAX_COUNT);
         add_counters(&mut self.counters, &extra.counters);
+        for (code, tally) in &extra.features {
+            add_feature(&mut self.features, code, *tally);
+        }
     }
 }
 
@@ -775,6 +783,12 @@ fn build_daily_aggregate(
             ));
         }
     }
+    if let Some(features) = feature_metrics(&queued.features) {
+        batch.events.push(envelope_like(
+            &common,
+            TelemetryEventV2::FeatureAggregate(features),
+        ));
+    }
     batch
         .validate()
         .map_err(|error| format!("invalid telemetry batch: {error:?}"))?;
@@ -1056,6 +1070,25 @@ pub fn record_checkout_started() -> Result<(), String> {
     with_locked_one_shots(|mut state| {
         let today = today_totals(&mut state);
         today.checkout_started = today.checkout_started.saturating_add(1).min(MAX_COUNT);
+        Ok((state, ()))
+    })
+}
+
+/// Counts one use of a registry feature (`core::telemetry_features`) for
+/// today; `ok = false` also counts a failure. Invalid codes are ignored.
+pub fn record_feature(code: &str, ok: bool) -> Result<(), String> {
+    if !valid_feature_code(code) || !telemetry_collection_eligible() {
+        return Ok(());
+    }
+    with_locked_one_shots(|mut state| {
+        add_feature(
+            &mut today_totals(&mut state).features,
+            code,
+            FeatureTally {
+                count: 1,
+                failures: u64::from(!ok),
+            },
+        );
         Ok((state, ()))
     })
 }

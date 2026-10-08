@@ -13,10 +13,11 @@ use std::io::IsTerminal;
 pub const DISCLOSURE: &[&str] = &[
     "random installation ID (not derived from your machine or account)",
     "LeanCTX version, OS, CPU architecture, install channel (cargo/npm/homebrew/…)",
-    "AI client family (Claude, Cursor, Codex, …) and setup profile / integrations",
+    "AI client family (Claude, Cursor, Codex, Cline, JetBrains, …) or that no AI client is connected, and setup profile / integrations",
     "runtime environment (local, container, Codespaces, …), installation age and number of active days, each as a coarse range",
     "daily counts per built-in tool: calls, failures by class, total latency, latency buckets",
     "the most frequent error messages per tool, with every path, name, value and number replaced by a placeholder on your machine",
+    "daily counts of the LeanCTX commands and background features you use (for example `pack export` or an index build) and how many failed, never their arguments",
     "your daily usage record (as `lean-ctx gain` shows it, last 90 days): operations and tokens before/after compression, lifetime totals, month of first use",
     "session counts and uptime, error categories, version upgrades",
     "aggregate autopilot, sync and plan events (counts only)",

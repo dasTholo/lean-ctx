@@ -369,6 +369,10 @@ fn run_build_worker(root: &str) {
             });
         }
         drop(guard);
+        crate::core::telemetry_features::record(
+            crate::core::telemetry_features::Feature::GraphIndex,
+            graph_result.is_ok(),
+        );
         {
             let mut s = graph_state
                 .lock()
@@ -414,6 +418,13 @@ fn run_build_worker(root: &str) {
             let outcome = idx.save(root_pb);
             (idx.doc_count, Some(outcome))
         }));
+        // A build another process owns is not counted here; that one counts it.
+        if !matches!(bm, Ok((_, None))) {
+            crate::core::telemetry_features::record(
+                crate::core::telemetry_features::Feature::Bm25Index,
+                bm.is_ok(),
+            );
+        }
         {
             let mut s = bm25_state
                 .lock()
@@ -500,6 +511,21 @@ pub fn build_semantic(project_root: &str) {
     match bm25_idx.as_ref() {
         Some(idx) if idx.doc_count > 0 => {
             let outcome = crate::core::embedding_index::build_or_update(root, idx);
+            match outcome {
+                crate::core::embedding_index::EmbeddingBuildOutcome::Ready => {
+                    crate::core::telemetry_features::record(
+                        crate::core::telemetry_features::Feature::SemanticIndex,
+                        true,
+                    );
+                }
+                crate::core::embedding_index::EmbeddingBuildOutcome::Failed => {
+                    crate::core::telemetry_features::record(
+                        crate::core::telemetry_features::Feature::SemanticIndex,
+                        false,
+                    );
+                }
+                _ => {}
+            }
             let mut s = state
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);

@@ -52,7 +52,7 @@ vor dem Versand geprüft; gültige V2-Wire-Bytes bleiben unverändert.
 
 ## 3. Ereignisfamilien
 
-Zweiundzwanzig typisierte Varianten. Keine trägt Freitext.
+Vierundzwanzig typisierte Varianten. Keine trägt Freitext.
 
 Das Ereignisobjekt erlaubt ausschließlich `name` und `metrics`; zusätzliche
 Felder werden bereits beim Deserialisieren abgewiesen, auch innerhalb eines
@@ -75,6 +75,7 @@ bleiben unverändert; die Korrektur erweitert das erlaubte Schema nicht.
 | `version_upgrade` | `VersionUpgradeMetrics` |
 | `orchestration_aggregate` | `OrchestrationMetrics` |
 | `usage_history` | `UsageHistoryMetrics` (ab 3.11.1) |
+| `feature_aggregate` | `FeatureMetrics` (ab 3.11.1) |
 
 ## 4. Metrikfelder
 
@@ -88,7 +89,7 @@ Löschung mit der Installation. Abweichungen sind vermerkt.
 | Feld | Werte | Zweck | Optional |
 |---|---|---|---|
 | `distribution_channel` | `cargo`, `homebrew`, `npm`, `docker`, `source`, `aur`, `pypi`, `binary`, `unknown` | Kanalverteilung. Ab 3.11.1 aus dem Speicherort der laufenden Datei abgeleitet (z. B. `node_modules` → `npm`); der Pfad selbst verlässt den Rechner nie | nein |
-| `client_family` | `claude`, `codex`, `cursor`, `gemini`, `windsurf`, `zed`, `vscode_copilot`, `kiro`, `antigravity`, `codebuddy`, `codewhale`, `other` | Client-Kohorte (aus dem MCP-Handshake, sonst Umgebungsvariablen; unbekannte Clients werden `other`, nie Klartext) | nein |
+| `client_family` | `claude`, `codex`, `cursor`, `gemini`, `windsurf`, `zed`, `vscode_copilot`, `kiro`, `antigravity`, `codebuddy`, `codewhale`; ab 3.11.1 zusätzlich `cline`, `roo_code`, `kilo_code`, `continue_dev`, `opencode`, `goose`, `amp`, `augment`, `jetbrains`, `warp`, `trae`, `qwen_code`, `crush`, `claude_desktop`, `chatgpt`, `lm_studio`, `copilot_cli`, `visual_studio`, `neovim`, `emacs`, `factory` und `none`; sonst `other` | Client-Kohorte (aus dem MCP-Handshake, sonst Umgebungsvariablen). `none` = kein MCP-Client gesehen (nur CLI und Shell-Hooks), `other` = ein MCP-Client, den LeanCTX nicht kennt; sein Name wird nie gesendet | nein |
 | `operating_system` | `macos`, `linux`, `windows`, `other` | Plattformverteilung | nein |
 | `architecture` | `x86_64`, `aarch64`, `other` | Build-Priorisierung | nein |
 | `install_age` | `lt_1h`, `lt_1d`, `lt_7d`, `lt_30d`, `gte_30d` | Alter der lokalen Installationskennung als Bereich; trennt Menschen von kurzlebigen Agent-Sandboxes (ab 3.11.1) | ja |
@@ -118,6 +119,18 @@ Nicht enthalten: Modellname, Pfade, Konfigurationswerte, Projektanzahl.
 | `tools[].latency_milliseconds_total` | Summe der Laufzeit dieser Aufrufe in ms | mittlere Latenz je Tool | ja (ab 3.11.1) |
 | `tools[].failure_kinds` | Fehler je geschlossener Klasse: `invalid_input`, `not_found`, `permission`, `policy_blocked`, `timeout`, `conflict`, `too_large`, `unavailable`, `other` | warum Tools fehlschlagen; die Klasse wird lokal aus der Meldung abgeleitet, die Meldung selbst wird nie gesendet | ja (ab 3.11.1) |
 | `tools[].failure_messages[]` | höchstens 5 `{template, count}` je Tool und Tag; `template` ist die erste Zeile der Fehlermeldung, auf dem Gerät bereinigt: Text in Anführungszeichen → `‹str›`, Pfade und Dateinamen → `‹path›`, Zahlen und alles mit Ziffern → `‹n›`, Bezeichner → `‹sym›`, URLs → `‹url›`, E-Mail-Adressen → `‹email›`, Nicht-ASCII-Wörter → `‹text›`; höchstens 160 Zeichen, keine Ziffern, geschlossener Zeichensatz. Bleibt kein sicherer Wortlaut übrig, wird kein Muster gesendet. | welche Fehler Nutzer treffen, damit wir sie beheben können | ja (ab 3.11.1) |
+
+### `FeatureMetrics` (Event `feature_aggregate`, ab 3.11.1)
+
+Tageszähler der genutzten LeanCTX-Befehle und Hintergrundfunktionen.
+
+| Feld | Werte | Zweck | Optional |
+|---|---|---|---|
+| `features[].feature` | Code aus der festen Registry in `core/telemetry_features.rs`: `cli.<befehl>` oder `cli.<befehl>.<verb>` (z. B. `cli.pack.export`, `cli.graph.build`), `index.graph`, `index.bm25`, `index.semantic`; je Segment `[a-z][a-z0-9_]{0,23}`, höchstens drei Segmente | welche Funktionen tatsächlich genutzt werden. Befehl und Verb werden nur gezählt, wenn sie wörtlich in der Registry stehen; Argumente, Pfade, Abfragen oder andere Eingaben werden nie Teil eines Codes. Befehle im Hot-Path (Shell-Hooks, `-c`, `read`, `grep`, Statuszeile …) werden nicht gezählt | nein |
+| `features[].count` | Nutzungen am Tag (≥ 1) | Nutzung | nein |
+| `features[].failures` | davon fehlgeschlagen (≤ `count`; bei Index-Builds) | Zuverlässigkeit | ja |
+
+Höchstens 96 Codes je Tag, aufsteigend sortiert.
 
 ### `UsageHistoryMetrics` (Event `usage_history`, ab 3.11.1)
 
