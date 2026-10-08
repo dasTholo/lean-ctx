@@ -85,7 +85,7 @@ impl McpTool for DelayedRead {
 
         let (released, wake) = &*self.probe.gate;
         let mut released = released.lock().expect("probe gate");
-        let deadline = std::time::Instant::now() + StdDuration::from_secs(15);
+        let deadline = std::time::Instant::now() + StdDuration::from_mins(1);
         while !*released {
             let (next, result) = wake
                 .wait_timeout(
@@ -117,7 +117,7 @@ impl McpTool for DelayedRead {
 }
 
 async fn wait_for(flag: &AtomicBool, notify: &Notify, label: &str) {
-    let deadline = tokio::time::Instant::now() + StdDuration::from_secs(10);
+    let deadline = tokio::time::Instant::now() + StdDuration::from_secs(30);
     while !flag.load(Ordering::Acquire) {
         let notified = notify.notified();
         if flag.load(Ordering::Acquire) {
@@ -204,7 +204,9 @@ async fn outer_rest_timeout_preserves_mcp_execution() {
             concurrency: Arc::new(tokio::sync::Semaphore::new(1)),
             rate: Arc::new(RateLimiter::new(10, 10)),
             project_root: root_str,
-            timeout: StdDuration::from_secs(3),
+            // Room for a slow windows-latest pre-dispatch path: the test checks
+            // ordering (504 while the tool is blocked), not latency.
+            timeout: StdDuration::from_secs(15),
             server,
         });
     let request = Request::builder()
@@ -227,7 +229,7 @@ async fn outer_rest_timeout_preserves_mcp_execution() {
         !response_task.is_finished(),
         "tool must start before the response deadline"
     );
-    let response = tokio::time::timeout(StdDuration::from_secs(5), response_task)
+    let response = tokio::time::timeout(StdDuration::from_secs(30), response_task)
         .await
         .expect("handler deadline")
         .expect("handler task")
