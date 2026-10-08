@@ -752,7 +752,16 @@ pub(super) fn build(sections: &mut BTreeMap<String, SectionSchema>) {
         key(
             "bool?",
             serde_json::json!(null),
-            "Filesystem path jail. null/true = enforced (tools confined to the project root + allow_paths). false = the blanket \"any path\" opt-out — every tool path is allowed (for containers/sandboxes where the boundary is external). Compression and secret redaction are unaffected. Flip both planes at once with `lean-ctx yolo` / `lean-ctx secure`",
+            "Filesystem path jail. null/true = enforced (what it admits is set by path_jail_scope). false = the blanket \"any path\" opt-out — every tool path is allowed (for containers/sandboxes where the boundary is external). Compression and secret redaction are unaffected. Flip both planes at once with `lean-ctx yolo` / `lean-ctx secure`",
+        ),
+    );
+    root.insert(
+        "path_jail_scope".into(),
+        key_with_env(
+            "string?",
+            serde_json::json!(null),
+            "What the enforced path jail admits. null/\"home\" (default) = every path below your home directory is readable, so all your projects work at once; writes stay in the session's project + allow entries; protected zones stay closed: top-level dot entries (~/.ssh, ~/.aws, ~/.config, other agents' dirs), ~/Library, ~/AppData, ~/snap. \"project\" = only the active project + allow_paths/extra_roots/read_only_roots. Open one more dir with `lean-ctx allow-path <dir>`. Falls back to \"project\" for an implausible $HOME. Global-only",
+            "LEAN_CTX_PATH_JAIL_SCOPE",
         ),
     );
     root.insert(

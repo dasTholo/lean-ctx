@@ -122,8 +122,10 @@ internal `post_update_rewire`), so a new version's tool list reaches your editor
 
 ## Safety
 
-**PathJail** — restricts file access to allowed roots. Extend with `allow_paths`
-/ `LEAN_CTX_ALLOW_PATH`.
+**PathJail** — restricts file access. Default scope `home`: read every project
+below `~`, write the active one, never dot dirs like `~/.ssh` or `~/Library`;
+`path_jail_scope = "project"` for the active project only. Admit more with
+`lean-ctx allow-path <dir>`.
 
 **Shell allowlist** — the ~200 binaries `ctx_shell` is permitted to run. Replace
 the whole set with `shell_allowlist` / `LEAN_CTX_SHELL_ALLOWLIST`, or just add a

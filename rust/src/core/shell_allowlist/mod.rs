@@ -13,6 +13,7 @@ mod heredoc;
 mod mode;
 mod powershell;
 mod ps_statements;
+mod self_config;
 mod substitution;
 mod tokenizer;
 

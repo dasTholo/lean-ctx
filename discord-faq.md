@@ -136,10 +136,10 @@ If you're using `pi-lean-ctx` (Pi editor), make sure you're on the latest versio
 3. Check that your project root is correct: `lean-ctx doctor`
 
 **Q: "path escapes project root" error!**
-This happens when the MCP server's project root is stuck from a previous session. Fixed in v3.2.5+:
-- Update: `lean-ctx update`
-- Restart your IDE/AI tool after switching projects
-- Run `lean-ctx doctor` to verify the root
+Since v3.11.1 every project below your home directory is readable out of the box (`path_jail_scope = "home"`); writes stay in the session's project. If you still see it:
+- The error names the fix — usually `lean-ctx allow-path <dir>` for a directory outside `~`, a sibling project you want to edit, or a protected one like `~/.config/...` (takes effect immediately)
+- Session bound to the wrong project? Run `lean-ctx doctor` — "Project binding" shows a `LEAN_CTX_PROJECT_ROOT` pinned in a global agent config (older setups wrote it); `lean-ctx doctor --fix` removes it, then restart the agent once
+- On an older version: `lean-ctx update`
 
 **Q: How do I use Unified mode vs Full Tools?**
 - **Full (default)**: Every registered tool available as a separate `ctx_*` tool

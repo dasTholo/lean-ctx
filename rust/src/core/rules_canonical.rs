@@ -240,7 +240,9 @@ pub const RECOVER_COMPACT: &str = "RECOVER: compression is reversible — read t
 /// Root restriction hint (#1465). Paths outside project roots and configured
 /// `allow_paths`/`extra_roots` are refused by ctx_* tools. Without this hint
 /// the model discovers the restriction only from a surprise error.
-pub const ROOT_RESTRICTION: &str = "ROOTS: ctx_* refuses paths outside project root + allow_paths. \
+/// The closing sentence is a block-end marker for installed Claude Code mods
+/// (`templates/claude_mod/register.ts`) — keep it verbatim.
+pub const ROOT_RESTRICTION: &str = "ROOTS: ctx_* read ~ projects, write the active one; ~/.ssh etc. closed. \
     Use native Read for out-of-root; `lean-ctx doctor` shows effective roots.";
 
 /// Context Engineering Protocol version reference.

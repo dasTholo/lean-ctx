@@ -226,9 +226,32 @@ working directory. With neither an explicit path nor an absolute active project
 root, the default search fails instead of scanning an unrelated directory;
 configured extra roots do not bypass this check.
 
-All tool file access (`ctx_read`, `ctx_edit`, `ctx_tree`, …) is jailed under the
-current `project_root` (**PathJail**). Three knobs widen or remove that boundary —
-they overlap, so here is exactly what each one does:
+All tool file access (`ctx_read`, `ctx_edit`, `ctx_tree`, …) is checked by
+**PathJail**. What it admits is set by `path_jail_scope` (since v3.11.1):
+
+- **`home` (default):** every path below your home directory is *readable* —
+  so all your projects work at once — except the protected zones: every
+  top-level dot entry (`~/.ssh`, `~/.aws`, `~/.config`, `~/.zshrc`, other
+  agents' `~/.claude` / `~/.codex` / `~/.cursor`, …) plus `~/Library` (macOS),
+  `~/AppData` / `NTUSER.DAT*` (Windows) and `~/snap` (Linux). *Writes* stay
+  limited to the session's project, host-declared roots and allow entries.
+  Paths outside `~` stay jailed. The home directory itself is not admitted as a
+  root, so a tree walk never starts there. Zones stay closed even when a root
+  or allow entry contains them; only an entry inside a zone opens it. With an
+  implausible `$HOME` (`/`, `/root`, `/tmp`, not owned by you) the scope falls
+  back to `project`.
+- **`project`:** only the session's `project_root` plus the knobs below — the
+  pre-3.11.1 behaviour.
+
+`path_jail_scope` is global-only (a project-local `.lean-ctx.toml` cannot set
+it); env override `LEAN_CTX_PATH_JAIL_SCOPE`.
+
+The quickest way to admit one more directory — outside `~`, a sibling project
+to edit, or a single protected one — is `lean-ctx allow-path <dir>` (appends to
+`allow_paths`, read + write, effective immediately; `--list`, `--remove`). It
+refuses `/`, `~` and any directory containing `~`.
+Further knobs widen or remove the boundary — they overlap, so here is exactly
+what each one does:
 
 | Knob | Effect | Use when |
 |------|--------|----------|
@@ -239,6 +262,20 @@ they overlap, so here is exactly what each one does:
 
 Env equivalents (path-list syntax, `:` on Unix / `;` on Windows):
 `LEAN_CTX_ALLOW_PATH` (= `allow_paths`), `LEAN_CTX_EXTRA_ROOTS` (= `extra_roots`).
+Env vars are read when the MCP server starts, so prefer the config keys: they
+apply on the next tool call.
+
+**Project binding is per session.** The active `project_root` comes from the
+host (MCP roots, `CLAUDE_PROJECT_DIR` / `CURSOR_PROJECT_DIR` / workspace
+folders) or the server's working directory. Do not put `LEAN_CTX_PROJECT_ROOT`
+into an agent's *global* MCP config (`~/.codex/config.toml`, `~/.grok/config.toml`,
+a global `mcp.json`): that pins one project for every session of the agent.
+lean-ctx versions before 3.11.1 wrote such pins during `setup`; current versions
+remove them on the next agent refresh, `lean-ctx doctor` lists any that remain
+("Project binding") and `lean-ctx doctor --fix` removes them — line by line, so
+JSON key order and comments survive; a `LEAN_CTX_EXTRA_ROOTS` value moves into
+`extra_roots`. Per-project entries (`projects.*` in `~/.claude.json`) are left
+alone. A session started inside a different real project ignores a stale pin.
 
 Notes that save debugging time:
 

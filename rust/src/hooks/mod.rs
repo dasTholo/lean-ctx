@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 
 pub mod agents;
+pub(crate) mod project_pins;
 mod support;
+pub(crate) use project_pins::strip_project_scoped_env_toml;
 
 /// Controls how hooks instruct agents to access lean-ctx functionality.
 ///
@@ -1298,48 +1300,22 @@ fn make_executable(_path: &PathBuf) {}
 /// per-category dirs (config/data/state/cache) at runtime, and pinning the data
 /// dir would set that var in the server's environment, forcing single-dir mode
 /// and collapsing config/state/cache onto the data dir — defeating the XDG split
-/// (GH #408). Emits `LEAN_CTX_PROJECT_ROOT` and `LEAN_CTX_EXTRA_ROOTS` when known
-/// (process env first, then config). Without these, a long-lived MCP server
-/// spawned by the agent loses the project / worktree scope captured at `init`,
-/// so an explicit path under a sibling worktree is wrongly rejected as a jail
-/// escape (#403). Single source of truth so every agent installer stays consistent.
+/// (GH #408).
+///
+/// Deliberately does NOT pin a project either. Agent configs are user-global:
+/// one `~/.codex/config.toml` serves every Codex session on the machine. The
+/// #403 build copied the *installing* process's `LEAN_CTX_PROJECT_ROOT` /
+/// `LEAN_CTX_EXTRA_ROOTS` in here, so whichever project last ran `setup`,
+/// `doctor --fix` or an MCP-start hook refresh became the project of every
+/// later session — and each switch needed a config edit plus an MCP restart.
+/// The server derives its project per session instead (host roots, host env,
+/// working directory) and reads `extra_roots` from config.toml itself; stale
+/// pins are removed by [`project_pins`].
+///
+/// Single source of truth so every agent installer stays consistent; it is
+/// currently empty on purpose.
 pub(crate) fn mcp_server_env_pairs() -> Vec<(String, String)> {
-    let mut pairs = Vec::new();
-
-    let cfg = crate::core::config::Config::load();
-
-    let project_root = std::env::var("LEAN_CTX_PROJECT_ROOT")
-        .ok()
-        .filter(|v| !v.trim().is_empty())
-        .or_else(|| cfg.project_root.clone().filter(|v| !v.trim().is_empty()));
-    if let Some(root) = project_root {
-        pairs.push(("LEAN_CTX_PROJECT_ROOT".to_string(), root));
-    }
-
-    // Env override is already a platform path-list; config is a Vec we join the
-    // same way `LEAN_CTX_EXTRA_ROOTS` is parsed (`std::env::split_paths`).
-    let extra_roots = std::env::var("LEAN_CTX_EXTRA_ROOTS")
-        .ok()
-        .filter(|v| !v.trim().is_empty())
-        .or_else(|| {
-            let roots: Vec<&str> = cfg
-                .extra_roots
-                .iter()
-                .map(String::as_str)
-                .filter(|s| !s.trim().is_empty())
-                .collect();
-            if roots.is_empty() {
-                return None;
-            }
-            std::env::join_paths(roots)
-                .ok()
-                .map(|s| s.to_string_lossy().to_string())
-        });
-    if let Some(extra) = extra_roots {
-        pairs.push(("LEAN_CTX_EXTRA_ROOTS".to_string(), extra));
-    }
-
-    pairs
+    Vec::new()
 }
 
 /// The MCP server env block as a JSON object, for the JSON-config agents.

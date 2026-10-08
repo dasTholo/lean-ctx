@@ -246,6 +246,13 @@ impl LeanCtxServer {
                 Some(ledger.pressure())
             };
             let extra_roots = self.session.read().await.extra_roots.clone();
+            // The home jail scope opens other projects for reading only; the
+            // session's own roots stay writable (pathjail_scope). Re-read the
+            // root: path resolution above may have re-rooted the session.
+            let bound_root = self.session.read().await.project_root.clone();
+            for root in bound_root.iter().chain(extra_roots.iter()) {
+                crate::core::pathjail_scope::register_session_root(root);
+            }
             let ctx = crate::server::tool_trait::ToolContext {
                 project_root,
                 extra_roots,

@@ -349,6 +349,7 @@ fn run_inner(json: bool) -> u32 {
     // pins a stale LEAN_CTX_DATA_DIR (which would make that editor's MCP server
     // read a different config.toml than this CLI), and print the resolved path.
     board.check(&config_parity_outcome());
+    board.check(&project_pin_outcome());
 
     // 5b) Shell allowlist (effective runtime view + silent-parse-error trap, #341)
     let allowlist_outcome = shell_allowlist_outcome();
