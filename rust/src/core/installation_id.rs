@@ -331,11 +331,13 @@ pub(crate) fn masked(id: &str) -> String {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     struct EnvVarGuard {
         key: &'static str,
         previous: Option<String>,
     }
 
+    #[cfg(unix)]
     impl EnvVarGuard {
         fn set(key: &'static str, value: Option<&str>) -> Self {
             let previous = std::env::var(key).ok();
@@ -347,6 +349,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     impl Drop for EnvVarGuard {
         fn drop(&mut self) {
             match &self.previous {
@@ -354,6 +357,28 @@ mod tests {
                 None => crate::test_env::remove_var(self.key),
             }
         }
+    }
+
+    /// An update never changes the tracked ID: a pre-3.11 sidecar ID becomes
+    /// the identity, and every later start returns that same identity.
+    #[test]
+    fn updates_keep_the_tracked_installation_id() {
+        let _iso = crate::core::data_dir::isolated_data_dir();
+        let legacy_id = generate_uuid_v4();
+        let dir = crate::core::paths::data_dir().unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("installation_id"), format!("{legacy_id}\n")).unwrap();
+
+        let (migrated, token) = get_or_create_identity().unwrap();
+        assert_eq!(migrated, legacy_id, "the v1 ID survives the move to v2");
+        for _ in 0..3 {
+            assert_eq!(
+                get_or_create_identity().unwrap(),
+                (legacy_id.clone(), token.clone())
+            );
+        }
+        let stored = read_identity(&identity_path().unwrap()).expect("identity persisted");
+        assert_eq!(stored.installation_id, legacy_id);
     }
 
     #[cfg(unix)]
