@@ -142,17 +142,30 @@ pub fn mark_notice_seen() {
     let _ = std::fs::write(path, format!("{NOTICE_VERSION}\n"));
 }
 
-fn notice_text() -> String {
-    let mut text =
-        String::from("\x1b[1mlean-ctx sends anonymous usage telemetry (on by default).\x1b[0m\n");
-    for line in disclosure_lines() {
-        text.push_str("  ");
-        text.push_str(&line);
-        text.push('\n');
-    }
-    text.push_str(
-        "  \x1b[2mSee the exact payload: lean-ctx telemetry show · Turn off: lean-ctx telemetry off · Details: https://leanctx.com/privacy\x1b[0m\n",
+/// The short, non-blocking hint shown by setup and once after install or
+/// upgrade. Telemetry is never asked about; the full list lives behind
+/// `lean-ctx telemetry status|show` and on the privacy page.
+pub fn hint_lines() -> Vec<String> {
+    let config = crate::core::config::Config::path().map_or_else(
+        || "config.toml".to_string(),
+        |path| path.display().to_string(),
     );
+    vec![
+        "Anonymous usage telemetry is on (daily counts only — no code, paths or prompts)."
+            .to_string(),
+        format!(
+            "Turn off: lean-ctx telemetry off · or set `enabled = false` under [telemetry] in {config}"
+        ),
+        "What is sent: lean-ctx telemetry show · https://leanctx.com/privacy".to_string(),
+    ]
+}
+
+fn notice_text() -> String {
+    let mut lines = hint_lines().into_iter();
+    let mut text = format!("\x1b[1m{}\x1b[0m\n", lines.next().unwrap_or_default());
+    for line in lines {
+        text.push_str(&format!("  \x1b[2m{line}\x1b[0m\n"));
+    }
     text
 }
 
@@ -171,7 +184,7 @@ pub fn maybe_show_notice() {
     mark_notice_seen();
 }
 
-fn telemetry_would_send() -> bool {
+pub(crate) fn telemetry_would_send() -> bool {
     let Ok(config) = crate::core::config::Config::try_load_global() else {
         return false;
     };
@@ -222,13 +235,19 @@ mod tests {
     }
 
     #[test]
-    fn disclosure_names_every_sent_category_and_the_exclusions() {
-        let text = notice_text();
-        for item in DISCLOSURE {
-            assert!(text.contains(item));
-        }
+    fn disclosure_names_the_exclusions() {
+        let text = disclosure_lines().join("\n");
+        assert_eq!(disclosure_lines().len(), DISCLOSURE.len() + 1);
         assert!(text.contains(NEVER_SENT));
+    }
+
+    #[test]
+    fn notice_is_a_short_hint_with_every_way_out() {
+        let text = notice_text();
+        assert_eq!(text.lines().count(), 3);
         assert!(text.contains("lean-ctx telemetry off"));
+        assert!(text.contains("[telemetry]"));
         assert!(text.contains("lean-ctx telemetry show"));
+        assert!(!text.contains('?'), "the notice must not ask anything");
     }
 }

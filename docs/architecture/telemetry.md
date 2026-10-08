@@ -26,22 +26,26 @@ personenbezogenes Datum gelten.
 ## Standard-an
 
 `TelemetryConfig` trägt `enabled` (Standard `true`), `preference` und
-`last_heartbeat`. Offenlegung statt Sendegatter, an drei Stellen mit derselben
-Liste aus `core::telemetry_consent::DISCLOSURE`:
+`last_heartbeat`. Telemetrie wird nie abgefragt; Offenlegung statt Sendegatter:
 
-- **Setup** fragt „Keep anonymous telemetry on? [Y/n]“ und listet die
-  gesendeten Kategorien. Beide Antworten werden persistiert; ein „n“ schreibt
-  `enabled = false` und `preference = "explicitly_disabled"` und überlebt jedes
-  spätere Upgrade.
-- **`telemetry on`** zeigt die Liste nach dem Einschalten.
-- **Einmaliger Hinweis** beim ersten interaktiven Befehl (stdin und stderr sind
-  Terminals; nie für MCP, Hooks, Server-Modus, Pipes; nie auf stdout), solange
-  die Telemetrie tatsächlich senden würde. Die gesehene Version steht in
+- **Setup** (ab 3.11.1) stellt keine Frage mehr. Sendet die Telemetrie, zeigt es
+  den kurzen Hinweis aus `telemetry_consent::hint_lines()` (an, nur Tageszähler;
+  ausschalten mit `lean-ctx telemetry off` oder `enabled = false` unter
+  `[telemetry]` im angezeigten `config.toml`; Inhalt via `telemetry show`).
+  Ist sie aus, sagt es das und nennt `telemetry on`. Es schreibt keine
+  Präferenz, eine frühere explizite Wahl bleibt also unberührt.
+- **`telemetry on|off`** zeigt die volle Liste aus
+  `core::telemetry_consent::DISCLOSURE`, **`telemetry show`** den exakten Inhalt.
+- **Einmaliger Hinweis** beim ersten interaktiven Befehl nach Installation oder
+  Update (stdin und stderr sind Terminals; nie für MCP, Hooks, Server-Modus,
+  Pipes; nie auf stdout), solange die Telemetrie tatsächlich senden würde:
+  dieselben drei Zeilen wie im Setup, ohne Frage. Die gesehene Version steht in
   `$STATE/telemetry_notice_version`; `NOTICE_VERSION` wird erhöht, wenn die
   Liste eine Kategorie gewinnt.
 
 Vor 3.11.0 wurde ein abgelehntes Setup nicht gespeichert; solche Installationen
-sind nach dem Upgrade an und sehen den Hinweis.
+sind nach dem Upgrade an und sehen den Hinweis. Ein „n“ im Setup von 3.11.0
+schrieb `preference = "explicitly_disabled"` und überlebt jedes Upgrade.
 
 **CI sammelt und sendet nie.** `CI` (ausser `false`/`0`) und die üblichen
 Anbieter-Marker (`GITHUB_ACTIONS`, `GITLAB_CI`, `BUILDKITE`, `CIRCLECI`,
