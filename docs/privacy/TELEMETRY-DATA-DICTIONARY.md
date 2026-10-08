@@ -74,6 +74,7 @@ bleiben unverändert; die Korrektur erweitert das erlaubte Schema nicht.
 | `error_category_aggregate` | `ErrorMetrics` |
 | `version_upgrade` | `VersionUpgradeMetrics` |
 | `orchestration_aggregate` | `OrchestrationMetrics` |
+| `usage_history` | `UsageHistoryMetrics` (ab 3.11.1) |
 
 ## 4. Metrikfelder
 
@@ -115,6 +116,23 @@ Nicht enthalten: Modellname, Pfade, Konfigurationswerte, Projektanzahl.
 | `tools[].tool` | Name eines **eingebauten** lean-ctx-Tools (`[a-z][a-z0-9_]*`, ≤ 64 Byte) | welche Tools tatsächlich genutzt werden | nein |
 | `tools[].calls`, `tools[].failures` | Zähler seit dem letzten bestätigten Batch | Nutzung und Fehlerquote je Tool | nein |
 | `tools[].latency_milliseconds_total` | Summe der Laufzeit dieser Aufrufe in ms | mittlere Latenz je Tool | ja (ab 3.11.1) |
+| `tools[].failure_kinds` | Fehler je geschlossener Klasse: `invalid_input`, `not_found`, `permission`, `policy_blocked`, `timeout`, `conflict`, `too_large`, `unavailable`, `other` | warum Tools fehlschlagen; die Klasse wird lokal aus der Meldung abgeleitet, die Meldung selbst wird nie gesendet | ja (ab 3.11.1) |
+
+### `UsageHistoryMetrics` (Event `usage_history`, ab 3.11.1)
+
+Die eigene Tagesbilanz der Installation, wie `lean-ctx gain` sie zeigt (`stats.json`).
+
+| Feld | Werte | Zweck | Optional |
+|---|---|---|---|
+| `days[].date` | lokaler Kalendertag `YYYY-MM-DD`, höchstens die letzten 90 Tage | Verlauf auch vor dem ersten Heartbeat | nein |
+| `days[].commands` | komprimierte Operationen des Tages (MCP-Aufrufe und Shell-Hook-Befehle) | Nutzung ausserhalb von MCP sichtbar machen | nein |
+| `days[].original_tokens`, `days[].delivered_tokens` | Tokens vor und nach der Kompression | Einsparung pro Tag | nein |
+| `lifetime.commands`, `lifetime.original_tokens`, `lifetime.delivered_tokens` | Gesamtsummen seit Installation | Lifetime-Wert | nein |
+| `lifetime.first_use_month` | `YYYY-MM` | Nutzungsdauer, nur Monatsgenauigkeit | ja |
+
+Keine Befehlsnamen, Pfade oder Inhalte. `ErrorCategory` kennt ab 3.11.1 zusätzlich
+`command`: ein über ein Shell-Tool ausgeführter Befehl endete mit Exit-Code ≠ 0
+(Fehler des Befehls, nicht von LeanCTX).
 
 Namen stammen ausschließlich aus der statischen Tool-Registry des Binaries;
 Tools fremder MCP-Server, Argumente und Ergebnisse werden nie gezählt. Liste
@@ -135,7 +153,7 @@ strikt sortiert und eindeutig, höchstens `MAX_TOOL_ENTRIES` (128) Einträge
 | `VersionUpgradeMetrics` | `from_major`, `to_major` | Upgrade-Pfade |
 
 `category` ist eine geschlossene Aufzählung: `authentication`, `authorization`,
-`configuration`, `network`, `provider`, `timeout`, `validation`, `internal`.
+`configuration`, `network`, `provider`, `timeout`, `validation`, `internal`, `command` (ab 3.11.1).
 **Rohe Fehlermeldungen erscheinen nirgends.**
 
 Konsistenz wird erzwungen: `failures ≤ calls`; `successes + failures ≤ attempts`;

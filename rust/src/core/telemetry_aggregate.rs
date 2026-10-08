@@ -25,7 +25,11 @@ use super::telemetry_v2::{
     ToolUsageMetrics, VersionUpgradeMetrics, valid_tool_name,
 };
 
+mod counters;
 mod environment;
+mod history;
+use super::telemetry_failure::{KindCounts, sub_kinds, wire_kinds};
+use counters::{add_counters, counter_delta};
 use environment::{client_family, distribution_channel, setup_profile};
 
 /// Most send attempts per installation and UTC day. The server admits ten;
@@ -74,6 +78,8 @@ struct ToolCounterCheckpoint {
     failures: u64,
     #[serde(default)]
     latency_us: u64,
+    #[serde(default)]
+    failure_kinds: KindCounts,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -149,6 +155,10 @@ struct QueuedOneShots {
     checkout_started: u64,
     #[serde(default)]
     error_categories: [u64; 8],
+    /// Shell commands that exited non-zero (3.11.1); kept apart from the
+    /// fixed-size category array so older state still loads.
+    #[serde(default)]
+    command_errors: u64,
     /// Tool counters folded in by every process, so short sessions reach the
     /// server even when the process exits before the next send.
     #[serde(default)]
@@ -198,6 +208,10 @@ impl QueuedOneShots {
         for (own, other) in self.error_categories.iter_mut().zip(extra.error_categories) {
             *own = own.saturating_add(other).min(MAX_COUNT);
         }
+        self.command_errors = self
+            .command_errors
+            .saturating_add(extra.command_errors)
+            .min(MAX_COUNT);
         add_counters(&mut self.counters, &extra.counters);
     }
 }
@@ -584,6 +598,13 @@ fn build_batch(
         .map(|day| day.totals.clone())
         .unwrap_or_default();
     let mut batch = build_day(today, &today_totals)?;
+    if let Some(history) = chrono::NaiveDate::parse_from_str(today, "%Y-%m-%d")
+        .ok()
+        .and_then(history::usage_history)
+    {
+        let event = envelope_like(&batch.events[0], TelemetryEventV2::UsageHistory(history));
+        batch.events.push(event);
+    }
     let mut included = BTreeMap::from([(today.to_string(), today_totals)]);
     for (day, totals) in one_shots
         .days
@@ -738,8 +759,12 @@ fn build_daily_aggregate(
             }),
         ));
     }
-    for (index, category) in ERROR_CATEGORIES.into_iter().enumerate() {
-        let count = queued.error_categories[index].min(MAX_COUNT);
+    for (category, count) in ERROR_CATEGORIES
+        .into_iter()
+        .zip(queued.error_categories)
+        .chain([(ErrorCategory::Command, queued.command_errors)])
+    {
+        let count = count.min(MAX_COUNT);
         if count > 0 {
             batch.events.push(envelope_like(
                 &common,
@@ -784,6 +809,10 @@ fn tool_call_deltas(
                 failures,
                 latency_milliseconds_total: Some(
                     (counter.latency_us.saturating_sub(base.latency_us) / 1_000).min(MAX_COUNT),
+                ),
+                failure_kinds: wire_kinds(
+                    &sub_kinds(&counter.failure_kinds, &base.failure_kinds),
+                    failures,
                 ),
             })
         })
@@ -838,6 +867,7 @@ fn current_checkpoint() -> CounterCheckpoint {
                         calls: counter.calls,
                         failures: counter.failures,
                         latency_us: counter.latency_us,
+                        failure_kinds: counter.failure_kinds,
                     },
                 )
             })
@@ -909,69 +939,6 @@ pub fn persist_process_counters() -> Result<(), String> {
     mark_folded(&path, observed);
     Ok(())
 }
-
-fn counter_delta(observed: &CounterCheckpoint, baseline: &CounterCheckpoint) -> CounterCheckpoint {
-    CounterCheckpoint {
-        tool_calls: observed.tool_calls.saturating_sub(baseline.tool_calls),
-        tool_failures: observed
-            .tool_failures
-            .saturating_sub(baseline.tool_failures),
-        tool_latency_buckets: std::array::from_fn(|index| {
-            observed.tool_latency_buckets[index]
-                .saturating_sub(baseline.tool_latency_buckets[index])
-        }),
-        session_uptime_secs: observed
-            .session_uptime_secs
-            .saturating_sub(baseline.session_uptime_secs),
-        tools: observed
-            .tools
-            .iter()
-            .filter_map(|(tool, counter)| {
-                let base = baseline.tools.get(tool).copied().unwrap_or_default();
-                let delta = ToolCounterCheckpoint {
-                    calls: counter.calls.saturating_sub(base.calls),
-                    failures: counter.failures.saturating_sub(base.failures),
-                    latency_us: counter.latency_us.saturating_sub(base.latency_us),
-                };
-                (delta.calls > 0 || delta.failures > 0).then(|| (tool.clone(), delta))
-            })
-            .collect(),
-        tokens_input: observed.tokens_input.saturating_sub(baseline.tokens_input),
-        tokens_output: observed
-            .tokens_output
-            .saturating_sub(baseline.tokens_output),
-    }
-}
-
-fn add_counters(total: &mut CounterCheckpoint, delta: &CounterCheckpoint) {
-    total.tool_calls = total.tool_calls.saturating_add(delta.tool_calls);
-    total.tool_failures = total.tool_failures.saturating_add(delta.tool_failures);
-    for (bucket, added) in total
-        .tool_latency_buckets
-        .iter_mut()
-        .zip(delta.tool_latency_buckets)
-    {
-        *bucket = bucket.saturating_add(added);
-    }
-    total.session_uptime_secs = total
-        .session_uptime_secs
-        .saturating_add(delta.session_uptime_secs);
-    total.tokens_input = total.tokens_input.saturating_add(delta.tokens_input);
-    total.tokens_output = total.tokens_output.saturating_add(delta.tokens_output);
-    for (tool, added) in &delta.tools {
-        if !total.tools.contains_key(tool) && total.tools.len() >= MAX_PERSISTED_TOOLS {
-            continue;
-        }
-        let entry = total.tools.entry(tool.clone()).or_default();
-        entry.calls = entry.calls.saturating_add(added.calls);
-        entry.failures = entry.failures.saturating_add(added.failures);
-        entry.latency_us = entry.latency_us.saturating_add(added.latency_us);
-    }
-}
-
-/// Upper bound on distinct tool names kept in the sidecar; the batch itself
-/// keeps at most [`MAX_TOOL_ENTRIES`] of them.
-const MAX_PERSISTED_TOOLS: usize = 256;
 
 fn state_path() -> Result<PathBuf, String> {
     crate::core::paths::state_dir().map(|dir| dir.join("telemetry_v2_aggregate.json"))
@@ -1104,10 +1071,13 @@ fn record_error_category_inner(category: ErrorCategory) -> Result<(), String> {
     }
     let index = ERROR_CATEGORIES
         .iter()
-        .position(|candidate| *candidate == category)
-        .expect("closed error category");
+        .position(|candidate| *candidate == category);
     with_locked_one_shots(|mut state| {
-        let count = &mut today_totals(&mut state).error_categories[index];
+        let totals = today_totals(&mut state);
+        let count = match index {
+            Some(index) => &mut totals.error_categories[index],
+            None => &mut totals.command_errors,
+        };
         *count = count.saturating_add(1).min(MAX_COUNT);
         Ok((state, ()))
     })

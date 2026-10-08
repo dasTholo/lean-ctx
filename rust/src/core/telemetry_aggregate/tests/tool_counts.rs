@@ -4,6 +4,32 @@
 
 use super::*;
 
+/// A failure recorded through `record_named_tool_call(.., false)` is unclassified.
+fn other_failure() -> KindCounts {
+    let mut kinds = KindCounts::default();
+    kinds[crate::core::telemetry_failure::FailureKind::Other.index()] = 1;
+    kinds
+}
+
+#[test]
+#[serial_test::serial]
+fn failure_classes_reach_the_wire_without_the_message() {
+    let _iso = crate::core::data_dir::isolated_data_dir();
+    let _clock = TestClockGuard::set(BUCKET, T0);
+    let metrics = crate::core::telemetry::global_metrics();
+    let kind =
+        crate::core::telemetry_failure::classify("Permission denied (os error 13): /secret/path");
+    metrics.record_named_tool_outcome("telemetry_kind_probe", 1_000, Some(kind));
+    metrics.record_named_tool_outcome("telemetry_kind_probe", 1_000, None);
+    let batch = preview_daily_batch().expect("preview");
+    let wire = serde_json::to_string(&batch).unwrap();
+    assert!(
+        wire.contains(r#""failure_kinds":{"permission":1}"#),
+        "{wire}"
+    );
+    assert!(!wire.contains("/secret/path"));
+}
+
 fn tool_call_counts(batch: &TelemetryBatchV2) -> Vec<(String, u64, u64)> {
     batch
         .events
@@ -31,6 +57,7 @@ fn counters(entries: &[(&str, u64, u64)]) -> BTreeMap<String, ToolCounterCheckpo
                     calls: *calls,
                     failures: *failures,
                     latency_us: 0,
+                    failure_kinds: KindCounts::default(),
                 },
             )
         })
@@ -69,6 +96,7 @@ fn tool_call_deltas_keep_the_most_called_tools_past_the_entry_cap() {
                     calls: index as u64 + 1,
                     failures: 0,
                     latency_us: 0,
+                    failure_kinds: KindCounts::default(),
                 },
             )
         })
@@ -163,6 +191,7 @@ fn persisted_counters_are_sent_cumulatively_and_later_calls_reach_the_right_day(
             calls: 2,
             failures: 1,
             latency_us: 2_000,
+            failure_kinds: other_failure(),
         })
     );
     // A second fold with no new calls must not count them again.
@@ -181,6 +210,7 @@ fn persisted_counters_are_sent_cumulatively_and_later_calls_reach_the_right_day(
             calls: 2,
             failures: 1,
             latency_us: 2_000,
+            failure_kinds: other_failure(),
         })
     );
     assert!(!today_is_unsent());

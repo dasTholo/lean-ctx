@@ -674,7 +674,11 @@ impl LeanCtxServer {
             .as_ref()
             .and_then(|key| cached_call_result(global_response_cache(), key))
         {
-            self.record_tool_usage(name, call_start, cached.is_error != Some(true));
+            self.record_tool_usage(
+                name,
+                call_start,
+                super::pipeline::result_failure_kind(&cached, ""),
+            );
             return Ok(PreparedCallResult::Cached(cached));
         }
 
@@ -696,8 +700,13 @@ impl LeanCtxServer {
 
     /// Feed the daily telemetry aggregate. Only registered tools are counted,
     /// under the registry's own name; calls stopped by a guard never reach
-    /// here and are not usage.
-    fn record_tool_usage(&self, name: &str, started: std::time::Instant, success: bool) {
+    /// here and are not usage. A failure carries only its class.
+    fn record_tool_usage(
+        &self,
+        name: &str,
+        started: std::time::Instant,
+        failure: Option<crate::core::telemetry_failure::FailureKind>,
+    ) {
         let Some(tool) = self
             .registry
             .as_ref()
@@ -706,7 +715,8 @@ impl LeanCtxServer {
             return;
         };
         let latency_us = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
-        crate::core::telemetry::global_metrics().record_named_tool_call(tool, latency_us, success);
+        crate::core::telemetry::global_metrics()
+            .record_named_tool_outcome(tool, latency_us, failure);
     }
 }
 
@@ -913,9 +923,10 @@ impl crate::core::execution_lifecycle::ExecutionDriver for McpDriver<'_> {
                 self.server.record_tool_usage(
                     &call.name,
                     dispatch_start,
-                    primitive
-                        .as_ref()
-                        .is_ok_and(super::pipeline::McpPrimitive::succeeded),
+                    match &primitive {
+                        Ok(primitive) => primitive.failure_kind(),
+                        Err(error) => Some(super::pipeline::error_failure_kind(error)),
+                    },
                 );
                 let primitive = primitive?;
                 Ok((

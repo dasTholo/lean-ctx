@@ -149,7 +149,7 @@ fn shell_error_categories_use_typed_outcomes_not_output_strings() {
     );
     assert_eq!(
         shell_error_category(Some(&ShellOutcome::Exit(2)), "provider timeout"),
-        Some(ErrorCategory::Internal)
+        Some(ErrorCategory::Command)
     );
     assert_eq!(
         shell_error_category(Some(&ShellOutcome::Exit(1)), "grep found no matches"),

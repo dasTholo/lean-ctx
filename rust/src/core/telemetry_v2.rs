@@ -155,6 +155,7 @@ pub enum TelemetryEventV2 {
     ErrorCategoryAggregate(ErrorMetrics),
     VersionUpgrade(VersionUpgradeMetrics),
     OrchestrationAggregate(Box<OrchestrationMetrics>),
+    UsageHistory(UsageHistoryMetrics),
 }
 
 impl TelemetryEventV2 {
@@ -182,6 +183,7 @@ impl TelemetryEventV2 {
             Self::ErrorCategoryAggregate(_) => "error_category_aggregate",
             Self::VersionUpgrade(_) => "version_upgrade",
             Self::OrchestrationAggregate(_) => "orchestration_aggregate",
+            Self::UsageHistory(_) => "usage_history",
         }
     }
 
@@ -210,8 +212,94 @@ impl TelemetryEventV2 {
             Self::ErrorCategoryAggregate(metrics) => metrics.validate(),
             Self::VersionUpgrade(metrics) => metrics.validate(),
             Self::OrchestrationAggregate(metrics) => metrics.validate(),
+            Self::UsageHistory(metrics) => metrics.validate(),
         }
     }
+}
+
+/// Upper bound for token totals: a heavy installation passes [`MAX_COUNT`]
+/// tokens within weeks, so tokens get their own, still finite, bound.
+pub const MAX_TOKENS: u64 = 1_000_000_000_000_000;
+/// Days of local history sent; matches the server's retention window.
+pub const MAX_HISTORY_DAYS: usize = 90;
+
+/// The installation's own daily usage record (`lean-ctx gain`), so history
+/// before telemetry and usage outside MCP (shell hooks, CLI) is counted.
+/// Days are `YYYY-MM-DD` in the client's calendar, strictly ascending.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UsageHistoryMetrics {
+    pub days: Vec<UsageDay>,
+    pub lifetime: LifetimeUsage,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UsageDay {
+    pub date: String,
+    /// Compressed operations (tool calls, hook-wrapped commands, reads).
+    pub commands: u64,
+    /// Tokens before compression.
+    pub original_tokens: u64,
+    /// Tokens that reached the model.
+    pub delivered_tokens: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LifetimeUsage {
+    pub commands: u64,
+    pub original_tokens: u64,
+    pub delivered_tokens: u64,
+    /// `YYYY-MM` of first use; month precision only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_use_month: Option<String>,
+}
+
+impl UsageHistoryMetrics {
+    fn validate(&self) -> Result<(), TelemetryValidationError> {
+        if self.days.len() > MAX_HISTORY_DAYS
+            || !self.days.windows(2).all(|pair| pair[0].date < pair[1].date)
+        {
+            return Err(TelemetryValidationError::History);
+        }
+        for day in &self.days {
+            if !valid_day(&day.date) {
+                return Err(TelemetryValidationError::History);
+            }
+            bounded(day.commands)?;
+            tokens_bounded(&[day.original_tokens, day.delivered_tokens])?;
+        }
+        bounded(self.lifetime.commands)?;
+        tokens_bounded(&[
+            self.lifetime.original_tokens,
+            self.lifetime.delivered_tokens,
+        ])?;
+        if self
+            .lifetime
+            .first_use_month
+            .as_deref()
+            .is_some_and(|month| !valid_day(&format!("{month}-01")))
+        {
+            return Err(TelemetryValidationError::History);
+        }
+        Ok(())
+    }
+}
+
+fn tokens_bounded(values: &[u64]) -> Result<(), TelemetryValidationError> {
+    if values.iter().all(|value| *value <= MAX_TOKENS) {
+        Ok(())
+    } else {
+        Err(TelemetryValidationError::CountBound)
+    }
+}
+
+/// A real calendar day written exactly as `YYYY-MM-DD`.
+fn valid_day(value: &str) -> bool {
+    value.len() == 10
+        && chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
+            .is_ok_and(|date| date.format("%Y-%m-%d").to_string() == value)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -431,6 +519,10 @@ pub struct ToolCallCount {
     /// Summed latency of these calls; absent from clients before 3.11.1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latency_milliseconds_total: Option<u64>,
+    /// Failures by class (never the message); absent before 3.11.1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_kinds:
+        Option<std::collections::BTreeMap<crate::core::telemetry_failure::FailureKind, u64>>,
 }
 
 impl ToolCallMetrics {
@@ -456,6 +548,19 @@ impl ToolCallCount {
         }
         bounded_many(&[self.calls, self.failures])?;
         bounded(self.latency_milliseconds_total.unwrap_or_default())?;
+        let classified: u64 = self
+            .failure_kinds
+            .iter()
+            .flat_map(|kinds| kinds.values())
+            .sum();
+        if classified > self.failures
+            || self
+                .failure_kinds
+                .as_ref()
+                .is_some_and(|kinds| kinds.values().any(|count| *count == 0))
+        {
+            return Err(TelemetryValidationError::InconsistentCounts);
+        }
         if self.calls == 0 || self.failures > self.calls {
             return Err(TelemetryValidationError::InconsistentCounts);
         }
@@ -699,6 +804,9 @@ pub enum ErrorCategory {
     Timeout,
     Validation,
     Internal,
+    /// A command run through a shell tool exited non-zero: the user's
+    /// command failed, not LeanCTX. Sent from 3.11.1 on.
+    Command,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -716,6 +824,7 @@ pub enum TelemetryValidationError {
     BatchSize,
     ToolEntries,
     ToolName,
+    History,
 }
 
 fn bounded(value: u64) -> Result<(), TelemetryValidationError> {
@@ -1036,6 +1145,7 @@ mod tests {
             calls,
             failures,
             latency_milliseconds_total: None,
+            failure_kinds: None,
         }
     }
 

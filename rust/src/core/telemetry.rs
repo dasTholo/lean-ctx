@@ -27,6 +27,8 @@ pub(crate) struct ToolCallCounter {
     pub calls: u64,
     pub failures: u64,
     pub latency_us: u64,
+    /// Failures by [`crate::core::telemetry_failure::FAILURE_KINDS`] index.
+    pub failure_kinds: [u64; crate::core::telemetry_failure::FAILURE_KINDS.len()],
 }
 
 pub fn global_metrics() -> &'static Metrics {
@@ -111,16 +113,32 @@ impl Metrics {
     /// Record a call of a built-in tool: the totals and the tool's own counter
     /// move together under one lock.
     pub fn record_named_tool_call(&self, tool: &'static str, latency_us: u64, success: bool) {
+        self.record_named_tool_outcome(
+            tool,
+            latency_us,
+            (!success).then_some(crate::core::telemetry_failure::FailureKind::Other),
+        );
+    }
+
+    /// Like [`Self::record_named_tool_call`], with the class of a failure.
+    pub fn record_named_tool_outcome(
+        &self,
+        tool: &'static str,
+        latency_us: u64,
+        failure: Option<crate::core::telemetry_failure::FailureKind>,
+    ) {
         let mut per_tool = self
             .tool_call_consistency
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        self.record_tool_call_locked(latency_us, success);
+        self.record_tool_call_locked(latency_us, failure.is_none());
         let counter = per_tool.entry(tool).or_default();
         counter.calls = counter.calls.saturating_add(1);
         counter.latency_us = counter.latency_us.saturating_add(latency_us);
-        if !success {
+        if let Some(kind) = failure {
             counter.failures = counter.failures.saturating_add(1);
+            let slot = &mut counter.failure_kinds[kind.index()];
+            *slot = slot.saturating_add(1);
         }
     }
 
@@ -660,6 +678,11 @@ mod tests {
                 calls: 2,
                 failures: 1,
                 latency_us: 3_000,
+                failure_kinds: {
+                    let mut kinds = [0; crate::core::telemetry_failure::FAILURE_KINDS.len()];
+                    kinds[crate::core::telemetry_failure::FailureKind::Other.index()] = 1;
+                    kinds
+                },
             })
         );
         assert_eq!(
@@ -668,6 +691,7 @@ mod tests {
                 calls: 1,
                 failures: 0,
                 latency_us: 3_000,
+                ..ToolCallCounter::default()
             })
         );
     }

@@ -15,8 +15,8 @@ pub const DISCLOSURE: &[&str] = &[
     "LeanCTX version, OS, CPU architecture, install channel (cargo/npm/homebrew/…)",
     "AI client family (Claude, Cursor, Codex, …) and setup profile / integrations",
     "runtime environment (local, container, Codespaces, …), installation age and number of active days, each as a coarse range",
-    "daily counts per built-in tool: calls, failures, total latency, latency buckets",
-    "daily token totals of tool output: original size and size delivered after compression",
+    "daily counts per built-in tool: calls, failures by class (never the message), total latency, latency buckets",
+    "your daily usage record (as `lean-ctx gain` shows it, last 90 days): operations and tokens before/after compression, lifetime totals, month of first use",
     "session counts and uptime, error categories, version upgrades",
     "aggregate autopilot, sync and plan events (counts only)",
 ];
@@ -27,7 +27,7 @@ pub const NEVER_SENT: &str =
 
 /// Bump when [`DISCLOSURE`] gains a category, so existing installations see
 /// the notice again. 2: runtime environment, installation age, active days,
-/// per-tool latency and token totals.
+/// per-tool latency and failure classes, daily usage history.
 const NOTICE_VERSION: u32 = 2;
 
 /// Environment variables that mark a CI or build job. Each job usually starts
