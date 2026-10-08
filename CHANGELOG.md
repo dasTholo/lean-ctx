@@ -6,6 +6,11 @@ Current positioning: [LeanCTX Engine — Context Gateway for AI Systems](docs/PO
 
 ## [Unreleased]
 
+### Changed
+
+- **Telemetry reports where and how long LeanCTX runs, as coarse ranges.** The daily heartbeat adds the runtime environment (local, container, Codespaces, Gitpod, Replit, cloud agent, CI), the installation age (under an hour … 30+ days) and the number of active days in the last 30 (1 … 15+), each as a closed value. They let usage numbers separate people from short-lived agent sandboxes. No machine, account, network or path information is sent. The disclosure lists the new category, so every installation sees the one-time notice again; `DO_NOT_TRACK=1`, `LEAN_CTX_TELEMETRY=off` and `lean-ctx telemetry off` still turn telemetry off.
+- **The install channel is detected.** It was `unknown` for every installation because no build set it; it now follows the location of the running executable (npm, Homebrew, cargo, PyPI, AUR, release binary). Only the channel name is sent.
+
 ## [3.11.0] — 2026-10-07
 
 ### Highlights
