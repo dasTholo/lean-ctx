@@ -119,6 +119,28 @@ fn marker_has_data(path: &std::path::Path) -> bool {
     }
 }
 
+/// Every location a LeanCTX data directory can resolve to for this user, in
+/// resolution priority order (legacy → mixed config → XDG data), whether or
+/// not it exists. Used to keep one telemetry identity per installation when
+/// processes resolve different directories.
+pub fn candidate_data_dirs() -> Vec<PathBuf> {
+    let Some(home) = dirs::home_dir() else {
+        return Vec::new();
+    };
+    let base = |variable: &str, fallback: PathBuf| {
+        std::env::var(variable)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .map_or(fallback, PathBuf::from)
+            .join("lean-ctx")
+    };
+    vec![
+        home.join(".lean-ctx"),
+        base("XDG_CONFIG_HOME", home.join(".config")),
+        base("XDG_DATA_HOME", home.join(".local").join("share")),
+    ]
+}
+
 /// Returns all known data directories that contain stats data, in resolution
 /// priority order (legacy → mixed config → XDG data). Used by the dual-dir
 /// consolidation (`crate::core::data_consolidate`) and doctor diagnostics.

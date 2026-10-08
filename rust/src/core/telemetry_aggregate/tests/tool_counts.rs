@@ -30,6 +30,32 @@ fn failure_classes_reach_the_wire_without_the_message() {
     assert!(!wire.contains("/secret/path"));
 }
 
+#[test]
+#[serial_test::serial]
+fn failure_templates_reach_the_wire_scrubbed_and_bounded() {
+    let _iso = crate::core::data_dir::isolated_data_dir();
+    let _clock = TestClockGuard::set(BUCKET, T0);
+    let metrics = crate::core::telemetry::global_metrics();
+    for path in ["/Users/anna/acme/payroll.rs", "/srv/other/thing.rs"] {
+        let failure = crate::core::telemetry_failure::Failure::from_message(&format!(
+            "old_string not found in {path}"
+        ));
+        metrics.record_named_tool_failure("telemetry_template_probe", 1_000, Some(failure));
+    }
+    let batch = preview_daily_batch().expect("preview");
+    batch.validate().expect("valid batch");
+    let wire = serde_json::to_string(&batch).unwrap();
+    assert!(
+        wire.contains(
+            r#""failure_messages":[{"template":"old_string not found in ‹path›","count":2}]"#
+        ),
+        "{wire}"
+    );
+    for leak in ["anna", "acme", "payroll", "/srv"] {
+        assert!(!wire.contains(leak), "{leak} leaked");
+    }
+}
+
 fn tool_call_counts(batch: &TelemetryBatchV2) -> Vec<(String, u64, u64)> {
     batch
         .events
@@ -73,7 +99,7 @@ fn tool_call_deltas_subtract_the_baseline_and_drop_invalid_names() {
         ("Bad Name", 9, 0),
     ]);
     let baseline = counters(&[("ctx_read", 7, 1), ("ctx_tree", 2, 0)]);
-    let deltas: Vec<_> = tool_call_deltas(&observed, &baseline)
+    let deltas: Vec<_> = tool_call_deltas(&observed, &baseline, &BTreeMap::new())
         .into_iter()
         .map(|entry| (entry.tool, entry.calls, entry.failures))
         .collect();
@@ -101,7 +127,7 @@ fn tool_call_deltas_keep_the_most_called_tools_past_the_entry_cap() {
             )
         })
         .collect();
-    let deltas = tool_call_deltas(&observed, &BTreeMap::new());
+    let deltas = tool_call_deltas(&observed, &BTreeMap::new(), &BTreeMap::new());
     assert_eq!(deltas.len(), MAX_TOOL_ENTRIES);
     assert!(deltas.iter().all(|entry| entry.calls > 5));
     ToolCallMetrics { tools: deltas }
@@ -275,6 +301,7 @@ fn counters_persisted_by_an_exited_process_are_included() {
             tools: counters(&[("telemetry_exited_probe", 3, 1)]),
             tokens_input: 12_000,
             tokens_output: 3_000,
+            failure_messages: BTreeMap::new(),
         },
     );
     write_one_shots(&path, &sidecar).expect("seed exited process counters");

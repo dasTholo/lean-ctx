@@ -677,7 +677,7 @@ impl LeanCtxServer {
             self.record_tool_usage(
                 name,
                 call_start,
-                super::pipeline::result_failure_kind(&cached, ""),
+                super::pipeline::result_failure(&cached, ""),
             );
             return Ok(PreparedCallResult::Cached(cached));
         }
@@ -700,12 +700,12 @@ impl LeanCtxServer {
 
     /// Feed the daily telemetry aggregate. Only registered tools are counted,
     /// under the registry's own name; calls stopped by a guard never reach
-    /// here and are not usage. A failure carries only its class.
+    /// here and are not usage. A failure carries only its class and template.
     fn record_tool_usage(
         &self,
         name: &str,
         started: std::time::Instant,
-        failure: Option<crate::core::telemetry_failure::FailureKind>,
+        failure: Option<crate::core::telemetry_failure::Failure>,
     ) {
         let Some(tool) = self
             .registry
@@ -716,7 +716,7 @@ impl LeanCtxServer {
         };
         let latency_us = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
         crate::core::telemetry::global_metrics()
-            .record_named_tool_outcome(tool, latency_us, failure);
+            .record_named_tool_failure(tool, latency_us, failure);
     }
 }
 
@@ -924,8 +924,8 @@ impl crate::core::execution_lifecycle::ExecutionDriver for McpDriver<'_> {
                     &call.name,
                     dispatch_start,
                     match &primitive {
-                        Ok(primitive) => primitive.failure_kind(),
-                        Err(error) => Some(super::pipeline::error_failure_kind(error)),
+                        Ok(primitive) => primitive.failure(),
+                        Err(error) => Some(super::pipeline::error_failure(error)),
                     },
                 );
                 let primitive = primitive?;

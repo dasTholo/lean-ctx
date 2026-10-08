@@ -117,6 +117,7 @@ Nicht enthalten: Modellname, Pfade, Konfigurationswerte, Projektanzahl.
 | `tools[].calls`, `tools[].failures` | Zähler seit dem letzten bestätigten Batch | Nutzung und Fehlerquote je Tool | nein |
 | `tools[].latency_milliseconds_total` | Summe der Laufzeit dieser Aufrufe in ms | mittlere Latenz je Tool | ja (ab 3.11.1) |
 | `tools[].failure_kinds` | Fehler je geschlossener Klasse: `invalid_input`, `not_found`, `permission`, `policy_blocked`, `timeout`, `conflict`, `too_large`, `unavailable`, `other` | warum Tools fehlschlagen; die Klasse wird lokal aus der Meldung abgeleitet, die Meldung selbst wird nie gesendet | ja (ab 3.11.1) |
+| `tools[].failure_messages[]` | höchstens 5 `{template, count}` je Tool und Tag; `template` ist die erste Zeile der Fehlermeldung, auf dem Gerät bereinigt: Text in Anführungszeichen → `‹str›`, Pfade und Dateinamen → `‹path›`, Zahlen und alles mit Ziffern → `‹n›`, Bezeichner → `‹sym›`, URLs → `‹url›`, E-Mail-Adressen → `‹email›`, Nicht-ASCII-Wörter → `‹text›`; höchstens 160 Zeichen, keine Ziffern, geschlossener Zeichensatz. Bleibt kein sicherer Wortlaut übrig, wird kein Muster gesendet. | welche Fehler Nutzer treffen, damit wir sie beheben können | ja (ab 3.11.1) |
 
 ### `UsageHistoryMetrics` (Event `usage_history`, ab 3.11.1)
 

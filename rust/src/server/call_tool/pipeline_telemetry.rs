@@ -44,30 +44,39 @@ pub(super) fn record_error_category(category: crate::core::telemetry_v2::ErrorCa
     }
 }
 
-/// Failure class of a finished result, or `None` when it succeeded.
-pub(in crate::server) fn result_failure_kind(
+/// Failure of a finished result, or `None` when it succeeded. The class sees
+/// the reason and the text; the template comes from the text the tool wrote.
+pub(in crate::server) fn result_failure(
     result: &rmcp::model::CallToolResult,
     reason: &str,
-) -> Option<crate::core::telemetry_failure::FailureKind> {
+) -> Option<crate::core::telemetry_failure::Failure> {
     (result.is_error == Some(true)).then(|| {
         let text: Vec<&str> = result
             .content
             .iter()
             .filter_map(|block| block.as_text().map(|text| text.text.as_str()))
             .collect();
-        crate::core::telemetry_failure::classify(&format!("{reason} {}", text.join(" ")))
+        let text = text.join("\n");
+        crate::core::telemetry_failure::Failure {
+            kind: crate::core::telemetry_failure::classify(&format!("{reason} {text}")),
+            template: crate::core::failure_template::message_template(if text.trim().is_empty() {
+                reason
+            } else {
+                &text
+            }),
+        }
     })
 }
 
-/// Failure class of a protocol error that ended the call.
-pub(in crate::server) fn error_failure_kind(
+/// Failure of a protocol error that ended the call.
+pub(in crate::server) fn error_failure(
     error: &rmcp::model::ErrorData,
-) -> crate::core::telemetry_failure::FailureKind {
+) -> crate::core::telemetry_failure::Failure {
+    let mut failure = crate::core::telemetry_failure::Failure::from_message(&error.message);
     if error.code == rmcp::model::ErrorCode::INVALID_PARAMS {
-        crate::core::telemetry_failure::FailureKind::InvalidInput
-    } else {
-        crate::core::telemetry_failure::classify(&error.message)
+        failure.kind = crate::core::telemetry_failure::FailureKind::InvalidInput;
     }
+    failure
 }
 
 pub(super) fn mcp_error_category(

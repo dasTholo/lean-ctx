@@ -523,6 +523,32 @@ pub struct ToolCallCount {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure_kinds:
         Option<std::collections::BTreeMap<crate::core::telemetry_failure::FailureKind, u64>>,
+    /// The most frequent scrubbed failure templates (see
+    /// `core::failure_template`); absent before 3.11.1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_messages: Option<Vec<FailureMessage>>,
+}
+
+/// One scrubbed failure template and how often it occurred that day.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FailureMessage {
+    pub template: String,
+    pub count: u64,
+}
+
+impl FailureMessage {
+    /// Shape of a template the scrubber can produce: bounded, a closed
+    /// character set and no digits.
+    fn valid(&self) -> bool {
+        let length = self.template.chars().count();
+        (1..=crate::core::failure_template::MAX_TEMPLATE_CHARS).contains(&length)
+            && self.count > 0
+            && self.template.chars().all(|c| {
+                (c.is_ascii_alphanumeric() && !c.is_ascii_digit())
+                    || " .,:;()[]{}<>!?'-_/‹›…".contains(c)
+            })
+    }
 }
 
 impl ToolCallMetrics {
@@ -563,6 +589,16 @@ impl ToolCallCount {
         }
         if self.calls == 0 || self.failures > self.calls {
             return Err(TelemetryValidationError::InconsistentCounts);
+        }
+        if let Some(messages) = &self.failure_messages {
+            let sum: u64 = messages.iter().map(|message| message.count).sum();
+            if messages.is_empty()
+                || messages.len() > crate::core::telemetry_failure::MAX_FAILURE_MESSAGES
+                || sum > self.failures
+                || !messages.iter().all(FailureMessage::valid)
+            {
+                return Err(TelemetryValidationError::InconsistentCounts);
+            }
         }
         Ok(())
     }
@@ -1146,6 +1182,7 @@ mod tests {
             failures,
             latency_milliseconds_total: None,
             failure_kinds: None,
+            failure_messages: None,
         }
     }
 

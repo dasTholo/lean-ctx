@@ -15,15 +15,15 @@ pub const DISCLOSURE: &[&str] = &[
     "LeanCTX version, OS, CPU architecture, install channel (cargo/npm/homebrew/…)",
     "AI client family (Claude, Cursor, Codex, …) and setup profile / integrations",
     "runtime environment (local, container, Codespaces, …), installation age and number of active days, each as a coarse range",
-    "daily counts per built-in tool: calls, failures by class (never the message), total latency, latency buckets",
+    "daily counts per built-in tool: calls, failures by class, total latency, latency buckets",
+    "the most frequent error messages per tool, with every path, name, value and number replaced by a placeholder on your machine",
     "your daily usage record (as `lean-ctx gain` shows it, last 90 days): operations and tokens before/after compression, lifetime totals, month of first use",
     "session counts and uptime, error categories, version upgrades",
     "aggregate autopilot, sync and plan events (counts only)",
 ];
 
 /// What a batch never contains.
-pub const NEVER_SENT: &str =
-    "No prompts, code, file names, paths, commands, secrets or IP-derived data.";
+pub const NEVER_SENT: &str = "No prompts, code, file names, paths, commands, raw error messages, secrets or IP-derived data.";
 
 /// Bump when [`DISCLOSURE`] gains a category, so existing installations see
 /// the notice again. 2: runtime environment, installation age, active days,

@@ -28,7 +28,7 @@ use super::telemetry_v2::{
 mod counters;
 mod environment;
 mod history;
-use super::telemetry_failure::{KindCounts, sub_kinds, wire_kinds};
+use super::telemetry_failure::{KindCounts, sub_kinds, wire_kinds, wire_messages};
 use counters::{add_counters, counter_delta};
 use environment::{client_family, distribution_channel, setup_profile};
 
@@ -69,6 +69,9 @@ struct CounterCheckpoint {
     tokens_input: u64,
     #[serde(default)]
     tokens_output: u64,
+    /// Scrubbed failure templates, keyed `tool\ttemplate` (3.11.1).
+    #[serde(default)]
+    failure_messages: BTreeMap<String, u64>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -702,7 +705,7 @@ fn build_daily_aggregate(
             }),
         }),
     ));
-    let tools = tool_call_deltas(&observed.tools, &baseline.tools);
+    let tools = tool_call_deltas(&observed.tools, &baseline.tools, &observed.failure_messages);
     if !tools.is_empty() {
         batch.events.push(envelope_like(
             &common,
@@ -795,6 +798,7 @@ fn bounded_histogram_delta<const N: usize>(observed: &[u64; N], baseline: &[u64;
 fn tool_call_deltas(
     observed: &BTreeMap<String, ToolCounterCheckpoint>,
     baseline: &BTreeMap<String, ToolCounterCheckpoint>,
+    messages: &BTreeMap<String, u64>,
 ) -> Vec<ToolCallCount> {
     let mut tools: Vec<ToolCallCount> = observed
         .iter()
@@ -814,6 +818,7 @@ fn tool_call_deltas(
                     &sub_kinds(&counter.failure_kinds, &base.failure_kinds),
                     failures,
                 ),
+                failure_messages: wire_messages(messages, tool, failures),
             })
         })
         .collect();
@@ -874,6 +879,11 @@ fn current_checkpoint() -> CounterCheckpoint {
             .collect(),
         tokens_input: snapshot.tokens_input,
         tokens_output: snapshot.tokens_output,
+        failure_messages: snapshot
+            .failure_templates
+            .into_iter()
+            .map(|((tool, template), count)| (format!("{tool}\t{template}"), count))
+            .collect(),
     }
 }
 

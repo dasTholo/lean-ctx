@@ -67,28 +67,14 @@ fn sibling_identity_paths(current: &std::path::Path) -> Vec<PathBuf> {
     if std::env::var_os("LEAN_CTX_DATA_DIR").is_some() {
         return Vec::new();
     }
-    let Some(home) = dirs::home_dir() else {
-        return Vec::new();
-    };
-    let base = |variable: &str, fallback: PathBuf| {
-        std::env::var(variable)
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-            .map_or(fallback, PathBuf::from)
-            .join("lean-ctx")
-    };
     let canonical = |path: &std::path::Path| std::fs::canonicalize(path).ok();
     let current_dir = current.parent().and_then(canonical);
-    [
-        home.join(".lean-ctx"),
-        base("XDG_CONFIG_HOME", home.join(".config")),
-        base("XDG_DATA_HOME", home.join(".local").join("share")),
-    ]
-    .into_iter()
-    .filter(|dir| current_dir.is_none() || canonical(dir) != current_dir)
-    .map(|dir| dir.join("telemetry_identity.json"))
-    .filter(|path| path.is_file())
-    .collect()
+    crate::core::data_dir::candidate_data_dirs()
+        .into_iter()
+        .filter(|dir| current_dir.is_none() || canonical(dir) != current_dir)
+        .map(|dir| dir.join("telemetry_identity.json"))
+        .filter(|path| path.is_file())
+        .collect()
 }
 
 /// The oldest valid identity among the sibling data directories, if any.
@@ -390,14 +376,17 @@ mod tests {
         let _pin = EnvVarGuard::set("LEAN_CTX_DATA_DIR", None);
         let _config = EnvVarGuard::set("XDG_CONFIG_HOME", None);
         let _data = EnvVarGuard::set("XDG_DATA_HOME", None);
-        let legacy = home.path().join(".lean-ctx");
+        // Candidates under the temporary HOME: [legacy, mixed config, XDG data].
+        let candidates = crate::core::data_dir::candidate_data_dirs();
+        let legacy = candidates[0].clone();
+        assert!(legacy.starts_with(home.path()));
         std::fs::create_dir_all(&legacy).unwrap();
         let identity = TelemetryIdentity {
             installation_id: generate_uuid_v4(),
             deletion_token: generate_deletion_token(),
         };
         persist_identity(&legacy.join("telemetry_identity.json"), &identity).unwrap();
-        let xdg = home.path().join(".local/share/lean-ctx");
+        let xdg = candidates[2].clone();
         std::fs::create_dir_all(&xdg).unwrap();
 
         let adopted =

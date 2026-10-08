@@ -181,6 +181,31 @@ pub fn classify(message: &str) -> FailureKind {
 /// Failure counts indexed like [`FAILURE_KINDS`].
 pub type KindCounts = [u64; FAILURE_KINDS.len()];
 
+/// A failed call as telemetry sees it: its class and, when one survives
+/// scrubbing, the template of its message (see [`super::failure_template`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Failure {
+    pub kind: FailureKind,
+    pub template: Option<String>,
+}
+
+impl Failure {
+    /// Derive class and template locally; the message itself is dropped.
+    pub fn from_message(message: &str) -> Self {
+        Self {
+            kind: classify(message),
+            template: super::failure_template::message_template(message),
+        }
+    }
+
+    pub fn of_kind(kind: FailureKind) -> Self {
+        Self {
+            kind,
+            template: None,
+        }
+    }
+}
+
 pub fn sub_kinds(observed: &KindCounts, baseline: &KindCounts) -> KindCounts {
     std::array::from_fn(|index| observed[index].saturating_sub(baseline[index]))
 }
@@ -204,6 +229,39 @@ pub fn wire_kinds(counts: &KindCounts, failures: u64) -> Option<BTreeMap<Failure
         })
         .collect();
     (!map.is_empty()).then_some(map)
+}
+
+/// Failure templates reported per tool and day.
+pub const MAX_FAILURE_MESSAGES: usize = 5;
+
+/// The most frequent scrubbed templates of `tool` (keys `tool\ttemplate`),
+/// counts capped so they never exceed `failures`.
+pub fn wire_messages(
+    messages: &BTreeMap<String, u64>,
+    tool: &str,
+    failures: u64,
+) -> Option<Vec<crate::core::telemetry_v2::FailureMessage>> {
+    let prefix = format!("{tool}\t");
+    let mut found: Vec<(&str, u64)> = messages
+        .iter()
+        .filter_map(|(key, count)| Some((key.strip_prefix(&prefix)?, *count)))
+        .filter(|(template, count)| *count > 0 && !template.is_empty())
+        .collect();
+    found.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+    let mut remaining = failures;
+    let list: Vec<_> = found
+        .into_iter()
+        .take(MAX_FAILURE_MESSAGES)
+        .filter_map(|(template, count)| {
+            let count = count.min(remaining);
+            remaining -= count;
+            (count > 0).then(|| crate::core::telemetry_v2::FailureMessage {
+                template: template.to_string(),
+                count,
+            })
+        })
+        .collect();
+    (!list.is_empty()).then_some(list)
 }
 
 #[cfg(test)]

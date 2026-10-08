@@ -40,6 +40,19 @@ pub(super) fn counter_delta(
         tokens_output: observed
             .tokens_output
             .saturating_sub(baseline.tokens_output),
+        failure_messages: observed
+            .failure_messages
+            .iter()
+            .filter_map(|(key, count)| {
+                let base = baseline
+                    .failure_messages
+                    .get(key)
+                    .copied()
+                    .unwrap_or_default();
+                let delta = count.saturating_sub(base);
+                (delta > 0).then(|| (key.clone(), delta))
+            })
+            .collect(),
     }
 }
 
@@ -67,6 +80,15 @@ pub(super) fn add_counters(total: &mut CounterCheckpoint, delta: &CounterCheckpo
         entry.failures = entry.failures.saturating_add(added.failures);
         entry.latency_us = entry.latency_us.saturating_add(added.latency_us);
         add_kinds(&mut entry.failure_kinds, &added.failure_kinds);
+    }
+    for (key, added) in &delta.failure_messages {
+        if !total.failure_messages.contains_key(key)
+            && total.failure_messages.len() >= crate::core::telemetry::MAX_FAILURE_TEMPLATES
+        {
+            continue;
+        }
+        let entry = total.failure_messages.entry(key.clone()).or_default();
+        *entry = entry.saturating_add(*added);
     }
 }
 

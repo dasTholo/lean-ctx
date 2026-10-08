@@ -21,6 +21,9 @@ static METRICS: OnceLock<Metrics> = OnceLock::new();
 pub(crate) const TOOL_LATENCY_BUCKET_UPPER_MS: [u64; 9] =
     [10, 50, 100, 250, 500, 1_000, 5_000, 60_000, i64::MAX as u64];
 
+/// Distinct (tool, failure template) pairs one process keeps.
+pub(crate) const MAX_FAILURE_TEMPLATES: usize = 256;
+
 /// Calls, failures and summed latency of one tool since process start.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct ToolCallCounter {
@@ -41,6 +44,8 @@ pub struct Metrics {
     /// half-applied call, and holds the per-tool counts. Keys are the static
     /// names of the built-in tool registry, never caller-supplied strings.
     tool_call_consistency: std::sync::Mutex<BTreeMap<&'static str, ToolCallCounter>>,
+    /// Scrubbed failure templates per built-in tool since process start.
+    failure_templates: std::sync::Mutex<BTreeMap<(&'static str, String), u64>>,
     // gen_ai.usage.input_tokens / gen_ai.usage.output_tokens
     pub tokens_input: AtomicU64,
     pub tokens_output: AtomicU64,
@@ -73,6 +78,7 @@ impl Default for Metrics {
     fn default() -> Self {
         Self {
             tool_call_consistency: std::sync::Mutex::new(BTreeMap::new()),
+            failure_templates: std::sync::Mutex::new(BTreeMap::new()),
             tokens_input: AtomicU64::new(0),
             tokens_output: AtomicU64::new(0),
             tokens_saved: AtomicU64::new(0),
@@ -139,6 +145,30 @@ impl Metrics {
             counter.failures = counter.failures.saturating_add(1);
             let slot = &mut counter.failure_kinds[kind.index()];
             *slot = slot.saturating_add(1);
+        }
+    }
+
+    /// Like [`Self::record_named_tool_outcome`], also counting the failure's
+    /// scrubbed template. Templates are bounded per process.
+    pub fn record_named_tool_failure(
+        &self,
+        tool: &'static str,
+        latency_us: u64,
+        failure: Option<crate::core::telemetry_failure::Failure>,
+    ) {
+        let template = failure
+            .as_ref()
+            .and_then(|failure| failure.template.clone());
+        self.record_named_tool_outcome(tool, latency_us, failure.map(|failure| failure.kind));
+        let Some(template) = template else { return };
+        let mut templates = self
+            .failure_templates
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let key = (tool, template);
+        if templates.len() < MAX_FAILURE_TEMPLATES || templates.contains_key(&key) {
+            let count = templates.entry(key).or_default();
+            *count = count.saturating_add(1);
         }
     }
 
@@ -262,6 +292,11 @@ impl Metrics {
             session_uptime_secs: self.session_start.elapsed().as_secs(),
             tokens_input: self.tokens_input.load(Ordering::Relaxed),
             tokens_output: self.tokens_output.load(Ordering::Relaxed),
+            failure_templates: self
+                .failure_templates
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone(),
         }
     }
 
@@ -326,6 +361,8 @@ pub(crate) struct DailyTelemetrySnapshot {
     /// Tokens tool output would have cost uncompressed vs. what was delivered.
     pub tokens_input: u64,
     pub tokens_output: u64,
+    /// Scrubbed failure templates by (tool, template).
+    pub failure_templates: BTreeMap<(&'static str, String), u64>,
 }
 
 /// Point-in-time snapshot of all metrics.
