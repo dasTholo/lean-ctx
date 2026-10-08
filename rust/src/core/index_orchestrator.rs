@@ -330,6 +330,11 @@ pub fn ensure_all_background(project_root: &str) {
 /// own the threading. Requires the caller to have claimed the worker slot via
 /// [`try_claim_worker`]; releases it on exit.
 fn run_build_worker(root: &str) {
+    // Released on every exit, a panic outside the per-phase `catch_unwind`
+    // included: `index build` waits for the slot without a deadline, so a slot
+    // left claimed would hang the CLI instead of reporting the failure.
+    let _slot = WorkerSlot(root.to_string());
+
     // #790: start memory guardian for daemon-spawned builds. Previously only
     // the CLI path (index_cmd.rs) started the guardian, leaving background
     // builds (MCP `ensure_all_background`, watcher, graph_coordinator) to run
@@ -455,12 +460,20 @@ fn run_build_worker(root: &str) {
     // close to the configured max_ram_percent target.
     crate::core::content_cache::trim_oldest_percent(75);
     crate::core::memory_guard::force_purge();
+}
 
-    let final_state = entry_for(root);
-    let mut s = final_state
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    s.worker_running = false;
+/// A claimed per-root build slot (see [`try_claim_worker`]); dropping it
+/// releases the slot.
+struct WorkerSlot(String);
+
+impl Drop for WorkerSlot {
+    fn drop(&mut self) {
+        let state = entry_for(&self.0);
+        let mut s = state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        s.worker_running = false;
+    }
 }
 
 /// Execute index phases without overlapping their retained working sets.
@@ -1110,6 +1123,25 @@ mod tests {
         v.graph_run_done = true;
         v.bm25_run_done = true;
         assert!(!v.graph_bm25_active());
+    }
+
+    /// `index build` waits for the slot without a deadline; a worker that
+    /// panics must still release it, or the CLI would wait forever.
+    #[test]
+    fn worker_slot_is_released_when_the_worker_panics() {
+        let root = "/tmp/leanctx-worker-slot-panic-test";
+        assert!(try_claim_worker(root));
+        assert!(progress_view(root).graph_bm25_active());
+        let result = std::panic::catch_unwind(|| {
+            let _slot = WorkerSlot(root.to_string());
+            panic!("simulated failure outside the phase catch_unwind");
+        });
+        assert!(result.is_err());
+        let view = progress_view(root);
+        assert!(!view.worker_running, "slot released by the guard");
+        assert!(!view.graph_bm25_active(), "the CLI wait loop ends");
+        assert!(try_claim_worker(root), "a later build can claim it again");
+        drop(WorkerSlot(root.to_string()));
     }
 
     #[test]
