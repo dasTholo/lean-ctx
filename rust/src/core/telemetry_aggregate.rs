@@ -1417,6 +1417,8 @@ pub fn build_daily_heartbeat(
     distribution_channel: DistributionChannel,
     client_family: ClientFamily,
 ) -> Result<TelemetryBatchV2, String> {
+    let install_age = environment::install_age(std::time::SystemTime::now());
+    let active_days = environment::active_days(&installation_id, &timestamp_bucket);
     let batch = TelemetryBatchV2 {
         schema_version: SCHEMA_VERSION,
         deletion_token_hash,
@@ -1432,6 +1434,9 @@ pub fn build_daily_heartbeat(
                 client_family,
                 operating_system: OperatingSystem::current(),
                 architecture: Architecture::current(),
+                install_age,
+                active_days: Some(active_days),
+                runtime_environment: Some(environment::runtime_environment()),
             }),
         }],
     };

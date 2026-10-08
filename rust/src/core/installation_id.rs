@@ -28,6 +28,14 @@ fn identity_path() -> Result<PathBuf, String> {
     crate::core::paths::data_dir().map(|d| d.join("telemetry_identity.json"))
 }
 
+/// When the current identity was created: the file's birth time where the
+/// filesystem records one, otherwise its last write (identity files are only
+/// rewritten on creation, migration or `telemetry reset-id`).
+pub(crate) fn identity_created_at() -> Option<std::time::SystemTime> {
+    let metadata = std::fs::metadata(identity_path().ok()?).ok()?;
+    metadata.created().or_else(|_| metadata.modified()).ok()
+}
+
 fn with_deletion_lock<T>(operation: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
     let lock_path = crate::core::paths::data_dir()?.join("telemetry_deletion_token.lock");
     if let Some(parent) = lock_path.parent() {

@@ -14,6 +14,7 @@ pub const DISCLOSURE: &[&str] = &[
     "random installation ID (not derived from your machine or account)",
     "LeanCTX version, OS, CPU architecture, install channel (cargo/npm/homebrew/…)",
     "AI client family (Claude, Cursor, Codex, …) and setup profile / integrations",
+    "runtime environment (local, container, Codespaces, …), installation age and number of active days, each as a coarse range",
     "daily counts per built-in tool: calls, failures, latency buckets",
     "session counts and uptime, error categories, version upgrades",
     "aggregate autopilot, sync and plan events (counts only)",
@@ -24,8 +25,8 @@ pub const NEVER_SENT: &str =
     "No prompts, code, file names, paths, commands, secrets or IP-derived data.";
 
 /// Bump when [`DISCLOSURE`] gains a category, so existing installations see
-/// the notice again.
-const NOTICE_VERSION: u32 = 1;
+/// the notice again. 2: runtime environment, installation age, active days.
+const NOTICE_VERSION: u32 = 2;
 
 /// Environment variables that mark a CI or build job. Each job usually starts
 /// from a fresh home and would report as a brand-new installation, so CI never

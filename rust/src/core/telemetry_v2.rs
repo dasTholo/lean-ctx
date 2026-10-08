@@ -221,6 +221,84 @@ pub struct HeartbeatMetrics {
     pub client_family: ClientFamily,
     pub operating_system: OperatingSystem,
     pub architecture: Architecture,
+    /// Age of the local installation identity, bucketed. Closed enums only;
+    /// skipped when unknown so older receivers keep accepting the heartbeat.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub install_age: Option<InstallAge>,
+    /// Distinct UTC days with a successful send in the trailing 30, bucketed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_days: Option<ActiveDays>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_environment: Option<RuntimeEnvironment>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum InstallAge {
+    #[serde(rename = "lt_1h")]
+    Lt1h,
+    #[serde(rename = "lt_1d")]
+    Lt1d,
+    #[serde(rename = "lt_7d")]
+    Lt7d,
+    #[serde(rename = "lt_30d")]
+    Lt30d,
+    #[serde(rename = "gte_30d")]
+    Gte30d,
+}
+
+impl InstallAge {
+    #[must_use]
+    pub fn from_seconds(seconds: u64) -> Self {
+        match seconds {
+            0..3_600 => Self::Lt1h,
+            3_600..86_400 => Self::Lt1d,
+            86_400..604_800 => Self::Lt7d,
+            604_800..2_592_000 => Self::Lt30d,
+            _ => Self::Gte30d,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ActiveDays {
+    #[serde(rename = "d1")]
+    D1,
+    #[serde(rename = "d2_3")]
+    D2To3,
+    #[serde(rename = "d4_7")]
+    D4To7,
+    #[serde(rename = "d8_14")]
+    D8To14,
+    #[serde(rename = "d15_plus")]
+    D15Plus,
+}
+
+impl ActiveDays {
+    #[must_use]
+    pub fn from_count(days: usize) -> Self {
+        match days {
+            0 | 1 => Self::D1,
+            2 | 3 => Self::D2To3,
+            4..=7 => Self::D4To7,
+            8..=14 => Self::D8To14,
+            _ => Self::D15Plus,
+        }
+    }
+}
+
+/// Where the process runs. Separates people from short-lived agent sandboxes
+/// without any machine, account or network identifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeEnvironment {
+    Local,
+    Container,
+    Codespaces,
+    Gitpod,
+    Replit,
+    CloudAgent,
+    Ci,
+    Unknown,
 }
 
 impl HeartbeatMetrics {
@@ -505,6 +583,10 @@ pub enum DistributionChannel {
     Npm,
     Docker,
     Source,
+    Aur,
+    Pypi,
+    /// A release binary installed by the install script or by hand.
+    Binary,
     Unknown,
 }
 
@@ -668,6 +750,9 @@ mod tests {
             client_family: ClientFamily::Codex,
             operating_system: OperatingSystem::Linux,
             architecture: Architecture::X86_64,
+            install_age: None,
+            active_days: None,
+            runtime_environment: None,
         }));
         let batch = TelemetryBatchV2 {
             schema_version: SCHEMA_VERSION,
@@ -687,6 +772,58 @@ mod tests {
             events: Vec::new(),
         };
         assert_eq!(empty.validate(), Err(TelemetryValidationError::BatchSize));
+    }
+
+    #[test]
+    fn ops_context_fields_use_closed_wire_names_and_are_omitted_when_unset() {
+        let mut metrics = HeartbeatMetrics {
+            distribution_channel: DistributionChannel::Aur,
+            client_family: ClientFamily::Codex,
+            operating_system: OperatingSystem::Linux,
+            architecture: Architecture::X86_64,
+            install_age: None,
+            active_days: None,
+            runtime_environment: None,
+        };
+        let bare = serde_json::to_value(&metrics).unwrap();
+        assert_eq!(
+            bare.as_object().unwrap().len(),
+            4,
+            "unset fields stay off the wire: {bare}"
+        );
+        metrics.install_age = Some(InstallAge::Lt1h);
+        metrics.active_days = Some(ActiveDays::D2To3);
+        metrics.runtime_environment = Some(RuntimeEnvironment::CloudAgent);
+        let full = serde_json::to_value(&metrics).unwrap();
+        assert_eq!(full["distribution_channel"], "aur");
+        assert_eq!(full["install_age"], "lt_1h");
+        assert_eq!(full["active_days"], "d2_3");
+        assert_eq!(full["runtime_environment"], "cloud_agent");
+        let decoded: HeartbeatMetrics = serde_json::from_value(full).unwrap();
+        assert_eq!(decoded, metrics);
+        assert!(
+            serde_json::from_value::<HeartbeatMetrics>(serde_json::json!({
+                "distribution_channel": "cargo", "client_family": "codex",
+                "operating_system": "linux", "architecture": "x86_64", "install_age": "3 days"
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn ops_context_buckets_have_exact_boundaries() {
+        assert_eq!(InstallAge::from_seconds(0), InstallAge::Lt1h);
+        assert_eq!(InstallAge::from_seconds(3_599), InstallAge::Lt1h);
+        assert_eq!(InstallAge::from_seconds(3_600), InstallAge::Lt1d);
+        assert_eq!(InstallAge::from_seconds(86_400), InstallAge::Lt7d);
+        assert_eq!(InstallAge::from_seconds(604_800), InstallAge::Lt30d);
+        assert_eq!(InstallAge::from_seconds(2_592_000), InstallAge::Gte30d);
+        assert_eq!(ActiveDays::from_count(0), ActiveDays::D1);
+        assert_eq!(ActiveDays::from_count(1), ActiveDays::D1);
+        assert_eq!(ActiveDays::from_count(3), ActiveDays::D2To3);
+        assert_eq!(ActiveDays::from_count(7), ActiveDays::D4To7);
+        assert_eq!(ActiveDays::from_count(14), ActiveDays::D8To14);
+        assert_eq!(ActiveDays::from_count(15), ActiveDays::D15Plus);
     }
 
     #[test]
@@ -763,6 +900,9 @@ mod tests {
             client_family: ClientFamily::Codex,
             operating_system: OperatingSystem::Linux,
             architecture: Architecture::X86_64,
+            install_age: None,
+            active_days: None,
+            runtime_environment: None,
         }));
         event.installation_id = "not-a-uuid".into();
         assert_eq!(

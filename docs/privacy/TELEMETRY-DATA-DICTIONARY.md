@@ -86,12 +86,16 @@ Löschung mit der Installation. Abweichungen sind vermerkt.
 
 | Feld | Werte | Zweck | Optional |
 |---|---|---|---|
-| `distribution_channel` | `cargo`, `homebrew`, `npm`, `docker`, `source`, `unknown` | Kanalverteilung | nein |
+| `distribution_channel` | `cargo`, `homebrew`, `npm`, `docker`, `source`, `aur`, `pypi`, `binary`, `unknown` | Kanalverteilung. Ab 3.11.1 aus dem Speicherort der laufenden Datei abgeleitet (z. B. `node_modules` → `npm`); der Pfad selbst verlässt den Rechner nie | nein |
 | `client_family` | `claude`, `codex`, `cursor`, `gemini`, `windsurf`, `zed`, `vscode_copilot`, `kiro`, `antigravity`, `codebuddy`, `codewhale`, `other` | Client-Kohorte (aus dem MCP-Handshake, sonst Umgebungsvariablen; unbekannte Clients werden `other`, nie Klartext) | nein |
 | `operating_system` | `macos`, `linux`, `windows`, `other` | Plattformverteilung | nein |
 | `architecture` | `x86_64`, `aarch64`, `other` | Build-Priorisierung | nein |
+| `install_age` | `lt_1h`, `lt_1d`, `lt_7d`, `lt_30d`, `gte_30d` | Alter der lokalen Installationskennung als Bereich; trennt Menschen von kurzlebigen Agent-Sandboxes (ab 3.11.1) | ja |
+| `active_days` | `d1`, `d2_3`, `d4_7`, `d8_14`, `d15_plus` | Anzahl UTC-Tage mit erfolgreicher Sendung in den letzten 30 Tagen, aus dem lokalen Sende-Ledger, als Bereich (ab 3.11.1) | ja |
+| `runtime_environment` | `local`, `container`, `codespaces`, `gitpod`, `replit`, `cloud_agent`, `ci`, `unknown` | Laufumgebung aus dokumentierten Markern (`CODESPACES`, `GITPOD_WORKSPACE_ID`, `REPL_ID`, `CLAUDE_CODE_REMOTE`, Container-Indikatoren, CI nur nach `LEAN_CTX_TELEMETRY_IN_CI=1`); keine Werte der Variablen (ab 3.11.1) | ja |
 
-Alle vier sind geschlossene Aufzählungen — keine freien Zeichenketten.
+Alle sieben sind geschlossene Aufzählungen — keine freien Zeichenketten, keine
+Pfade, keine Zeitstempel. Die drei optionalen Felder fehlen bei älteren Clients.
 
 ### `SetupProfileMetrics`
 
