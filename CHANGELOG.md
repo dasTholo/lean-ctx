@@ -6,8 +6,31 @@ Current positioning: [LeanCTX Engine — Context Gateway for AI Systems](docs/PO
 
 ## [Unreleased]
 
+### Highlights
+
+- Agents can read across all your projects at once: the path jail now admits every project below your home directory for reading by default, while writes stay in the session's own project and `~/.ssh`, `~/.aws`, `~/.config`, other top-level dot directories, `~/Library`, `~/AppData` and `~/snap` stay closed.
+- Each agent session binds to the project it was started in. Setup no longer pins one project into an agent's global MCP config, and existing pins are removed.
+
+### Upgrade notes
+
+- **Path jail scope:** the new `path_jail_scope` setting defaults to `"home"`: reads anywhere below your home directory outside the protected zones; writes only in the session's project, host-declared roots and allow entries. Set `lean-ctx config set path_jail_scope project` to keep the previous single-project boundary. The setting is global-only; a project-local `.lean-ctx.toml` cannot change it. With an implausible `$HOME` (`/`, a single path component, not owned by you) the scope falls back to `project`. `path_jail = false` still disables the jail.
+- **Protected zones are a hard deny in both scopes:** a project root or allow entry that only contains a zone (for example a dotfiles repository at `~`) no longer opens `~/.ssh` and the like; add an entry inside the zone (`lean-ctx allow-path ~/.config/myapp`) if a tool must reach it.
+- **Project pins:** earlier `lean-ctx setup` / `doctor --fix` runs and MCP-start hook refreshes copied the installing session's `LEAN_CTX_PROJECT_ROOT` and `LEAN_CTX_EXTRA_ROOTS` into user-global agent configs (`~/.codex/config.toml`, `~/.grok/config.toml`, global JSON MCP entries), so every later session of that agent opened the same project. The Codex and Grok entries are cleaned on the next agent refresh; `lean-ctx doctor` reports remaining pins under "Project binding" and `lean-ctx doctor --fix` removes them line by line, keeping key order and comments (a pin that shares a line with other keys is listed for a manual edit). `LEAN_CTX_EXTRA_ROOTS` values move into `extra_roots`; per-project entries in `~/.claude.json` are left alone. Restart the agent once afterwards.
+
+### Security
+
+- **Agent shells can no longer loosen lean-ctx itself.** `lean-ctx` is on the default shell allowlist, so an agent could run `lean-ctx yolo --yes`, `lean-ctx allow <cmd>`, `lean-ctx allow-path <dir>`, `lean-ctx trust`, `lean-ctx security open`, `lean-ctx security secrets off` or `lean-ctx config set <security key>` through ctx_shell (or a hook-rewritten Bash call) and then do what the jail or the allowlist had just refused. Those subcommands are now blocked in agent shells with a message to ask the user; listing (`--list`, `status`, `config show`), narrowing (`--remove`) and tightening (`secure`, `untrust`, `security secrets on`) still run. Run the blocked commands in your own terminal.
+- **Path jail writes:** the new `home` scope opens other projects for reading only; writes outside the session's project need an explicit `lean-ctx allow-path`, so an agent in one repository cannot plant another repository's Git hooks or a binary on your `PATH`.
+
+### Added
+
+- `lean-ctx allow-path <dir>` admits one directory for reading and writing — outside your home directory, a sibling project to edit, or one protected location — effective on the next tool call without a restart. `--list` shows the jail scope and added directories; `--remove` takes one out. It refuses `/`, the home directory and any directory containing it.
+- `lean-ctx security status` shows the active jail scope, and `lean-ctx doctor` reports global project pins.
+
 ### Changed
 
+- A refused path names the one command that admits it (`lean-ctx allow-path <dir>`, offered for the enclosing project) for the user to run in their terminal. The previous hints to open a new IDE window or set an env var that the running server cannot see are gone.
+- When a stale `LEAN_CTX_PROJECT_ROOT` pin is still set and the MCP server starts inside a different real project, the session binds to that project and logs a warning. Host-specific roots (`CLAUDE_PROJECT_DIR`, workspace folders) keep their precedence.
 - **Telemetry reports where and how long LeanCTX runs, as coarse ranges.** The daily heartbeat adds the runtime environment (local, container, Codespaces, Gitpod, Replit, cloud agent, CI), the installation age (under an hour … 30+ days) and the number of active days in the last 30 (1 … 15+), each as a closed value. They let usage numbers separate people from short-lived agent sandboxes. No machine, account, network or path information is sent. The disclosure lists the new category, so every installation sees the one-time notice again; `DO_NOT_TRACK=1`, `LEAN_CTX_TELEMETRY=off` and `lean-ctx telemetry off` still turn telemetry off.
 - **The install channel is detected.** It was `unknown` for every installation because no build set it; it now follows the location of the running executable (npm, Homebrew, cargo, PyPI, AUR, release binary). Only the channel name is sent.
 - **Telemetry reports token savings and per-tool latency.** The daily tool aggregate adds the day's total tool-output tokens before and after compression, and each built-in tool's summed latency. Counts only; no content.
@@ -25,6 +48,7 @@ Current positioning: [LeanCTX Engine — Context Gateway for AI Systems](docs/PO
 - **CLAUDE.md is read in full.** Automatic `ctx_read` modes (and redirected native reads) returned a large CLAUDE.md as a headings-only map, because only SKILL.md, AGENTS.md and a few rule files were treated as instructions. `CLAUDE.md`, `CLAUDE.local.md`, `GEMINI.md`, `copilot-instructions.md`, `.windsurfrules`, and documents under `.claude/agents/` and `.claude/commands/` are now always delivered complete.
 - **`redirect_exclude` works again.** The key was loaded but never applied, so listing a file there changed nothing. Matching paths (globs on the trailing path components, e.g. `CLAUDE.md`, `*.json`, `docs/**`) now skip the native-read hook redirect and are returned in full by automatic `ctx_read` modes; `LEAN_CTX_HOOK_EXCLUDE` (comma-separated) takes precedence, as documented since 2.17.4.
 - **`lean-ctx index build` / `build-full` no longer stop after 5 minutes** while graph and BM25 are still building, which ended the process before the index was saved.
+
 
 ## [3.11.0] — 2026-10-07
 

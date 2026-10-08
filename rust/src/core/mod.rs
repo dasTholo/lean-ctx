@@ -561,6 +561,7 @@ mod doc_claims;
 pub mod editor_registry;
 pub(crate) mod firewall;
 pub mod pathjail;
+pub mod pathjail_scope;
 pub(crate) mod relevance_gate;
 pub mod signatures;
 #[cfg(feature = "tree-sitter")]

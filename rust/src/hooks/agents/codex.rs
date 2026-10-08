@@ -160,6 +160,8 @@ fn install_codex_hook_config(codex_dir: &std::path::Path) -> bool {
     let config_toml_path = crate::core::home::resolve_codex_config_path()
         .unwrap_or_else(|| codex_dir.join("config.toml"));
     let config_content = std::fs::read_to_string(&config_toml_path).unwrap_or_default();
+    // The refresh below strips a global project pin; keep the extra roots.
+    crate::hooks::project_pins::migrate_extra_roots(&config_content);
 
     // Hybrid mode: ensure MCP server entry exists in config.toml so Codex
     // Desktop/Cloud can reach lean-ctx even without CLI hooks.
@@ -441,12 +443,17 @@ fn ensure_codex_mcp_server(
         lean_tbl["tool_timeout_sec"] = toml_edit::value(120);
     }
 
-    let env = lean_tbl["env"].or_insert(toml_edit::table());
-    if let Some(env_tbl) = env.as_table_mut() {
-        for (key, val) in env_pairs {
-            let key = key.as_str();
-            if env_tbl.get(key).and_then(toml_edit::Item::as_str) != Some(val.as_str()) {
-                env_tbl[key] = toml_edit::value(val.as_str());
+    // A user-global entry must not pin one project for every session; heal the
+    // pins earlier builds wrote (see `mcp_server_env_pairs`).
+    crate::hooks::strip_project_scoped_env_toml(lean_tbl);
+    if !env_pairs.is_empty() {
+        let env = lean_tbl["env"].or_insert(toml_edit::table());
+        if let Some(env_tbl) = env.as_table_mut() {
+            for (key, val) in env_pairs {
+                let key = key.as_str();
+                if env_tbl.get(key).and_then(toml_edit::Item::as_str) != Some(val.as_str()) {
+                    env_tbl[key] = toml_edit::value(val.as_str());
+                }
             }
         }
     }
@@ -975,75 +982,31 @@ command = \"other\"
     }
 
     #[test]
-    fn ensure_mcp_server_writes_project_and_extra_roots() {
-        // #403: when init captured a project root + sibling worktrees, those
-        // must be propagated into the env block so the long-lived MCP server
-        // resolves explicit paths under every root.
-        let pairs = vec![
-            (
-                "LEAN_CTX_DATA_DIR".to_string(),
-                "/home/u/.lean-ctx".to_string(),
-            ),
-            (
-                "LEAN_CTX_PROJECT_ROOT".to_string(),
-                "/work/main".to_string(),
-            ),
-            (
-                "LEAN_CTX_EXTRA_ROOTS".to_string(),
-                "/work/wt-a:/work/wt-b".to_string(),
-            ),
-        ];
-        let result =
-            ensure_codex_mcp_server("", "lean-ctx", &pairs).expect("fresh config must be created");
+    fn ensure_mcp_server_heals_a_global_project_pin() {
+        // A pre-fix install pinned the installing session's project into the
+        // user-global Codex config, so every later session — in any repo —
+        // bound to that project. The refresh must drop the pin (and nothing
+        // else), and a second pass must be a no-op.
+        let input = "[mcp_servers.lean-ctx]\ncommand = \"lean-ctx\"\nargs = [\"mcp\"]\n\n\
+                     [mcp_servers.lean-ctx.env]\n\
+                     LEAN_CTX_EXTRA_ROOTS = \"/work/other\"\n\
+                     LEAN_CTX_PROJECT_ROOT = \"/work/main\"\n\
+                     LEAN_CTX_QUIET = \"1\"\n";
 
+        let result = ensure_codex_mcp_server(input, "lean-ctx", &data_dir_pairs())
+            .expect("a pinned project must be healed");
+        assert_eq!(result.matches("[mcp_servers.lean-ctx]").count(), 1);
         let doc = result
             .parse::<toml_edit::DocumentMut>()
             .expect("output must be valid TOML");
         let env = &doc["mcp_servers"]["lean-ctx"]["env"];
-        assert_eq!(env["LEAN_CTX_PROJECT_ROOT"].as_str(), Some("/work/main"));
-        assert_eq!(
-            env["LEAN_CTX_EXTRA_ROOTS"].as_str(),
-            Some("/work/wt-a:/work/wt-b")
-        );
-        assert_eq!(env["LEAN_CTX_DATA_DIR"].as_str(), Some("/home/u/.lean-ctx"));
-    }
+        assert!(env.get("LEAN_CTX_PROJECT_ROOT").is_none(), "{result}");
+        assert!(env.get("LEAN_CTX_EXTRA_ROOTS").is_none(), "{result}");
+        assert_eq!(env["LEAN_CTX_QUIET"].as_str(), Some("1"));
 
-    #[test]
-    fn ensure_mcp_server_upserts_missing_keys_into_existing_env() {
-        // Pre-existing install (only DATA_DIR) must gain the new roots without
-        // duplicating the section, and the operation must be idempotent.
-        let input = "[mcp_servers.lean-ctx]\ncommand = \"lean-ctx\"\nargs = []\n\n\
-                     [mcp_servers.lean-ctx.env]\nLEAN_CTX_DATA_DIR = \"/home/u/.lean-ctx\"\n";
-        let pairs = vec![
-            (
-                "LEAN_CTX_DATA_DIR".to_string(),
-                "/home/u/.lean-ctx".to_string(),
-            ),
-            (
-                "LEAN_CTX_PROJECT_ROOT".to_string(),
-                "/work/main".to_string(),
-            ),
-        ];
-
-        let result = ensure_codex_mcp_server(input, "lean-ctx", &pairs)
-            .expect("should upsert the missing project root");
-        assert_eq!(
-            result.matches("[mcp_servers.lean-ctx]").count(),
-            1,
-            "must not duplicate the parent section"
-        );
-        let doc = result
-            .parse::<toml_edit::DocumentMut>()
-            .expect("output must be valid TOML");
-        assert_eq!(
-            doc["mcp_servers"]["lean-ctx"]["env"]["LEAN_CTX_PROJECT_ROOT"].as_str(),
-            Some("/work/main")
-        );
-
-        // Second pass over the upserted config is a no-op.
         assert!(
-            ensure_codex_mcp_server(&result, "lean-ctx", &pairs).is_none(),
-            "upsert must be idempotent"
+            ensure_codex_mcp_server(&result, "lean-ctx", &data_dir_pairs()).is_none(),
+            "heal must be idempotent"
         );
     }
 

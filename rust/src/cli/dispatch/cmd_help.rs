@@ -165,6 +165,7 @@ const GUARDED: &[&[&str]] = &[
     &["tools"],
     &["config"],
     &["allow"],
+    &["allow-path"],
     &["yolo"],
     &["secure", "lockdown"],
     &["stats"],

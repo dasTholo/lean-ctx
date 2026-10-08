@@ -287,22 +287,23 @@ pub fn is_read_only_path(candidate: &Path) -> bool {
     if roots.is_empty() {
         return false;
     }
+    let base = canonical_target(candidate);
+    roots.iter().any(|r| is_under_prefix(&base, r))
+}
 
-    // Compare the canonicalized nearest-existing-ancestor (resolves symlinks so
-    // a symlink *into* a read-only root can't launder a write past the prefix
-    // check), reconstructing the full path for the comparison.
-    let base = match canonicalize_existing_ancestor(candidate) {
-        Some((base, remainder)) => {
-            let mut p = base;
+/// The canonicalized nearest-existing-ancestor of `candidate` with the
+/// not-yet-existing remainder re-appended. Resolves symlinks so a symlink
+/// *into* a guarded root cannot launder a write past a prefix check.
+fn canonical_target(candidate: &Path) -> PathBuf {
+    match canonicalize_existing_ancestor(candidate) {
+        Some((mut p, remainder)) => {
             for part in remainder.iter().rev() {
                 p.push(part);
             }
             p
         }
         None => canonicalize_or_self(candidate),
-    };
-
-    roots.iter().any(|r| is_under_prefix(&base, r))
+    }
 }
 
 /// Default-deny write guard for the read-only tier (#475): returns an error if
@@ -323,7 +324,10 @@ pub fn enforce_writable(candidate: &Path) -> Result<(), String> {
             candidate.display()
         ));
     }
-    Ok(())
+    match super::pathjail_scope::home_scope_write_denial(&canonical_target(candidate)) {
+        Some(denial) => Err(denial),
+        None => Ok(()),
+    }
 }
 
 /// Foreign editor config dirs for the jail (~/.cursor, ~/.claude, VS Code, …).
@@ -406,12 +410,15 @@ pub fn is_harness_auto_memory_path(path: &Path) -> bool {
 }
 
 fn path_allowed_by_jail(base: &Path, root: &Path, allow: &[PathBuf]) -> bool {
+    if is_harness_auto_memory_path(base) {
+        return true;
+    }
     let allowed = is_under_prefix(base, root)
         || allow.iter().any(|p| is_under_prefix(base, p))
-        || is_harness_auto_memory_path(base);
+        || super::pathjail_scope::home_scope_admits(base);
     #[cfg(windows)]
     let allowed = allowed || is_under_prefix_windows(base, root);
-    allowed
+    allowed && super::pathjail_scope::protected_zone_permits(base, root, allow)
 }
 
 /// Heuristic canonicalize — honours the #356 TCC guard. Used by the
@@ -425,7 +432,7 @@ pub fn canonicalize_or_self(path: &Path) -> PathBuf {
 /// escape re-check). Deliberately bypasses the #356 TCC guard: the jail must
 /// keep resolving symlinks to detect escapes, and it only ever runs on a path
 /// the client explicitly asked to access, where a one-time prompt is legitimate.
-fn canonicalize_secure(path: &Path) -> PathBuf {
+pub(crate) fn canonicalize_secure(path: &Path) -> PathBuf {
     super::pathutil::canonicalize_secure_bounded(path, 2000)
 }
 
@@ -597,26 +604,14 @@ pub fn jail_path_with_roots(
         let allowed = path_allowed_by_jail(&base, &root, &allow);
 
         if !allowed {
-            let dir = candidate.parent().unwrap_or(candidate).display();
-            let root_display = root.display();
             let is_suspicious = crate::tools::startup::is_suspicious_root(&root);
             let mut hint = if is_suspicious || root == std::path::Path::new("/") {
-                ". lean-ctx could not detect your project automatically. \
-                     This usually resolves on the next tool call. \
-                     If it persists: lean-ctx doctor --fix"
+                ". lean-ctx has not bound this session to a project yet (the host reported \
+                     no project directory). Any path inside a project binds it; if it \
+                     persists: lean-ctx doctor --fix"
                     .to_string()
-            } else if crate::core::protocol::meta_visible() {
-                format!(
-                    ". {dir} is outside the active project ({root_display}). \
-                     To access other projects: open it in a new IDE window, \
-                     or run: lean-ctx config set extra_roots {dir}"
-                )
             } else {
-                format!(
-                    ". Access denied: outside active project ({root_display}). \
-                     To allow: open that project in a new window, \
-                     or: LEAN_CTX_EXTRA_ROOTS={dir}"
-                )
+                super::pathjail_scope::escape_hint(candidate, &base, &root)
             };
             // An untrusted workspace's project-local `allow_paths` is silently
             // withheld; always surface that reason (the stderr warning is
@@ -1091,10 +1086,13 @@ mod tests {
 
         let err = jail_path(&other.join("b.txt"), &root).unwrap_err();
         let msg = err.to_string();
+        // One command that resolves it without a restart — never "open a new
+        // IDE window" or an env var the running server cannot see.
         assert!(
-            msg.contains("outside active project") || msg.contains("LEAN_CTX_EXTRA_ROOTS"),
+            msg.contains("lean-ctx allow-path") && msg.contains("no restart"),
             "agent-visible escape error should hint at resolution: {msg}"
         );
+        assert!(!msg.contains("LEAN_CTX_EXTRA_ROOTS="), "{msg}");
     }
 
     // GH #392: config entries like "$HOME/code" or "~/code" were taken

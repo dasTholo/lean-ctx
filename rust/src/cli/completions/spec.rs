@@ -1556,6 +1556,15 @@ pub static COMMAND_TREE: &[CommandNode] = &[
         hidden: false,
     },
     CommandNode {
+        name: "allow-path",
+        aliases: &[],
+        description: "Let the path jail admit a directory outside ~ or a protected one",
+        subcommands: &[],
+        flags: &[],
+        positional: None,
+        hidden: false,
+    },
+    CommandNode {
         name: "untrust",
         aliases: &[],
         description: "Untrust a command/path",

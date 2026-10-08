@@ -255,6 +255,7 @@ mod tests {
         let schema = ConfigSchema::generate();
         for key in [
             "path_jail",
+            "path_jail_scope",
             "persona",
             "bypass_hints",
             "shell_security",

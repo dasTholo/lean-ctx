@@ -734,6 +734,11 @@ pub struct Config {
     /// (The former `LEAN_CTX_NO_JAIL=1` env override was removed in v3.7.3.)
     #[serde(default)]
     pub path_jail: Option<bool>,
+    /// What the enforced jail admits besides the project + allow-lists:
+    /// `home` (default — everything below `$HOME` except dot entries,
+    /// `~/Library`, `~/AppData`) or `project`. See `core::pathjail_scope`.
+    #[serde(default)]
+    pub path_jail_scope: Option<String>,
     /// Sandbox level for code execution (ctx_exec).
     /// 0 = subprocess only (current), 1 = OS-level restriction (Seatbelt/Landlock).
     /// Override via LEAN_CTX_SANDBOX_LEVEL env var.

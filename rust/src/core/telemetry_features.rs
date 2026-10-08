@@ -111,6 +111,7 @@ const COMMANDS: &[(&str, &[&str])] = &[
     ("tools", &[]),
     ("config", &[]),
     ("allow", &[]),
+    ("allow_path", &["allow-path"]),
     ("security", &[]),
     ("yolo", &[]),
     ("secure", &["lockdown"]),

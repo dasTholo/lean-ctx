@@ -636,6 +636,10 @@ pub fn run() {
                 super::cmd_allow(&rest);
                 return;
             }
+            "allow-path" => {
+                super::cmd_allow_path(&rest);
+                return;
+            }
             "security" => {
                 super::cmd_security(&rest);
                 return;
