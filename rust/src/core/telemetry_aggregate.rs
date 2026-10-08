@@ -21,8 +21,8 @@ use super::telemetry_v2::{
     Architecture, ClientFamily, DecisionMetrics, DistributionChannel, ErrorCategory, ErrorMetrics,
     HeartbeatMetrics, Histogram, MAX_BATCH_EVENTS, MAX_COUNT, MAX_TOOL_ENTRIES, OccurrenceMetrics,
     OperatingSystem, SCHEMA_VERSION, SessionMetrics, SyncMetrics, TelemetryBatchV2,
-    TelemetryEnvelopeV2, TelemetryEventV2, ToolCallCount, ToolCallMetrics, ToolUsageMetrics,
-    VersionUpgradeMetrics, valid_tool_name,
+    TelemetryEnvelopeV2, TelemetryEventV2, TokenMetrics, ToolCallCount, ToolCallMetrics,
+    ToolUsageMetrics, VersionUpgradeMetrics, valid_tool_name,
 };
 
 mod environment;
@@ -60,6 +60,11 @@ struct CounterCheckpoint {
     /// Per-tool counters. Absent in state written before per-tool counting.
     #[serde(default)]
     tools: BTreeMap<String, ToolCounterCheckpoint>,
+    /// Tool-output tokens. Absent in state written before 3.11.1.
+    #[serde(default)]
+    tokens_input: u64,
+    #[serde(default)]
+    tokens_output: u64,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -67,6 +72,8 @@ struct CounterCheckpoint {
 struct ToolCounterCheckpoint {
     calls: u64,
     failures: u64,
+    #[serde(default)]
+    latency_us: u64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -668,6 +675,10 @@ fn build_daily_aggregate(
                 upper_bounds: crate::core::telemetry::TOOL_LATENCY_BUCKET_UPPER_MS.to_vec(),
                 counts: latency_counts.to_vec(),
             },
+            tokens: Some(TokenMetrics {
+                original: observed.tokens_input.min(MAX_COUNT),
+                delivered: observed.tokens_output.min(MAX_COUNT),
+            }),
         }),
     ));
     let tools = tool_call_deltas(&observed.tools, &baseline.tools);
@@ -771,6 +782,9 @@ fn tool_call_deltas(
                 tool: tool.clone(),
                 calls,
                 failures,
+                latency_milliseconds_total: Some(
+                    (counter.latency_us.saturating_sub(base.latency_us) / 1_000).min(MAX_COUNT),
+                ),
             })
         })
         .collect();
@@ -823,10 +837,13 @@ fn current_checkpoint() -> CounterCheckpoint {
                     ToolCounterCheckpoint {
                         calls: counter.calls,
                         failures: counter.failures,
+                        latency_us: counter.latency_us,
                     },
                 )
             })
             .collect(),
+        tokens_input: snapshot.tokens_input,
+        tokens_output: snapshot.tokens_output,
     }
 }
 
@@ -914,10 +931,15 @@ fn counter_delta(observed: &CounterCheckpoint, baseline: &CounterCheckpoint) -> 
                 let delta = ToolCounterCheckpoint {
                     calls: counter.calls.saturating_sub(base.calls),
                     failures: counter.failures.saturating_sub(base.failures),
+                    latency_us: counter.latency_us.saturating_sub(base.latency_us),
                 };
                 (delta.calls > 0 || delta.failures > 0).then(|| (tool.clone(), delta))
             })
             .collect(),
+        tokens_input: observed.tokens_input.saturating_sub(baseline.tokens_input),
+        tokens_output: observed
+            .tokens_output
+            .saturating_sub(baseline.tokens_output),
     }
 }
 
@@ -934,6 +956,8 @@ fn add_counters(total: &mut CounterCheckpoint, delta: &CounterCheckpoint) {
     total.session_uptime_secs = total
         .session_uptime_secs
         .saturating_add(delta.session_uptime_secs);
+    total.tokens_input = total.tokens_input.saturating_add(delta.tokens_input);
+    total.tokens_output = total.tokens_output.saturating_add(delta.tokens_output);
     for (tool, added) in &delta.tools {
         if !total.tools.contains_key(tool) && total.tools.len() >= MAX_PERSISTED_TOOLS {
             continue;
@@ -941,6 +965,7 @@ fn add_counters(total: &mut CounterCheckpoint, delta: &CounterCheckpoint) {
         let entry = total.tools.entry(tool.clone()).or_default();
         entry.calls = entry.calls.saturating_add(added.calls);
         entry.failures = entry.failures.saturating_add(added.failures);
+        entry.latency_us = entry.latency_us.saturating_add(added.latency_us);
     }
 }
 

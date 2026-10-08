@@ -114,6 +114,7 @@ Nicht enthalten: Modellname, Pfade, Konfigurationswerte, Projektanzahl.
 |---|---|---|---|
 | `tools[].tool` | Name eines **eingebauten** lean-ctx-Tools (`[a-z][a-z0-9_]*`, ≤ 64 Byte) | welche Tools tatsächlich genutzt werden | nein |
 | `tools[].calls`, `tools[].failures` | Zähler seit dem letzten bestätigten Batch | Nutzung und Fehlerquote je Tool | nein |
+| `tools[].latency_milliseconds_total` | Summe der Laufzeit dieser Aufrufe in ms | mittlere Latenz je Tool | ja (ab 3.11.1) |
 
 Namen stammen ausschließlich aus der statischen Tool-Registry des Binaries;
 Tools fremder MCP-Server, Argumente und Ergebnisse werden nie gezählt. Liste
@@ -127,7 +128,7 @@ strikt sortiert und eindeutig, höchstens `MAX_TOOL_ENTRIES` (128) Einträge
 | `OccurrenceMetrics` | `count` | Häufigkeit eines Funnel- oder Setup-Ereignisses |
 | `OutcomeMetrics` | `accepted`, `rejected`, `unknown` | Ergebnisverteilung |
 | `SessionMetrics` | `sessions`, `duration_seconds` (Histogramm) | Nutzungsintensität |
-| `ToolUsageMetrics` | `calls`, `failures`, `latency_milliseconds` (Histogramm) | Zuverlässigkeit und Latenz |
+| `ToolUsageMetrics` | `calls`, `failures`, `latency_milliseconds` (Histogramm), optional `tokens.original` / `tokens.delivered` (ab 3.11.1) | Zuverlässigkeit, Latenz und Token-Einsparung (Tagessummen, keine Inhalte) |
 | `DecisionMetrics` | `admitted`, `denied`, `fallback` | Autopilot-Entscheidungskategorien |
 | `SyncMetrics` | `attempts`, `successes`, `failures` | Sync-Zuverlässigkeit |
 | `ErrorMetrics` | `category`, `count` | Fehlerklassen ohne Fehlertext |

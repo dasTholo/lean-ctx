@@ -30,6 +30,7 @@ fn counters(entries: &[(&str, u64, u64)]) -> BTreeMap<String, ToolCounterCheckpo
                 ToolCounterCheckpoint {
                     calls: *calls,
                     failures: *failures,
+                    latency_us: 0,
                 },
             )
         })
@@ -67,6 +68,7 @@ fn tool_call_deltas_keep_the_most_called_tools_past_the_entry_cap() {
                 ToolCounterCheckpoint {
                     calls: index as u64 + 1,
                     failures: 0,
+                    latency_us: 0,
                 },
             )
         })
@@ -159,7 +161,8 @@ fn persisted_counters_are_sent_cumulatively_and_later_calls_reach_the_right_day(
         queued_counters().tools.get("telemetry_fold_probe").copied(),
         Some(ToolCounterCheckpoint {
             calls: 2,
-            failures: 1
+            failures: 1,
+            latency_us: 2_000,
         })
     );
     // A second fold with no new calls must not count them again.
@@ -176,7 +179,8 @@ fn persisted_counters_are_sent_cumulatively_and_later_calls_reach_the_right_day(
         queued_counters().tools.get("telemetry_fold_probe").copied(),
         Some(ToolCounterCheckpoint {
             calls: 2,
-            failures: 1
+            failures: 1,
+            latency_us: 2_000,
         })
     );
     assert!(!today_is_unsent());
@@ -239,6 +243,8 @@ fn counters_persisted_by_an_exited_process_are_included() {
             tool_latency_buckets: buckets,
             session_uptime_secs: 30,
             tools: counters(&[("telemetry_exited_probe", 3, 1)]),
+            tokens_input: 12_000,
+            tokens_output: 3_000,
         },
     );
     write_one_shots(&path, &sidecar).expect("seed exited process counters");
@@ -247,6 +253,17 @@ fn counters_persisted_by_an_exited_process_are_included() {
     assert_eq!(
         probe_counts(&preview, "telemetry_exited_probe"),
         Some((3, 1))
+    );
+    // Tests never record tokens on the global metrics, so the seed is exact.
+    assert_eq!(
+        preview.events.iter().find_map(|event| match &event.event {
+            TelemetryEventV2::ToolUsageAggregate(usage) => usage.tokens,
+            _ => None,
+        }),
+        Some(TokenMetrics {
+            original: 12_000,
+            delivered: 3_000,
+        })
     );
     assert!(tool_counts(&preview).0 >= 3);
     // The preview folded in memory only.

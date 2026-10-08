@@ -384,6 +384,18 @@ pub struct ToolUsageMetrics {
     pub calls: u64,
     pub failures: u64,
     pub latency_milliseconds: Histogram,
+    /// Absent from clients before 3.11.1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokens: Option<TokenMetrics>,
+}
+
+/// Tokens of tool output for one day: what it would have cost uncompressed
+/// (`original`) and what reached the model (`delivered`). Counts only.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TokenMetrics {
+    pub original: u64,
+    pub delivered: u64,
 }
 
 impl ToolUsageMetrics {
@@ -391,6 +403,9 @@ impl ToolUsageMetrics {
         bounded_many(&[self.calls, self.failures])?;
         if self.failures > self.calls {
             return Err(TelemetryValidationError::InconsistentCounts);
+        }
+        if let Some(tokens) = self.tokens {
+            bounded_many(&[tokens.original, tokens.delivered])?;
         }
         self.latency_milliseconds.validate()
     }
@@ -413,6 +428,9 @@ pub struct ToolCallCount {
     pub tool: String,
     pub calls: u64,
     pub failures: u64,
+    /// Summed latency of these calls; absent from clients before 3.11.1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latency_milliseconds_total: Option<u64>,
 }
 
 impl ToolCallMetrics {
@@ -437,6 +455,7 @@ impl ToolCallCount {
             return Err(TelemetryValidationError::ToolName);
         }
         bounded_many(&[self.calls, self.failures])?;
+        bounded(self.latency_milliseconds_total.unwrap_or_default())?;
         if self.calls == 0 || self.failures > self.calls {
             return Err(TelemetryValidationError::InconsistentCounts);
         }
@@ -736,6 +755,10 @@ mod tests {
                 upper_bounds: vec![10, 100],
                 counts: vec![1, 3],
             },
+            tokens: Some(TokenMetrics {
+                original: 12_000,
+                delivered: 3_000,
+            }),
         }));
         event.validate().unwrap();
         let encoded = serde_json::to_vec(&event).unwrap();
@@ -1012,6 +1035,7 @@ mod tests {
             tool: tool.into(),
             calls,
             failures,
+            latency_milliseconds_total: None,
         }
     }
 

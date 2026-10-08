@@ -15,7 +15,8 @@ pub const DISCLOSURE: &[&str] = &[
     "LeanCTX version, OS, CPU architecture, install channel (cargo/npm/homebrew/…)",
     "AI client family (Claude, Cursor, Codex, …) and setup profile / integrations",
     "runtime environment (local, container, Codespaces, …), installation age and number of active days, each as a coarse range",
-    "daily counts per built-in tool: calls, failures, latency buckets",
+    "daily counts per built-in tool: calls, failures, total latency, latency buckets",
+    "daily token totals of tool output: original size and size delivered after compression",
     "session counts and uptime, error categories, version upgrades",
     "aggregate autopilot, sync and plan events (counts only)",
 ];
@@ -25,7 +26,8 @@ pub const NEVER_SENT: &str =
     "No prompts, code, file names, paths, commands, secrets or IP-derived data.";
 
 /// Bump when [`DISCLOSURE`] gains a category, so existing installations see
-/// the notice again. 2: runtime environment, installation age, active days.
+/// the notice again. 2: runtime environment, installation age, active days,
+/// per-tool latency and token totals.
 const NOTICE_VERSION: u32 = 2;
 
 /// Environment variables that mark a CI or build job. Each job usually starts
@@ -97,6 +99,26 @@ pub fn consent_updates(enabled: bool) -> [(&'static str, &'static str); 2] {
         ("telemetry.enabled", value),
         ("telemetry.preference", preference),
     ]
+}
+
+fn legacy_reset_path() -> Result<std::path::PathBuf, String> {
+    crate::core::paths::state_dir().map(|dir| dir.join("telemetry_legacy_opt_out_reset"))
+}
+
+/// Whether the one-time re-enable of pre-v2 `telemetry.enabled = false` has
+/// yet to run. After it ran, a hand-edited `enabled = false` is a v2 choice.
+pub(crate) fn legacy_opt_out_reset_pending() -> bool {
+    legacy_reset_path().is_ok_and(|path| !path.exists())
+}
+
+pub(crate) fn mark_legacy_opt_out_reset() {
+    let Ok(path) = legacy_reset_path() else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(path, "1\n");
 }
 
 fn notice_path() -> Result<std::path::PathBuf, String> {

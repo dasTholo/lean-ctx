@@ -21,11 +21,12 @@ static METRICS: OnceLock<Metrics> = OnceLock::new();
 pub(crate) const TOOL_LATENCY_BUCKET_UPPER_MS: [u64; 9] =
     [10, 50, 100, 250, 500, 1_000, 5_000, 60_000, i64::MAX as u64];
 
-/// Calls and failures of one tool since process start.
+/// Calls, failures and summed latency of one tool since process start.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct ToolCallCounter {
     pub calls: u64,
     pub failures: u64,
+    pub latency_us: u64,
 }
 
 pub fn global_metrics() -> &'static Metrics {
@@ -117,6 +118,7 @@ impl Metrics {
         self.record_tool_call_locked(latency_us, success);
         let counter = per_tool.entry(tool).or_default();
         counter.calls = counter.calls.saturating_add(1);
+        counter.latency_us = counter.latency_us.saturating_add(latency_us);
         if !success {
             counter.failures = counter.failures.saturating_add(1);
         }
@@ -240,6 +242,8 @@ impl Metrics {
                 self.tool_call_latency_buckets[index].load(Ordering::Relaxed)
             }),
             session_uptime_secs: self.session_start.elapsed().as_secs(),
+            tokens_input: self.tokens_input.load(Ordering::Relaxed),
+            tokens_output: self.tokens_output.load(Ordering::Relaxed),
         }
     }
 
@@ -301,6 +305,9 @@ pub(crate) struct DailyTelemetrySnapshot {
     pub tool_latency_buckets: [u64; TOOL_LATENCY_BUCKET_UPPER_MS.len()],
     pub session_uptime_secs: u64,
     pub per_tool: BTreeMap<&'static str, ToolCallCounter>,
+    /// Tokens tool output would have cost uncompressed vs. what was delivered.
+    pub tokens_input: u64,
+    pub tokens_output: u64,
 }
 
 /// Point-in-time snapshot of all metrics.
@@ -651,14 +658,16 @@ mod tests {
             snap.per_tool.get("ctx_read"),
             Some(&ToolCallCounter {
                 calls: 2,
-                failures: 1
+                failures: 1,
+                latency_us: 3_000,
             })
         );
         assert_eq!(
             snap.per_tool.get("ctx_shell"),
             Some(&ToolCallCounter {
                 calls: 1,
-                failures: 0
+                failures: 0,
+                latency_us: 3_000,
             })
         );
     }
