@@ -22,12 +22,14 @@ fn request(name: &str, arguments: Value) -> CallToolRequestParams {
 }
 
 async fn call(server: &crate::tools::LeanCtxServer, name: &str, arguments: Value) -> String {
+    // A hang guard, not a latency bound: one ctx_shell `printf` took longer
+    // than 15 s on the windows-msvc release runner (sequential suite).
     let result = tokio::time::timeout(
-        std::time::Duration::from_secs(15),
+        std::time::Duration::from_secs(60),
         server.call_tool_guarded(request(name, arguments)),
     )
     .await
-    .unwrap_or_else(|_| panic!("{name} MCP call must complete within 15 seconds"))
+    .unwrap_or_else(|_| panic!("{name} MCP call must complete within 60 seconds"))
     .unwrap_or_else(|error| panic!("{name} MCP call must complete: {error}"));
     assert_ne!(
         result.is_error,
