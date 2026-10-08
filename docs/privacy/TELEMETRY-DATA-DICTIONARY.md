@@ -220,7 +220,10 @@ Vor einer öffentlichen Datenschutzaussage ist durch Rechtsberatung zu klären:
 - Erfüllung von Auskunfts- und Löschbegehren über `deletion_token_hash`, ohne
   eine Klaridentität einzuführen;
 - Behandlung von IP-Adressen an der Netzwerkkante — sie dürfen nicht als
-  Produktanalyse-Identifikator persistiert werden;
+  Produktanalyse-Identifikator persistiert werden. Umgesetzt: Der Server
+  speichert nur einen geschlüsselten /24- bzw. /48-Netz-Hash und das
+  öffentliche autonome System, nie die Adresse (siehe
+  `docs/architecture/telemetry.md`);
 - Auftragsverarbeitung und Drittlandtransfer;
 - Aufbewahrung in Team- und Enterprise-Kontexten mit Organisationsbindung.
 

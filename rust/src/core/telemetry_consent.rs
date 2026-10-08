@@ -23,8 +23,8 @@ pub const DISCLOSURE: &[&str] = &[
     "aggregate autopilot, sync and plan events (counts only)",
 ];
 
-/// What a batch never contains.
-pub const NEVER_SENT: &str = "No prompts, code, file names, paths, commands, raw error messages, secrets or IP-derived data.";
+/// What a batch never contains, and what the server keeps of the connection.
+pub const NEVER_SENT: &str = "No prompts, code, file names, paths, commands, raw error messages or secrets. The server reduces the connection's IP address to a keyed network hash and the network operator's public name; the address is never stored.";
 
 /// Bump when [`DISCLOSURE`] gains a category, so existing installations see
 /// the notice again. 2: runtime environment, installation age, active days,

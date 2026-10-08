@@ -212,10 +212,19 @@ Identifikation oder Profilbildung, Speicherung in der Schweiz, keine Weitergabe
 an Dritte für deren Zwecke, Offenlegung in `DISCLOSURE` und auf
 leanctx.com/privacy.
 
-Belegt im Server-Code (`lean-ctx-cloud`): Aufbewahrung 90 Tage
-(`telemetry_retention_job`, täglich); `DELETE
-/api/telemetry/v2/installations/{id}` löscht mit gültigem Löschtoken die
-Installation samt aller abhängigen Tabellen (Kaskade) und setzt einen Tombstone.
+Belegt im Server-Code (`lean-ctx-cloud`): Daten einer Installation bleiben
+erhalten, solange sie sich meldet, und werden 25 Monate (760 Tage) nach ihrem
+letzten Kontakt vollständig gelöscht (`telemetry_retention_job`, täglich);
+`DELETE /api/telemetry/v2/installations/{id}` löscht mit gültigem Löschtoken
+die Installation samt aller abhängigen Tabellen (Kaskade) und setzt einen
+Tombstone.
+
+Netzwerk-Kontext (`network_intel.rs`, serverseitig, ab 2026-10-08): Beim
+Empfang eines Batches wird die vom Proxy gelieferte Client-Adresse nur im
+Speicher auf einen HMAC-SHA256-Hash ihres /24- bzw. /48-Präfixes (zufälliger
+Schlüssel in der Datenbank) und auf das öffentliche autonome System (Name,
+Nummer, Land aus iptoasn.com) samt grobem Netztyp reduziert. Die Adresse wird
+nie gespeichert oder geloggt; der Client sendet nichts davon.
 
 ## Mindestabnahme
 
