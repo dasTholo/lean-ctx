@@ -430,6 +430,12 @@ fn resolve_name_path_ambiguous_trait_impls() {
 fn file_scope_disambiguates_ambiguous_symbol() {
     let _env_lock = crate::core::data_dir::test_env_lock();
     let dir = tempfile::tempdir().unwrap();
+    // Own data dir, like its neighbours: against the shared one, after the
+    // rest of a sequential release run, the index build came back empty
+    // (NO_SYMBOL on macos-15-intel).
+    let data = dir.path().join("data");
+    std::fs::create_dir_all(&data).unwrap();
+    crate::test_env::set_var("LEAN_CTX_DATA_DIR", data.to_string_lossy().to_string());
     let proj = dir.path().join("proj845");
     std::fs::create_dir_all(proj.join("src")).unwrap();
 

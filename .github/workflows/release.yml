@@ -244,6 +244,10 @@ jobs:
             echo "CC_aarch64_unknown_linux_musl=musl-gcc" >> "$GITHUB_ENV"
             echo "AR_aarch64_unknown_linux_musl=ar" >> "$GITHUB_ENV"
             echo "RANLIB_aarch64_unknown_linux_musl=ranlib" >> "$GITHUB_ENV"
+            # GCC emits outline atomics (__aarch64_ldadd4_sync, from libgcc) by
+            # default; musl-gcc does not link them, so the vendored libdbus
+            # behind keyring failed to link (3.11.0 release run).
+            echo "CFLAGS_aarch64_unknown_linux_musl=-mno-outline-atomics" >> "$GITHUB_ENV"
           fi
 
       - name: Install cross-compilation tools
