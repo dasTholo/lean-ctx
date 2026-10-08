@@ -134,7 +134,9 @@ pgvector = ["embeddings"]
 # N×M shape translation (enterprise#16): Claude clients on OpenAI-shape
 # upstreams (Foundry, vLLM, Ollama…). LOCAL_OPTIONAL: compile-gated only.
 shape-xlat = ["http-server"]
-secure-update = []
+# Release-signature checks run in-process (updater/sigstore.rs) with the
+# rustls crypto provider; no external `cosign` binary is required.
+secure-update = ["dep:rustls"]
 experimental = []
 # Compatibility feature name for existing builds; Engine internals are always compiled.
 context_kernel = []

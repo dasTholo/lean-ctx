@@ -14,7 +14,7 @@ use crate::tools::CrpMode;
 pub mod dedup_hook;
 mod helpers;
 use helpers::{detect_project_root, find_similar_and_update_semantic_index};
-pub use helpers::{graph_related_hint, is_instruction_file};
+pub use helpers::{graph_related_hint, is_instruction_file, is_user_excluded};
 mod fallback_banner;
 mod kernel;
 pub(crate) use kernel::kernel_trailer;

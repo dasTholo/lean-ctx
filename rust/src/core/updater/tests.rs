@@ -374,21 +374,6 @@ fn receipt_integrity_digest_is_tamper_evident() {
 }
 
 #[test]
-fn cosign_identity_is_pinned_to_release_workflow_and_tag() {
-    assert_eq!(
-        cosign_identity_for_tag("v3.9.20"),
-        r"^https://github\.com/yvgude/lean-ctx/\.github/workflows/release\.yml@refs/tags/v3\.9\.20$"
-    );
-    let identity = regex::Regex::new(&cosign_identity_for_tag("v3.9.20")).unwrap();
-    assert!(identity.is_match(
-        "https://github.com/yvgude/lean-ctx/.github/workflows/release.yml@refs/tags/v3.9.20"
-    ));
-    assert!(!identity.is_match(
-        "https://github.com/yvgude/lean-ctx/.github/workflows/release.yml@refs/tags/v3x9x20"
-    ));
-}
-
-#[test]
 fn manifest_rejects_malformed_payload_digest() {
     let asset = "lean-ctx-linux.tar.gz";
     let mut artifacts = std::collections::HashMap::new();
