@@ -746,4 +746,37 @@ pub(super) fn build(sections: &mut BTreeMap<String, SectionSchema>) {
             keys: protection,
         },
     );
+
+    let mut agents = BTreeMap::new();
+    agents.insert(
+        "serialize_build_commands".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.agents.serialize_build_commands),
+            "Opt-in: run only one cargo/npm build or test at a time across all lean-ctx sessions on this machine; ctx_shell waits for the slot. Off by default",
+        ),
+    );
+    agents.insert(
+        "cargo_build_jobs".into(),
+        key(
+            "usize",
+            serde_json::json!(cfg.agents.cargo_build_jobs),
+            "Opt-in: CARGO_BUILD_JOBS for builds run through ctx_shell. 0 (default) leaves cargo's own setting alone",
+        ),
+    );
+    agents.insert(
+        "shared_cargo_target".into(),
+        key(
+            "bool",
+            serde_json::json!(cfg.agents.shared_cargo_target),
+            "Opt-in: builds run through ctx_shell use one machine-wide CARGO_TARGET_DIR (<data dir>/build-cache/cargo-target) instead of ./target. Off by default — when on, a binary run from ./target is stale. An explicit CARGO_TARGET_DIR always wins",
+        ),
+    );
+    sections.insert(
+        "agents".into(),
+        SectionSchema {
+            description: "Build handling for ctx_shell in multi-agent setups. All opt-in; by default lean-ctx neither queues, throttles nor relocates your builds".into(),
+            keys: agents,
+        },
+    );
 }

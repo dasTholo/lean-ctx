@@ -122,13 +122,19 @@ impl McpTool for CtxShellTool {
         // opt-out via `shell_allow_writes` (#523). The real command gating
         // (`check_shell_allowlist`, below) is NOT affected by this flag.
         let config = crate::core::config::Config::load();
-        let write_allow_paths = config.shell_write_allow_paths_effective();
-        let project_root = crate::core::config::Config::find_project_root();
+        let mut write_allow_paths = config.shell_write_allow_paths_effective();
+        // The session's project and the jail's allow entries are capture
+        // targets too, so no project root is passed as a refusal below.
+        write_allow_paths.extend(crate::tools::ctx_shell::capture_roots(
+            &ctx.project_root,
+            &ctx.extra_roots,
+            &config,
+        ));
         if !config.shell_allow_writes_effective()
             && let Some(rejection) = crate::tools::ctx_shell::validate_command_in_cwd(
                 &command,
                 &write_allow_paths,
-                project_root.as_deref(),
+                None,
                 resolved_cwd.as_ref().map(|(cwd, _)| cwd.as_str()),
             )
         {

@@ -29,11 +29,38 @@ pub(crate) fn validate_command_with_write_allow_paths(
 /// project — and outside every root — is refused just the same. A caller who
 /// took that wording at its word tried another non-project path and was
 /// refused again with the identical text.
-const CAPTURE_RULE: &str = "The rule: output capture (`>`, `>>`, `| tee`) may only go to a \
-     scratch path (/tmp, /var/tmp, $TMPDIR) or a directory listed in `write_allow_paths` in \
-     config.toml. Every other destination is refused, inside the project or not, and the \
-     project root stays refused even when listed. Commands that do not capture output are \
-     not restricted.";
+const CAPTURE_RULE: &str = "The rule: output capture (`>`, `>>`, `| tee`) may go to the \
+     session's project, a directory in `allow_paths` / `extra_roots`, a directory listed in \
+     `write_allow_paths` in config.toml, or a scratch path (/tmp, /var/tmp, $TMPDIR). Every \
+     other destination is refused. Commands that do not capture output are not restricted.";
+
+/// Directories ctx_shell output capture may write besides `write_allow_paths`
+/// and the scratch paths: the session's project, its host-declared roots and
+/// the jail's explicit allow entries — the places lean-ctx's own edit tools may
+/// write (owner decision 2026-10-08: refusing `> out.txt` inside the project
+/// while `allow_paths` was ignored read as a bug). Broad roots (`/`, `~`, temp
+/// parents) and anything under `read_only_roots` are never included.
+pub(crate) fn capture_roots(
+    project_root: &str,
+    session_extra_roots: &[String],
+    cfg: &crate::core::config::Config,
+) -> Vec<String> {
+    std::iter::once(project_root.to_string())
+        .chain(session_extra_roots.iter().cloned())
+        .chain(cfg.allow_paths.iter().cloned())
+        .chain(cfg.extra_roots.iter().cloned())
+        .filter(|raw| !raw.trim().is_empty())
+        .map(|raw| crate::core::pathjail::expand_user_path(&raw))
+        .filter(|path| {
+            let contains_home = dirs::home_dir().is_some_and(|home| home.starts_with(path));
+            path.is_absolute()
+                && !contains_home
+                && !crate::core::pathutil::is_broad_or_unsafe_root(path)
+                && !crate::core::pathjail::is_read_only_path(path)
+        })
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect()
+}
 
 /// Why the capture rule exists, shared by every write refusal (#1992). The
 /// refusals used to say ctx_shell's compression could land in the file as

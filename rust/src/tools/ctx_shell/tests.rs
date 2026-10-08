@@ -915,6 +915,54 @@ fn write_refusals_state_the_write_path_reason_not_compression() {
 /// "into a project path". The reporter believed that wording, tried another
 /// non-project path and hit the identical refusal. Both the redirect and the
 /// `tee` refusal state the rule that fires and name the configured escape.
+/// Owner decision 2026-10-08 (Discord report: "refuses the project dir and
+/// ignores allow_paths"): ctx_shell capture may land in the session's project
+/// and the jail's allow entries; every other destination stays refused, and
+/// broad roots never become capture roots.
+#[test]
+fn capture_into_the_project_and_allow_entries_is_allowed() {
+    let _iso = crate::core::data_dir::isolated_data_dir();
+    let project = tempfile::tempdir().unwrap();
+    let shared = tempfile::tempdir().unwrap();
+    let cfg = crate::core::config::Config {
+        allow_paths: vec![shared.path().to_string_lossy().into_owned()],
+        ..Default::default()
+    };
+    let project_s = project.path().to_string_lossy().into_owned();
+    let mut allow = vec!["/tmp".to_string()];
+    allow.extend(super::capture_roots(&project_s, &[], &cfg));
+
+    for cmd in [
+        format!("cargo build 2>&1 > {project_s}/build.log"),
+        format!("echo x | tee {project_s}/out.txt"),
+        format!("echo x >> {}/notes.txt", shared.path().display()),
+    ] {
+        assert!(
+            validate_command_in_cwd(&cmd, &allow, None, Some(&project_s)).is_none(),
+            "{cmd}"
+        );
+    }
+    // A relative target from the project cwd lands in the project.
+    assert!(validate_command_in_cwd("echo x > out.txt", &allow, None, Some(&project_s)).is_none());
+    // Elsewhere stays refused.
+    assert!(
+        validate_command_in_cwd(
+            "echo x > /Users/me/Desktop/p.txt",
+            &allow,
+            None,
+            Some(&project_s)
+        )
+        .is_some()
+    );
+    // `/`, `~` and its ancestors never become capture roots.
+    let home = dirs::home_dir().unwrap().to_string_lossy().into_owned();
+    let broad = crate::core::config::Config {
+        allow_paths: vec!["/".into(), "~".into(), home.clone()],
+        ..Default::default()
+    };
+    assert!(super::capture_roots(&home, &["/".to_string()], &broad).is_empty());
+}
+
 #[test]
 fn capture_refusals_state_the_rule_that_fires_outside_the_project() {
     let allow = vec!["/tmp".to_string()];
