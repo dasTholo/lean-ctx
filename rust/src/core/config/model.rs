@@ -166,6 +166,8 @@ pub struct Config {
     pub buddy_enabled: bool,
     #[serde(default = "serde_defaults::default_true")]
     pub enable_wakeup_ctx: bool,
+    /// File globs delivered verbatim: native reads skip the hook redirect and
+    /// automatic `ctx_read` modes return them in full (#60).
     #[serde(default)]
     pub redirect_exclude: Vec<String>,
     /// Tools to exclude from the MCP tool list returned by list_tools.

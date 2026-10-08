@@ -422,6 +422,9 @@ pub(crate) fn ensure_embeddings(
     }
 
     if let Some(aligned) = embed_idx.get_aligned_flat(&index.chunks) {
+        if !changed_files.is_empty() {
+            crate::core::embedding_index::clear_partial_marker(root);
+        }
         let coverage = embed_idx.coverage(index.chunks.len());
         return Ok((aligned, coverage, changed_files));
     }
@@ -447,6 +450,7 @@ pub(crate) fn ensure_embeddings(
     let aligned = embed_idx
         .get_aligned_flat(&index.chunks)
         .ok_or_else(|| "embedding alignment failed after full rebuild".to_string())?;
+    crate::core::embedding_index::clear_partial_marker(root);
     let coverage = embed_idx.coverage(index.chunks.len());
     Ok((aligned, coverage, all_files))
 }

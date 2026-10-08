@@ -40,10 +40,7 @@ pub(crate) fn cmd_index(args: &[String]) {
                 true
             }));
             crate::core::index_orchestrator::ensure_all_background(&project_root);
-
-            if !wait_graph_bm25_progress(&project_root, Duration::from_mins(5)) {
-                return;
-            }
+            wait_graph_bm25_progress(&project_root);
 
             // Surface the BM25 build outcome so the operator knows the index
             // state (issue #249).
@@ -84,10 +81,7 @@ pub(crate) fn cmd_index(args: &[String]) {
                 let _ = std::fs::remove_file(&embedding_json);
             }
             crate::core::index_orchestrator::ensure_all_background(&project_root);
-
-            if !wait_graph_bm25_progress(&project_root, Duration::from_mins(5)) {
-                return;
-            }
+            wait_graph_bm25_progress(&project_root);
 
             // Surface the BM25 build outcome (chunk count + persisted size, or the
             // "too large to persist" remedy) so the operator is never left guessing.
@@ -161,9 +155,7 @@ pub(crate) fn cmd_index(args: &[String]) {
             if !disk.bm25_index.exists {
                 eprintln!("BM25 index not found — building graph + BM25 first ...");
                 crate::core::index_orchestrator::ensure_all_background(&project_root);
-                if !wait_graph_bm25_progress(&project_root, Duration::from_mins(5)) {
-                    return;
-                }
+                wait_graph_bm25_progress(&project_root);
             }
 
             wait_semantic_progress(&project_root);
@@ -171,7 +163,7 @@ pub(crate) fn cmd_index(args: &[String]) {
             match sem.state {
                 "ready" => eprintln!("semantic index ready"),
                 "failed" => eprintln!(
-                    "semantic index failed: {}",
+                    "semantic index failed: {}\n  finished files are kept — re-run `lean-ctx index build-semantic` to resume",
                     sem.last_error.unwrap_or_else(|| String::from("unknown"))
                 ),
                 _ => {
@@ -247,52 +239,43 @@ fn positional_after<'a>(args: &'a [String], sub: &str) -> Option<&'a str> {
 
 /// Wait for graph + BM25 with a shared progress indicator.
 ///
-/// Uses [`progress_view`] (typed) — no JSON scrape. Returns `false` on timeout
-/// (background work continues).
-fn wait_graph_bm25_progress(project_root: &str, timeout: Duration) -> bool {
+/// Uses [`progress_view`] (typed) — no JSON scrape. No deadline: the build runs
+/// on a thread of this process, so returning early would exit and kill it
+/// before the index is persisted.
+fn wait_graph_bm25_progress(project_root: &str) {
     let mut progress = ProgressIndicator::new("indexes");
-    let start = Instant::now();
     loop {
         let view = crate::core::index_orchestrator::progress_view(project_root);
         if !view.graph_bm25_active() {
             progress.finish("indexes (graph + BM25) done (search may still be warming)");
-            return true;
+            return;
         }
         apply_graph_bm25_progress(&mut progress, &view);
         progress.tick();
-        if start.elapsed() > timeout {
-            progress.finish("indexes still building (timeout — check `lean-ctx index status`)");
-            return false;
-        }
         std::thread::sleep(Duration::from_millis(100));
     }
 }
 
 /// Build semantic on a worker thread while showing progress.
 ///
-/// Returns `false` on timeout (worker keeps running).
-fn wait_semantic_progress(project_root: &str) -> bool {
+/// Waits for the worker without a deadline: the build runs in this process,
+/// so returning early would exit and kill it. A CPU-only build of a large
+/// corpus can take hours; Ctrl-C stops it and the checkpointed files are kept.
+fn wait_semantic_progress(project_root: &str) {
     let root = project_root.to_string();
     let handle = std::thread::spawn(move || {
         crate::core::index_orchestrator::build_semantic(&root);
     });
     let mut progress = ProgressIndicator::new("semantic");
-    let start = Instant::now();
-    let timeout = Duration::from_mins(10);
     loop {
         if handle.is_finished() {
             let _ = handle.join();
             progress.finish("semantic done");
-            return true;
+            return;
         }
         let view = crate::core::index_orchestrator::progress_view(project_root);
         apply_semantic_progress(&mut progress, &view);
         progress.tick();
-        if start.elapsed() > timeout {
-            progress.finish("semantic still building (timeout — check `lean-ctx index status`)");
-            // JoinHandle drop detaches — leave worker running.
-            return false;
-        }
         std::thread::sleep(Duration::from_millis(100));
     }
 }
@@ -549,6 +532,12 @@ fn format_disk_line(ds: &crate::core::index_orchestrator::DiskStatus, count_labe
     if !ds.exists {
         return "not built".to_string();
     }
+    if let Some(total) = ds.partial_of {
+        return format!(
+            "(partial, {}/{total} {count_label} — resume: lean-ctx index build-semantic)",
+            ds.file_count.unwrap_or(0)
+        );
+    }
     // #1914: a persisted index that holds nothing is not "ready" — searches
     // against it return nothing, and the user must be able to tell.
     let state = if ds.file_count == Some(0) {
@@ -597,6 +586,7 @@ mod tests {
             size_bytes: Some(26),
             file_count: Some(0),
             modified_at: None,
+            partial_of: None,
         };
         assert_eq!(
             format_disk_line(&empty, "chunks"),
@@ -610,6 +600,22 @@ mod tests {
         assert_eq!(
             format_disk_line(&built, "chunks"),
             "(ready, 1200 chunks, 9.0 MB)"
+        );
+    }
+
+    #[test]
+    fn interrupted_semantic_build_is_reported_partial_with_resume_hint() {
+        use crate::core::index_orchestrator::DiskStatus;
+        let partial = DiskStatus {
+            exists: true,
+            size_bytes: Some(4096),
+            file_count: Some(1200),
+            modified_at: None,
+            partial_of: Some(5000),
+        };
+        assert_eq!(
+            format_disk_line(&partial, "vectors"),
+            "(partial, 1200/5000 vectors — resume: lean-ctx index build-semantic)"
         );
     }
 

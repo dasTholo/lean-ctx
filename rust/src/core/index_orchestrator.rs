@@ -117,6 +117,19 @@ fn bm25_index_lock_name(root: &Path) -> String {
     )
 }
 
+/// Per-repo lock name for the semantic (embedding) build. Two concurrent builds
+/// would each checkpoint `embeddings.bin` and overwrite the other's progress.
+fn semantic_index_lock_name(root: &Path) -> String {
+    format!(
+        "semantic-idx-{}",
+        &crate::core::index_namespace::namespace_hash(root)[..8]
+    )
+}
+
+/// A CPU-only embed of a large corpus can run for hours; a crashed holder is
+/// reclaimed at once through its PID, so this only bounds a frozen process.
+const SEMANTIC_LOCK_STALE_AFTER: std::time::Duration = std::time::Duration::from_hours(24);
+
 fn start_component(c: &mut Component) {
     c.state = State::Building;
     c.started_ms = Some(now_ms());
@@ -323,16 +336,7 @@ fn run_build_worker(root: &str) {
     // without RSS pressure checks — the guardian's abort/pressure flags never
     // fired. `start_guard` is idempotent: a second call within the same
     // process is a no-op.
-    crate::core::memory_guard::start_guard(std::sync::Arc::new(|level| {
-        tracing::warn!(
-            "[build_worker] memory pressure: {level:?} — background tasks will throttle"
-        );
-        if level >= crate::core::memory_guard::PressureLevel::Hard {
-            crate::core::content_cache::clear();
-        }
-        crate::core::memory_guard::force_purge();
-        true
-    }));
+    start_index_memory_guard("build_worker");
 
     // Graph, BM25, and the resident search index each retain substantial live
     // state. Running them concurrently defeats cache eviction because active
@@ -483,6 +487,22 @@ pub fn build_semantic(project_root: &str) {
     let state = entry_for(project_root);
     let root = Path::new(project_root);
 
+    let Some(_lock) = crate::core::startup_guard::try_acquire_lock(
+        &semantic_index_lock_name(root),
+        std::time::Duration::ZERO,
+        SEMANTIC_LOCK_STALE_AFTER,
+    ) else {
+        let mut s = state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        s.semantic.note = Some(
+            "another lean-ctx process is already building the semantic index for this project; \
+             it saves progress as it goes — check `lean-ctx index status` later"
+                .to_string(),
+        );
+        return;
+    };
+
     {
         let mut s = state
             .lock()
@@ -540,6 +560,42 @@ pub fn build_semantic(project_root: &str) {
                 Some("BM25 index is empty or unavailable — nothing to embed".to_string());
         }
     }
+}
+
+/// Build the semantic index on a background thread, after the graph + BM25 run
+/// when one is in flight or the BM25 index is missing. For MCP calls: a CPU
+/// embed of a large corpus outlives any tool-call timeout, and starting the
+/// embed before BM25 is on disk would find nothing to embed.
+pub fn build_semantic_background(project_root: &str) {
+    let root = project_root.to_string();
+    let spawned = std::thread::Builder::new()
+        .name("leanctx-semantic".to_string())
+        .stack_size(INDEXER_STACK_BYTES)
+        .spawn(move || {
+            start_index_memory_guard("semantic_build");
+            if !disk_status(&root).bm25_index.exists {
+                ensure_all_background(&root);
+            }
+            while progress_view(&root).graph_bm25_active() {
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+            build_semantic(&root);
+        });
+    if let Err(e) = spawned {
+        tracing::warn!("[index_orchestrator: could not spawn semantic worker: {e}]");
+    }
+}
+
+/// Start the memory guardian for an index build. Idempotent per process.
+fn start_index_memory_guard(label: &'static str) {
+    crate::core::memory_guard::start_guard(std::sync::Arc::new(move |level| {
+        tracing::warn!("[{label}] memory pressure: {level:?} — background tasks will throttle");
+        if level >= crate::core::memory_guard::PressureLevel::Hard {
+            crate::core::content_cache::clear();
+        }
+        crate::core::memory_guard::force_purge();
+        true
+    }));
 }
 
 /// Ensure background indexing for all extra roots (in addition to the primary).
@@ -874,6 +930,11 @@ pub struct DiskStatus {
     pub size_bytes: Option<u64>,
     pub file_count: Option<u64>,
     pub modified_at: Option<String>,
+    /// Semantic index only: total chunks when the persisted index is an
+    /// interrupted build's checkpoint (`file_count` then counts the embedded
+    /// ones). Absent for a complete index.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub partial_of: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Default)]
@@ -908,6 +969,7 @@ fn disk_status_for_graph(project_root: &str) -> DiskStatus {
         size_bytes: None,
         file_count,
         modified_at: meta.and_then(|m| m.modified().ok()).map(format_time),
+        partial_of: None,
     }
 }
 
@@ -923,6 +985,7 @@ fn disk_status_for_bm25(project_root: &str) -> DiskStatus {
         size_bytes: meta.as_ref().map(std::fs::Metadata::len),
         file_count: BM25Index::persisted_chunk_count(root),
         modified_at: meta.and_then(|m| m.modified().ok()).map(format_time),
+        partial_of: None,
     }
 }
 
@@ -946,6 +1009,7 @@ fn disk_status_for_code_graph(project_root: &str) -> DiskStatus {
         size_bytes: meta.as_ref().map(std::fs::Metadata::len),
         file_count: node_count,
         modified_at: meta.and_then(|m| m.modified().ok()).map(format_time),
+        partial_of: None,
     }
 }
 
@@ -966,11 +1030,13 @@ pub fn disk_status_for_semantic(project_root: &str) -> DiskStatus {
         return DiskStatus::default();
     }
     let meta = std::fs::metadata(&bin_path).ok();
+    let partial = crate::core::embedding_index::partial_progress(root);
     DiskStatus {
         exists: true,
         size_bytes: meta.as_ref().map(std::fs::Metadata::len),
-        file_count: None,
+        file_count: partial.map(|(done, _)| done),
         modified_at: meta.and_then(|m| m.modified().ok()).map(format_time),
+        partial_of: partial.map(|(_, total)| total),
     }
 }
 
