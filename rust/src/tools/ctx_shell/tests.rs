@@ -932,10 +932,14 @@ fn capture_into_the_project_and_allow_entries_is_allowed() {
     let mut allow = vec!["/tmp".to_string()];
     allow.extend(super::capture_roots(&project_s, &[], &cfg));
 
+    // Shell text uses `/` (a `\` is an escape to the POSIX tokenizer); Windows
+    // accepts it, and that is how agents spell paths in commands there.
+    let shell = |p: &std::path::Path| p.to_string_lossy().replace('\\', "/");
+    let (proj, shared_s) = (shell(project.path()), shell(shared.path()));
     for cmd in [
-        format!("cargo build 2>&1 > {project_s}/build.log"),
-        format!("echo x | tee {project_s}/out.txt"),
-        format!("echo x >> {}/notes.txt", shared.path().display()),
+        format!("cargo build 2>&1 > {proj}/build.log"),
+        format!("echo x | tee {proj}/out.txt"),
+        format!("echo x >> {shared_s}/notes.txt"),
     ] {
         assert!(
             validate_command_in_cwd(&cmd, &allow, None, Some(&project_s)).is_none(),
