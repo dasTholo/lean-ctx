@@ -455,6 +455,17 @@ fn file_scope_disambiguates_ambiguous_symbol() {
     .unwrap();
     let root = proj.to_string_lossy().to_string();
 
+    // Build the index explicitly so a failure names its cause. Late in a
+    // sequential release run the lazy build twice came back empty (NO_SYMBOL on
+    // macos-15-intel, then windows-msvc) while the parallel suite passed.
+    let index = crate::core::graph_index::scan(&root);
+    assert!(
+        index.files.len() >= 2,
+        "fixture index must cover both files: root={root} safe={} files={:?}",
+        crate::core::graph_index::is_safe_scan_root_public(&root),
+        index.files.keys().collect::<Vec<_>>()
+    );
+
     // Without file_scope: ambiguous (2 matches).
     let err = super::resolve_name_path("RenderBridge/execute", &root)
         .expect_err("should be ambiguous without file_scope");
