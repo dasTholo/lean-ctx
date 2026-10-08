@@ -227,10 +227,10 @@ pub(crate) fn execute_command_with_env_cancellable(
         cmd.env(key, val);
     }
     if is_build_or_test_command(command) {
-        if !extra_env.contains_key("CARGO_BUILD_JOBS") {
+        if resource_config.cargo_build_jobs > 0 && !extra_env.contains_key("CARGO_BUILD_JOBS") {
             cmd.env(
                 "CARGO_BUILD_JOBS",
-                resource_config.cargo_build_jobs.max(1).to_string(),
+                resource_config.cargo_build_jobs.to_string(),
             );
         }
         if resource_config.shared_cargo_target
@@ -692,7 +692,18 @@ mod tests {
 
     #[test]
     fn resource_broker_serializes_build_leases() {
-        let _isolation = crate::core::data_dir::isolated_data_dir();
+        let isolation = crate::core::data_dir::isolated_data_dir();
+        // Off by default: a user's builds are never queued behind other sessions.
+        assert!(
+            super::acquire_build_lease("cargo test", None)
+                .expect("lease")
+                .is_none()
+        );
+        std::fs::write(
+            isolation.path().join("config.toml"),
+            "[agents]\nserialize_build_commands = true\n",
+        )
+        .expect("opt in");
         let first = super::acquire_build_lease("cargo test first", None)
             .expect("first lease")
             .expect("build command gets lease");

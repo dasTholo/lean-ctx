@@ -109,7 +109,15 @@ Top-level configuration keys
 - `tools_enabled` (string[], default `[]`) — Explicit list of enabled tool names. Used only when no tool_profile is pinned (tool_profile takes precedence); leave tool_profile unset to apply this list. The universal invoker ctx_call stays advertised so unlisted tools remain reachable — add it to disabled_tools (disabled_tools = ["ctx_call"]) to make this allowlist authoritative.
 - `ultra_compact` (bool, default `false`) — Legacy flag for maximum compression (use compression_level instead)
 - `update_check_disabled` (bool, default `false` — env `LEAN_CTX_NO_UPDATE_CHECK`) — Disable the daily version check
-- `write_allow_paths` (string[], default `[]`) — Absolute paths allowed for ctx_shell redirects and tee output; empty = OS temp directories
+- `write_allow_paths` (string[], default `[]`) — Extra absolute paths for ctx_shell redirects, tee output and downloads, beyond the scratch dirs. Capture into the session's project and allow_paths/extra_roots is always allowed; empty = OS temp directories only
+
+## `[agents]`
+
+Build handling for ctx_shell in multi-agent setups. All opt-in; by default lean-ctx neither queues, throttles nor relocates your builds
+
+- `cargo_build_jobs` (usize, default `0`) — Opt-in: CARGO_BUILD_JOBS for builds run through ctx_shell. 0 (default) leaves cargo's own setting alone
+- `serialize_build_commands` (bool, default `false`) — Opt-in: run only one cargo/npm build or test at a time across all lean-ctx sessions on this machine; ctx_shell waits for the slot. Off by default
+- `shared_cargo_target` (bool, default `false`) — Opt-in: builds run through ctx_shell use one machine-wide CARGO_TARGET_DIR (<data dir>/build-cache/cargo-target) instead of ./target. Off by default — when on, a binary run from ./target is stale. An explicit CARGO_TARGET_DIR always wins
 
 ## `[archive]`
 

@@ -167,11 +167,17 @@ pub struct AgentsConfig {
     pub max_concurrent_mutating_workers: usize,
     /// Active worker lease. Missing heartbeats release capacity automatically.
     pub active_worker_lease_seconds: u64,
-    /// Serialize build/test commands across all lean-ctx sessions.
+    /// Opt-in: let only one cargo/npm build or test run at a time across all
+    /// lean-ctx sessions on this machine (ctx_shell waits for the slot).
+    /// Off by default — it queued every user's builds behind other sessions.
     pub serialize_build_commands: bool,
-    /// Cargo compiler processes per admitted build.
+    /// Opt-in: `CARGO_BUILD_JOBS` for builds run through ctx_shell. `0`
+    /// (default) leaves cargo's own setting alone.
     pub cargo_build_jobs: usize,
-    /// Reuse one machine-wide Cargo target directory across agent sessions.
+    /// Opt-in: point builds run through ctx_shell at one machine-wide
+    /// `CARGO_TARGET_DIR` (`<data dir>/build-cache/cargo-target`). Off by
+    /// default: when on, `./target` stops receiving the output, so a binary
+    /// run from there is stale.
     pub shared_cargo_target: bool,
     /// Max scratchpad entries before oldest are evicted.
     pub max_scratchpad_entries: usize,
@@ -188,9 +194,9 @@ impl Default for AgentsConfig {
             max_concurrent_workers: 12,
             max_concurrent_mutating_workers: 4,
             active_worker_lease_seconds: 120,
-            serialize_build_commands: true,
-            cargo_build_jobs: 3,
-            shared_cargo_target: true,
+            serialize_build_commands: false,
+            cargo_build_jobs: 0,
+            shared_cargo_target: false,
             max_scratchpad_entries: 200,
         }
     }
@@ -211,9 +217,11 @@ mod agents_config_tests {
         assert_eq!(cfg.max_concurrent_workers, 12);
         assert_eq!(cfg.max_concurrent_mutating_workers, 4);
         assert_eq!(cfg.active_worker_lease_seconds, 120);
-        assert!(cfg.serialize_build_commands);
-        assert_eq!(cfg.cargo_build_jobs, 3);
-        assert!(cfg.shared_cargo_target);
+        // Builds are the user's own: lean-ctx neither queues, throttles nor
+        // relocates them unless asked (a shared target made `./target` stale).
+        assert!(!cfg.serialize_build_commands);
+        assert_eq!(cfg.cargo_build_jobs, 0);
+        assert!(!cfg.shared_cargo_target);
         assert_eq!(cfg.max_scratchpad_entries, 200);
     }
 

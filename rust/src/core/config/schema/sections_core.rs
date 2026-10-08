@@ -864,7 +864,7 @@ pub(super) fn build(sections: &mut BTreeMap<String, SectionSchema>) {
         key(
             "string[]",
             serde_json::json!(cfg.write_allow_paths),
-            "Absolute paths allowed for ctx_shell redirects and tee output; empty = OS temp directories",
+            "Extra absolute paths for ctx_shell redirects, tee output and downloads, beyond the scratch dirs. Capture into the session's project and allow_paths/extra_roots is always allowed; empty = OS temp directories only",
         ),
     );
 
