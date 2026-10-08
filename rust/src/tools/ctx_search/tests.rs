@@ -177,6 +177,9 @@ fn warm_index_and_content_cache_path_returns_correct_matches() {
     // then this search reuses those bytes. Results must be byte-identical to
     // the walk path — this asserts that correctness, independent of whether
     // any individual file is a cache hit or a fallback re-read.
+    // Pin "no policy": a parallel test's override withheld both sources here
+    // ("2 sources withheld under policy", ubuntu main CI).
+    let _no_policy = crate::core::policy::runtime::TestPolicyOverride::set(None);
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("a.rs"),
