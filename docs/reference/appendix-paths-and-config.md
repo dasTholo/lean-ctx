@@ -229,8 +229,13 @@ configured extra roots do not bypass this check.
 All tool file access (`ctx_read`, `ctx_edit`, `ctx_tree`, …) is checked by
 **PathJail**. What it admits is set by `path_jail_scope` (since v3.11.1):
 
-- **`home` (default):** every path below your home directory is *readable* —
-  so all your projects work at once — except the protected zones: every
+- **`home` (default):** every *project* below your home directory is
+  *readable* — so all your projects work at once. A path counts when a folder
+  between it and `~` holds a project marker (`.git`, `Cargo.toml`,
+  `package.json`, `go.mod`, `pyproject.toml`, `Makefile`, …); loose personal
+  files (`~/Documents/taxes.pdf`, `~/Downloads`, `~/Desktop`) stay jailed
+  (since v3.11.2; v3.11.1 opened every path below `~`). Also excepted are the
+  protected zones: every
   top-level dot entry (`~/.ssh`, `~/.aws`, `~/.config`, `~/.zshrc`, other
   agents' `~/.claude` / `~/.codex` / `~/.cursor`, …) plus `~/Library` (macOS),
   `~/AppData` / `NTUSER.DAT*` (Windows) and `~/snap` (Linux). *Writes* stay

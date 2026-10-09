@@ -4,6 +4,12 @@ All notable changes to lean-ctx are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 Current positioning: [LeanCTX Engine — Context Gateway for AI Systems](docs/POSITIONING_CANONICAL.md).
 
+## [Unreleased]
+
+### Security
+
+- **The `home` jail scope opens projects, not your home directory.** 3.11.1 admitted every path below `~` for reading, so a prompt-injected agent could pull loose personal files (`~/Documents/taxes.pdf`, `~/Downloads`, `~/Desktop`) into the model context. A path is now admitted only when a folder between it and `~` holds a project marker (`.git`, `Cargo.toml`, `package.json`, `go.mod`, `pyproject.toml`, `Makefile`, …). Every repository below `~` stays readable; anything else needs `lean-ctx allow-path <dir>`, and the refusal says so.
+
 ## [3.11.1] — 2026-10-09
 
 ### Highlights

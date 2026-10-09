@@ -735,8 +735,8 @@ pub struct Config {
     #[serde(default)]
     pub path_jail: Option<bool>,
     /// What the enforced jail admits besides the project + allow-lists:
-    /// `home` (default — everything below `$HOME` except dot entries,
-    /// `~/Library`, `~/AppData`) or `project`. See `core::pathjail_scope`.
+    /// `home` (default — every project below `$HOME`, read-only, except dot
+    /// entries, `~/Library`, `~/AppData`) or `project`. See `core::pathjail_scope`.
     #[serde(default)]
     pub path_jail_scope: Option<String>,
     /// Sandbox level for code execution (ctx_exec).

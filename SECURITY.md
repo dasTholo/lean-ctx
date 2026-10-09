@@ -44,8 +44,10 @@ lean-ctx enforces a **filesystem boundary** for tool I/O:
 
 - **PathJail**: all tool path inputs are resolved (symlinks and `..` included) and checked
   against the jail scope (`path_jail_scope`, global-only):
-  - `home` (default since v3.11.1): every path below the user's home directory is readable,
-    except the protected zones — every top-level dot entry (`~/.ssh`, `~/.aws`, `~/.gnupg`,
+  - `home` (default since v3.11.1): every path inside a project below the user's home
+    directory is readable — a folder between it and `~` holds `.git`, `Cargo.toml`,
+    `package.json` or another project marker; loose personal files stay jailed (since
+    v3.11.2; v3.11.1 admitted every path below `~`) — except the protected zones — every top-level dot entry (`~/.ssh`, `~/.aws`, `~/.gnupg`,
     `~/.config`, shell rc files, other agents' `~/.claude` / `~/.codex` / `~/.cursor`),
     `~/Library`, `~/AppData` / `NTUSER.DAT*` and `~/snap`. Writes stay limited to the session's
     project, host-declared roots and explicit allow entries. Everything outside `~` stays jailed.

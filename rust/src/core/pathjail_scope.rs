@@ -6,8 +6,10 @@
 //! root" on every cross-project read, and the suggested fixes — one allow entry
 //! per directory, or env vars that need an MCP restart — did not scale.
 //!
-//! - `home` (**default**): every path below the user's home directory is
-//!   admitted, except the protected zones where credentials and other
+//! - `home` (**default**): every path inside a project below the user's home
+//!   directory is admitted for reading (a directory between it and `~` holds
+//!   `.git`, `Cargo.toml`, … — loose personal files are not), except the
+//!   protected zones where credentials and other
 //!   programs' private state live (every top-level dot entry such as `~/.ssh`,
 //!   `~/.aws`, `~/.config`, `~/.zshrc` or other agents' `~/.claude`, plus
 //!   `~/Library` on macOS, `~/AppData` and the `NTUSER.DAT*` registry hive on
@@ -130,10 +132,16 @@ fn protected_zone_in(path: &Path, home: &Path) -> Option<PathBuf> {
     protected.then(|| home.join(first))
 }
 
-/// True when the `home` scope admits the canonical path `base`: it lies
-/// strictly below the home directory and outside every protected zone. The
-/// home directory itself is not admitted — a tree walk rooted there would
-/// descend into `~/Library` and friends.
+/// True when the `home` scope admits the canonical path `base`: it lies inside
+/// a project below the home directory and outside every protected zone.
+///
+/// "Inside a project" — some directory between `base` and `~` (not `~`
+/// itself) carries a project marker (`.git`, `Cargo.toml`, `package.json`, …).
+/// The scope exists so agents can read the user's other repositories; loose
+/// personal files (`~/Documents/taxes.pdf`, `~/Downloads/contract.pdf`,
+/// `~/Desktop`) are not code and stay jailed, so a prompt-injected agent cannot
+/// pull them into the model context. The home directory itself is never
+/// admitted — a tree walk rooted there would descend into `~/Library`.
 pub(crate) fn home_scope_admits(base: &Path) -> bool {
     if PathJailScope::resolve() != PathJailScope::Home {
         return false;
@@ -141,11 +149,26 @@ pub(crate) fn home_scope_admits(base: &Path) -> bool {
     let Some(home) = scope_home() else {
         return false;
     };
-    admits_below(base, &home)
+    admits_below(base, &home) && project_containing(base, &home).is_some()
 }
 
 fn admits_below(base: &Path, home: &Path) -> bool {
     first_component_below(base, home).is_some() && protected_zone_in(base, home).is_none()
+}
+
+/// The nearest directory at or above `path`, strictly below `home`, that
+/// carries a project marker. `has_project_marker` keeps its TCC guard: a
+/// launchd-owned process never probes `~/Documents` & co., so there the scope
+/// admits nothing and the project boundary applies (fail closed).
+fn project_containing(path: &Path, home: &Path) -> Option<PathBuf> {
+    let mut cur = if path.is_dir() { path } else { path.parent()? };
+    while cur != home && cur.starts_with(home) {
+        if crate::core::pathutil::has_project_marker(cur) {
+            return Some(cur.to_path_buf());
+        }
+        cur = cur.parent()?;
+    }
+    None
 }
 
 /// Protected zones are a deny, not only a gap in the widening: a root or allow
@@ -291,7 +314,16 @@ pub(crate) fn escape_hint(candidate: &Path, base: &Path, root: &Path) -> String 
 
     let suggestion = suggested_allow_dir(base, home.as_deref());
     let under_home = scope_home().is_some_and(|h| admits_below(base, &h));
-    // Only reachable with the `project` scope: `home` admits these paths.
+    // `home` scope: below ~ but not inside any project — loose personal files.
+    if under_home && PathJailScope::resolve() == PathJailScope::Home {
+        return format!(
+            ". {} is in your home directory but not inside a project (no .git, Cargo.toml, \
+             package.json, … above it), so the home scope does not open it — loose \
+             personal files stay private. To allow it: lean-ctx allow-path {}{TAIL}",
+            candidate.display(),
+            suggestion.display()
+        );
+    }
     if under_home {
         return format!(
             ". {} is outside the active project ({}). Allow every project in your home \
@@ -383,8 +415,14 @@ mod tests {
             std::fs::create_dir_all(dir).unwrap();
         }
         std::fs::create_dir_all(a.join(".git")).unwrap();
+        std::fs::write(b.join("Cargo.toml"), "[package]").unwrap();
+        std::fs::create_dir_all(b.join("src")).unwrap();
+        std::fs::write(b.join("src/lib.rs"), "x").unwrap();
         std::fs::write(b.join("lib.rs"), "x").unwrap();
         std::fs::write(ssh.join("id_ed25519"), "secret").unwrap();
+        let docs = home.join("Documents/Steuern");
+        std::fs::create_dir_all(&docs).unwrap();
+        std::fs::write(docs.join("2025.pdf"), "private").unwrap();
         let outside = tmp.path().join("outside.txt");
         std::fs::write(&outside, "x").unwrap();
 
@@ -397,6 +435,16 @@ mod tests {
             jail(&b.join("lib.rs"), &a).is_ok(),
             "sibling project under ~"
         );
+        assert!(
+            jail(&b.join("src/lib.rs"), &a).is_ok(),
+            "nested file of a sibling project"
+        );
+        // Loose personal files and folders that only *contain* projects stay
+        // jailed: the scope opens code, not the home directory.
+        let err = jail(&docs.join("2025.pdf"), &a).unwrap_err().to_string();
+        assert!(err.contains("not inside a project"), "{err}");
+        assert!(jail(&docs, &a).is_err(), "a folder without a project");
+        assert!(jail(&home.join("code"), &a).is_err(), "parent of projects");
         let err = jail(&ssh.join("id_ed25519"), &a).unwrap_err().to_string();
         assert!(err.contains("protected location"), "{err}");
         let err = jail(&outside, &a).unwrap_err().to_string();

@@ -222,7 +222,8 @@ fn print_usage() {
          \x20      lean-ctx allow-path --list             Show the jail scope + extra directories\n\
          \x20      lean-ctx allow-path --remove <dir>     Remove a directory you added\n\
          \n\
-         With the default `path_jail_scope = home`, every project below your home directory\n\
+         With the default `path_jail_scope = home`, every project (a folder with .git,\n\
+         Cargo.toml, package.json, …) below your home directory\n\
          is readable and the session's own project is writable. Use this to edit another\n\
          project, for directories outside ~ (/opt/src, /srv/repo) or for one protected\n\
          location (~/.config/myapp). Read + write; takes effect immediately, no restart.\n\
