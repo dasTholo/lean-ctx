@@ -115,13 +115,32 @@ fn windows_replace(tmp: &Path, path: &Path) -> std::io::Result<()> {
     let tmp_w = to_wide(tmp);
     let path_w = to_wide(path);
 
-    // SAFETY: both vectors own NUL-terminated UTF-16 buffers and remain alive
-    // for the duration of the call.
-    let ok = unsafe { MoveFileExW(tmp_w.as_ptr(), path_w.as_ptr(), MOVEFILE_REPLACE_EXISTING) };
-    if ok == 0 {
-        return Err(std::io::Error::last_os_error());
+    // A reader, Defender or the search indexer briefly holding `path` open
+    // without FILE_SHARE_DELETE makes the replace fail with ACCESS_DENIED (5)
+    // or SHARING_VIOLATION (32) until the handle closes. Those are transient:
+    // retry with backoff for about a second before reporting the error.
+    const ACCESS_DENIED: i32 = 5;
+    const SHARING_VIOLATION: i32 = 32;
+    let mut delay = std::time::Duration::from_millis(5);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    loop {
+        // SAFETY: both vectors own NUL-terminated UTF-16 buffers and remain
+        // alive for the duration of the call.
+        let ok = unsafe { MoveFileExW(tmp_w.as_ptr(), path_w.as_ptr(), MOVEFILE_REPLACE_EXISTING) };
+        if ok != 0 {
+            return Ok(());
+        }
+        let error = std::io::Error::last_os_error();
+        let transient = matches!(
+            error.raw_os_error(),
+            Some(ACCESS_DENIED | SHARING_VIOLATION)
+        );
+        if !transient || std::time::Instant::now() >= deadline {
+            return Err(error);
+        }
+        std::thread::sleep(delay);
+        delay = (delay * 2).min(std::time::Duration::from_millis(100));
     }
-    Ok(())
 }
 
 /// Best-effort `fsync` of a directory's inode so a preceding `rename`/`create`

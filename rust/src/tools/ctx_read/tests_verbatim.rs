@@ -5,6 +5,9 @@ use super::*;
 /// self-describing legend. End-to-end through the real read pipeline.
 #[test]
 fn anchored_mode_emits_line_hash_anchors() {
+    // Reads go raw while another test holds LEAN_CTX_DISABLED=1; reading the
+    // environment under the same lock keeps this test out of that window.
+    let _env = crate::core::data_dir::test_env_lock();
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("anc.rs");
     let p = path.to_string_lossy().to_string();
@@ -37,6 +40,7 @@ fn anchored_mode_emits_line_hash_anchors() {
 /// anchors back.
 #[test]
 fn anchored_mode_is_not_capped_to_raw_on_small_files() {
+    let _env = crate::core::data_dir::test_env_lock();
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("tiny.rs");
     let p = path.to_string_lossy().to_string();

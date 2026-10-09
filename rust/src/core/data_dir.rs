@@ -218,6 +218,11 @@ pub fn test_env_lock() -> TestEnvGuard {
     TestEnvGuard { _private: () }
 }
 
+/// Whether the current thread holds [`test_env_lock`].
+pub fn holds_test_env_lock() -> bool {
+    TEST_ENV_DEPTH.with(|depth| depth.get() > 0)
+}
+
 /// RAII guard for [`test_env_lock`]. Dropping the outermost one releases the
 /// underlying mutex; nested guards just decrement the depth.
 pub struct TestEnvGuard {

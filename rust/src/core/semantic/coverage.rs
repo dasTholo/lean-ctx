@@ -193,7 +193,10 @@ pub fn record_negotiated(language: &str, info: &crate::lsp::capabilities::Semant
     else {
         return;
     };
-    if crate::core::file_lock::acquire_exclusive_timeout(&lock, std::time::Duration::from_secs(2))
+    // Each holder does a read, a serialize and an fsync'd atomic write; on a
+    // loaded disk several queued starts outlast 2 s and the late ones silently
+    // dropped their entry. Once per backend start, so waiting longer is cheap.
+    if crate::core::file_lock::acquire_exclusive_timeout(&lock, std::time::Duration::from_secs(10))
         .is_err()
     {
         return;

@@ -277,14 +277,11 @@ fn format_provider_health(provider: &ProviderHealth) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
 
     use super::{
         ConnectivityProbe, ProviderHealth, build_report, check_provider_health,
         env_var_for_provider, format_health_report,
     };
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn health(reachable: bool, cache_fresh: bool) -> ProviderHealth {
         ProviderHealth {
@@ -310,20 +307,15 @@ mod tests {
 
     #[test]
     fn test_provider_health_env_only_available() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = crate::core::data_dir::test_env_lock();
         let original = std::env::var_os("GITHUB_TOKEN");
-        // SAFETY: test-only, serialized by ENV_LOCK
-        unsafe {
-            std::env::set_var("GITHUB_TOKEN", "test-token");
-        }
+        crate::test_env::set_var("GITHUB_TOKEN", "test-token");
 
         let result = check_provider_health("github-test", "github", ConnectivityProbe::EnvOnly);
 
         match original {
-            // SAFETY: test-only, serialized by ENV_LOCK
-            Some(value) => unsafe { std::env::set_var("GITHUB_TOKEN", value) },
-            // SAFETY: test-only, serialized by ENV_LOCK
-            None => unsafe { std::env::remove_var("GITHUB_TOKEN") },
+            Some(value) => crate::test_env::set_var("GITHUB_TOKEN", value),
+            None => crate::test_env::remove_var("GITHUB_TOKEN"),
         }
         assert!(result.reachable);
         assert!(result.latency_ms.is_none());
@@ -332,20 +324,14 @@ mod tests {
 
     #[test]
     fn test_provider_health_env_only_unavailable() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = crate::core::data_dir::test_env_lock();
         let original = std::env::var_os("GITHUB_TOKEN");
-        // SAFETY: test-only, serialized by ENV_LOCK
-        unsafe {
-            std::env::remove_var("GITHUB_TOKEN");
-        }
+        crate::test_env::remove_var("GITHUB_TOKEN");
 
         let result = check_provider_health("github-test", "github", ConnectivityProbe::EnvOnly);
 
         if let Some(value) = original {
-            // SAFETY: test-only, serialized by ENV_LOCK
-            unsafe {
-                std::env::set_var("GITHUB_TOKEN", value);
-            }
+            crate::test_env::set_var("GITHUB_TOKEN", value);
         }
         assert!(!result.reachable);
         assert_eq!(result.error.as_deref(), Some("GITHUB_TOKEN not set"));

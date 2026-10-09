@@ -9,6 +9,20 @@ fn policy() -> TestPolicyOverride {
     ).unwrap()))
 }
 
+/// `store` never blocks on the shared pool (try_lock), and tests elsewhere in
+/// the crate hold it for a moment; a single attempt can miss on contention
+/// alone. Retry for a bounded while — an in-budget entry must land.
+fn stored(text: &str) -> String {
+    (0..500)
+        .find_map(|_| {
+            store(text).or_else(|| {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+                None
+            })
+        })
+        .expect("in-budget entry is stored once the pool is free")
+}
+
 fn scope<T>(root: &Path, operation: impl FnOnce() -> T) -> T {
     // Other full-suite tests change the process-wide role without the data-dir
     // guard. Keep this fixture's expected caller independent of those tests.
@@ -174,7 +188,7 @@ fn references_filter_current_output_rules() {
 fn expired_or_modified_reference_is_not_retrievable() {
     let _data = crate::core::data_dir::isolated_data_dir();
     let _policy = TestPolicyOverride::set(None);
-    let id = store("ttl payload").unwrap();
+    let id = stored("ttl payload");
     store_lock()
         .lock()
         .unwrap()
@@ -182,7 +196,7 @@ fn expired_or_modified_reference_is_not_retrievable() {
         .unwrap()
         .created_at = Instant::now().checked_sub(TTL).unwrap();
     assert!(resolve(&id).is_none());
-    let id = store("integrity payload").unwrap();
+    let id = stored("integrity payload");
     store_lock().lock().unwrap().get_mut(&id).unwrap().content = Arc::from("substituted content");
     assert!(resolve(&id).is_none());
 }
@@ -192,7 +206,7 @@ fn invalid_policy_cannot_restore_or_create_an_unbound_reference() {
     let _data = crate::core::data_dir::isolated_data_dir();
     let _policy = TestPolicyOverride::set(None);
     let root = tempfile::tempdir().unwrap();
-    let id = store("community retained payload").unwrap();
+    let id = stored("community retained payload");
     std::fs::create_dir(root.path().join(".lean-ctx")).unwrap();
     std::fs::write(root.path().join(".lean-ctx/policy.toml"), "[invalid").unwrap();
     scope(root.path(), || {
@@ -206,7 +220,7 @@ fn invalid_policy_cannot_restore_or_create_an_unbound_reference() {
 fn resolve_waits_out_a_concurrent_store_instead_of_reporting_missing() {
     let _data = crate::core::data_dir::isolated_data_dir();
     let _policy = TestPolicyOverride::set(None);
-    let id = store("briefly contended payload").unwrap();
+    let id = stored("briefly contended payload");
     let held = store_lock().lock().unwrap();
     let (tx, rx) = std::sync::mpsc::channel();
     let resolver = std::thread::spawn({

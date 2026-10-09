@@ -16,17 +16,23 @@ struct TelemetryIdentity {
     deletion_token: String,
 }
 
+#[cfg(test)]
 fn id_path() -> Result<PathBuf, String> {
-    crate::core::paths::data_dir().map(|d| d.join("installation_id"))
+    crate::core::paths::data_dir().map(|d| d.join(ID_FILE))
 }
 
+#[cfg(test)]
 fn deletion_token_path() -> Result<PathBuf, String> {
-    crate::core::paths::data_dir().map(|d| d.join("telemetry_deletion_token"))
+    crate::core::paths::data_dir().map(|d| d.join(TOKEN_FILE))
 }
 
 fn identity_path() -> Result<PathBuf, String> {
-    crate::core::paths::data_dir().map(|d| d.join("telemetry_identity.json"))
+    crate::core::paths::data_dir().map(|d| d.join(IDENTITY_FILE))
 }
+
+const ID_FILE: &str = "installation_id";
+const TOKEN_FILE: &str = "telemetry_deletion_token";
+const IDENTITY_FILE: &str = "telemetry_identity.json";
 
 /// When the current identity was created: the file's birth time where the
 /// filesystem records one, otherwise its last write (identity files are only
@@ -86,8 +92,16 @@ fn sibling_identity(current: &std::path::Path) -> Option<TelemetryIdentity> {
         .map(|(_, identity)| identity)
 }
 
-fn with_deletion_lock<T>(operation: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
-    let lock_path = crate::core::paths::data_dir()?.join("telemetry_deletion_token.lock");
+/// Run `operation` under the credential lock, handing it the data directory
+/// the lock lives in. Every identity file the operation touches must come from
+/// that directory: resolving it again inside could name a different one (the
+/// data-dir env changed meanwhile), and two writers would then interleave the
+/// sidecar retirement unlocked — minting a second ID next to the old token.
+fn with_deletion_lock<T>(
+    operation: impl FnOnce(&std::path::Path) -> Result<T, String>,
+) -> Result<T, String> {
+    let dir = crate::core::paths::data_dir()?;
+    let lock_path = dir.join("telemetry_deletion_token.lock");
     if let Some(parent) = lock_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("Cannot create data dir: {e}"))?;
     }
@@ -103,7 +117,7 @@ fn with_deletion_lock<T>(operation: impl FnOnce() -> Result<T, String>) -> Resul
         .map_err(|e| format!("Cannot open telemetry credential lock: {e}"))?;
     lock.lock_exclusive()
         .map_err(|e| format!("Cannot lock telemetry credential: {e}"))?;
-    let result = operation();
+    let result = operation(&dir);
     FileExt::unlock(&lock).map_err(|e| format!("Cannot unlock telemetry credential: {e}"))?;
     result
 }
@@ -115,15 +129,15 @@ pub(crate) fn get_or_create() -> Result<String, String> {
 
 /// Read one lock-consistent installation ID and deletion credential snapshot.
 pub(crate) fn get_or_create_identity() -> Result<(String, String), String> {
-    with_deletion_lock(|| {
-        let path = identity_path()?;
+    with_deletion_lock(|dir| {
+        let path = dir.join(IDENTITY_FILE);
         if let Ok(raw) = std::fs::read_to_string(&path) {
             if let Ok(identity) = serde_json::from_str::<TelemetryIdentity>(&raw) {
                 if is_valid_uuid(&identity.installation_id)
                     && is_lower_hex_256(&identity.deletion_token)
                 {
                     tighten_secret_permissions(&path)?;
-                    retire_legacy_sidecars()?;
+                    retire_legacy_sidecars(dir)?;
                     return Ok((identity.installation_id, identity.deletion_token));
                 }
             }
@@ -131,23 +145,23 @@ pub(crate) fn get_or_create_identity() -> Result<(String, String), String> {
         // A legacy sidecar in this directory is this directory's own identity;
         // only a directory without one adopts the user's identity from a
         // sibling data directory instead of minting a second one.
-        let own_sidecar = id_path()?.is_file();
+        let own_sidecar = dir.join(ID_FILE).is_file();
         if !own_sidecar && let Some(identity) = sibling_identity(&path) {
             persist_identity(&path, &identity)?;
             return Ok((identity.installation_id, identity.deletion_token));
         }
         let identity = TelemetryIdentity {
-            installation_id: load_or_create_id()?,
-            deletion_token: load_or_create_token()?,
+            installation_id: load_or_create_id(dir)?,
+            deletion_token: load_or_create_token(dir)?,
         };
         persist_identity(&path, &identity)?;
-        retire_legacy_sidecars()?;
+        retire_legacy_sidecars(dir)?;
         Ok((identity.installation_id, identity.deletion_token))
     })
 }
 
-fn load_or_create_id() -> Result<String, String> {
-    let path = id_path()?;
+fn load_or_create_id(dir: &std::path::Path) -> Result<String, String> {
+    let path = dir.join(ID_FILE);
     if let Ok(existing) = std::fs::read_to_string(&path) {
         let trimmed = existing.trim().to_string();
         if is_valid_uuid(&trimmed) {
@@ -161,13 +175,13 @@ fn load_or_create_id() -> Result<String, String> {
 
 /// Regenerate the installation ID (for `lean-ctx telemetry reset-id`).
 pub(crate) fn reset() -> Result<String, String> {
-    with_deletion_lock(|| {
+    with_deletion_lock(|dir| {
         let identity = TelemetryIdentity {
             installation_id: generate_uuid_v4(),
             deletion_token: generate_deletion_token(),
         };
-        persist_identity(&identity_path()?, &identity)?;
-        retire_legacy_sidecars()?;
+        persist_identity(&dir.join(IDENTITY_FILE), &identity)?;
+        retire_legacy_sidecars(dir)?;
         Ok(identity.installation_id)
     })
 }
@@ -178,8 +192,8 @@ pub(crate) fn deletion_token() -> Result<String, String> {
     Ok(get_or_create_identity()?.1)
 }
 
-fn load_or_create_token() -> Result<String, String> {
-    let path = deletion_token_path()?;
+fn load_or_create_token(dir: &std::path::Path) -> Result<String, String> {
+    let path = dir.join(TOKEN_FILE);
     if let Ok(existing) = std::fs::read_to_string(&path) {
         let token = existing.trim().to_string();
         if is_lower_hex_256(&token) {
@@ -228,8 +242,8 @@ fn persist_secret(path: &std::path::Path, token: &str) -> Result<(), String> {
     tighten_secret_permissions(path)
 }
 
-fn retire_legacy_sidecars() -> Result<(), String> {
-    for path in [id_path()?, deletion_token_path()?] {
+fn retire_legacy_sidecars(dir: &std::path::Path) -> Result<(), String> {
+    for path in [dir.join(ID_FILE), dir.join(TOKEN_FILE)] {
         match std::fs::remove_file(&path) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -397,6 +411,33 @@ mod tests {
         assert!(sibling_identity(&legacy.join("telemetry_identity.json")).is_none());
         let _pinned = EnvVarGuard::set("LEAN_CTX_DATA_DIR", Some(xdg.to_str().unwrap()));
         assert!(sibling_identity(&xdg.join("telemetry_identity.json")).is_none());
+    }
+
+    /// The credential lock and the files it guards come from one data-dir
+    /// resolution. A writer whose env moved on mid-operation used to lock one
+    /// directory and write another, racing an owner of that second directory
+    /// through the sidecar retirement (CI: a fresh ID next to the old token).
+    #[test]
+    fn locked_operations_stay_in_the_directory_they_locked() {
+        let iso = crate::core::data_dir::isolated_data_dir();
+        let locked = iso.path().to_path_buf();
+        let elsewhere = tempfile::tempdir().unwrap();
+
+        let id = with_deletion_lock(|dir| {
+            crate::test_env::set_var("LEAN_CTX_DATA_DIR", elsewhere.path());
+            let id = load_or_create_id(dir);
+            crate::test_env::set_var("LEAN_CTX_DATA_DIR", &locked);
+            id
+        })
+        .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(locked.join(ID_FILE))
+                .unwrap()
+                .trim(),
+            id
+        );
+        assert!(!elsewhere.path().join(ID_FILE).exists());
     }
 
     #[test]

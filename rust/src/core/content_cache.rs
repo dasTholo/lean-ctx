@@ -329,6 +329,7 @@ pub mod tests {
     #[test]
     #[serial(cache_telemetry)]
     fn hit_after_insert_with_matching_state() {
+        let _env_lock = crate::core::data_dir::test_env_lock();
         let _g = TEST_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -345,6 +346,7 @@ pub mod tests {
     #[test]
     #[serial(cache_telemetry)]
     fn miss_paths_update_local_and_central_stats() {
+        let _env_lock = crate::core::data_dir::test_env_lock();
         let _g = TEST_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -379,6 +381,7 @@ pub mod tests {
     #[test]
     #[serial(cache_telemetry)]
     fn warm_hit_updates_local_and_central_stats() {
+        let _env_lock = crate::core::data_dir::test_env_lock();
         let _g = TEST_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -408,6 +411,7 @@ pub mod tests {
     #[test]
     #[serial(cache_telemetry)]
     fn mtime_or_size_change_invalidates() {
+        let _env_lock = crate::core::data_dir::test_env_lock();
         let _g = TEST_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -441,6 +445,7 @@ pub mod tests {
     #[test]
     #[serial(cache_telemetry)]
     fn get_or_read_populates_then_serves_from_cache() {
+        let _env_lock = crate::core::data_dir::test_env_lock();
         let _g = TEST_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -482,6 +487,7 @@ pub mod tests {
     #[test]
     #[serial(cache_telemetry)]
     fn eviction_keeps_cache_within_budget() {
+        let _env_lock = crate::core::data_dir::test_env_lock();
         let _g = TEST_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
