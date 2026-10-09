@@ -715,13 +715,29 @@ mod tests {
         assert!(budget_warning_due(&role, "cost", 85)); // other dimension independent
     }
 
+    /// Project an event into the in-memory ring only. The filter tests are
+    /// about `events_since`, not persistence: routing them through the shared
+    /// SQLite observation store made them queue behind every other emitting
+    /// test, and on windows-latest that queue outlasted even a 30 s retry.
+    fn record_in_ring(kind: EventKind) -> u64 {
+        let id = next_event_id();
+        bus().record(LeanCtxEvent {
+            id,
+            timestamp: chrono::Local::now()
+                .format("%Y-%m-%dT%H:%M:%S%.3f")
+                .to_string(),
+            kind,
+        });
+        id
+    }
+
     #[test]
     fn events_since_filters_correctly() {
-        let id1 = emit_persisted(&EventKind::CacheHit {
+        let id1 = record_in_ring(EventKind::CacheHit {
             path: "filter_test_a.rs".to_string(),
             saved_tokens: 100,
         });
-        let id2 = emit_persisted(&EventKind::CacheHit {
+        let id2 = record_in_ring(EventKind::CacheHit {
             path: "filter_test_b.rs".to_string(),
             saved_tokens: 200,
         });
