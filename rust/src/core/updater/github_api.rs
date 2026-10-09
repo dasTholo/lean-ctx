@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 use super::{CURRENT_VERSION, https_agent};
 
 /// A GitHub token for the updater's API calls (#2037): `GITHUB_TOKEN`,
