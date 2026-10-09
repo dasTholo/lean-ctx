@@ -4,7 +4,14 @@ All notable changes to lean-ctx are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 Current positioning: [LeanCTX Engine — Context Gateway for AI Systems](docs/POSITIONING_CANONICAL.md).
 
-## [Unreleased]
+## [3.11.2] — 2026-10-09
+
+Updater and security hotfix for 3.11.1. Agent Tools protocol, configuration and data formats are unchanged.
+
+### Upgrade notes
+
+- **Updating from 3.11.0 or 3.11.1 needs one manual step.** Their built-in updater stops after downloading and verifying a release with `Failed to complete durable update transaction: prepared transaction is missing its integrity digest`, and scheduled automatic updates fail the same way. Nothing is changed or damaged: the installed binary keeps running. Install this release once through the channel you installed with — `curl -fsSL https://leanctx.com/install.sh | sh`, `brew upgrade lean-ctx`, `npm i -g lean-ctx-bin@latest`, `cargo install lean-ctx --force` or your AUR helper — and `lean-ctx update` and automatic updates work again from then on.
+- **Windows on 3.11.0** (#2039): the 3.11.0 updater also needs the external `cosign` tool and looks for it under that exact name; installing cosign does not help, because its update then stops at the error above. Extract the Windows ZIP of this release over your `lean-ctx.exe`, or update through npm. From 3.11.1 on, no external tool is needed.
 
 ### Security
 
@@ -14,6 +21,12 @@ Current positioning: [LeanCTX Engine — Context Gateway for AI Systems](docs/PO
 ### Fixed
 
 - **Codex threads recorded while ChatGPT routing was on stay resumable.** Codex stamps `model_provider = "leanctx-chatgpt"` into every such thread and refuses to resume it once that provider is missing (`Model provider 'leanctx-chatgpt' not found`). `lean-ctx doctor --fix`, `proxy` runs and stale-proxy cleanup deleted the `[model_providers.leanctx-chatgpt]` block by name, including the direct one users restored by hand. Cleanup now only touches a block that targets the local proxy, and repoints it at `https://chatgpt.com/backend-api/codex` instead of deleting it; a block aimed anywhere else is kept verbatim and no longer reported as routed or broken.
+- **`ctx_multi_repo action=search` without a query says so.** While a content policy was active, the call was refused with the cross-project policy message instead of `query is required for search`.
+- **No downgrade as "update".** Without an explicit version, `lean-ctx update` and scheduled updates only install a release newer than the running build; a build ahead of GitHub's latest release was offered, and on a schedule installed, the older release. `lean-ctx update <version>` and `--pin` still install any version on purpose.
+- **GitHub API rate limit** (#2037): the updater now sends `GITHUB_TOKEN`, `GH_TOKEN` or `LEAN_CTX_GITHUB_TOKEN` when set (only to api.github.com, without following redirects), raising GitHub's limit from 60 requests per hour per IP address to 5000. An exhausted quota now says so, with the reset time and the fix, instead of `http status: 403`; a rejected token reports `401 Bad credentials`. The background version check uses the same client.
+- **`lean-ctx update` and `lean-ctx update --rollback` complete again.** The updater sealed each prepared transaction with its integrity digest when writing it to disk, but then executed the unsealed copy, which the integrity check rejected every time. The updater now executes exactly the sealed transaction it persisted. A new test runs the real prepare → execute → recover path on a stand-in binary.
+- **macOS: the update signature is applied before the swap.** The updater re-signed the installed binary after moving it into place (#356, so the TCC grant survives), which changed its bytes after the transaction had recorded them; the update then stopped with "active binary does not match prepared target". The staged binary is now signed first, and the receipt records exactly the bytes that are installed; the release manifest and archive digests still record its provenance.
+- **A reinstall no longer blocks later updates.** A failed 3.11.0/3.11.1 run leaves a prepared transaction behind; after a manual reinstall the updater refused every update with "active binary matches neither prepared state". Recovery now recognizes a transaction that a build at least as new as its target has superseded and removes its staged files without touching the binary. Likewise, an update receipt from a different, earlier version no longer refuses updates ("current binary differs from the active receipt"); the updater starts a new receipt from the running binary. A binary that differs from a receipt of the same version is still refused.
 
 ## [3.11.1] — 2026-10-09
 

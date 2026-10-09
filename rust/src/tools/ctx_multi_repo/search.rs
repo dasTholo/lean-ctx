@@ -26,6 +26,10 @@ pub(super) fn handle_search(
     roots_filter: Option<&[String]>,
     mode: Option<&str>,
 ) -> (String, usize) {
+    // A malformed call is answered as such, whatever the content policy state.
+    let Some(query) = query else {
+        return ("ERROR: query is required for search".to_string(), 0);
+    };
     crate::core::policy::runtime::with_source_view(|| {
         if crate::core::policy::runtime::is_active() {
             return (
@@ -39,15 +43,11 @@ pub(super) fn handle_search(
 }
 
 fn handle_search_in_view(
-    query: Option<&str>,
+    query: &str,
     max_results: usize,
     roots_filter: Option<&[String]>,
     mode: Option<&str>,
 ) -> (String, usize) {
-    let Some(query) = query else {
-        return ("ERROR: query is required for search".to_string(), 0);
-    };
-
     let mode = mode.unwrap_or("hybrid").trim().to_ascii_lowercase();
     match mode.as_str() {
         "bm25" => bm25_search(query, max_results, roots_filter),

@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 
 #[path = "updater/flow.rs"]
 mod flow;
+#[path = "updater/github_api.rs"]
+mod github_api;
 #[path = "updater/transaction.rs"]
 mod transaction;
 
@@ -15,7 +17,14 @@ use transaction::{
     recover_pending_transaction, rollback_to_previous,
 };
 #[cfg(test)]
-use transaction::{cleanup_orphaned_prepared_files, orphan_prepared_paths, write_update_receipt};
+use transaction::{
+    cleanup_orphaned_prepared_files, orphan_prepared_paths, rollback_installation,
+    write_update_receipt,
+};
+
+pub(crate) use github_api::github_api_json;
+#[cfg(test)]
+use github_api::{github_token, rate_limit_message};
 
 mod platform;
 use platform::{gpu_next_steps, gpu_platform_asset_name, platform_asset_name};
@@ -385,17 +394,22 @@ fn fetch_api_json(url: &str) -> Result<serde_json::Value, String> {
             "refusing GitHub API URL outside canonical repository: {url}"
         ));
     }
-    let response = https_agent()
-        .get(url)
-        .header("User-Agent", &format!("lean-ctx/{CURRENT_VERSION}"))
-        .header("Accept", "application/vnd.github.v3+json")
-        .call()
-        .map_err(|e| e.to_string())?;
-    response
-        .into_body()
-        .read_to_string()
-        .map_err(|e| e.to_string())
-        .and_then(|body| serde_json::from_str(&body).map_err(|e| e.to_string()))
+    github_api_json(url)
+}
+
+/// Whether `target` is an update for the running `current` build. Without an
+/// explicit version only a newer release counts: a build ahead of GitHub's
+/// "latest" (a fresh release before it is marked latest, a development build)
+/// must never be "updated" — or, on a schedule, silently downgraded — to an
+/// older one. `lean-ctx update <version>` and `--pin` install any other
+/// version on purpose.
+fn offers_update(target: &str, current: &str, pinned: bool) -> bool {
+    let target = target.trim_start_matches('v');
+    if pinned {
+        target != current
+    } else {
+        crate::core::version_check::is_newer(target, current)
+    }
 }
 
 fn verify_release_commit(release_tag: &str, expected_commit: &str) -> Result<(), String> {
@@ -1072,18 +1086,7 @@ fn https_agent() -> ureq::Agent {
 /// Fetches release metadata from GitHub. `version = None` returns the latest
 /// release; `Some(v)` returns the specific tagged release for version pinning.
 fn fetch_release(version: Option<&str>) -> Result<serde_json::Value, String> {
-    let response = https_agent()
-        .get(&release_api_url(version))
-        .header("User-Agent", &format!("lean-ctx/{CURRENT_VERSION}"))
-        .header("Accept", "application/vnd.github.v3+json")
-        .call()
-        .map_err(|e| e.to_string())?;
-
-    response
-        .into_body()
-        .read_to_string()
-        .map_err(|e| e.to_string())
-        .and_then(|s| serde_json::from_str(&s).map_err(|e| e.to_string()))
+    github_api_json(&release_api_url(version))
 }
 
 /// Extracts an explicit version argument from `update` args, if present.
@@ -1143,6 +1146,26 @@ fn extract_binary(archive_bytes: &[u8], asset_name: &str) -> Result<Vec<u8>, Str
     } else {
         extract_from_tar_gz(archive_bytes)
     }
+}
+
+/// #356: on macOS, sign the staged update with the persistent identity (ad-hoc
+/// fallback) so the TCC grant survives the update. Done before the swap: a
+/// signature added after it would change the installed bytes behind the
+/// transaction's back, and the commit check would refuse the update.
+/// Returns the bytes as they will be installed.
+fn sign_staged_binary(staged_path: &std::path::Path, bytes: &[u8]) -> Result<Vec<u8>, String> {
+    #[cfg(target_os = "macos")]
+    let installed = {
+        let _ = bytes;
+        let _ = crate::core::codesign::sign_binary(staged_path);
+        std::fs::read(staged_path).map_err(|e| format!("cannot read signed staged binary: {e}"))
+    };
+    #[cfg(not(target_os = "macos"))]
+    let installed = {
+        let _ = staged_path;
+        Ok(bytes.to_vec())
+    };
+    installed
 }
 
 fn replace_staged_binary(
@@ -1212,18 +1235,13 @@ fn replace_staged_binary(
     {
         // Same-filesystem rename is atomic and retains the old inode on
         // Unix/macOS, so a failed swap cannot leave the install path absent.
+        // The staged file is installed byte for byte: on macOS it was signed
+        // while staged (`sign_staged_binary`), so the receipt and the commit
+        // check see exactly the installed bytes.
         std::fs::rename(staged_path, current_exe).map_err(|e| {
             let _ = std::fs::remove_file(staged_path);
             format!("Cannot replace binary (permission denied?): {e}")
         })?;
-
-        // #356: re-sign with the persistent identity when available so the
-        // macOS TCC grant survives the update; ad-hoc fallback keeps it runnable.
-        #[cfg(target_os = "macos")]
-        {
-            let _ = crate::core::codesign::sign_binary(current_exe);
-        }
-
         Ok(())
     }
 }

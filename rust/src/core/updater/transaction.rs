@@ -9,8 +9,9 @@ use super::{
     UPDATE_TRANSACTION_FILE, UPDATE_TRANSACTION_SCHEMA, UpdateReceipt, VerifiedArtifact,
     atomic_write_bytes, canonical_current_exe, canonical_state_dir, canonical_update_paths,
     constant_time_eq, ensure_no_symlink_under, load_update_receipt_for, previous_binary_path,
-    receipt_digest, replace_staged_binary, sha256_hex, staged_update_path, update_layout,
-    update_lock_path, update_transaction_path, validate_receipt, validate_receipt_paths,
+    receipt_digest, replace_staged_binary, sha256_hex, sign_staged_binary, staged_update_path,
+    update_layout, update_lock_path, update_transaction_path, validate_receipt,
+    validate_receipt_paths,
 };
 
 pub(super) struct UpdateLock {
@@ -107,10 +108,13 @@ pub(super) fn validate_prepared_transaction(
     Ok(())
 }
 
+/// Seals `transaction` with its integrity digest, persists it, and returns the
+/// sealed copy. Callers must execute the returned value: the unsealed input
+/// has no digest and `validate_prepared_transaction` rejects it.
 pub(super) fn write_prepared_transaction(
     transaction: &PreparedTransaction,
     current_exe: &Path,
-) -> Result<(), String> {
+) -> Result<PreparedTransaction, String> {
     let state = canonical_state_dir()?;
     update_layout(&state)?;
     let mut sealed = transaction.clone();
@@ -134,7 +138,8 @@ pub(super) fn write_prepared_transaction(
     sealed.transaction_sha256 = Some(transaction_digest(&sealed)?);
     let bytes = serde_json::to_vec_pretty(&sealed).map_err(|e| e.to_string())?;
     let path = update_transaction_path()?;
-    atomic_write_bytes(&path, &[bytes.as_slice(), b"\n"].concat())
+    atomic_write_bytes(&path, &[bytes.as_slice(), b"\n"].concat())?;
+    Ok(sealed)
 }
 
 pub(super) fn load_prepared_transaction(
@@ -277,14 +282,19 @@ pub(super) fn prepare_update_transaction(
         return Err("current binary is empty".to_string());
     }
     let current_sha = sha256_hex(&current);
-    let existing = load_update_receipt_for(current_exe)?;
+    let mut existing = load_update_receipt_for(current_exe)?;
     if let Some(receipt) = &existing {
         if receipt.active.size != current.len() as u64
             || !constant_time_eq(receipt.active.sha256.as_bytes(), current_sha.as_bytes())
         {
-            return Err(
-                "current binary differs from the active receipt; refusing update".to_string(),
-            );
+            if !receipt_outdated_by_external_install(receipt) {
+                return Err(
+                    "current binary differs from the active receipt; refusing update".to_string(),
+                );
+            }
+            // Reinstalled from outside the updater: start a new receipt chain
+            // from the running binary instead of refusing forever.
+            existing = None;
         }
     }
     let old_active = existing
@@ -304,16 +314,6 @@ pub(super) fn prepare_update_transaction(
             archive_sha256: None,
             release_commit: None,
         });
-    let target_active = BinaryReceipt {
-        version: target_version.to_string(),
-        asset: asset_name.to_string(),
-        sha256: sha256_hex(binary),
-        size: binary.len() as u64,
-        path: current_path.to_string_lossy().into_owned(),
-        manifest_sha256: Some(verified.manifest_sha256.clone()),
-        archive_sha256: Some(verified.archive_sha256.clone()),
-        release_commit: Some(verified.release_commit.clone()),
-    };
     let target_previous = BinaryReceipt {
         path: previous_path.to_string_lossy().into_owned(),
         ..old_active.clone()
@@ -329,7 +329,21 @@ pub(super) fn prepare_update_transaction(
         }
     }
     atomic_write_bytes(&staged_path, binary)?;
+    // The verified release binary, signed for this machine where the platform
+    // needs it: the receipt records exactly the bytes that will be installed,
+    // while the manifest and archive digests keep the release provenance.
+    let installed = sign_staged_binary(&staged_path, binary)?;
     atomic_write_bytes(&backup_path, &current)?;
+    let target_active = BinaryReceipt {
+        version: target_version.to_string(),
+        asset: asset_name.to_string(),
+        sha256: sha256_hex(&installed),
+        size: installed.len() as u64,
+        path: current_path.to_string_lossy().into_owned(),
+        manifest_sha256: Some(verified.manifest_sha256.clone()),
+        archive_sha256: Some(verified.archive_sha256.clone()),
+        release_commit: Some(verified.release_commit.clone()),
+    };
     let transaction = PreparedTransaction {
         schema_version: UPDATE_TRANSACTION_SCHEMA.to_string(),
         operation: "update".to_string(),
@@ -342,8 +356,7 @@ pub(super) fn prepare_update_transaction(
         target_previous,
         transaction_sha256: None,
     };
-    write_prepared_transaction(&transaction, &current_path)?;
-    Ok(transaction)
+    write_prepared_transaction(&transaction, &current_path)
 }
 
 pub(super) fn commit_prepared_transaction(
@@ -441,11 +454,45 @@ pub(super) fn recover_pending_transaction(current_exe: &Path) -> Result<bool, St
         cleanup_prepared_transaction(&transaction)?;
         return Ok(false);
     }
+    if superseded_by_external_install(&transaction) {
+        cleanup_prepared_transaction(&transaction)?;
+        return Ok(false);
+    }
     Err("active binary matches neither prepared state; refusing recovery".to_string())
+}
+
+/// A prepared update the binary has already outgrown: something other than
+/// the updater (install script, package manager, `cargo install`) replaced
+/// it with a build at least as new as the transaction's target. The
+/// 3.11.0/3.11.1 updater left such transactions behind on every run, because
+/// it executed the unsealed copy. Dropping the staged files is safe; the
+/// active binary is not touched.
+fn superseded_by_external_install(transaction: &PreparedTransaction) -> bool {
+    transaction.operation == "update"
+        && !crate::core::version_check::is_newer(
+            &transaction.target_active.version,
+            CURRENT_VERSION,
+        )
+}
+
+/// Whether `receipt` describes an earlier install that something other than
+/// the updater replaced with a different version. Its rollback chain no
+/// longer applies; a same-version mismatch stays a refusal.
+fn receipt_outdated_by_external_install(receipt: &UpdateReceipt) -> bool {
+    receipt.active.version.trim_start_matches('v') != CURRENT_VERSION
 }
 
 pub(super) fn rollback_to_previous() -> Result<(), String> {
     let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    rollback_installation(&current_exe)
+}
+
+/// Restores the retained previous binary over `current_exe`.
+pub(super) fn rollback_installation(current_exe: &Path) -> Result<(), String> {
+    // The transaction validator requires canonical paths, like an update does;
+    // an executable reached through a symlinked directory (`/var` on macOS)
+    // would otherwise fail with "non-canonical path".
+    let current_exe = canonical_current_exe(current_exe)?;
     let _lock = acquire_update_lock()?;
     if recover_pending_transaction(&current_exe)? {
         return Ok(());
@@ -496,6 +543,6 @@ pub(super) fn rollback_to_previous() -> Result<(), String> {
         target_previous,
         transaction_sha256: None,
     };
-    write_prepared_transaction(&transaction, &current_exe)?;
-    execute_prepared_transaction(&transaction, &current_exe)
+    let sealed = write_prepared_transaction(&transaction, &current_exe)?;
+    execute_prepared_transaction(&sealed, &current_exe)
 }
