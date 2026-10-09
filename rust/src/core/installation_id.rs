@@ -437,7 +437,16 @@ mod tests {
                 .trim(),
             id
         );
-        assert!(!elsewhere.path().join(ID_FILE).exists());
+        // Not "no file there": while the env pointed at `elsewhere`, a
+        // background thread from another test may have minted its own
+        // identity in it (exactly the writer this fix guards against). What
+        // must hold is that *this* operation's ID never went there.
+        let stray = std::fs::read_to_string(elsewhere.path().join(ID_FILE)).unwrap_or_default();
+        assert_ne!(
+            stray.trim(),
+            id,
+            "the locked operation wrote outside its lock"
+        );
     }
 
     #[test]
