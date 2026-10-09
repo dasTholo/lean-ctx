@@ -110,7 +110,15 @@ impl Target {
         let Ok(lock) = open_append(&lock_path) else {
             return;
         };
-        let deadline = Instant::now() + Duration::from_millis(50);
+        // Diagnostics must never stall a tool call, so a contended write is
+        // dropped after 50 ms. Tests that queue a writer behind a held lock
+        // cannot meet that bound on a loaded runner and saw the write vanish.
+        let wait = if cfg!(test) {
+            Duration::from_secs(10)
+        } else {
+            Duration::from_millis(50)
+        };
+        let deadline = Instant::now() + wait;
         loop {
             match lock.try_lock_exclusive() {
                 Ok(()) => break,
