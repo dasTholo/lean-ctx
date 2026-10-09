@@ -347,7 +347,7 @@ jobs:
 
   clippy:
     name: Clippy
-    runs-on: ${{ (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')) && vars.SELF_HOSTED_CI != 'off' && fromJSON('["self-hosted","pounce"]') || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4 # v4
         with:
@@ -356,7 +356,6 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        if: runner.environment == 'github-hosted'
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: rust -> target
@@ -376,7 +375,7 @@ jobs:
   # warnings are not denied here (override the workflow-wide -Dwarnings).
   build-minimal:
     name: Build (no embeddings / no ORT)
-    runs-on: ${{ (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')) && vars.SELF_HOSTED_CI != 'off' && fromJSON('["self-hosted","pounce"]') || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     env:
       RUSTFLAGS: ""
     steps:
@@ -385,7 +384,6 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        if: runner.environment == 'github-hosted'
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: rust -> target
@@ -565,7 +563,7 @@ jobs:
     # Deliberately NOT called an SDK: the LeanCTX SDK is thinkery-leanctx-sdk
     # (Thinkery-AG/leanctx-sdk). See docs/reference/sdk-surface.md.
     name: Embed facade (lean-ctx-embed)
-    runs-on: ${{ (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')) && vars.SELF_HOSTED_CI != 'off' && fromJSON('["self-hosted","pounce"]') || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4 # v4
         with:
@@ -574,7 +572,6 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        if: runner.environment == 'github-hosted'
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: rust -> target
@@ -695,14 +692,13 @@ jobs:
 
   adversarial:
     name: Adversarial Safety
-    runs-on: ${{ (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')) && vars.SELF_HOSTED_CI != 'off' && fromJSON('["self-hosted","pounce"]') || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4 # v4
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        if: runner.environment == 'github-hosted'
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: rust -> target
@@ -712,14 +708,13 @@ jobs:
 
   gateway-proof:
     name: Gateway Proof (60 scenarios, 26 bypass paths)
-    runs-on: ${{ (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')) && vars.SELF_HOSTED_CI != 'off' && fromJSON('["self-hosted","pounce"]') || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4 # v4
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        if: runner.environment == 'github-hosted'
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: rust -> target
@@ -730,14 +725,13 @@ jobs:
 
   bench:
     name: Benchmarks
-    runs-on: ${{ (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')) && vars.SELF_HOSTED_CI != 'off' && fromJSON('["self-hosted","pounce"]') || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        if: runner.environment == 'github-hosted'
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: rust -> target
@@ -762,7 +756,7 @@ jobs:
 
   quality-gate:
     name: Output-Quality Gate (eval A/B)
-    runs-on: ${{ (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')) && vars.SELF_HOSTED_CI != 'off' && fromJSON('["self-hosted","pounce"]') || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4 # v4
@@ -770,7 +764,6 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        if: runner.environment == 'github-hosted'
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: rust -> target
