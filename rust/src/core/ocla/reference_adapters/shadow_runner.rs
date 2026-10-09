@@ -498,12 +498,27 @@ mod tests {
         let hash = super::super::rtk_shell::sha256_file(&binary).expect("hash fake RTK");
         // Bound fixture preparation separately; this exercises observation pairing,
         // while production retains its fixed version-probe deadline.
-        let prepared = crate::core::process_capture::run_with_output_limits(
-            std::process::Command::new(&binary).arg("--version"),
-            Some(std::time::Duration::from_secs(10)),
-            16 * 1024,
-            16 * 1024,
-        )
+        // A test thread that forked while the write handle above was open holds
+        // it until its child execs, and exec of the fresh script then fails with
+        // ETXTBSY (seen on Linux CI). Retry only that error, as in
+        // lsp::format's `spawn_fresh_script`; once one spawn succeeds, no
+        // inherited handle is left and the adapter's own spawns are unaffected.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let prepared = loop {
+            match crate::core::process_capture::run_with_output_limits(
+                std::process::Command::new(&binary).arg("--version"),
+                Some(std::time::Duration::from_secs(10)),
+                16 * 1024,
+                16 * 1024,
+            ) {
+                Err(error)
+                    if error.contains("Text file busy") && std::time::Instant::now() < deadline =>
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                result => break result,
+            }
+        }
         .expect("prepare RTK fixture");
         assert!(!prepared.timed_out && prepared.output.status.success());
         let adapter = RtkShellAdapter::new(

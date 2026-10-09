@@ -562,6 +562,39 @@ pub(crate) fn set_test_active_role(role: Role) {
     TEST_ACTIVE_ROLE.with(|slot| *slot.borrow_mut() = Some(role));
 }
 
+/// Held by every test that changes the process-wide role with
+/// [`set_active_role`]: serializes them and restores the previous role on
+/// drop, so a switch to `reviewer` or `admin` neither races another such test
+/// nor leaks into unrelated tests. Tests that only need a role for their own
+/// thread use [`with_test_active_role`] instead.
+#[cfg(test)]
+pub(crate) struct GlobalRoleGuard {
+    previous: String,
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+
+#[cfg(test)]
+pub(crate) fn lock_global_role() -> GlobalRoleGuard {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let lock = LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    GlobalRoleGuard {
+        previous: active_role_name(),
+        _lock: lock,
+    }
+}
+
+#[cfg(test)]
+impl Drop for GlobalRoleGuard {
+    fn drop(&mut self) {
+        let slot = ACTIVE_ROLE_NAME.get_or_init(|| std::sync::Mutex::new(String::new()));
+        *slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = self.previous.clone();
+    }
+}
+
 /// Roles that grant elevated privileges and cannot be activated via MCP tool calls.
 /// These roles must be set via env var (`LEAN_CTX_ROLE`) or config file.
 const PRIVILEGED_ROLES: &[&str] = &["admin", "ops"];
@@ -853,6 +886,7 @@ pub mod tests {
 
     #[test]
     fn runtime_escalation_to_admin_blocked() {
+        let _role = lock_global_role();
         let result = set_active_role("admin");
         assert!(
             result.is_err(),
@@ -867,12 +901,14 @@ pub mod tests {
 
     #[test]
     fn runtime_escalation_to_ops_blocked() {
+        let _role = lock_global_role();
         let result = set_active_role("ops");
         assert!(result.is_err(), "runtime escalation to ops must be blocked");
     }
 
     #[test]
     fn config_escalation_to_admin_allowed() {
+        let _role = lock_global_role();
         let result = set_active_role_with_source("admin", true);
         assert!(
             result.is_ok(),
@@ -882,12 +918,14 @@ pub mod tests {
 
     #[test]
     fn runtime_switch_to_coder_allowed() {
+        let _role = lock_global_role();
         let result = set_active_role("coder");
         assert!(result.is_ok(), "switching to coder must always work");
     }
 
     #[test]
     fn runtime_switch_to_reviewer_allowed() {
+        let _role = lock_global_role();
         let result = set_active_role("reviewer");
         assert!(result.is_ok(), "switching to reviewer must always work");
     }
@@ -930,6 +968,7 @@ pub mod tests {
 
     #[test]
     fn invalid_role_name_rejected_at_set() {
+        let _role = lock_global_role();
         let result = set_active_role("../../evil");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Invalid role name"));
@@ -957,6 +996,7 @@ pub mod tests {
 
     #[test]
     fn debugger_runtime_switch_allowed() {
+        let _role = lock_global_role();
         let result = set_active_role("debugger");
         assert!(
             result.is_ok(),
