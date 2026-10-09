@@ -4,7 +4,13 @@ All notable changes to lean-ctx are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 Current positioning: [LeanCTX Engine — Context Gateway for AI Systems](docs/POSITIONING_CANONICAL.md).
 
-## [Unreleased]
+## [3.11.2] — 2026-10-09
+
+Updater and security hotfix for 3.11.1. Agent Tools protocol, configuration and data formats are unchanged.
+
+### Upgrade notes
+
+- **Updating from 3.11.0 or 3.11.1 needs one manual step.** Their built-in updater stops after downloading and verifying a release with `Failed to complete durable update transaction: prepared transaction is missing its integrity digest`, and scheduled automatic updates fail the same way. Nothing is changed or damaged: the installed binary keeps running. Install this release once through the channel you installed with — `curl -fsSL https://leanctx.com/install.sh | sh`, `brew upgrade lean-ctx`, `npm i -g lean-ctx-bin@latest`, `cargo install lean-ctx --force` or your AUR helper — and `lean-ctx update` and automatic updates work again from then on.
 
 ### Security
 
@@ -14,6 +20,11 @@ Current positioning: [LeanCTX Engine — Context Gateway for AI Systems](docs/PO
 ### Fixed
 
 - **Codex threads recorded while ChatGPT routing was on stay resumable.** Codex stamps `model_provider = "leanctx-chatgpt"` into every such thread and refuses to resume it once that provider is missing (`Model provider 'leanctx-chatgpt' not found`). `lean-ctx doctor --fix`, `proxy` runs and stale-proxy cleanup deleted the `[model_providers.leanctx-chatgpt]` block by name, including the direct one users restored by hand. Cleanup now only touches a block that targets the local proxy, and repoints it at `https://chatgpt.com/backend-api/codex` instead of deleting it; a block aimed anywhere else is kept verbatim and no longer reported as routed or broken.
+
+### Fixed
+
+- **`lean-ctx update` and `lean-ctx update --rollback` complete again.** The updater sealed each prepared transaction with its integrity digest when writing it to disk, but then executed the unsealed copy, which the integrity check rejected every time. The updater now executes exactly the sealed transaction it persisted. A new test runs the real prepare → execute → recover path on a stand-in binary.
+- **A reinstall no longer blocks later updates.** A failed 3.11.0/3.11.1 run leaves a prepared transaction behind; after a manual reinstall the updater refused every update with "active binary matches neither prepared state". Recovery now recognizes a transaction that a build at least as new as its target has superseded and removes its staged files without touching the binary. Likewise, an update receipt from a different, earlier version no longer refuses updates ("current binary differs from the active receipt"); the updater starts a new receipt from the running binary. A binary that differs from a receipt of the same version is still refused.
 
 ## [3.11.1] — 2026-10-09
 
