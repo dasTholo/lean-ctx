@@ -11,6 +11,10 @@ Current positioning: [LeanCTX Engine — Context Gateway for AI Systems](docs/PO
 - **The `home` jail scope opens projects, not your home directory.** 3.11.1 admitted every path below `~` for reading, so a prompt-injected agent could pull loose personal files (`~/Documents/taxes.pdf`, `~/Downloads`, `~/Desktop`) into the model context. A path is now admitted only when a folder between it and `~` holds a project marker (`.git`, `Cargo.toml`, `package.json`, `go.mod`, `pyproject.toml`, `Makefile`, …). Every repository below `~` stays readable; anything else needs `lean-ctx allow-path <dir>`, and the refusal says so.
 - **`redirect_exclude` from an untrusted workspace is withheld (#2034).** Paths in `redirect_exclude` skip the native-read hook redirect and with it the redaction that path applies. In 3.11.1 a repository's own `.lean-ctx.toml` could extend the list even when the workspace was not trusted, so a cloned repository could opt its reads out (for example with `["**"]`) on hosts where the read redirect is active. Such a list is now ignored with a `[SECURITY]` warning until you run `lean-ctx trust`; the global config and `LEAN_CTX_HOOK_EXCLUDE` still apply.
 
+### Fixed
+
+- **Codex threads recorded while ChatGPT routing was on stay resumable.** Codex stamps `model_provider = "leanctx-chatgpt"` into every such thread and refuses to resume it once that provider is missing (`Model provider 'leanctx-chatgpt' not found`). `lean-ctx doctor --fix`, `proxy` runs and stale-proxy cleanup deleted the `[model_providers.leanctx-chatgpt]` block by name, including the direct one users restored by hand. Cleanup now only touches a block that targets the local proxy, and repoints it at `https://chatgpt.com/backend-api/codex` instead of deleting it; a block aimed anywhere else is kept verbatim and no longer reported as routed or broken.
+
 ## [3.11.1] — 2026-10-09
 
 ### Highlights

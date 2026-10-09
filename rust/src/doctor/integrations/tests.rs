@@ -47,6 +47,21 @@ fn codex_chatgpt_proxy_artifact_detects_only_top_level_entries() {
         ),
         OptInRouted
     );
+    // The direct provider block keeps routed-era threads resumable and
+    // routes nothing → native, so `doctor --fix` leaves it alone.
+    assert_eq!(
+        classify_codex_proxy_entries(
+            "model = \"gpt-5.5\"\n\n[model_providers.leanctx-chatgpt]\nname = \"OpenAI\"\nbase_url = \"https://chatgpt.com/backend-api/codex\"\n"
+        ),
+        Native
+    );
+    // A routed block left behind without its pin is stale.
+    assert_eq!(
+        classify_codex_proxy_entries(
+            "[model_providers.leanctx-chatgpt]\nbase_url = \"http://127.0.0.1:8765/backend-api/codex\"\n"
+        ),
+        Artifact
+    );
     // Default provider → native.
     assert_eq!(
         classify_codex_proxy_entries("model_provider = \"openai\"\n"),

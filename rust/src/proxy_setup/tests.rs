@@ -557,14 +557,17 @@ fn codex_env_chatgpt_optin_toggle_off_restores_native() {
         "opt-in writes provider"
     );
 
-    // OFF → stripped back to native.
+    // OFF → no pin, no proxy URL; the provider id stays resolvable (aimed at
+    // ChatGPT directly) so threads recorded while ON can still be resumed.
     install_codex_env_at_mode(&codex_dir, port, true, CodexProxyMode::ChatGpt, false);
     let off = std::fs::read_to_string(codex_dir.join("config.toml")).unwrap();
     assert!(
-        !off.contains("model_provider")
+        !off.contains("model_provider =")
             && !off.contains("chatgpt_base_url")
-            && !off.contains(CODEX_CHATGPT_PROVIDER_ID)
-            && !off.contains("127.0.0.1"),
+            && !off.contains("127.0.0.1")
+            && off.contains(&format!(
+                "base_url = \"{CODEX_CHATGPT_DIRECT_BASE}/backend-api/codex\""
+            )),
         "toggling opt-in off restores native config, got:\n{off}"
     );
     assert!(off.contains("model = \"gpt-5.5\""), "user keys preserved");
@@ -611,8 +614,10 @@ fn codex_env_chatgpt_mode_writes_backend_url_idempotently() {
     install_codex_env_at_mode(&codex_dir, port, true, CodexProxyMode::ApiKey, false);
     let off = std::fs::read_to_string(codex_dir.join("config.toml")).unwrap();
     assert!(
-        !off.contains("chatgpt_base_url") && !off.contains(CODEX_CHATGPT_PROVIDER_ID),
-        "API-key mode must remove ChatGPT-only config, got:\n{off}"
+        !off.contains("chatgpt_base_url")
+            && !off.contains("model_provider =")
+            && !off.contains(&format!("127.0.0.1:{port}/backend-api")),
+        "API-key mode must remove ChatGPT-only routing, got:\n{off}"
     );
     assert!(off.contains(&format!("openai_base_url = \"http://127.0.0.1:{port}/v1\"")));
     assert!(off.contains("model = \"gpt-5.5\""));
@@ -692,8 +697,8 @@ fn strip_codex_proxy_entries_preserves_nested_model_provider() {
     let out = strip_codex_proxy_entries(&body);
 
     assert!(
-        !out.contains(&format!("[model_providers.{CODEX_CHATGPT_PROVIDER_ID}]")),
-        "generated provider block must be removed, got:\n{out}"
+        !out.contains("http://127.0.0.1:4444/backend-api/codex"),
+        "generated provider block must stop targeting the proxy, got:\n{out}"
     );
     assert!(
         out.contains(

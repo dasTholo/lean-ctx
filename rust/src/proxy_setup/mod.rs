@@ -19,6 +19,10 @@ mod tests;
 #[path = "tests_codex_rail.rs"]
 mod tests_codex_rail;
 
+#[cfg(test)]
+#[path = "tests_codex_provider.rs"]
+mod tests_codex_provider;
+
 use std::path::Path;
 
 use crate::marked_block;

@@ -1,5 +1,6 @@
 //! Codex CLI config.toml proxy wiring.
 
+use std::borrow::Cow;
 use std::path::Path;
 
 use super::util::is_proxy_reachable;
@@ -207,7 +208,14 @@ pub(crate) fn render_codex_config(
     append_block: Option<&str>,
     port: u16,
 ) -> String {
-    let mut cleaned = strip_owned_codex_entries(existing, Some(port));
+    // The appended block is the provider itself: any existing copy must go, or
+    // the table is declared twice and config.toml stops parsing.
+    let provider_block = if append_block.is_some() {
+        ProviderBlock::Drop
+    } else {
+        ProviderBlock::Repoint
+    };
+    let mut cleaned = strip_owned_codex_entries(existing, Some(port), provider_block);
     if entries.iter().any(|(key, _)| *key == "model_provider") {
         cleaned = strip_top_level_codex_config_key(&cleaned, "model_provider");
         cleaned = strip_top_level_codex_config_key(&cleaned, "chatgpt_base_url");
@@ -270,29 +278,77 @@ pub(crate) fn strip_top_level_codex_config_key(body: &str, key: &str) -> String 
 /// ChatGPT provider block. Endpoints lean-ctx did not write — remote or on
 /// another localhost port (#1972) — and profile tables are preserved.
 pub(crate) fn strip_codex_proxy_entries(body: &str) -> String {
-    strip_owned_codex_entries(body, None)
+    strip_owned_codex_entries(body, None, ProviderBlock::Repoint)
+}
+
+/// Where the generated provider points once nothing routes through the proxy.
+/// Codex stamps `model_provider = "leanctx-chatgpt"` into every rollout recorded
+/// while routing was on and refuses to resume such a thread once that provider
+/// id is gone ("Model provider 'leanctx-chatgpt' not found"). Cleanup therefore
+/// repoints the block straight at ChatGPT instead of deleting it.
+pub(crate) const CODEX_CHATGPT_DIRECT_BASE: &str = "https://chatgpt.com";
+
+/// What a strip pass does with a `[model_providers.leanctx-chatgpt]` block that
+/// targets lean-ctx's local proxy. A block aimed anywhere else is the user's
+/// (typically the direct one that keeps old threads resumable) and is kept.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProviderBlock {
+    /// Routing is being (re)installed and appends a fresh block.
+    Drop,
+    /// Routing is off: keep the provider id, aim it at ChatGPT directly.
+    Repoint,
 }
 
 /// [`strip_codex_proxy_entries`] that also owns `install_port`, the port an
 /// install pass is about to write, so its own previous value is replaced.
-fn strip_owned_codex_entries(body: &str, install_port: Option<u16>) -> String {
+fn strip_owned_codex_entries(
+    body: &str,
+    install_port: Option<u16>,
+    provider_block: ProviderBlock,
+) -> String {
     let lines: Vec<&str> = body.lines().collect();
-    let mut kept: Vec<&str> = Vec::with_capacity(lines.len());
+    let mut kept: Vec<Cow<'_, str>> = Vec::with_capacity(lines.len());
     let mut current_table: Option<&str> = None;
     let mut i = 0;
     while i < lines.len() {
         let trimmed = lines[i].trim();
         if is_generated_codex_chatgpt_provider_header(trimmed) {
-            i += 1;
-            while i < lines.len() && !lines[i].trim_start().starts_with('[') {
-                i += 1;
+            let end = lines[i + 1..]
+                .iter()
+                .position(|l| l.trim_start().starts_with('['))
+                .map_or(lines.len(), |n| i + 1 + n);
+            let block = &lines[i..end];
+            let local = block.iter().any(|l| {
+                is_local_codex_base_url_entry(l.trim_start(), &["base_url"], install_port)
+            });
+            match (provider_block, local) {
+                (ProviderBlock::Drop, _) => {}
+                (ProviderBlock::Repoint, true) => {
+                    kept.extend(block.iter().map(|l| {
+                        if is_local_codex_base_url_entry(
+                            l.trim_start(),
+                            &["base_url"],
+                            install_port,
+                        ) {
+                            Cow::Owned(format!(
+                                "base_url = \"{CODEX_CHATGPT_DIRECT_BASE}/backend-api/codex\""
+                            ))
+                        } else {
+                            Cow::Borrowed(*l)
+                        }
+                    }));
+                }
+                (ProviderBlock::Repoint, false) => {
+                    kept.extend(block.iter().map(|l| Cow::Borrowed(*l)));
+                }
             }
+            i = end;
             continue;
         }
 
         if lines[i].trim_start().starts_with('[') {
             current_table = Some(trimmed);
-            kept.push(lines[i]);
+            kept.push(Cow::Borrowed(lines[i]));
             i += 1;
             continue;
         }
@@ -302,9 +358,10 @@ fn strip_owned_codex_entries(body: &str, install_port: Option<u16>) -> String {
             continue;
         }
 
-        kept.push(lines[i]);
+        kept.push(Cow::Borrowed(lines[i]));
         i += 1;
     }
+    let kept: Vec<&str> = kept.iter().map(AsRef::as_ref).collect();
 
     // Drop an `[env]` header left without any keys after the removal.
     let mut out: Vec<&str> = Vec::with_capacity(kept.len());
@@ -423,9 +480,6 @@ pub(crate) fn codex_config_has_local_proxy_entry(body: &str) -> bool {
     let mut current_table: Option<&str> = None;
     for line in body.lines() {
         let t = line.trim_start();
-        if is_generated_codex_chatgpt_provider_header(line.trim()) {
-            return true;
-        }
         if t.starts_with('[') {
             current_table = Some(line.trim());
             continue;
@@ -444,6 +498,14 @@ pub(crate) fn codex_config_has_local_proxy_entry(body: &str) -> bool {
                     &["OPENAI_BASE_URL", "CHATGPT_BASE_URL"],
                     None,
                 ) =>
+            {
+                return true;
+            }
+            // The generated provider counts only while it targets the proxy;
+            // the direct ChatGPT one routes nothing and must survive cleanup.
+            Some(table)
+                if is_generated_codex_chatgpt_provider_header(table)
+                    && is_local_codex_base_url_entry(t, &["base_url"], None) =>
             {
                 return true;
             }
