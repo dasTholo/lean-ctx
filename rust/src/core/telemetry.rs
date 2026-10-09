@@ -21,11 +21,17 @@ static METRICS: OnceLock<Metrics> = OnceLock::new();
 pub(crate) const TOOL_LATENCY_BUCKET_UPPER_MS: [u64; 9] =
     [10, 50, 100, 250, 500, 1_000, 5_000, 60_000, i64::MAX as u64];
 
-/// Calls and failures of one tool since process start.
+/// Distinct (tool, failure template) pairs one process keeps.
+pub(crate) const MAX_FAILURE_TEMPLATES: usize = 256;
+
+/// Calls, failures and summed latency of one tool since process start.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct ToolCallCounter {
     pub calls: u64,
     pub failures: u64,
+    pub latency_us: u64,
+    /// Failures by [`crate::core::telemetry_failure::FAILURE_KINDS`] index.
+    pub failure_kinds: [u64; crate::core::telemetry_failure::FAILURE_KINDS.len()],
 }
 
 pub fn global_metrics() -> &'static Metrics {
@@ -38,6 +44,8 @@ pub struct Metrics {
     /// half-applied call, and holds the per-tool counts. Keys are the static
     /// names of the built-in tool registry, never caller-supplied strings.
     tool_call_consistency: std::sync::Mutex<BTreeMap<&'static str, ToolCallCounter>>,
+    /// Scrubbed failure templates per built-in tool since process start.
+    failure_templates: std::sync::Mutex<BTreeMap<(&'static str, String), u64>>,
     // gen_ai.usage.input_tokens / gen_ai.usage.output_tokens
     pub tokens_input: AtomicU64,
     pub tokens_output: AtomicU64,
@@ -70,6 +78,7 @@ impl Default for Metrics {
     fn default() -> Self {
         Self {
             tool_call_consistency: std::sync::Mutex::new(BTreeMap::new()),
+            failure_templates: std::sync::Mutex::new(BTreeMap::new()),
             tokens_input: AtomicU64::new(0),
             tokens_output: AtomicU64::new(0),
             tokens_saved: AtomicU64::new(0),
@@ -110,15 +119,56 @@ impl Metrics {
     /// Record a call of a built-in tool: the totals and the tool's own counter
     /// move together under one lock.
     pub fn record_named_tool_call(&self, tool: &'static str, latency_us: u64, success: bool) {
+        self.record_named_tool_outcome(
+            tool,
+            latency_us,
+            (!success).then_some(crate::core::telemetry_failure::FailureKind::Other),
+        );
+    }
+
+    /// Like [`Self::record_named_tool_call`], with the class of a failure.
+    pub fn record_named_tool_outcome(
+        &self,
+        tool: &'static str,
+        latency_us: u64,
+        failure: Option<crate::core::telemetry_failure::FailureKind>,
+    ) {
         let mut per_tool = self
             .tool_call_consistency
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        self.record_tool_call_locked(latency_us, success);
+        self.record_tool_call_locked(latency_us, failure.is_none());
         let counter = per_tool.entry(tool).or_default();
         counter.calls = counter.calls.saturating_add(1);
-        if !success {
+        counter.latency_us = counter.latency_us.saturating_add(latency_us);
+        if let Some(kind) = failure {
             counter.failures = counter.failures.saturating_add(1);
+            let slot = &mut counter.failure_kinds[kind.index()];
+            *slot = slot.saturating_add(1);
+        }
+    }
+
+    /// Like [`Self::record_named_tool_outcome`], also counting the failure's
+    /// scrubbed template. Templates are bounded per process.
+    pub fn record_named_tool_failure(
+        &self,
+        tool: &'static str,
+        latency_us: u64,
+        failure: Option<crate::core::telemetry_failure::Failure>,
+    ) {
+        let template = failure
+            .as_ref()
+            .and_then(|failure| failure.template.clone());
+        self.record_named_tool_outcome(tool, latency_us, failure.map(|failure| failure.kind));
+        let Some(template) = template else { return };
+        let mut templates = self
+            .failure_templates
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let key = (tool, template);
+        if templates.len() < MAX_FAILURE_TEMPLATES || templates.contains_key(&key) {
+            let count = templates.entry(key).or_default();
+            *count = count.saturating_add(1);
         }
     }
 
@@ -240,6 +290,13 @@ impl Metrics {
                 self.tool_call_latency_buckets[index].load(Ordering::Relaxed)
             }),
             session_uptime_secs: self.session_start.elapsed().as_secs(),
+            tokens_input: self.tokens_input.load(Ordering::Relaxed),
+            tokens_output: self.tokens_output.load(Ordering::Relaxed),
+            failure_templates: self
+                .failure_templates
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone(),
         }
     }
 
@@ -301,6 +358,11 @@ pub(crate) struct DailyTelemetrySnapshot {
     pub tool_latency_buckets: [u64; TOOL_LATENCY_BUCKET_UPPER_MS.len()],
     pub session_uptime_secs: u64,
     pub per_tool: BTreeMap<&'static str, ToolCallCounter>,
+    /// Tokens tool output would have cost uncompressed vs. what was delivered.
+    pub tokens_input: u64,
+    pub tokens_output: u64,
+    /// Scrubbed failure templates by (tool, template).
+    pub failure_templates: BTreeMap<(&'static str, String), u64>,
 }
 
 /// Point-in-time snapshot of all metrics.
@@ -651,14 +713,22 @@ mod tests {
             snap.per_tool.get("ctx_read"),
             Some(&ToolCallCounter {
                 calls: 2,
-                failures: 1
+                failures: 1,
+                latency_us: 3_000,
+                failure_kinds: {
+                    let mut kinds = [0; crate::core::telemetry_failure::FAILURE_KINDS.len()];
+                    kinds[crate::core::telemetry_failure::FailureKind::Other.index()] = 1;
+                    kinds
+                },
             })
         );
         assert_eq!(
             snap.per_tool.get("ctx_shell"),
             Some(&ToolCallCounter {
                 calls: 1,
-                failures: 0
+                failures: 0,
+                latency_us: 3_000,
+                ..ToolCallCounter::default()
             })
         );
     }

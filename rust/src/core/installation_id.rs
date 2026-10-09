@@ -28,6 +28,64 @@ fn identity_path() -> Result<PathBuf, String> {
     crate::core::paths::data_dir().map(|d| d.join("telemetry_identity.json"))
 }
 
+/// When the current identity was created: the file's birth time where the
+/// filesystem records one, otherwise its last write (identity files are only
+/// rewritten on creation, migration or `telemetry reset-id`). An identity
+/// adopted from a sibling data directory keeps the sibling's age.
+pub(crate) fn identity_created_at() -> Option<std::time::SystemTime> {
+    let path = identity_path().ok()?;
+    let own = read_identity(&path)?;
+    std::iter::once(path.clone())
+        .chain(sibling_identity_paths(&path))
+        .filter(|candidate| {
+            read_identity(candidate)
+                .is_some_and(|other| other.installation_id == own.installation_id)
+        })
+        .filter_map(|candidate| file_created_at(&candidate))
+        .min()
+}
+
+fn file_created_at(path: &std::path::Path) -> Option<std::time::SystemTime> {
+    let metadata = std::fs::metadata(path).ok()?;
+    metadata.created().or_else(|_| metadata.modified()).ok()
+}
+
+fn read_identity(path: &std::path::Path) -> Option<TelemetryIdentity> {
+    let identity: TelemetryIdentity =
+        serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
+    (is_valid_uuid(&identity.installation_id) && is_lower_hex_256(&identity.deletion_token))
+        .then_some(identity)
+}
+
+/// The identity files of the same user's other LeanCTX data directories:
+/// legacy `~/.lean-ctx`, mixed `$XDG_CONFIG_HOME/lean-ctx` and
+/// `$XDG_DATA_HOME/lean-ctx`. Processes started with a different data-dir
+/// resolution (an agent host with its own `XDG_*`, an upgrade across the
+/// #408 layout change) would otherwise mint a second identity for one
+/// installation. An explicit `LEAN_CTX_DATA_DIR` pins exactly one directory.
+fn sibling_identity_paths(current: &std::path::Path) -> Vec<PathBuf> {
+    if std::env::var_os("LEAN_CTX_DATA_DIR").is_some() {
+        return Vec::new();
+    }
+    let canonical = |path: &std::path::Path| std::fs::canonicalize(path).ok();
+    let current_dir = current.parent().and_then(canonical);
+    crate::core::data_dir::candidate_data_dirs()
+        .into_iter()
+        .filter(|dir| current_dir.is_none() || canonical(dir) != current_dir)
+        .map(|dir| dir.join("telemetry_identity.json"))
+        .filter(|path| path.is_file())
+        .collect()
+}
+
+/// The oldest valid identity among the sibling data directories, if any.
+fn sibling_identity(current: &std::path::Path) -> Option<TelemetryIdentity> {
+    sibling_identity_paths(current)
+        .into_iter()
+        .filter_map(|path| Some((file_created_at(&path)?, read_identity(&path)?)))
+        .min_by_key(|(created, _)| *created)
+        .map(|(_, identity)| identity)
+}
+
 fn with_deletion_lock<T>(operation: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
     let lock_path = crate::core::paths::data_dir()?.join("telemetry_deletion_token.lock");
     if let Some(parent) = lock_path.parent() {
@@ -69,6 +127,14 @@ pub(crate) fn get_or_create_identity() -> Result<(String, String), String> {
                     return Ok((identity.installation_id, identity.deletion_token));
                 }
             }
+        }
+        // A legacy sidecar in this directory is this directory's own identity;
+        // only a directory without one adopts the user's identity from a
+        // sibling data directory instead of minting a second one.
+        let own_sidecar = id_path()?.is_file();
+        if !own_sidecar && let Some(identity) = sibling_identity(&path) {
+            persist_identity(&path, &identity)?;
+            return Ok((identity.installation_id, identity.deletion_token));
         }
         let identity = TelemetryIdentity {
             installation_id: load_or_create_id()?,
@@ -250,6 +316,88 @@ pub(crate) fn masked(id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    #[cfg(unix)]
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: Option<&str>) -> Self {
+            let previous = std::env::var(key).ok();
+            match value {
+                Some(value) => crate::test_env::set_var(key, value),
+                None => crate::test_env::remove_var(key),
+            }
+            Self { key, previous }
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(previous) => crate::test_env::set_var(self.key, previous),
+                None => crate::test_env::remove_var(self.key),
+            }
+        }
+    }
+
+    /// An update never changes the tracked ID: a pre-3.11 sidecar ID becomes
+    /// the identity, and every later start returns that same identity.
+    #[test]
+    fn updates_keep_the_tracked_installation_id() {
+        let _iso = crate::core::data_dir::isolated_data_dir();
+        let legacy_id = generate_uuid_v4();
+        let dir = crate::core::paths::data_dir().unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("installation_id"), format!("{legacy_id}\n")).unwrap();
+
+        let (migrated, token) = get_or_create_identity().unwrap();
+        assert_eq!(migrated, legacy_id, "the v1 ID survives the move to v2");
+        for _ in 0..3 {
+            assert_eq!(
+                get_or_create_identity().unwrap(),
+                (legacy_id.clone(), token.clone())
+            );
+        }
+        let stored = read_identity(&identity_path().unwrap()).expect("identity persisted");
+        assert_eq!(stored.installation_id, legacy_id);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_new_data_dir_adopts_the_users_identity_from_a_sibling_dir() {
+        let _lock = crate::core::data_dir::test_env_lock();
+        let home = tempfile::tempdir().unwrap();
+        let _home = EnvVarGuard::set("HOME", Some(home.path().to_str().unwrap()));
+        let _pin = EnvVarGuard::set("LEAN_CTX_DATA_DIR", None);
+        let _config = EnvVarGuard::set("XDG_CONFIG_HOME", None);
+        let _data = EnvVarGuard::set("XDG_DATA_HOME", None);
+        // Candidates under the temporary HOME: [legacy, mixed config, XDG data].
+        let candidates = crate::core::data_dir::candidate_data_dirs();
+        let legacy = candidates[0].clone();
+        assert!(legacy.starts_with(home.path()));
+        std::fs::create_dir_all(&legacy).unwrap();
+        let identity = TelemetryIdentity {
+            installation_id: generate_uuid_v4(),
+            deletion_token: generate_deletion_token(),
+        };
+        persist_identity(&legacy.join("telemetry_identity.json"), &identity).unwrap();
+        let xdg = candidates[2].clone();
+        std::fs::create_dir_all(&xdg).unwrap();
+
+        let adopted =
+            sibling_identity(&xdg.join("telemetry_identity.json")).expect("sibling identity");
+        assert_eq!(adopted.installation_id, identity.installation_id);
+        assert_eq!(adopted.deletion_token, identity.deletion_token);
+        // The directory never adopts itself, and an explicit pin adopts nothing.
+        assert!(sibling_identity(&legacy.join("telemetry_identity.json")).is_none());
+        let _pinned = EnvVarGuard::set("LEAN_CTX_DATA_DIR", Some(xdg.to_str().unwrap()));
+        assert!(sibling_identity(&xdg.join("telemetry_identity.json")).is_none());
+    }
 
     #[test]
     fn generated_uuid_is_valid() {

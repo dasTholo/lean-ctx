@@ -4,6 +4,58 @@
 
 use super::*;
 
+/// A failure recorded through `record_named_tool_call(.., false)` is unclassified.
+fn other_failure() -> KindCounts {
+    let mut kinds = KindCounts::default();
+    kinds[crate::core::telemetry_failure::FailureKind::Other.index()] = 1;
+    kinds
+}
+
+#[test]
+#[serial_test::serial]
+fn failure_classes_reach_the_wire_without_the_message() {
+    let _iso = crate::core::data_dir::isolated_data_dir();
+    let _clock = TestClockGuard::set(BUCKET, T0);
+    let metrics = crate::core::telemetry::global_metrics();
+    let kind =
+        crate::core::telemetry_failure::classify("Permission denied (os error 13): /secret/path");
+    metrics.record_named_tool_outcome("telemetry_kind_probe", 1_000, Some(kind));
+    metrics.record_named_tool_outcome("telemetry_kind_probe", 1_000, None);
+    let batch = preview_daily_batch().expect("preview");
+    let wire = serde_json::to_string(&batch).unwrap();
+    assert!(
+        wire.contains(r#""failure_kinds":{"permission":1}"#),
+        "{wire}"
+    );
+    assert!(!wire.contains("/secret/path"));
+}
+
+#[test]
+#[serial_test::serial]
+fn failure_templates_reach_the_wire_scrubbed_and_bounded() {
+    let _iso = crate::core::data_dir::isolated_data_dir();
+    let _clock = TestClockGuard::set(BUCKET, T0);
+    let metrics = crate::core::telemetry::global_metrics();
+    for path in ["/Users/anna/acme/payroll.rs", "/srv/other/thing.rs"] {
+        let failure = crate::core::telemetry_failure::Failure::from_message(&format!(
+            "old_string not found in {path}"
+        ));
+        metrics.record_named_tool_failure("telemetry_template_probe", 1_000, Some(failure));
+    }
+    let batch = preview_daily_batch().expect("preview");
+    batch.validate().expect("valid batch");
+    let wire = serde_json::to_string(&batch).unwrap();
+    assert!(
+        wire.contains(
+            r#""failure_messages":[{"template":"old_string not found in ‹path›","count":2}]"#
+        ),
+        "{wire}"
+    );
+    for leak in ["anna", "acme", "payroll", "/srv"] {
+        assert!(!wire.contains(leak), "{leak} leaked");
+    }
+}
+
 fn tool_call_counts(batch: &TelemetryBatchV2) -> Vec<(String, u64, u64)> {
     batch
         .events
@@ -30,6 +82,8 @@ fn counters(entries: &[(&str, u64, u64)]) -> BTreeMap<String, ToolCounterCheckpo
                 ToolCounterCheckpoint {
                     calls: *calls,
                     failures: *failures,
+                    latency_us: 0,
+                    failure_kinds: KindCounts::default(),
                 },
             )
         })
@@ -45,7 +99,7 @@ fn tool_call_deltas_subtract_the_baseline_and_drop_invalid_names() {
         ("Bad Name", 9, 0),
     ]);
     let baseline = counters(&[("ctx_read", 7, 1), ("ctx_tree", 2, 0)]);
-    let deltas: Vec<_> = tool_call_deltas(&observed, &baseline)
+    let deltas: Vec<_> = tool_call_deltas(&observed, &baseline, &BTreeMap::new())
         .into_iter()
         .map(|entry| (entry.tool, entry.calls, entry.failures))
         .collect();
@@ -67,11 +121,13 @@ fn tool_call_deltas_keep_the_most_called_tools_past_the_entry_cap() {
                 ToolCounterCheckpoint {
                     calls: index as u64 + 1,
                     failures: 0,
+                    latency_us: 0,
+                    failure_kinds: KindCounts::default(),
                 },
             )
         })
         .collect();
-    let deltas = tool_call_deltas(&observed, &BTreeMap::new());
+    let deltas = tool_call_deltas(&observed, &BTreeMap::new(), &BTreeMap::new());
     assert_eq!(deltas.len(), MAX_TOOL_ENTRIES);
     assert!(deltas.iter().all(|entry| entry.calls > 5));
     ToolCallMetrics { tools: deltas }
@@ -159,7 +215,9 @@ fn persisted_counters_are_sent_cumulatively_and_later_calls_reach_the_right_day(
         queued_counters().tools.get("telemetry_fold_probe").copied(),
         Some(ToolCounterCheckpoint {
             calls: 2,
-            failures: 1
+            failures: 1,
+            latency_us: 2_000,
+            failure_kinds: other_failure(),
         })
     );
     // A second fold with no new calls must not count them again.
@@ -176,7 +234,9 @@ fn persisted_counters_are_sent_cumulatively_and_later_calls_reach_the_right_day(
         queued_counters().tools.get("telemetry_fold_probe").copied(),
         Some(ToolCounterCheckpoint {
             calls: 2,
-            failures: 1
+            failures: 1,
+            latency_us: 2_000,
+            failure_kinds: other_failure(),
         })
     );
     assert!(!today_is_unsent());
@@ -239,6 +299,9 @@ fn counters_persisted_by_an_exited_process_are_included() {
             tool_latency_buckets: buckets,
             session_uptime_secs: 30,
             tools: counters(&[("telemetry_exited_probe", 3, 1)]),
+            tokens_input: 12_000,
+            tokens_output: 3_000,
+            failure_messages: BTreeMap::new(),
         },
     );
     write_one_shots(&path, &sidecar).expect("seed exited process counters");
@@ -247,6 +310,17 @@ fn counters_persisted_by_an_exited_process_are_included() {
     assert_eq!(
         probe_counts(&preview, "telemetry_exited_probe"),
         Some((3, 1))
+    );
+    // Tests never record tokens on the global metrics, so the seed is exact.
+    assert_eq!(
+        preview.events.iter().find_map(|event| match &event.event {
+            TelemetryEventV2::ToolUsageAggregate(usage) => usage.tokens,
+            _ => None,
+        }),
+        Some(TokenMetrics {
+            original: 12_000,
+            delivered: 3_000,
+        })
     );
     assert!(tool_counts(&preview).0 >= 3);
     // The preview folded in memory only.

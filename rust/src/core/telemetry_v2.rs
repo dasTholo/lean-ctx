@@ -155,6 +155,9 @@ pub enum TelemetryEventV2 {
     ErrorCategoryAggregate(ErrorMetrics),
     VersionUpgrade(VersionUpgradeMetrics),
     OrchestrationAggregate(Box<OrchestrationMetrics>),
+    UsageHistory(UsageHistoryMetrics),
+    /// Daily use of CLI commands and background features (3.11.1+).
+    FeatureAggregate(FeatureMetrics),
 }
 
 impl TelemetryEventV2 {
@@ -182,6 +185,8 @@ impl TelemetryEventV2 {
             Self::ErrorCategoryAggregate(_) => "error_category_aggregate",
             Self::VersionUpgrade(_) => "version_upgrade",
             Self::OrchestrationAggregate(_) => "orchestration_aggregate",
+            Self::UsageHistory(_) => "usage_history",
+            Self::FeatureAggregate(_) => "feature_aggregate",
         }
     }
 
@@ -210,8 +215,95 @@ impl TelemetryEventV2 {
             Self::ErrorCategoryAggregate(metrics) => metrics.validate(),
             Self::VersionUpgrade(metrics) => metrics.validate(),
             Self::OrchestrationAggregate(metrics) => metrics.validate(),
+            Self::UsageHistory(metrics) => metrics.validate(),
+            Self::FeatureAggregate(metrics) => metrics.validate(),
         }
     }
+}
+
+/// Upper bound for token totals: a heavy installation passes [`MAX_COUNT`]
+/// tokens within weeks, so tokens get their own, still finite, bound.
+pub const MAX_TOKENS: u64 = 1_000_000_000_000_000;
+/// Days of local history sent; matches the server's retention window.
+pub const MAX_HISTORY_DAYS: usize = 90;
+
+/// The installation's own daily usage record (`lean-ctx gain`), so history
+/// before telemetry and usage outside MCP (shell hooks, CLI) is counted.
+/// Days are `YYYY-MM-DD` in the client's calendar, strictly ascending.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UsageHistoryMetrics {
+    pub days: Vec<UsageDay>,
+    pub lifetime: LifetimeUsage,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UsageDay {
+    pub date: String,
+    /// Compressed operations (tool calls, hook-wrapped commands, reads).
+    pub commands: u64,
+    /// Tokens before compression.
+    pub original_tokens: u64,
+    /// Tokens that reached the model.
+    pub delivered_tokens: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LifetimeUsage {
+    pub commands: u64,
+    pub original_tokens: u64,
+    pub delivered_tokens: u64,
+    /// `YYYY-MM` of first use; month precision only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_use_month: Option<String>,
+}
+
+impl UsageHistoryMetrics {
+    fn validate(&self) -> Result<(), TelemetryValidationError> {
+        if self.days.len() > MAX_HISTORY_DAYS
+            || !self.days.windows(2).all(|pair| pair[0].date < pair[1].date)
+        {
+            return Err(TelemetryValidationError::History);
+        }
+        for day in &self.days {
+            if !valid_day(&day.date) {
+                return Err(TelemetryValidationError::History);
+            }
+            bounded(day.commands)?;
+            tokens_bounded(&[day.original_tokens, day.delivered_tokens])?;
+        }
+        bounded(self.lifetime.commands)?;
+        tokens_bounded(&[
+            self.lifetime.original_tokens,
+            self.lifetime.delivered_tokens,
+        ])?;
+        if self
+            .lifetime
+            .first_use_month
+            .as_deref()
+            .is_some_and(|month| !valid_day(&format!("{month}-01")))
+        {
+            return Err(TelemetryValidationError::History);
+        }
+        Ok(())
+    }
+}
+
+fn tokens_bounded(values: &[u64]) -> Result<(), TelemetryValidationError> {
+    if values.iter().all(|value| *value <= MAX_TOKENS) {
+        Ok(())
+    } else {
+        Err(TelemetryValidationError::CountBound)
+    }
+}
+
+/// A real calendar day written exactly as `YYYY-MM-DD`.
+fn valid_day(value: &str) -> bool {
+    value.len() == 10
+        && chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
+            .is_ok_and(|date| date.format("%Y-%m-%d").to_string() == value)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -221,6 +313,84 @@ pub struct HeartbeatMetrics {
     pub client_family: ClientFamily,
     pub operating_system: OperatingSystem,
     pub architecture: Architecture,
+    /// Age of the local installation identity, bucketed. Closed enums only;
+    /// skipped when unknown so older receivers keep accepting the heartbeat.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub install_age: Option<InstallAge>,
+    /// Distinct UTC days with a successful send in the trailing 30, bucketed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_days: Option<ActiveDays>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_environment: Option<RuntimeEnvironment>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum InstallAge {
+    #[serde(rename = "lt_1h")]
+    Lt1h,
+    #[serde(rename = "lt_1d")]
+    Lt1d,
+    #[serde(rename = "lt_7d")]
+    Lt7d,
+    #[serde(rename = "lt_30d")]
+    Lt30d,
+    #[serde(rename = "gte_30d")]
+    Gte30d,
+}
+
+impl InstallAge {
+    #[must_use]
+    pub fn from_seconds(seconds: u64) -> Self {
+        match seconds {
+            0..3_600 => Self::Lt1h,
+            3_600..86_400 => Self::Lt1d,
+            86_400..604_800 => Self::Lt7d,
+            604_800..2_592_000 => Self::Lt30d,
+            _ => Self::Gte30d,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ActiveDays {
+    #[serde(rename = "d1")]
+    D1,
+    #[serde(rename = "d2_3")]
+    D2To3,
+    #[serde(rename = "d4_7")]
+    D4To7,
+    #[serde(rename = "d8_14")]
+    D8To14,
+    #[serde(rename = "d15_plus")]
+    D15Plus,
+}
+
+impl ActiveDays {
+    #[must_use]
+    pub fn from_count(days: usize) -> Self {
+        match days {
+            0 | 1 => Self::D1,
+            2 | 3 => Self::D2To3,
+            4..=7 => Self::D4To7,
+            8..=14 => Self::D8To14,
+            _ => Self::D15Plus,
+        }
+    }
+}
+
+/// Where the process runs. Separates people from short-lived agent sandboxes
+/// without any machine, account or network identifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeEnvironment {
+    Local,
+    Container,
+    Codespaces,
+    Gitpod,
+    Replit,
+    CloudAgent,
+    Ci,
+    Unknown,
 }
 
 impl HeartbeatMetrics {
@@ -306,6 +476,18 @@ pub struct ToolUsageMetrics {
     pub calls: u64,
     pub failures: u64,
     pub latency_milliseconds: Histogram,
+    /// Absent from clients before 3.11.1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokens: Option<TokenMetrics>,
+}
+
+/// Tokens of tool output for one day: what it would have cost uncompressed
+/// (`original`) and what reached the model (`delivered`). Counts only.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TokenMetrics {
+    pub original: u64,
+    pub delivered: u64,
 }
 
 impl ToolUsageMetrics {
@@ -313,6 +495,9 @@ impl ToolUsageMetrics {
         bounded_many(&[self.calls, self.failures])?;
         if self.failures > self.calls {
             return Err(TelemetryValidationError::InconsistentCounts);
+        }
+        if let Some(tokens) = self.tokens {
+            bounded_many(&[tokens.original, tokens.delivered])?;
         }
         self.latency_milliseconds.validate()
     }
@@ -335,6 +520,39 @@ pub struct ToolCallCount {
     pub tool: String,
     pub calls: u64,
     pub failures: u64,
+    /// Summed latency of these calls; absent from clients before 3.11.1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latency_milliseconds_total: Option<u64>,
+    /// Failures by class (never the message); absent before 3.11.1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_kinds:
+        Option<std::collections::BTreeMap<crate::core::telemetry_failure::FailureKind, u64>>,
+    /// The most frequent scrubbed failure templates (see
+    /// `core::failure_template`); absent before 3.11.1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_messages: Option<Vec<FailureMessage>>,
+}
+
+/// One scrubbed failure template and how often it occurred that day.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FailureMessage {
+    pub template: String,
+    pub count: u64,
+}
+
+impl FailureMessage {
+    /// Shape of a template the scrubber can produce: bounded, a closed
+    /// character set and no digits.
+    fn valid(&self) -> bool {
+        let length = self.template.chars().count();
+        (1..=crate::core::failure_template::MAX_TEMPLATE_CHARS).contains(&length)
+            && self.count > 0
+            && self.template.chars().all(|c| {
+                (c.is_ascii_alphanumeric() && !c.is_ascii_digit())
+                    || " .,:;()[]{}<>!?'-_/‹›…".contains(c)
+            })
+    }
 }
 
 impl ToolCallMetrics {
@@ -359,8 +577,32 @@ impl ToolCallCount {
             return Err(TelemetryValidationError::ToolName);
         }
         bounded_many(&[self.calls, self.failures])?;
+        bounded(self.latency_milliseconds_total.unwrap_or_default())?;
+        let classified: u64 = self
+            .failure_kinds
+            .iter()
+            .flat_map(|kinds| kinds.values())
+            .sum();
+        if classified > self.failures
+            || self
+                .failure_kinds
+                .as_ref()
+                .is_some_and(|kinds| kinds.values().any(|count| *count == 0))
+        {
+            return Err(TelemetryValidationError::InconsistentCounts);
+        }
         if self.calls == 0 || self.failures > self.calls {
             return Err(TelemetryValidationError::InconsistentCounts);
+        }
+        if let Some(messages) = &self.failure_messages {
+            let sum: u64 = messages.iter().map(|message| message.count).sum();
+            if messages.is_empty()
+                || messages.len() > crate::core::telemetry_failure::MAX_FAILURE_MESSAGES
+                || sum > self.failures
+                || !messages.iter().all(FailureMessage::valid)
+            {
+                return Err(TelemetryValidationError::InconsistentCounts);
+            }
         }
         Ok(())
     }
@@ -375,6 +617,69 @@ pub fn valid_tool_name(name: &str) -> bool {
         && bytes
             .iter()
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'_')
+}
+
+/// Most distinct feature codes per day; extra codes are dropped on the client.
+pub const MAX_FEATURE_ENTRIES: usize = 96;
+
+/// Daily counts per feature code from the closed registry in
+/// `core::telemetry_features` (e.g. `cli.pack.export`, `index.graph`).
+/// Sorted by code; a code never carries arguments, paths or user input.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FeatureMetrics {
+    pub features: Vec<FeatureCount>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FeatureCount {
+    pub feature: String,
+    pub count: u64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub failures: u64,
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
+}
+
+/// `segment(.segment){0,2}`, each `[a-z][a-z0-9_]{0,23}`.
+#[must_use]
+pub fn valid_feature_code(code: &str) -> bool {
+    let segments: Vec<&str> = code.split('.').collect();
+    (1..=3).contains(&segments.len())
+        && segments.iter().all(|segment| {
+            let mut bytes = segment.bytes();
+            segment.len() <= 24
+                && bytes.next().is_some_and(|byte| byte.is_ascii_lowercase())
+                && bytes
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+        })
+}
+
+impl FeatureMetrics {
+    fn validate(&self) -> Result<(), TelemetryValidationError> {
+        if self.features.is_empty()
+            || self.features.len() > MAX_FEATURE_ENTRIES
+            || !self
+                .features
+                .windows(2)
+                .all(|pair| pair[0].feature < pair[1].feature)
+        {
+            return Err(TelemetryValidationError::FeatureEntries);
+        }
+        for entry in &self.features {
+            bounded_many(&[entry.count, entry.failures])?;
+            if !valid_feature_code(&entry.feature) {
+                return Err(TelemetryValidationError::FeatureCode);
+            }
+            if entry.count == 0 || entry.failures > entry.count {
+                return Err(TelemetryValidationError::InconsistentCounts);
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -505,6 +810,10 @@ pub enum DistributionChannel {
     Npm,
     Docker,
     Source,
+    Aur,
+    Pypi,
+    /// A release binary installed by the install script or by hand.
+    Binary,
     Unknown,
 }
 
@@ -522,6 +831,31 @@ pub enum ClientFamily {
     Antigravity,
     Codebuddy,
     Codewhale,
+    // 3.11.1: more MCP hosts. The server accepts these from 3.11.1 on.
+    Cline,
+    RooCode,
+    KiloCode,
+    ContinueDev,
+    Opencode,
+    Goose,
+    Amp,
+    Augment,
+    Jetbrains,
+    Warp,
+    Trae,
+    QwenCode,
+    Crush,
+    ClaudeDesktop,
+    Chatgpt,
+    LmStudio,
+    CopilotCli,
+    VisualStudio,
+    Neovim,
+    Emacs,
+    Factory,
+    /// No MCP client was seen: LeanCTX runs only through the CLI or shell hooks.
+    None,
+    /// An MCP client LeanCTX does not recognise.
     Other,
 }
 
@@ -542,6 +876,27 @@ impl ClientFamily {
             "antigravity" => Self::Antigravity,
             "codebuddy" => Self::Codebuddy,
             "codewhale" => Self::Codewhale,
+            "cline" => Self::Cline,
+            "roo-code" => Self::RooCode,
+            "kilo-code" => Self::KiloCode,
+            "continue" => Self::ContinueDev,
+            "opencode" => Self::Opencode,
+            "goose" => Self::Goose,
+            "amp" => Self::Amp,
+            "augment" => Self::Augment,
+            "jetbrains" => Self::Jetbrains,
+            "warp" => Self::Warp,
+            "trae" => Self::Trae,
+            "qwen-code" => Self::QwenCode,
+            "crush" => Self::Crush,
+            "claude-desktop" => Self::ClaudeDesktop,
+            "chatgpt" => Self::Chatgpt,
+            "lm-studio" => Self::LmStudio,
+            "copilot-cli" => Self::CopilotCli,
+            "visual-studio" => Self::VisualStudio,
+            "neovim" => Self::Neovim,
+            "emacs" => Self::Emacs,
+            "factory" => Self::Factory,
             _ => return None,
         })
     }
@@ -598,6 +953,9 @@ pub enum ErrorCategory {
     Timeout,
     Validation,
     Internal,
+    /// A command run through a shell tool exited non-zero: the user's
+    /// command failed, not LeanCTX. Sent from 3.11.1 on.
+    Command,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -615,6 +973,9 @@ pub enum TelemetryValidationError {
     BatchSize,
     ToolEntries,
     ToolName,
+    History,
+    FeatureEntries,
+    FeatureCode,
 }
 
 fn bounded(value: u64) -> Result<(), TelemetryValidationError> {
@@ -654,6 +1015,10 @@ mod tests {
                 upper_bounds: vec![10, 100],
                 counts: vec![1, 3],
             },
+            tokens: Some(TokenMetrics {
+                original: 12_000,
+                delivered: 3_000,
+            }),
         }));
         event.validate().unwrap();
         let encoded = serde_json::to_vec(&event).unwrap();
@@ -668,6 +1033,9 @@ mod tests {
             client_family: ClientFamily::Codex,
             operating_system: OperatingSystem::Linux,
             architecture: Architecture::X86_64,
+            install_age: None,
+            active_days: None,
+            runtime_environment: None,
         }));
         let batch = TelemetryBatchV2 {
             schema_version: SCHEMA_VERSION,
@@ -687,6 +1055,58 @@ mod tests {
             events: Vec::new(),
         };
         assert_eq!(empty.validate(), Err(TelemetryValidationError::BatchSize));
+    }
+
+    #[test]
+    fn ops_context_fields_use_closed_wire_names_and_are_omitted_when_unset() {
+        let mut metrics = HeartbeatMetrics {
+            distribution_channel: DistributionChannel::Aur,
+            client_family: ClientFamily::Codex,
+            operating_system: OperatingSystem::Linux,
+            architecture: Architecture::X86_64,
+            install_age: None,
+            active_days: None,
+            runtime_environment: None,
+        };
+        let bare = serde_json::to_value(&metrics).unwrap();
+        assert_eq!(
+            bare.as_object().unwrap().len(),
+            4,
+            "unset fields stay off the wire: {bare}"
+        );
+        metrics.install_age = Some(InstallAge::Lt1h);
+        metrics.active_days = Some(ActiveDays::D2To3);
+        metrics.runtime_environment = Some(RuntimeEnvironment::CloudAgent);
+        let full = serde_json::to_value(&metrics).unwrap();
+        assert_eq!(full["distribution_channel"], "aur");
+        assert_eq!(full["install_age"], "lt_1h");
+        assert_eq!(full["active_days"], "d2_3");
+        assert_eq!(full["runtime_environment"], "cloud_agent");
+        let decoded: HeartbeatMetrics = serde_json::from_value(full).unwrap();
+        assert_eq!(decoded, metrics);
+        assert!(
+            serde_json::from_value::<HeartbeatMetrics>(serde_json::json!({
+                "distribution_channel": "cargo", "client_family": "codex",
+                "operating_system": "linux", "architecture": "x86_64", "install_age": "3 days"
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn ops_context_buckets_have_exact_boundaries() {
+        assert_eq!(InstallAge::from_seconds(0), InstallAge::Lt1h);
+        assert_eq!(InstallAge::from_seconds(3_599), InstallAge::Lt1h);
+        assert_eq!(InstallAge::from_seconds(3_600), InstallAge::Lt1d);
+        assert_eq!(InstallAge::from_seconds(86_400), InstallAge::Lt7d);
+        assert_eq!(InstallAge::from_seconds(604_800), InstallAge::Lt30d);
+        assert_eq!(InstallAge::from_seconds(2_592_000), InstallAge::Gte30d);
+        assert_eq!(ActiveDays::from_count(0), ActiveDays::D1);
+        assert_eq!(ActiveDays::from_count(1), ActiveDays::D1);
+        assert_eq!(ActiveDays::from_count(3), ActiveDays::D2To3);
+        assert_eq!(ActiveDays::from_count(7), ActiveDays::D4To7);
+        assert_eq!(ActiveDays::from_count(14), ActiveDays::D8To14);
+        assert_eq!(ActiveDays::from_count(15), ActiveDays::D15Plus);
     }
 
     #[test]
@@ -763,6 +1183,9 @@ mod tests {
             client_family: ClientFamily::Codex,
             operating_system: OperatingSystem::Linux,
             architecture: Architecture::X86_64,
+            install_age: None,
+            active_days: None,
+            runtime_environment: None,
         }));
         event.installation_id = "not-a-uuid".into();
         assert_eq!(
@@ -872,6 +1295,9 @@ mod tests {
             tool: tool.into(),
             calls,
             failures,
+            latency_milliseconds_total: None,
+            failure_kinds: None,
+            failure_messages: None,
         }
     }
 

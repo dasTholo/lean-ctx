@@ -439,6 +439,26 @@ impl Config {
     /// Consolidate legacy changes into one recoverable config transaction.
     /// Preserve explicit telemetry opt-outs and the integrated preference model.
     pub(crate) fn migrate_v4_config_on_disk(&mut self) {
+        // Telemetry was opt-in before v2, so a persisted `enabled = false`
+        // without an explicit preference is not a choice against v2. Re-enable
+        // it once, in a writable config only: a read-only (declaratively
+        // managed) file keeps exactly what its owner wrote.
+        let path = Self::path();
+        let writable = path
+            .as_deref()
+            .is_some_and(allows_automatic_config_migration);
+        let raw = path
+            .as_deref()
+            .filter(|_| writable)
+            .and_then(|path| std::fs::read_to_string(path).ok());
+        let reset_pending = crate::core::telemetry_consent::legacy_opt_out_reset_pending();
+        let reset = raw
+            .as_deref()
+            .filter(|_| reset_pending)
+            .and_then(reset_legacy_telemetry_opt_out);
+        if reset.is_some() && self.telemetry.preference == super::TelemetryPreference::DefaultOn {
+            self.telemetry.enabled = true;
+        }
         let preserve_opt_out = self.telemetry.explicitly_disabled();
         if self.cloud.contribute_enabled {
             self.cloud.contribute_enabled = false;
@@ -450,32 +470,46 @@ impl Config {
         if matches!(self.cognitive_mode, CognitiveMode::Basic) {
             self.cognitive_mode = CognitiveMode::Full;
         }
-        let Some(path) = Self::path() else {
+        let Some(path) = path else {
             return;
         };
-        if !allows_automatic_config_migration(&path) {
-            tracing::debug!("config migration remains in memory: source or directory is read-only");
-            return;
-        }
-        let Ok(raw) = std::fs::read_to_string(&path) else {
+        let Some(raw) = raw else {
+            if !writable {
+                tracing::debug!(
+                    "config migration remains in memory: source or directory is read-only"
+                );
+            }
+            // No config yet: there is no legacy opt-out to reset, now or later.
+            if reset_pending && !path.exists() {
+                crate::core::telemetry_consent::mark_legacy_opt_out_reset();
+            }
             return;
         };
-        match Self::migrate_v4_config_document(
-            &raw,
+        let source = reset.as_deref().unwrap_or(&raw);
+        let migrated = match Self::migrate_v4_config_document(
+            source,
             environment_config_profile().as_deref(),
             preserve_opt_out,
         ) {
-            Ok(Some(updated)) => {
-                if let Err(error) = crate::config_io::write_atomic_config_migration_checked(
-                    &path,
-                    &updated,
-                    Some(raw.as_bytes()),
-                ) {
-                    tracing::warn!("config migration could not be persisted: {error}");
-                }
+            Ok(Some(updated)) => Some(updated),
+            Ok(None) => (source != raw).then(|| source.to_string()),
+            Err(error) => {
+                tracing::warn!("config migration failed: {error}");
+                return;
             }
-            Ok(None) => {}
-            Err(error) => tracing::warn!("config migration failed: {error}"),
+        };
+        let persisted = match migrated {
+            Some(updated) => crate::config_io::write_atomic_config_migration_checked(
+                &path,
+                &updated,
+                Some(raw.as_bytes()),
+            )
+            .map_err(|error| tracing::warn!("config migration could not be persisted: {error}"))
+            .is_ok(),
+            None => true,
+        };
+        if persisted && reset_pending {
+            crate::core::telemetry_consent::mark_legacy_opt_out_reset();
         }
     }
 
@@ -664,6 +698,24 @@ fn allows_automatic_config_migration(path: &Path) -> bool {
             std::fs::metadata(entry).is_ok_and(|metadata| !metadata.permissions().readonly())
         })
     })
+}
+
+/// Re-enables a pre-v2 `telemetry.enabled = false` that carries no explicit
+/// preference. Returns `None` when there is nothing to reset, including every
+/// explicit choice (`explicitly_disabled` stays off).
+pub(super) fn reset_legacy_telemetry_opt_out(raw: &str) -> Option<String> {
+    let mut document = raw.parse::<toml_edit::DocumentMut>().ok()?;
+    let telemetry = document.get("telemetry")?;
+    let disabled = telemetry.get("enabled").and_then(toml_edit::Item::as_bool) == Some(false);
+    let implicit = matches!(
+        telemetry.get("preference").map(toml_edit::Item::as_str),
+        None | Some(Some("default_on"))
+    );
+    if !(disabled && implicit) {
+        return None;
+    }
+    document["telemetry"]["enabled"] = toml_edit::value(true);
+    Some(document.to_string())
 }
 
 fn migrate_legacy_contribute_document(raw: &str, preserve_opt_out: bool) -> Option<String> {

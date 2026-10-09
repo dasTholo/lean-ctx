@@ -374,41 +374,18 @@ pub fn run_setup() {
     crate::core::layout_pin::heal();
 
     terminal_ui::print_step_header(9, 14, "Help Improve lean-ctx");
-    println!("  lean-ctx sends anonymous usage telemetry (on by default):");
-    for line in crate::core::telemetry_consent::disclosure_lines() {
-        println!("  [2m  {line}[0m");
-    }
-    println!("  [2mSee the exact payload anytime: lean-ctx telemetry show[0m");
-    println!();
-    print!("  Keep anonymous telemetry on? [1m[Y/n][0m ");
-    use std::io::Write;
-    std::io::stdout().flush().ok();
-
-    // Enter keeps the default; only an explicit "n"/"no" opts out. Either
-    // answer is persisted, so a "no" survives every later upgrade.
-    let mut input = String::new();
-    let keep = match std::io::stdin().read_line(&mut input) {
-        Ok(_) => !matches!(input.trim().to_lowercase().as_str(), "n" | "no"),
-        Err(_) => true,
-    };
-    match crate::core::telemetry_consent::persist_choice(keep) {
-        Ok(()) => {
-            crate::core::telemetry_consent::mark_notice_seen();
-            if keep {
-                terminal_ui::print_status_ok(
-                    "On — thank you! Turn off anytime: lean-ctx telemetry off",
-                );
-            } else {
-                terminal_ui::print_status_skip(
-                    "Off — nothing is sent. Re-enable: lean-ctx telemetry on",
-                );
-            }
+    // No question: telemetry stays on by default and setup only says how to
+    // change it. An earlier explicit `telemetry off` is left untouched.
+    if crate::core::telemetry_consent::telemetry_would_send() {
+        for line in crate::core::telemetry_consent::hint_lines() {
+            println!("  \x1b[2m{line}\x1b[0m");
         }
-        Err(error) => terminal_ui::print_status_skip(&format!(
-            "Could not save your choice ({error}); run lean-ctx telemetry {}",
-            if keep { "on" } else { "off" }
-        )),
+    } else {
+        terminal_ui::print_status_skip(
+            "Telemetry is off — nothing is sent. Turn on: lean-ctx telemetry on",
+        );
     }
+    crate::core::telemetry_consent::mark_notice_seen();
 
     terminal_ui::print_step_header(10, 14, "Auto-Updates");
     println!("  Keep lean-ctx up to date automatically.");
@@ -418,6 +395,7 @@ pub fn run_setup() {
     );
     println!();
     print!("  Enable automatic updates? \x1b[1m[y/N]\x1b[0m ");
+    use std::io::Write;
     std::io::stdout().flush().ok();
 
     let mut auto_input = String::new();

@@ -47,6 +47,7 @@ pub fn set_many_by_key(
         let toml_value = parse_value(value, key_schema)?;
         set_nested(&mut table, key, toml_value)?;
     }
+    record_telemetry_choice(&mut table, updates)?;
 
     let cfg: Config = toml::Value::Table(table)
         .try_into()
@@ -187,6 +188,40 @@ fn parse_value(
     }
 }
 
+/// A user who sets `telemetry.enabled` by hand (`config set`) made an explicit
+/// choice. Record it as one, so upgrades that re-enable the ambiguous legacy
+/// `enabled = false` never override an opt-out made after telemetry v2.
+fn record_telemetry_choice(
+    table: &mut toml::Table,
+    updates: &[(&str, &str)],
+) -> Result<(), crate::core::error::ConfigError> {
+    if updates
+        .iter()
+        .any(|(key, _)| *key == "telemetry.preference")
+    {
+        return Ok(());
+    }
+    let enabled = table
+        .get("telemetry")
+        .and_then(|telemetry| telemetry.get("enabled"))
+        .and_then(toml::Value::as_bool);
+    let Some(enabled) =
+        enabled.filter(|_| updates.iter().any(|(key, _)| *key == "telemetry.enabled"))
+    else {
+        return Ok(());
+    };
+    let preference = if enabled {
+        "explicitly_enabled"
+    } else {
+        "explicitly_disabled"
+    };
+    set_nested(
+        table,
+        "telemetry.preference",
+        toml::Value::String(preference.to_string()),
+    )
+}
+
 fn set_nested(
     table: &mut toml::Table,
     key: &str,
@@ -314,6 +349,48 @@ mod tests {
         let cfg: Config = toml::Value::Table(table).try_into().unwrap();
         assert!(!cfg.decision_loop.enabled);
         assert_eq!(cfg.decision_loop.max_filter_level, 0);
+    }
+
+    #[test]
+    fn manual_telemetry_switch_is_recorded_as_explicit_choice() {
+        for (value, preference) in [
+            ("false", "explicitly_disabled"),
+            ("true", "explicitly_enabled"),
+        ] {
+            let mut table = toml::Table::new();
+            set_nested(
+                &mut table,
+                "telemetry.enabled",
+                toml::Value::Boolean(value == "true"),
+            )
+            .unwrap();
+            record_telemetry_choice(&mut table, &[("telemetry.enabled", value)]).unwrap();
+            assert_eq!(table["telemetry"]["preference"].as_str(), Some(preference));
+        }
+
+        // An explicit preference in the same write wins; unrelated writes add nothing.
+        let mut table = toml::Table::new();
+        set_nested(&mut table, "telemetry.enabled", toml::Value::Boolean(false)).unwrap();
+        record_telemetry_choice(&mut table, &[("profile", "coder")]).unwrap();
+        assert!(table["telemetry"].get("preference").is_none());
+        set_nested(
+            &mut table,
+            "telemetry.preference",
+            toml::Value::String("default_on".into()),
+        )
+        .unwrap();
+        record_telemetry_choice(
+            &mut table,
+            &[
+                ("telemetry.enabled", "false"),
+                ("telemetry.preference", "default_on"),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            table["telemetry"]["preference"].as_str(),
+            Some("default_on")
+        );
     }
 
     #[test]

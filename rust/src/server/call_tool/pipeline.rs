@@ -10,11 +10,14 @@ pub(in crate::server) enum McpPrimitive {
 }
 
 impl McpPrimitive {
-    /// Whether the tool itself succeeded — what usage telemetry counts.
-    pub(in crate::server) fn succeeded(&self) -> bool {
+    /// A tool failure as telemetry sees it (class and scrubbed template),
+    /// derived locally from its message; `None` when the tool succeeded.
+    pub(in crate::server) fn failure(&self) -> Option<crate::core::telemetry_failure::Failure> {
         match self {
-            Self::Raw(raw) => !raw.tool_error,
-            Self::Terminal(result, _) => result.is_error != Some(true),
+            Self::Raw(raw) => raw
+                .tool_error
+                .then(|| crate::core::telemetry_failure::Failure::from_message(&raw.result_text)),
+            Self::Terminal(result, reason) => result_failure(result, reason),
         }
     }
 }
@@ -1434,6 +1437,7 @@ use terminal::{policy_blocked_output, protect_terminal_result};
 
 #[cfg(test)]
 use telemetry::shell_error_category;
+pub(in crate::server) use telemetry::{error_failure, result_failure};
 use telemetry::{mcp_error_category, record_error_category, record_shell_error_category};
 
 #[path = "pipeline_triage.rs"]

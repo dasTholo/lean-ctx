@@ -13,19 +13,23 @@ use std::io::IsTerminal;
 pub const DISCLOSURE: &[&str] = &[
     "random installation ID (not derived from your machine or account)",
     "LeanCTX version, OS, CPU architecture, install channel (cargo/npm/homebrew/…)",
-    "AI client family (Claude, Cursor, Codex, …) and setup profile / integrations",
-    "daily counts per built-in tool: calls, failures, latency buckets",
+    "AI client family (Claude, Cursor, Codex, Cline, JetBrains, …) or that no AI client is connected, and setup profile / integrations",
+    "runtime environment (local, container, Codespaces, …), installation age and number of active days, each as a coarse range",
+    "daily counts per built-in tool: calls, failures by class, total latency, latency buckets",
+    "the most frequent error messages per tool, with every path, name, value and number replaced by a placeholder on your machine",
+    "daily counts of the LeanCTX commands and background features you use (for example `pack export` or an index build) and how many failed, never their arguments",
+    "your daily usage record (as `lean-ctx gain` shows it, last 90 days): operations and tokens before/after compression, lifetime totals, month of first use",
     "session counts and uptime, error categories, version upgrades",
     "aggregate autopilot, sync and plan events (counts only)",
 ];
 
-/// What a batch never contains.
-pub const NEVER_SENT: &str =
-    "No prompts, code, file names, paths, commands, secrets or IP-derived data.";
+/// What a batch never contains, and what the server keeps of the connection.
+pub const NEVER_SENT: &str = "No prompts, code, file names, paths, commands, raw error messages or secrets. The server reduces the connection's IP address to a keyed network hash and the network operator's public name; the address is never stored.";
 
 /// Bump when [`DISCLOSURE`] gains a category, so existing installations see
-/// the notice again.
-const NOTICE_VERSION: u32 = 1;
+/// the notice again. 2: runtime environment, installation age, active days,
+/// per-tool latency and failure classes, daily usage history.
+const NOTICE_VERSION: u32 = 2;
 
 /// Environment variables that mark a CI or build job. Each job usually starts
 /// from a fresh home and would report as a brand-new installation, so CI never
@@ -98,6 +102,26 @@ pub fn consent_updates(enabled: bool) -> [(&'static str, &'static str); 2] {
     ]
 }
 
+fn legacy_reset_path() -> Result<std::path::PathBuf, String> {
+    crate::core::paths::state_dir().map(|dir| dir.join("telemetry_legacy_opt_out_reset"))
+}
+
+/// Whether the one-time re-enable of pre-v2 `telemetry.enabled = false` has
+/// yet to run. After it ran, a hand-edited `enabled = false` is a v2 choice.
+pub(crate) fn legacy_opt_out_reset_pending() -> bool {
+    legacy_reset_path().is_ok_and(|path| !path.exists())
+}
+
+pub(crate) fn mark_legacy_opt_out_reset() {
+    let Ok(path) = legacy_reset_path() else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(path, "1\n");
+}
+
 fn notice_path() -> Result<std::path::PathBuf, String> {
     crate::core::paths::state_dir().map(|dir| dir.join("telemetry_notice_version"))
 }
@@ -119,17 +143,30 @@ pub fn mark_notice_seen() {
     let _ = std::fs::write(path, format!("{NOTICE_VERSION}\n"));
 }
 
-fn notice_text() -> String {
-    let mut text =
-        String::from("\x1b[1mlean-ctx sends anonymous usage telemetry (on by default).\x1b[0m\n");
-    for line in disclosure_lines() {
-        text.push_str("  ");
-        text.push_str(&line);
-        text.push('\n');
-    }
-    text.push_str(
-        "  \x1b[2mSee the exact payload: lean-ctx telemetry show · Turn off: lean-ctx telemetry off · Details: https://leanctx.com/privacy\x1b[0m\n",
+/// The short, non-blocking hint shown by setup and once after install or
+/// upgrade. Telemetry is never asked about; the full list lives behind
+/// `lean-ctx telemetry status|show` and on the privacy page.
+pub fn hint_lines() -> Vec<String> {
+    let config = crate::core::config::Config::path().map_or_else(
+        || "config.toml".to_string(),
+        |path| path.display().to_string(),
     );
+    vec![
+        "Anonymous usage telemetry is on (daily counts only — no code, paths or prompts)."
+            .to_string(),
+        format!(
+            "Turn off: lean-ctx telemetry off · or set `enabled = false` under [telemetry] in {config}"
+        ),
+        "What is sent: lean-ctx telemetry show · https://leanctx.com/privacy".to_string(),
+    ]
+}
+
+fn notice_text() -> String {
+    let mut lines = hint_lines().into_iter();
+    let mut text = format!("\x1b[1m{}\x1b[0m\n", lines.next().unwrap_or_default());
+    for line in lines {
+        text.push_str(&format!("  \x1b[2m{line}\x1b[0m\n"));
+    }
     text
 }
 
@@ -148,7 +185,7 @@ pub fn maybe_show_notice() {
     mark_notice_seen();
 }
 
-fn telemetry_would_send() -> bool {
+pub(crate) fn telemetry_would_send() -> bool {
     let Ok(config) = crate::core::config::Config::try_load_global() else {
         return false;
     };
@@ -199,13 +236,19 @@ mod tests {
     }
 
     #[test]
-    fn disclosure_names_every_sent_category_and_the_exclusions() {
-        let text = notice_text();
-        for item in DISCLOSURE {
-            assert!(text.contains(item));
-        }
+    fn disclosure_names_the_exclusions() {
+        let text = disclosure_lines().join("\n");
+        assert_eq!(disclosure_lines().len(), DISCLOSURE.len() + 1);
         assert!(text.contains(NEVER_SENT));
+    }
+
+    #[test]
+    fn notice_is_a_short_hint_with_every_way_out() {
+        let text = notice_text();
+        assert_eq!(text.lines().count(), 3);
         assert!(text.contains("lean-ctx telemetry off"));
+        assert!(text.contains("[telemetry]"));
         assert!(text.contains("lean-ctx telemetry show"));
+        assert!(!text.contains('?'), "the notice must not ask anything");
     }
 }

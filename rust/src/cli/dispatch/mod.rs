@@ -65,6 +65,10 @@ pub fn run() {
     {
         crate::core::telemetry_consent::maybe_show_notice();
     }
+    // Counts the command (from a closed list, never its arguments).
+    if !enters_mcp && !is_server_mode(&args) {
+        crate::core::telemetry_features::record_cli(&args);
+    }
 
     if args.len() > 1 {
         let rest = args[2..].to_vec();

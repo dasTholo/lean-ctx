@@ -26,22 +26,26 @@ personenbezogenes Datum gelten.
 ## Standard-an
 
 `TelemetryConfig` trägt `enabled` (Standard `true`), `preference` und
-`last_heartbeat`. Offenlegung statt Sendegatter, an drei Stellen mit derselben
-Liste aus `core::telemetry_consent::DISCLOSURE`:
+`last_heartbeat`. Telemetrie wird nie abgefragt; Offenlegung statt Sendegatter:
 
-- **Setup** fragt „Keep anonymous telemetry on? [Y/n]“ und listet die
-  gesendeten Kategorien. Beide Antworten werden persistiert; ein „n“ schreibt
-  `enabled = false` und `preference = "explicitly_disabled"` und überlebt jedes
-  spätere Upgrade.
-- **`telemetry on`** zeigt die Liste nach dem Einschalten.
-- **Einmaliger Hinweis** beim ersten interaktiven Befehl (stdin und stderr sind
-  Terminals; nie für MCP, Hooks, Server-Modus, Pipes; nie auf stdout), solange
-  die Telemetrie tatsächlich senden würde. Die gesehene Version steht in
+- **Setup** (ab 3.11.1) stellt keine Frage mehr. Sendet die Telemetrie, zeigt es
+  den kurzen Hinweis aus `telemetry_consent::hint_lines()` (an, nur Tageszähler;
+  ausschalten mit `lean-ctx telemetry off` oder `enabled = false` unter
+  `[telemetry]` im angezeigten `config.toml`; Inhalt via `telemetry show`).
+  Ist sie aus, sagt es das und nennt `telemetry on`. Es schreibt keine
+  Präferenz, eine frühere explizite Wahl bleibt also unberührt.
+- **`telemetry on|off`** zeigt die volle Liste aus
+  `core::telemetry_consent::DISCLOSURE`, **`telemetry show`** den exakten Inhalt.
+- **Einmaliger Hinweis** beim ersten interaktiven Befehl nach Installation oder
+  Update (stdin und stderr sind Terminals; nie für MCP, Hooks, Server-Modus,
+  Pipes; nie auf stdout), solange die Telemetrie tatsächlich senden würde:
+  dieselben drei Zeilen wie im Setup, ohne Frage. Die gesehene Version steht in
   `$STATE/telemetry_notice_version`; `NOTICE_VERSION` wird erhöht, wenn die
   Liste eine Kategorie gewinnt.
 
 Vor 3.11.0 wurde ein abgelehntes Setup nicht gespeichert; solche Installationen
-sind nach dem Upgrade an und sehen den Hinweis.
+sind nach dem Upgrade an und sehen den Hinweis. Ein „n“ im Setup von 3.11.0
+schrieb `preference = "explicitly_disabled"` und überlebt jedes Upgrade.
 
 **CI sammelt und sendet nie.** `CI` (ausser `false`/`0`) und die üblichen
 Anbieter-Marker (`GITHUB_ACTIONS`, `GITLAB_CI`, `BUILDKITE`, `CIRCLECI`,
@@ -208,10 +212,19 @@ Identifikation oder Profilbildung, Speicherung in der Schweiz, keine Weitergabe
 an Dritte für deren Zwecke, Offenlegung in `DISCLOSURE` und auf
 leanctx.com/privacy.
 
-Belegt im Server-Code (`lean-ctx-cloud`): Aufbewahrung 90 Tage
-(`telemetry_retention_job`, täglich); `DELETE
-/api/telemetry/v2/installations/{id}` löscht mit gültigem Löschtoken die
-Installation samt aller abhängigen Tabellen (Kaskade) und setzt einen Tombstone.
+Belegt im Server-Code (`lean-ctx-cloud`): Daten einer Installation bleiben
+erhalten, solange sie sich meldet, und werden 25 Monate (760 Tage) nach ihrem
+letzten Kontakt vollständig gelöscht (`telemetry_retention_job`, täglich);
+`DELETE /api/telemetry/v2/installations/{id}` löscht mit gültigem Löschtoken
+die Installation samt aller abhängigen Tabellen (Kaskade) und setzt einen
+Tombstone.
+
+Netzwerk-Kontext (`network_intel.rs`, serverseitig, ab 2026-10-08): Beim
+Empfang eines Batches wird die vom Proxy gelieferte Client-Adresse nur im
+Speicher auf einen HMAC-SHA256-Hash ihres /24- bzw. /48-Präfixes (zufälliger
+Schlüssel in der Datenbank) und auf das öffentliche autonome System (Name,
+Nummer, Land aus iptoasn.com) samt grobem Netztyp reduziert. Die Adresse wird
+nie gespeichert oder geloggt; der Client sendet nichts davon.
 
 ## Mindestabnahme
 
