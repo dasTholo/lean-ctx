@@ -590,6 +590,54 @@ fn update_refuses_a_same_version_binary_that_differs_from_its_receipt() {
     assert!(error.contains("differs from the active receipt"), "{error}");
 }
 
+/// #2037: an exhausted GitHub quota names the cause, the reset time and the
+/// fix instead of a bare "http status: 403".
+#[test]
+fn rate_limit_message_names_reset_and_token() {
+    let now = 1_791_550_000;
+    let anonymous = rate_limit_message(Some(now + 600), false, now);
+    assert!(anonymous.contains("60 requests per hour"), "{anonymous}");
+    assert!(anonymous.contains("in 10 min"), "{anonymous}");
+    assert!(
+        anonymous.contains("GITHUB_TOKEN or GH_TOKEN"),
+        "{anonymous}"
+    );
+    let with_token = rate_limit_message(None, true, now);
+    assert!(with_token.contains("for your token"), "{with_token}");
+    assert!(!with_token.contains("resets"), "{with_token}");
+}
+
+/// #2037: the updater reads GITHUB_TOKEN, then GH_TOKEN, then
+/// LEAN_CTX_GITHUB_TOKEN, ignoring empty values.
+#[test]
+fn github_token_prefers_github_token_and_skips_empty_values() {
+    let _env_lock = crate::core::data_dir::test_env_lock();
+    let saved: Vec<_> = ["GITHUB_TOKEN", "GH_TOKEN", "LEAN_CTX_GITHUB_TOKEN"]
+        .iter()
+        .map(|name| (*name, std::env::var_os(name)))
+        .collect();
+    crate::test_env::set_var("GITHUB_TOKEN", "  ");
+    crate::test_env::set_var("GH_TOKEN", "gh-token");
+    crate::test_env::set_var("LEAN_CTX_GITHUB_TOKEN", "lean-token");
+    assert_eq!(github_token().as_deref(), Some("gh-token"));
+    crate::test_env::set_var("GITHUB_TOKEN", "github-token");
+    assert_eq!(github_token().as_deref(), Some("github-token"));
+    for (name, value) in saved {
+        match value {
+            Some(value) => crate::test_env::set_var(name, value),
+            None => crate::test_env::remove_var(name),
+        }
+    }
+}
+
+/// The token is only ever sent to api.github.com.
+#[test]
+fn github_api_json_refuses_other_hosts() {
+    let error = github_api_json("https://example.com/repos/yvgude/lean-ctx/releases/latest")
+        .expect_err("refused");
+    assert!(error.contains("refusing non-GitHub API URL"), "{error}");
+}
+
 #[test]
 fn filesystem_lock_rejects_concurrent_writer() {
     let directory = tempfile::tempdir().expect("tempdir");
