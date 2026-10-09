@@ -590,6 +590,21 @@ fn update_refuses_a_same_version_binary_that_differs_from_its_receipt() {
     assert!(error.contains("differs from the active receipt"), "{error}");
 }
 
+/// Only a newer release is an update unless a version was chosen on purpose:
+/// a build ahead of GitHub's "latest" is never downgraded on a schedule.
+#[test]
+fn only_newer_releases_are_offered_without_a_pin() {
+    assert!(offers_update("3.11.2", "3.11.1", false));
+    assert!(offers_update("v3.12.0", "3.11.2", false));
+    assert!(!offers_update("3.11.1", "3.11.2", false));
+    assert!(!offers_update("3.11.2", "3.11.2", false));
+    assert!(
+        offers_update("3.11.0", "3.11.2", true),
+        "explicit downgrade"
+    );
+    assert!(!offers_update("v3.11.2", "3.11.2", true));
+}
+
 /// #2037: an exhausted GitHub quota names the cause, the reset time and the
 /// fix instead of a bare "http status: 403".
 #[test]

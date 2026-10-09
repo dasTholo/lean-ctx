@@ -263,7 +263,8 @@ pub(super) fn run_with_mode(args: &[String], mode: UpdateMode) {
         std::process::exit(1);
     };
 
-    if target_tag == CURRENT_VERSION && mode == UpdateMode::Normal {
+    let up_to_date = !super::offers_update(&target_tag, CURRENT_VERSION, pinned);
+    if up_to_date && mode == UpdateMode::Normal {
         if quiet {
             return;
         }

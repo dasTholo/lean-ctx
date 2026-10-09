@@ -391,6 +391,21 @@ fn fetch_api_json(url: &str) -> Result<serde_json::Value, String> {
     github_api_json(url)
 }
 
+/// Whether `target` is an update for the running `current` build. Without an
+/// explicit version only a newer release counts: a build ahead of GitHub's
+/// "latest" (a fresh release before it is marked latest, a development build)
+/// must never be "updated" — or, on a schedule, silently downgraded — to an
+/// older one. `lean-ctx update <version>` and `--pin` install any other
+/// version on purpose.
+fn offers_update(target: &str, current: &str, pinned: bool) -> bool {
+    let target = target.trim_start_matches('v');
+    if pinned {
+        target != current
+    } else {
+        crate::core::version_check::is_newer(target, current)
+    }
+}
+
 /// A GitHub token for the updater's API calls (#2037): `GITHUB_TOKEN`,
 /// `GH_TOKEN` or `LEAN_CTX_GITHUB_TOKEN`, first non-empty wins. Without one,
 /// GitHub allows 60 requests per hour per IP address, shared by everything
