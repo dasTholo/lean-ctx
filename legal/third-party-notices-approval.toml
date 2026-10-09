@@ -1,5 +1,5 @@
 schema = "leanctx.third-party-notices-approval/v1"
-approved_content_sha256 = "f8bbaf6b694b2ff30ef57f73634005a3cabb4a95c4d0df6c2765b4dcffda0454"
+approved_content_sha256 = "421787d9c3facddec18fcba0a2e5fda7588b3db48c55c63053be2ce103c8bdc3"
 approving_owner = "Yves Gugger"
-approval_evidence = "Copyright owner approval of the generated THIRD_PARTY_NOTICES (GENERATED AND APPROVED variant of scripts/generate-third-party-notices.py) for the 3.11.0 release inputs after the Dependabot bumps of packages/pi-lean-ctx (@modelcontextprotocol/sdk 1.32.1, proxy-addr 2.0.8, source-map-js 1.2.2), given explicitly by the owner on 2026-10-07 and recorded on his instruction under the owner-approver policy in docs/licensing/v4-licensing.md"
-approved_at = "2026-10-07"
+approval_evidence = "Copyright owner approval of the generated THIRD_PARTY_NOTICES (GENERATED AND APPROVED variant of scripts/generate-third-party-notices.py) for the 3.11.1 release inputs: the engine version bump to 3.11.1 changed only the Cargo.lock, SBOM, npm package-lock and asset-manifest digests, with no change to any dependency, license or notice text; given explicitly by the owner on 2026-10-09 and recorded on his instruction under the owner-approver policy in docs/licensing/v4-licensing.md"
+approved_at = "2026-10-09"
