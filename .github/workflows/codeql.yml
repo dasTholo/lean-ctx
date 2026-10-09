@@ -46,9 +46,10 @@ jobs:
 
   analyze-rust:
     name: Analyze (rust)
-    # Trusted runs use the self-hosted pounce runners (see ci.yml); forks and
-    # Dependabot stay on GitHub-hosted runners.
-    runs-on: ${{ (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')) && vars.SELF_HOSTED_CI != 'off' && fromJSON('["self-hosted","pounce"]') || 'ubuntu-latest' }}
+    # Hosted, not pounce: the CodeQL JVM sizes itself to the machine (22 GB
+    # RSS on the runner VM) and got the test jobs OOM-killed. It does not gate
+    # merges, and build-mode none already removed its 14-minute build.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4 # v4
         with:
