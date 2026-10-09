@@ -21,9 +21,7 @@ Updater and security hotfix for 3.11.1. Agent Tools protocol, configuration and 
 ### Fixed
 
 - **Codex threads recorded while ChatGPT routing was on stay resumable.** Codex stamps `model_provider = "leanctx-chatgpt"` into every such thread and refuses to resume it once that provider is missing (`Model provider 'leanctx-chatgpt' not found`). `lean-ctx doctor --fix`, `proxy` runs and stale-proxy cleanup deleted the `[model_providers.leanctx-chatgpt]` block by name, including the direct one users restored by hand. Cleanup now only touches a block that targets the local proxy, and repoints it at `https://chatgpt.com/backend-api/codex` instead of deleting it; a block aimed anywhere else is kept verbatim and no longer reported as routed or broken.
-
-### Fixed
-
+- **`ctx_multi_repo action=search` without a query says so.** While a content policy was active, the call was refused with the cross-project policy message instead of `query is required for search`.
 - **No downgrade as "update".** Without an explicit version, `lean-ctx update` and scheduled updates only install a release newer than the running build; a build ahead of GitHub's latest release was offered, and on a schedule installed, the older release. `lean-ctx update <version>` and `--pin` still install any version on purpose.
 - **GitHub API rate limit** (#2037): the updater now sends `GITHUB_TOKEN`, `GH_TOKEN` or `LEAN_CTX_GITHUB_TOKEN` when set (only to api.github.com, without following redirects), raising GitHub's limit from 60 requests per hour per IP address to 5000. An exhausted quota now says so, with the reset time and the fix, instead of `http status: 403`; a rejected token reports `401 Bad credentials`. The background version check uses the same client.
 - **`lean-ctx update` and `lean-ctx update --rollback` complete again.** The updater sealed each prepared transaction with its integrity digest when writing it to disk, but then executed the unsealed copy, which the integrity check rejected every time. The updater now executes exactly the sealed transaction it persisted. A new test runs the real prepare → execute → recover path on a stand-in binary.
