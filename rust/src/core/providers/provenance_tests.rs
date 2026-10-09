@@ -15,7 +15,16 @@ fn source_view_reacquires_the_redacted_snapshot_projection() {
     exercise_reuse(Projection::SnapshotV1);
 }
 
+/// Reacquisition checks `roles::active_role()`, which other tests change
+/// process-wide (`set_active_role("reviewer")` denies `ctx_provider`); a
+/// concurrent switch withheld every provider fact (Linux CI, #2036). Pin the
+/// role for this test the way the compose tests do.
 fn exercise_reuse(projection: Projection) {
+    let role = crate::core::roles::load_role("coder").unwrap();
+    crate::core::roles::with_test_active_role(role, || exercise_reuse_as_coder(projection));
+}
+
+fn exercise_reuse_as_coder(projection: Projection) {
     let _data = crate::core::data_dir::isolated_data_dir();
     let root = tempfile::tempdir().unwrap();
     let project = root.path().to_str().unwrap();
