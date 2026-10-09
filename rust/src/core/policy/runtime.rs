@@ -529,26 +529,49 @@ fn test_override_lock() -> &'static std::sync::Mutex<()> {
     LOCK.get_or_init(|| std::sync::Mutex::new(()))
 }
 
+/// Held while a test pins the process-wide policy override.
+///
+/// Lock order is always `test_env_lock` → override lock. Tests take both in
+/// either order (`isolated_data_dir()` then `TestPolicyOverride::set`, or
+/// `lock_test_override()` then `isolated_data_dir()`); taking them as two
+/// independent locks deadlocked the suite (ABBA) once enough tests ran in
+/// parallel — 28 threads on a 28-core runner hung it for good. The env lock is
+/// reentrant per thread, so acquiring it first here is free for a test that
+/// already holds it.
 #[cfg(test)]
-pub(crate) fn lock_test_override() -> std::sync::MutexGuard<'static, ()> {
-    test_override_lock()
+pub(crate) struct TestOverrideLock {
+    _lock: std::sync::MutexGuard<'static, ()>,
+    _env: crate::core::data_dir::TestEnvGuard,
+}
+
+#[cfg(test)]
+fn acquire_test_override() -> TestOverrideLock {
+    let env = crate::core::data_dir::test_env_lock();
+    let lock = test_override_lock()
         .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    TestOverrideLock {
+        _lock: lock,
+        _env: env,
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn lock_test_override() -> TestOverrideLock {
+    acquire_test_override()
 }
 
 /// Process-wide test override held under a shared lock for its whole lifetime.
 #[cfg(test)]
 pub struct TestPolicyOverride {
     previous: OverrideState,
-    _lock: std::sync::MutexGuard<'static, ()>,
+    _lock: TestOverrideLock,
 }
 
 #[cfg(test)]
 impl TestPolicyOverride {
     pub fn set(resolved: Option<ResolvedPolicy>) -> Self {
-        let lock = test_override_lock()
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let lock = acquire_test_override();
         let previous = std::mem::replace(
             &mut *test_override()
                 .write()

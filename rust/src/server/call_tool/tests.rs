@@ -1168,8 +1168,10 @@ mod shell_outcome_tests {
     #[cfg(not(windows))]
     fn scoped_policy_overrides_serialize_parallel_mutation() {
         // The deliberately active global overrides below must not leak into
-        // other tests that hold isolated data/config state but use live policy.
-        let _data = crate::core::data_dir::test_env_lock();
+        // other tests that hold isolated data/config state but use live
+        // policy. Each override now holds `test_env_lock` itself (lock order
+        // env → override), so this thread must not hold it: the override
+        // threads below would wait on it forever.
         let (first_ready_tx, first_ready_rx) = std::sync::mpsc::channel();
         let (release_first_tx, release_first_rx) = std::sync::mpsc::channel();
         let first = std::thread::spawn(move || {
@@ -1177,8 +1179,12 @@ mod shell_outcome_tests {
             first_ready_tx.send(()).expect("signal first override");
             release_first_rx.recv().expect("release first override");
         });
+        // Liveness waits, not timing assertions: an override first takes
+        // `test_env_lock`, which other tests may hold for a while on a busy
+        // many-core runner.
+        let acquire = std::time::Duration::from_mins(2);
         first_ready_rx
-            .recv_timeout(std::time::Duration::from_secs(1))
+            .recv_timeout(acquire)
             .expect("first override must become active");
 
         let (second_started_tx, second_started_rx) = std::sync::mpsc::channel();
@@ -1201,7 +1207,7 @@ mod shell_outcome_tests {
         first.join().expect("first policy thread");
         if !overlapped {
             second_acquired_rx
-                .recv_timeout(std::time::Duration::from_secs(1))
+                .recv_timeout(acquire)
                 .expect("second override must acquire after first drops");
         }
         release_second_tx.send(()).expect("release second thread");
