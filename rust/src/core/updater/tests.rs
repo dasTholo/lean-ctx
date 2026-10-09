@@ -396,6 +396,200 @@ fn manifest_rejects_malformed_payload_digest() {
     assert!(validate_manifest(&manifest, "v3.9.20", asset).is_err());
 }
 
+/// Regression (3.11.0/3.11.1): `prepare_update_transaction` returned the
+/// unsealed transaction, so `execute_prepared_transaction` always failed with
+/// "prepared transaction is missing its integrity digest" and `lean-ctx update`
+/// could never install a release. Runs the real prepare → execute path on a
+/// stand-in binary inside an isolated state directory.
+#[test]
+fn prepared_update_executes_and_records_the_receipt() {
+    let sandbox = UpdaterSandbox::new(b"#!/bin/sh\necho old\n");
+    let exe = sandbox.exe.clone();
+    let target = b"#!/bin/sh\necho new\n";
+
+    let transaction = sandbox.prepare("9.9.9", target);
+    assert!(
+        transaction.transaction_sha256.is_some(),
+        "the caller must receive the sealed transaction"
+    );
+    execute_prepared_transaction(&transaction, &exe).expect("execute");
+
+    assert_eq!(std::fs::read(&exe).expect("installed binary"), target);
+    let receipt = load_update_receipt_for(&exe)
+        .expect("receipt loads")
+        .expect("receipt written");
+    assert_eq!(receipt.active.version, "9.9.9");
+    assert_eq!(receipt.active.sha256, sha256_hex(target));
+    assert!(
+        !update_transaction_path()
+            .expect("transaction path")
+            .exists(),
+        "a committed transaction is cleaned up"
+    );
+    // A second run finds nothing pending.
+    assert!(!recover_pending_transaction(&exe).expect("recovery"));
+
+    // `lean-ctx update --rollback` restores the previous binary through the
+    // same sealed-transaction path and records the swapped receipt.
+    rollback_installation(&exe).expect("rollback");
+    assert_eq!(
+        std::fs::read(&exe).expect("restored binary"),
+        b"#!/bin/sh\necho old\n"
+    );
+    let receipt = load_update_receipt_for(&exe)
+        .expect("receipt loads")
+        .expect("receipt written");
+    assert_eq!(receipt.previous.version, "9.9.9");
+    assert!(!recover_pending_transaction(&exe).expect("recovery after rollback"));
+}
+
+/// Stand-in install for transaction tests: isolated state dir plus a binary.
+struct UpdaterSandbox {
+    _env_lock: crate::core::data_dir::TestEnvGuard,
+    _state: tempfile::TempDir,
+    _install: tempfile::TempDir,
+    exe: std::path::PathBuf,
+}
+
+impl UpdaterSandbox {
+    fn new(binary: &[u8]) -> Self {
+        let env_lock = crate::core::data_dir::test_env_lock();
+        let state = tempfile::tempdir().expect("state dir");
+        crate::test_env::set_var("LEAN_CTX_STATE_DIR", state.path());
+        let install = tempfile::tempdir().expect("install dir");
+        let exe = install.path().join("lean-ctx");
+        std::fs::write(&exe, binary).expect("current binary");
+        Self {
+            _env_lock: env_lock,
+            _state: state,
+            _install: install,
+            exe,
+        }
+    }
+
+    fn prepare(&self, version: &str, target: &[u8]) -> PreparedTransaction {
+        let verified = VerifiedArtifact {
+            archive_sha256: "a".repeat(64),
+            manifest_sha256: "b".repeat(64),
+            release_commit: "c".repeat(40),
+            payload_sha256: sha256_hex(target),
+        };
+        prepare_update_transaction(
+            &self.exe,
+            "lean-ctx-aarch64-apple-darwin.tar.gz",
+            version,
+            &verified,
+            target,
+        )
+        .expect("prepare")
+    }
+}
+
+impl Drop for UpdaterSandbox {
+    fn drop(&mut self) {
+        crate::test_env::remove_var("LEAN_CTX_STATE_DIR");
+    }
+}
+
+/// Users stranded on 3.11.0/3.11.1 keep a sealed transaction on disk from a
+/// failed run. After they reinstall a newer build by script or package
+/// manager, recovery must drop that obsolete transaction instead of refusing
+/// every later update with "matches neither prepared state".
+#[test]
+fn recovery_drops_a_transaction_an_external_install_superseded() {
+    let sandbox = UpdaterSandbox::new(b"#!/bin/sh\necho stranded\n");
+    let transaction = sandbox.prepare(CURRENT_VERSION, b"#!/bin/sh\necho target\n");
+    std::fs::write(&sandbox.exe, b"#!/bin/sh\necho reinstalled\n").expect("reinstall");
+
+    assert!(!recover_pending_transaction(&sandbox.exe).expect("recovery"));
+    assert_eq!(
+        std::fs::read(&sandbox.exe).expect("binary"),
+        b"#!/bin/sh\necho reinstalled\n",
+        "recovery never touches the reinstalled binary"
+    );
+    for path in [
+        update_transaction_path().expect("transaction path"),
+        std::path::PathBuf::from(&transaction.staged_path),
+        std::path::PathBuf::from(&transaction.backup_path),
+    ] {
+        assert!(!path.exists(), "{} removed", path.display());
+    }
+}
+
+/// A transaction toward a version newer than the running build is not
+/// superseded: an unknown binary there still refuses recovery.
+#[test]
+fn recovery_still_refuses_an_unknown_binary_below_the_target() {
+    let sandbox = UpdaterSandbox::new(b"#!/bin/sh\necho old\n");
+    sandbox.prepare("999.0.0", b"#!/bin/sh\necho future\n");
+    std::fs::write(&sandbox.exe, b"#!/bin/sh\necho tampered\n").expect("swap");
+    let error = recover_pending_transaction(&sandbox.exe).expect_err("refuses");
+    assert!(error.contains("matches neither prepared state"), "{error}");
+}
+
+fn receipt_for(
+    sandbox: &UpdaterSandbox,
+    version: &str,
+    bytes: &[u8],
+) -> (std::path::PathBuf, UpdateReceipt) {
+    let (_state, receipt_path, previous) = canonical_update_paths(&sandbox.exe).expect("paths");
+    let binary = |path: String| BinaryReceipt {
+        version: version.to_string(),
+        asset: "lean-ctx".to_string(),
+        sha256: sha256_hex(bytes),
+        size: bytes.len() as u64,
+        path,
+        manifest_sha256: None,
+        archive_sha256: None,
+        release_commit: None,
+    };
+    let current = canonical_current_exe(&sandbox.exe).expect("canonical exe");
+    let receipt = UpdateReceipt {
+        schema_version: UPDATE_RECEIPT_SCHEMA.to_string(),
+        active: binary(current.to_string_lossy().into_owned()),
+        previous: binary(previous.to_string_lossy().into_owned()),
+        receipt_sha256: None,
+    };
+    (receipt_path, receipt)
+}
+
+/// A receipt from an earlier updater run that a reinstall of another version
+/// made stale no longer blocks updates; the chain restarts from the running
+/// binary.
+#[test]
+fn update_restarts_the_receipt_chain_after_an_external_reinstall() {
+    let sandbox = UpdaterSandbox::new(b"#!/bin/sh\necho reinstalled\n");
+    let (path, receipt) = receipt_for(&sandbox, "3.0.0", b"#!/bin/sh\necho earlier\n");
+    write_update_receipt(&path, &receipt).expect("stale receipt");
+
+    let target = b"#!/bin/sh\necho next\n";
+    let transaction = sandbox.prepare("999.0.0", target);
+    assert_eq!(
+        transaction.old_active.sha256,
+        sha256_hex(b"#!/bin/sh\necho reinstalled\n")
+    );
+    execute_prepared_transaction(&transaction, &sandbox.exe).expect("execute");
+    assert_eq!(std::fs::read(&sandbox.exe).expect("installed"), target);
+}
+
+/// Same version, different bytes is not a reinstall but an unexplained
+/// change: the updater keeps refusing.
+#[test]
+fn update_refuses_a_same_version_binary_that_differs_from_its_receipt() {
+    let sandbox = UpdaterSandbox::new(b"#!/bin/sh\necho modified\n");
+    let (path, receipt) = receipt_for(&sandbox, CURRENT_VERSION, b"#!/bin/sh\necho recorded\n");
+    write_update_receipt(&path, &receipt).expect("receipt");
+    let verified = VerifiedArtifact {
+        archive_sha256: "a".repeat(64),
+        manifest_sha256: "b".repeat(64),
+        release_commit: "c".repeat(40),
+        payload_sha256: sha256_hex(b"x"),
+    };
+    let error = prepare_update_transaction(&sandbox.exe, "lean-ctx", "999.0.0", &verified, b"x")
+        .expect_err("refuses");
+    assert!(error.contains("differs from the active receipt"), "{error}");
+}
+
 #[test]
 fn filesystem_lock_rejects_concurrent_writer() {
     let directory = tempfile::tempdir().expect("tempdir");

@@ -77,9 +77,13 @@ fn fetch_latest_version() -> Result<String, String> {
     Ok(version)
 }
 
-fn is_newer(latest: &str, current: &str) -> bool {
-    let parse =
-        |v: &str| -> Vec<u32> { v.split('.').filter_map(|p| p.parse::<u32>().ok()).collect() };
+pub(crate) fn is_newer(latest: &str, current: &str) -> bool {
+    let parse = |v: &str| -> Vec<u32> {
+        v.trim_start_matches('v')
+            .split('.')
+            .filter_map(|p| p.parse::<u32>().ok())
+            .collect()
+    };
     parse(latest) > parse(current)
 }
 

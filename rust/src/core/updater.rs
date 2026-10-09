@@ -15,7 +15,10 @@ use transaction::{
     recover_pending_transaction, rollback_to_previous,
 };
 #[cfg(test)]
-use transaction::{cleanup_orphaned_prepared_files, orphan_prepared_paths, write_update_receipt};
+use transaction::{
+    cleanup_orphaned_prepared_files, orphan_prepared_paths, rollback_installation,
+    write_update_receipt,
+};
 
 mod platform;
 use platform::{gpu_next_steps, gpu_platform_asset_name, platform_asset_name};
