@@ -96,7 +96,11 @@ lean-ctx security secrets on    # re-enable masking
 **What it does:** confines lean-ctx's file tools to your code. Since v3.11.1 the
 default scope is **`home`**: every project below your home directory is
 **readable** at once, so working across several repositories needs no
-configuration. **Writes** stay where they were: the session's own project,
+configuration. A path counts as part of a project when a folder between it and
+`~` holds `.git`, `Cargo.toml`, `package.json` or another project marker. Loose
+personal files — `~/Documents/taxes.pdf`, `~/Downloads`, `~/Desktop` — are not
+code and stay jailed, so a prompt-injected agent cannot pull them into the model
+context (since v3.11.2; v3.11.1 opened every path below `~`). **Writes** stay where they were: the session's own project,
 host-declared roots, and explicit allow entries — an agent in repo A cannot plant
 `~/code/B/.git/hooks/pre-commit` or `~/bin/git`. What stays jailed entirely:
 
