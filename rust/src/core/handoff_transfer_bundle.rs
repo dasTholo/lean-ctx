@@ -507,6 +507,13 @@ mod tests {
     /// `Unsigned` (legacy, allowed with warning).
     #[test]
     fn import_signature_check_verified_unsigned_invalid() {
+        // Signing writes the agent key under the data dir. Own it for the
+        // test: a concurrent test that points LEAN_CTX_DATA_DIR at a temp dir
+        // and deletes it made `sign` fail with "path not found" (Windows CI).
+        let _lock = crate::core::data_dir::test_env_lock();
+        let data_dir = tempfile::tempdir().unwrap();
+        crate::test_env::set_var("LEAN_CTX_DATA_DIR", data_dir.path());
+
         let unsigned = build_bundle_v1(sample_ledger(), None, BundlePrivacyV1::Redacted);
         assert_eq!(
             check_bundle_signature(&unsigned),
@@ -537,5 +544,7 @@ mod tests {
             check_bundle_signature(&partial),
             BundleSignatureStatus::Invalid(_)
         ));
+
+        crate::test_env::remove_var("LEAN_CTX_DATA_DIR");
     }
 }
