@@ -1148,6 +1148,26 @@ fn extract_binary(archive_bytes: &[u8], asset_name: &str) -> Result<Vec<u8>, Str
     }
 }
 
+/// #356: on macOS, sign the staged update with the persistent identity (ad-hoc
+/// fallback) so the TCC grant survives the update. Done before the swap: a
+/// signature added after it would change the installed bytes behind the
+/// transaction's back, and the commit check would refuse the update.
+/// Returns the bytes as they will be installed.
+fn sign_staged_binary(staged_path: &std::path::Path, bytes: &[u8]) -> Result<Vec<u8>, String> {
+    #[cfg(target_os = "macos")]
+    let installed = {
+        let _ = bytes;
+        let _ = crate::core::codesign::sign_binary(staged_path);
+        std::fs::read(staged_path).map_err(|e| format!("cannot read signed staged binary: {e}"))
+    };
+    #[cfg(not(target_os = "macos"))]
+    let installed = {
+        let _ = staged_path;
+        Ok(bytes.to_vec())
+    };
+    installed
+}
+
 fn replace_staged_binary(
     staged_path: &std::path::Path,
     current_exe: &std::path::Path,
@@ -1215,18 +1235,13 @@ fn replace_staged_binary(
     {
         // Same-filesystem rename is atomic and retains the old inode on
         // Unix/macOS, so a failed swap cannot leave the install path absent.
+        // The staged file is installed byte for byte: on macOS it was signed
+        // while staged (`sign_staged_binary`), so the receipt and the commit
+        // check see exactly the installed bytes.
         std::fs::rename(staged_path, current_exe).map_err(|e| {
             let _ = std::fs::remove_file(staged_path);
             format!("Cannot replace binary (permission denied?): {e}")
         })?;
-
-        // #356: re-sign with the persistent identity when available so the
-        // macOS TCC grant survives the update; ad-hoc fallback keeps it runnable.
-        #[cfg(target_os = "macos")]
-        {
-            let _ = crate::core::codesign::sign_binary(current_exe);
-        }
-
         Ok(())
     }
 }

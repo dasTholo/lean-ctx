@@ -9,8 +9,9 @@ use super::{
     UPDATE_TRANSACTION_FILE, UPDATE_TRANSACTION_SCHEMA, UpdateReceipt, VerifiedArtifact,
     atomic_write_bytes, canonical_current_exe, canonical_state_dir, canonical_update_paths,
     constant_time_eq, ensure_no_symlink_under, load_update_receipt_for, previous_binary_path,
-    receipt_digest, replace_staged_binary, sha256_hex, staged_update_path, update_layout,
-    update_lock_path, update_transaction_path, validate_receipt, validate_receipt_paths,
+    receipt_digest, replace_staged_binary, sha256_hex, sign_staged_binary, staged_update_path,
+    update_layout, update_lock_path, update_transaction_path, validate_receipt,
+    validate_receipt_paths,
 };
 
 pub(super) struct UpdateLock {
@@ -313,16 +314,6 @@ pub(super) fn prepare_update_transaction(
             archive_sha256: None,
             release_commit: None,
         });
-    let target_active = BinaryReceipt {
-        version: target_version.to_string(),
-        asset: asset_name.to_string(),
-        sha256: sha256_hex(binary),
-        size: binary.len() as u64,
-        path: current_path.to_string_lossy().into_owned(),
-        manifest_sha256: Some(verified.manifest_sha256.clone()),
-        archive_sha256: Some(verified.archive_sha256.clone()),
-        release_commit: Some(verified.release_commit.clone()),
-    };
     let target_previous = BinaryReceipt {
         path: previous_path.to_string_lossy().into_owned(),
         ..old_active.clone()
@@ -338,7 +329,21 @@ pub(super) fn prepare_update_transaction(
         }
     }
     atomic_write_bytes(&staged_path, binary)?;
+    // The verified release binary, signed for this machine where the platform
+    // needs it: the receipt records exactly the bytes that will be installed,
+    // while the manifest and archive digests keep the release provenance.
+    let installed = sign_staged_binary(&staged_path, binary)?;
     atomic_write_bytes(&backup_path, &current)?;
+    let target_active = BinaryReceipt {
+        version: target_version.to_string(),
+        asset: asset_name.to_string(),
+        sha256: sha256_hex(&installed),
+        size: installed.len() as u64,
+        path: current_path.to_string_lossy().into_owned(),
+        manifest_sha256: Some(verified.manifest_sha256.clone()),
+        archive_sha256: Some(verified.archive_sha256.clone()),
+        release_commit: Some(verified.release_commit.clone()),
+    };
     let transaction = PreparedTransaction {
         schema_version: UPDATE_TRANSACTION_SCHEMA.to_string(),
         operation: "update".to_string(),
