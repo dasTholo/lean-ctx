@@ -119,8 +119,7 @@ async fn server_with_fixture() -> (
 async fn decision_loop_integration_simple_read() {
     let _lock = crate::core::data_dir::test_env_lock();
     let (data_dir, project_dir, server) = server_with_fixture().await;
-    // SAFETY: test_env_lock serializes process-wide data directory changes.
-    unsafe { std::env::set_var("LEAN_CTX_DATA_DIR", data_dir.path()) };
+    crate::test_env::set_var("LEAN_CTX_DATA_DIR", data_dir.path());
 
     let task_id = call(
         &server,
@@ -149,8 +148,7 @@ async fn decision_loop_integration_simple_read() {
         "a task-text-less profile must pass output through unfiltered"
     );
 
-    // SAFETY: test_env_lock serializes process-wide data directory changes.
-    unsafe { std::env::remove_var("LEAN_CTX_DATA_DIR") };
+    crate::test_env::remove_var("LEAN_CTX_DATA_DIR");
 }
 
 #[allow(clippy::await_holding_lock)]
@@ -158,8 +156,7 @@ async fn decision_loop_integration_simple_read() {
 async fn decision_loop_integration_shell() {
     let _lock = crate::core::data_dir::test_env_lock();
     let (data_dir, _project_dir, server) = server_with_fixture().await;
-    // SAFETY: test_env_lock serializes process-wide data directory changes.
-    unsafe { std::env::set_var("LEAN_CTX_DATA_DIR", data_dir.path()) };
+    crate::test_env::set_var("LEAN_CTX_DATA_DIR", data_dir.path());
 
     let task_id = call(
         &server,
@@ -169,8 +166,7 @@ async fn decision_loop_integration_shell() {
     .await;
     assert_completed_task(&server, &task_id, "ctx_shell").await;
 
-    // SAFETY: test_env_lock serializes process-wide data directory changes.
-    unsafe { std::env::remove_var("LEAN_CTX_DATA_DIR") };
+    crate::test_env::remove_var("LEAN_CTX_DATA_DIR");
 }
 
 #[allow(clippy::await_holding_lock)]
@@ -178,8 +174,7 @@ async fn decision_loop_integration_shell() {
 async fn decision_loop_integration_multi_step_operation() {
     let _lock = crate::core::data_dir::test_env_lock();
     let (data_dir, project_dir, server) = server_with_fixture().await;
-    // SAFETY: test_env_lock serializes process-wide data directory changes.
-    unsafe { std::env::set_var("LEAN_CTX_DATA_DIR", data_dir.path()) };
+    crate::test_env::set_var("LEAN_CTX_DATA_DIR", data_dir.path());
 
     let first_task_id = call(
         &server,
@@ -207,6 +202,5 @@ async fn decision_loop_integration_multi_step_operation() {
     assert_ne!(first_task_id, shell_task_id);
     assert_ne!(shell_task_id, final_task_id);
 
-    // SAFETY: test_env_lock serializes process-wide data directory changes.
-    unsafe { std::env::remove_var("LEAN_CTX_DATA_DIR") };
+    crate::test_env::remove_var("LEAN_CTX_DATA_DIR");
 }

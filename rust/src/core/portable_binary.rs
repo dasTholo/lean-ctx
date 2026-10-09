@@ -331,17 +331,14 @@ mod tests {
     #[test]
     fn hook_binary_override_env_is_verbatim_and_blank_is_none() {
         let _lock = crate::core::data_dir::test_env_lock();
-        // SAFETY: serialized by test_env_lock.
-        unsafe { std::env::set_var("LEAN_CTX_HOOK_BINARY", "$HOME/.local/bin/lean-ctx") };
+        crate::test_env::set_var("LEAN_CTX_HOOK_BINARY", "$HOME/.local/bin/lean-ctx");
         assert_eq!(
             hook_binary_override().as_deref(),
             Some("$HOME/.local/bin/lean-ctx")
         );
-        // SAFETY: serialized by test_env_lock.
-        unsafe { std::env::set_var("LEAN_CTX_HOOK_BINARY", "   ") };
+        crate::test_env::set_var("LEAN_CTX_HOOK_BINARY", "   ");
         assert_eq!(hook_binary_override(), None);
-        // SAFETY: serialized by test_env_lock.
-        unsafe { std::env::remove_var("LEAN_CTX_HOOK_BINARY") };
+        crate::test_env::remove_var("LEAN_CTX_HOOK_BINARY");
     }
 
     #[test]

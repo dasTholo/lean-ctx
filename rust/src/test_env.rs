@@ -40,6 +40,7 @@ pub(crate) fn run_with_conversation_scope(test_name: &str, enabled: bool) -> boo
 
 /// Sets `key` to `value` in the process environment (test-only).
 pub(crate) fn set_var<K: AsRef<OsStr>, V: AsRef<OsStr>>(key: K, value: V) {
+    assert_env_lock_held(key.as_ref());
     // SAFETY: tests serialize all environment access through test_env_lock(),
     // so no other thread reads or writes the environment concurrently.
     unsafe { std::env::set_var(key, value) };
@@ -47,7 +48,23 @@ pub(crate) fn set_var<K: AsRef<OsStr>, V: AsRef<OsStr>>(key: K, value: V) {
 
 /// Removes `key` from the process environment (test-only).
 pub(crate) fn remove_var<K: AsRef<OsStr>>(key: K) {
+    assert_env_lock_held(key.as_ref());
     // SAFETY: tests serialize all environment access through test_env_lock(),
     // so no other thread reads or writes the environment concurrently.
     unsafe { std::env::remove_var(key) };
+}
+
+/// The SAFETY argument above is only true if the caller holds the lock. An
+/// unlocked mutation does not crash; it silently repoints a parallel test's
+/// data dir or role mid-run, and on a many-core runner every run tripped a
+/// different pair. Enforcing the invariant turns that into a deterministic
+/// failure at the offending call site.
+fn assert_env_lock_held(key: &OsStr) {
+    #[cfg(test)]
+    assert!(
+        crate::core::data_dir::holds_test_env_lock(),
+        "test env mutation of {key:?} without crate::core::data_dir::test_env_lock()"
+    );
+    #[cfg(not(test))]
+    let _ = key;
 }
