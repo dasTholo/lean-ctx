@@ -266,6 +266,24 @@ fn merge_local_untrusted_withholds_tool_surface_overrides() {
 }
 
 #[test]
+fn redirect_exclude_follows_workspace_trust() {
+    // `redirect_exclude` routes native reads around the lean-ctx redirect (and
+    // its redaction), so an untrusted repo's own list is withheld; the global
+    // list stays in force either way.
+    let global = || Config {
+        redirect_exclude: vec!["CLAUDE.md".to_string()],
+        ..Config::default()
+    };
+    let mut untrusted = global();
+    untrusted.merge_local(r#"redirect_exclude = ["**"]"#, false);
+    assert_eq!(untrusted.redirect_exclude, vec!["CLAUDE.md"]);
+
+    let mut trusted = global();
+    trusted.merge_local(r#"redirect_exclude = ["docs/**"]"#, true);
+    assert_eq!(trusted.redirect_exclude, vec!["CLAUDE.md", "docs/**"]);
+}
+
+#[test]
 fn merge_local_trusted_applies_tool_surface_overrides() {
     let mut base = Config {
         tool_profile: Some("minimal".to_string()),

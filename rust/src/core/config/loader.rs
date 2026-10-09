@@ -133,6 +133,12 @@ pub(crate) fn strip_sensitive_overrides(local: &mut Config) -> Vec<&'static str>
         local.passthrough_urls.clear();
         withheld.push("passthrough_urls");
     }
+    // Paths in `redirect_exclude` skip the native-read redirect, and with it
+    // the redaction that path applies; a cloned repo must not opt itself out.
+    if !local.redirect_exclude.is_empty() {
+        local.redirect_exclude.clear();
+        withheld.push("redirect_exclude");
+    }
     if local.proxy.anthropic_upstream.is_some()
         || local.proxy.openai_upstream.is_some()
         || local.proxy.chatgpt_upstream.is_some()
