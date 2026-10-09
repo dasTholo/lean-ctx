@@ -16423,7 +16423,7 @@
         "registry+https://github.com/rust-lang/crates.io-index#zip@8.6.0",
         "registry+https://github.com/rust-lang/crates.io-index#zstd@0.13.3"
       ],
-      "ref": "path+file://./rust#lean-ctx@3.11.0"
+      "ref": "path+file://./rust#lean-ctx@3.11.1"
     },
     {
       "dependsOn": [
@@ -20097,21 +20097,21 @@
   ],
   "metadata": {
     "component": {
-      "bom-ref": "path+file://./rust#lean-ctx@3.11.0",
+      "bom-ref": "path+file://./rust#lean-ctx@3.11.1",
       "components": [
         {
-          "bom-ref": "path+file://./rust#lean-ctx@3.11.0 bin-target-0",
+          "bom-ref": "path+file://./rust#lean-ctx@3.11.1 bin-target-0",
           "name": "lean_ctx",
-          "purl": "pkg:cargo/lean-ctx@3.11.0?download_url=file://.#src/lib.rs",
+          "purl": "pkg:cargo/lean-ctx@3.11.1?download_url=file://.#src/lib.rs",
           "type": "library",
-          "version": "3.11.0"
+          "version": "3.11.1"
         },
         {
-          "bom-ref": "path+file://./rust#lean-ctx@3.11.0 bin-target-1",
+          "bom-ref": "path+file://./rust#lean-ctx@3.11.1 bin-target-1",
           "name": "lean-ctx",
-          "purl": "pkg:cargo/lean-ctx@3.11.0?download_url=file://.#src/main.rs",
+          "purl": "pkg:cargo/lean-ctx@3.11.1?download_url=file://.#src/main.rs",
           "type": "application",
-          "version": "3.11.0"
+          "version": "3.11.1"
         }
       ],
       "description": "LeanCTX Engine: the open-source runtime for the Context Gateway for AI Systems. CLI, MCP server, and supported proxy integrations.",
@@ -20131,10 +20131,10 @@
         }
       ],
       "name": "lean-ctx",
-      "purl": "pkg:cargo/lean-ctx@3.11.0?download_url=file://.",
+      "purl": "pkg:cargo/lean-ctx@3.11.1?download_url=file://.",
       "scope": "required",
       "type": "application",
-      "version": "3.11.0"
+      "version": "3.11.1"
     },
     "properties": [
       {
@@ -20143,7 +20143,7 @@
       },
       {
         "name": "leanctx:cargo-lock-sha256",
-        "value": "a9d8b3bb6d65830fb64bad579692ec7819b0c4b0948923e22f6c2b701aa6fa6f"
+        "value": "02c716694a298c2b22ce4716fda8d3b41407b78c855b1f92b440ca1af4e2d37f"
       }
     ],
     "tools": [
