@@ -4,7 +4,7 @@ All notable changes to lean-ctx are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 Current positioning: [LeanCTX Engine — Context Gateway for AI Systems](docs/POSITIONING_CANONICAL.md).
 
-## [Unreleased]
+## [3.11.1] — 2026-10-09
 
 ### Highlights
 
@@ -16,6 +16,7 @@ Current positioning: [LeanCTX Engine — Context Gateway for AI Systems](docs/PO
 - **Path jail scope:** the new `path_jail_scope` setting defaults to `"home"`: reads anywhere below your home directory outside the protected zones; writes only in the session's project, host-declared roots and allow entries. Set `lean-ctx config set path_jail_scope project` to keep the previous single-project boundary. The setting is global-only; a project-local `.lean-ctx.toml` cannot change it. With an implausible `$HOME` (`/`, a single path component, not owned by you) the scope falls back to `project`. `path_jail = false` still disables the jail.
 - **Protected zones are a hard deny in both scopes:** a project root or allow entry that only contains a zone (for example a dotfiles repository at `~`) no longer opens `~/.ssh` and the like; add an entry inside the zone (`lean-ctx allow-path ~/.config/myapp`) if a tool must reach it.
 - **Project pins:** earlier `lean-ctx setup` / `doctor --fix` runs and MCP-start hook refreshes copied the installing session's `LEAN_CTX_PROJECT_ROOT` and `LEAN_CTX_EXTRA_ROOTS` into user-global agent configs (`~/.codex/config.toml`, `~/.grok/config.toml`, global JSON MCP entries), so every later session of that agent opened the same project. The Codex and Grok entries are cleaned on the next agent refresh; `lean-ctx doctor` reports remaining pins under "Project binding" and `lean-ctx doctor --fix` removes them line by line, keeping key order and comments (a pin that shares a line with other keys is listed for a manual edit). `LEAN_CTX_EXTRA_ROOTS` values move into `extra_roots`; per-project entries in `~/.claude.json` are left alone. Restart the agent once afterwards.
+- **Telemetry:** the daily aggregates report more (see Changed), and setup no longer asks: setup and the first interactive command after this update print a three-line notice instead. Turn telemetry off any time with `lean-ctx telemetry off`, `DO_NOT_TRACK=1` or `LEAN_CTX_TELEMETRY=off`; an explicit opt-out made since 3.11.0 stays in effect, and `lean-ctx telemetry show` prints the exact payload. What the server keeps, including a keyed network hash and the network operator's public name derived from the connection (never the IP address), and how long, is described at leanctx.com/privacy.
 
 ### Security
 
