@@ -140,7 +140,13 @@ impl ProjectServers {
         let root = std::path::Path::new(root)
             .canonicalize()
             .map_err(|_| "project root unavailable")?;
-        if !root.is_dir() || crate::core::pathutil::is_broad_or_unsafe_root(&root) {
+        // A canonical filesystem root has no parent: `/`, and on Windows the
+        // verbatim drive root `\\?\C:\`, which `is_broad_or_unsafe_root`
+        // does not spell out.
+        if !root.is_dir()
+            || root.parent().is_none()
+            || crate::core::pathutil::is_broad_or_unsafe_root(&root)
+        {
             return Err("project root is not a project");
         }
         if std::path::Path::new(default_root)
