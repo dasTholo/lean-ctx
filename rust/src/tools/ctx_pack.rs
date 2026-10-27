@@ -333,7 +333,15 @@ pub fn handle_import(file_path: &str, apply: bool, project_root: &str) -> String
         Err(e) => return format!("ERROR: {e}"),
     };
 
-    match registry.import_from_file(std::path::Path::new(file_path)) {
+    // GHSA-gvg8-285q-m62g: this is the MCP door, so the caller may be a
+    // prompt-injected model. Unsigned or untrusted-signer packages need the
+    // user's global opt-in; no tool argument can grant it.
+    let policy = if crate::core::config::Config::load().mcp_import_allow_unverified {
+        crate::core::context_package::registry::SignaturePolicy::AllowUnsigned
+    } else {
+        crate::core::context_package::registry::SignaturePolicy::RequireTrustedSigner
+    };
+    match registry.import_from_file(std::path::Path::new(file_path), policy) {
         Ok(manifest) => {
             let layers_str = manifest
                 .layers
@@ -342,8 +350,12 @@ pub fn handle_import(file_path: &str, apply: bool, project_root: &str) -> String
                 .collect::<Vec<_>>()
                 .join(", ");
             let mut out = format!(
-                "Imported: {} v{}\n  Layers: {}\n  Size: {} bytes\n",
-                manifest.name, manifest.version, layers_str, manifest.integrity.byte_size,
+                "Imported: {} v{}\n  Signature: {}\n  Layers: {}\n  Size: {} bytes\n",
+                manifest.name,
+                manifest.version,
+                crate::core::context_package::registry::describe_package_signature(&manifest),
+                layers_str,
+                manifest.integrity.byte_size,
             );
             if apply {
                 match crate::core::context_package::LocalRegistry::open() {

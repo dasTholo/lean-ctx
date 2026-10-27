@@ -62,6 +62,9 @@ fn resolve_segment_leaves(
         .into());
     }
     let mut s = segment.trim();
+    if is_zsh_short_loop(strip_body_intro_keywords(s)) {
+        return Err(zsh_only_form(segment));
+    }
     // GH #2134: `(( expr ))` is arithmetic evaluation, like `$(( ))` (#1664),
     // not a nested subshell or a PowerShell `( … )` expression. Walking it as
     // one made a variable (`i`) or an expression fragment (`i++`) the command
@@ -144,7 +147,15 @@ fn resolve_segment_leaves(
     // each inner command as its own leaf. This is a validation-only walk — the
     // command string is never rewritten — so the cd/env-persistence property
     // that #939 relied on (why it declined to recurse) is unaffected.
-    if let Some(inner) = balanced_brace_inner(s) {
+    //
+    // GHSA-rxv5-4c3x-g4q6 E: a trailing redirection binds the group's
+    // descriptors (`{ a; b; } > out`), as for a subshell (#1751), so the group
+    // is still recursed into — it used to be checked by `a` alone. Anything
+    // else after the `}` (`{ a; } b`, zsh `{ a } always { b }`) is refused.
+    if let Some((inner, suffix)) = brace_group(s) {
+        if !suffix.trim().is_empty() && !is_redirect_only_suffix(suffix) {
+            return Err(zsh_only_form(segment));
+        }
         for inner_seg in extract_all_commands(inner) {
             resolve_segment_leaves(&inner_seg, depth + 1, out)?;
         }
@@ -180,12 +191,49 @@ fn resolve_segment_leaves(
     // (`ForEach-Object { Remove-Item $_ }`), so each block body is resolved
     // into leaves of its own, after the cmdlet itself so its verdict comes
     // first.
-    out.push(s.to_string());
     let base = extract_base_from_segment(s);
-    for body in super::ps_statements::script_block_bodies(s, &base) {
+    let bodies = super::ps_statements::script_block_bodies(s, &base);
+    // zsh runs brace bodies without `do`/`then`: `while true { cmd }`,
+    // `if [[ x ]] { cmd }`, `repeat 2 { cmd }`. In bash a lone `{` argument
+    // is a syntax error waiting to happen; PowerShell script blocks are
+    // resolved below instead.
+    if bodies.is_empty()
+        && super::tokenizer::detect_function_def(s).is_none()
+        && shell_tokenize(s).iter().skip(1).any(|t| t == "{")
+    {
+        return Err(zsh_only_form(segment));
+    }
+    out.push(s.to_string());
+    for body in bodies {
         resolve_block_body(&body, depth, out)?;
     }
     Ok(())
+}
+
+/// zsh's short loop `for x (a b) cmd` / `foreach x (a b)` runs `cmd` from
+/// the header segment itself (GHSA-rxv5-4c3x-g4q6 E); bash has no such form.
+/// Checked before the PowerShell walk, which would read `(a b)` as a loop
+/// header and drop `cmd`. PowerShell's own `for (…)`/`foreach (…)` put the
+/// parenthesis right after the keyword and stay with that walk.
+fn is_zsh_short_loop(s: &str) -> bool {
+    let tokens = shell_tokenize(s);
+    matches!(
+        tokens.first().map(String::as_str),
+        Some("for" | "select" | "foreach")
+    ) && tokens.get(1).is_some_and(|name| !name.starts_with('('))
+        && tokens[2..]
+            .iter()
+            .any(|t| t.starts_with('(') && !t.starts_with("(("))
+}
+
+fn zsh_only_form(segment: &str) -> ShellError {
+    format!(
+        "[BLOCKED — DO NOT RETRY] This command uses a brace body or short loop form that \
+         zsh runs but this gate cannot split into its commands (`while c {{ … }}`, \
+         `for x (…) cmd`, `{{ … }} always {{ … }}`). Use `do … done`/`then … fi` and end \
+         brace groups with `; }}`.\nCommand: {segment}"
+    )
+    .into()
 }
 
 /// Resolve every segment of a command text found inside PowerShell syntax.
@@ -431,24 +479,61 @@ fn is_redirect_only_suffix(suffix: &str) -> bool {
             return false;
         };
         rest = op[op_len..].trim_start();
-        // Target: `&1`/`-` for descriptor dups, otherwise one plain word. A
-        // shell metacharacter here means this is not a bare redirect target.
-        let target = rest
-            .bytes()
-            .take_while(|byte| {
-                !byte.is_ascii_whitespace()
-                    && !matches!(
-                        byte,
-                        b';' | b'|' | b'&' | b'(' | b')' | b'`' | b'$' | b'<' | b'>' | b'"' | b'\''
-                    )
-            })
-            .count();
+        // Target: `&1`/`-` for descriptor dups, otherwise one shell word.
+        let Some(target) = redirect_target_len(rest) else {
+            return false;
+        };
         if target == 0 {
             return false;
         }
         rest = rest[target..].trim_start();
     }
     true
+}
+
+/// Byte length of the single shell word that forms a redirect target at the
+/// start of `rest` (#2149). Quoted parts, `$VAR`/`${VAR}`, and `$( … )` or
+/// backtick substitutions belong to the word, exactly as they would after a
+/// plain command (`echo ok > /tmp/lc_$(echo b).txt`): the word itself runs
+/// nothing, and the commands in its substitutions are extracted and gated by
+/// the same segment walk and substitution check as without the subshell.
+/// Unquoted whitespace or an operator ends the word; a word that starts with
+/// `<`/`>` (process substitution, herestring) yields 0. `None`: an
+/// unterminated quote or substitution, which is never accepted.
+fn redirect_target_len(rest: &str) -> Option<usize> {
+    let bytes = rest.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b if b.is_ascii_whitespace() => break,
+            b';' | b'|' | b'&' | b'(' | b')' | b'<' | b'>' => break,
+            b'\\' => i += 2,
+            b'\'' => i += rest[i + 1..].find('\'')? + 2,
+            b'"' => i = closing_double_quote(rest, i + 1)? + 1,
+            b'$' if bytes.get(i + 1) == Some(&b'(') => i = balanced_paren_at(rest, i + 1)?.1,
+            b'`' => i = super::case_construct::skip_backticks(bytes, i)?,
+            _ => i += 1,
+        }
+    }
+    Some(i.min(bytes.len()))
+}
+
+/// Index of the `"` closing a double-quoted string whose body starts at
+/// `from`, stepping over escapes and `$( … )`/backtick substitutions (which
+/// may themselves contain quotes).
+fn closing_double_quote(s: &str, from: usize) -> Option<usize> {
+    let bytes = s.as_bytes();
+    let mut i = from;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' => i += 2,
+            b'"' => return Some(i),
+            b'$' if bytes.get(i + 1) == Some(&b'(') => i = balanced_paren_at(s, i + 1)?.1,
+            b'`' => i = super::case_construct::skip_backticks(bytes, i)?,
+            _ => i += 1,
+        }
+    }
+    None
 }
 
 /// GH #2134: if `segment` is an arithmetic command `(( expr ))`, return `expr`.
@@ -496,7 +581,10 @@ fn strip_body_intro_keywords(segment: &str) -> &str {
 /// the substitutions and are not honoured here. A nested `$(( … ))` is walked
 /// into, not skipped, so a substitution inside it is found too. An
 /// unterminated substitution cannot be validated and blocks the command.
-fn arithmetic_substitutions<'a>(expr: &'a str, segment: &str) -> Result<Vec<&'a str>, ShellError> {
+pub(super) fn arithmetic_substitutions<'a>(
+    expr: &'a str,
+    segment: &str,
+) -> Result<Vec<&'a str>, ShellError> {
     let bytes = expr.as_bytes();
     let mut found = Vec::new();
     let mut i = 0;
@@ -606,6 +694,13 @@ fn balanced_paren_inner(segment: &str) -> Option<&str> {
 /// (trailing content → falls through to base extraction), matching the paren
 /// walker; such a form is a shell syntax error anyway.
 pub(super) fn balanced_brace_inner(segment: &str) -> Option<&str> {
+    brace_group(segment).and_then(|(inner, suffix)| suffix.is_empty().then_some(inner))
+}
+
+/// A closed `{ … }` brace group at the start of `segment`: its inner command
+/// list and the text after the closing `}`. `None` when `segment` does not
+/// open a group or the group never closes.
+fn brace_group(segment: &str) -> Option<(&str, &str)> {
     let trimmed = segment.trim();
     let bytes = trimmed.as_bytes();
     if bytes.first() != Some(&b'{') {
@@ -648,11 +743,7 @@ pub(super) fn balanced_brace_inner(segment: &str) -> Option<&str> {
             b'}' => {
                 depth -= 1;
                 if depth == 0 {
-                    return if i == len - 1 {
-                        Some(trimmed[1..i].trim())
-                    } else {
-                        None
-                    };
+                    return Some((trimmed[1..i].trim(), &trimmed[i + 1..]));
                 }
             }
             _ => {}

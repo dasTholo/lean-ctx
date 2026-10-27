@@ -110,9 +110,12 @@ In addition, roles can restrict **unsafe I/O**:
 - **Pipeline archive redaction** — shell output archives redacted before storage.
 - **UDS socket permissions** — `0o600` enforced on Unix domain sockets after bind.
 - **Error response sanitization** — internal details logged server-side, generic codes returned to clients.
+- **MCP gateway output redaction** — downstream `ctx_tools call` output (success and error text) passes secret detection before it reaches the model.
+- **Signed handoffs and packages** — handoff bundle signatures cover the signer id and key; context packages and addons must be signed unless a local import passes `--allow-unsigned` (`allow_unsigned=true` over MCP); `/v1/a2a/handoff` rejects unsigned bundles and context packages. An embedded key proves integrity only: a signer is reported as trusted only when its key is pinned in `<data_dir>/trusted-signers.toml` (`[[signers]] subject = "<agent id or @namespace>"`, `public_key = "<hex>"`) or held by a local agent identity. Remote `pack install` / `addon add` pin the namespace publisher key on first install and refuse a different key afterwards.
+- **Bounded audit trail** — `<data_dir>/audit/trail.jsonl` rotates at 32 MiB into `trail.NNNNNN.jsonl`; the hash chain continues across segments and `verify` checks all of them. Archived segments are not deleted automatically, because removing one breaks chain verification.
 
 **Optional network activity (review effective configuration):**
-- **Update check**: a lightweight daily GET to `leanctx.com/version.txt` to notify you of new versions. Sends only the current version as User-Agent. Disable with `update_check_disabled = true` in `~/.lean-ctx/config.toml` or `LEAN_CTX_NO_UPDATE_CHECK=1`.
+- **Update check**: a lightweight daily GET to `api.github.com/repos/yvgude/lean-ctx/releases/latest` to notify you of new versions. Sends only the current version as User-Agent. Disable with `update_check_disabled = true` in `~/.lean-ctx/config.toml` or `LEAN_CTX_NO_UPDATE_CHECK=1`.
 - **Telemetry**: product telemetry is on by default since v3.11.0 (v3.10.5 and earlier defaulted it off); an explicit earlier opt-out is kept. Inspect your installed build with `lean-ctx telemetry status` and `lean-ctx telemetry show`. Disable sending with `lean-ctx telemetry off`, `DO_NOT_TRACK=1`, or `LEAN_CTX_TELEMETRY=off`. Enabled telemetry sends installation and aggregate usage metadata. Do not infer zero network activity from telemetry being disabled.
 - **Configured providers and integrations**: source connectors, upstream model requests, submitted feedback, and remote endpoints have their own payloads and credentials. Review each enabled path.
 
@@ -203,6 +206,32 @@ Use the checksums attached to the relevant [GitHub Release](https://github.com/y
 
 ---
 
+## Verifying Release Artifacts
+
+Every release publishes `SHA256SUMS` and `release-manifest.json`, each signed with keyless Cosign by the release workflow (`.sig` and `.pem` next to the file).
+
+- **`lean-ctx update`** verifies both signatures against the pinned release-workflow identity, then the archive digest, and refuses the update on any failure.
+- **`install.sh` and the npm package** verify the archive against `SHA256SUMS` and abort when the checksum file, its entry for the archive, or a SHA-256 tool is missing, or when the digest does not match. There is no opt-out. They do not check the Cosign signature, so a tampered release whose `SHA256SUMS` was replaced too is only caught by the checks below.
+
+To check a manual download yourself (replace `vX.Y.Z` with the release tag):
+
+```bash
+cosign verify-blob SHA256SUMS \
+  --signature SHA256SUMS.sig --certificate SHA256SUMS.pem \
+  --certificate-identity "https://github.com/yvgude/lean-ctx/.github/workflows/release.yml@refs/tags/vX.Y.Z" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+sha256sum --ignore-missing -c SHA256SUMS   # macOS: shasum -a 256 --ignore-missing -c SHA256SUMS
+```
+
+Releases built after GHSA-rxv5-4c3x-g4q6 also carry GitHub build-provenance attestations for every archive, wheel, `SHA256SUMS` and `release-manifest.json`:
+
+```bash
+gh attestation verify lean-ctx-aarch64-apple-darwin.tar.gz --repo yvgude/lean-ctx \
+  --signer-workflow yvgude/lean-ctx/.github/workflows/release.yml
+```
+
+---
+
 ## Disclosure Timeline
 
 When vulnerabilities are reported:
@@ -252,9 +281,24 @@ proof of OS isolation. Inspect `rust/src/core/sandbox.rs` for the release in use
 - dangerous-flag blocking (`git --upload-pack`, `tar --to-command`, `find -exec`, `awk system()`), inline env hijack blocking (`PATH=`, `LD_PRELOAD=`, `GIT_SSH_COMMAND=`, …), and dangerous env-key filtering on the MCP `env` parameter,
 - **no self-loosening** (allowlist mode, the default): lean-ctx subcommands that widen its own guardrails — `yolo`, `allow <cmd>`, `allow-path <dir>`, `trust`, `security open`, `security secrets off`, `config set` of a security or path/allowlist key — are refused, so an agent cannot undo a refusal it just received. Listing, `--remove`, `secure`, `untrust` and `security secrets on` still run. The user runs the blocked commands in their own terminal (warn-only there, see below). `ctx_execute` is not covered — see the next paragraph.
 
-Enforcement applies to the MCP path, hook-child mode and every non-interactive CLI invocation; an interactive human terminal gets a warning instead (`LEAN_CTX_ALLOWLIST_WARN_ONLY=1` opts out explicitly). Cloud/infra mutation CLIs (terraform, kubectl, aws, …) are excluded from the default allowlist and require per-tool opt-in (`lean-ctx allow <cmd>`). `shell_strict_mode = true` upgrades the warn-only heuristics (command substitution in arguments, pipe-to-bare-interpreter) to hard blocks.
+Enforcement applies to the MCP path, hook-child mode and every non-interactive CLI invocation; an interactive human terminal gets a warning instead (`LEAN_CTX_ALLOWLIST_WARN_ONLY=1` opts out explicitly). Cloud/infra mutation CLIs (terraform, kubectl, aws, …) are excluded from the default allowlist and require per-tool opt-in (`lean-ctx allow <cmd>`). Commands inside a substitution in an argument (`$(…)`, backticks, `<(…)`/`>(…)`) are gated like top-level commands in every enforce-mode call. `shell_strict_mode = true` upgrades the remaining warn-only heuristic (pipe to a bare interpreter) to a hard block.
 
 **`ctx_execute(language=shell)` is deliberately NOT allowlisted (GH #905).** The checks above gate `ctx_shell` and `lean-ctx -c` only. `ctx_execute` is the trusted script path: calling it is an explicit decision to write and run a script, the same decision a native Write plus `bash script.sh` would express, so re-running the allowlist there would only tax the sanctioned route. The consequence must be stated plainly rather than assumed: **the two tools are one trust tier, not a boundary and a bypass.** Any agent that can call `ctx_execute` has full shell reach no matter how `shell_allowlist` is configured — tightening the allowlist does not constrain it. Where that reach is unacceptable, deny the tool by role (`denied: ["ctx_execute"]`) or run the stack in an OS sandbox; those are the only controls that bind it.
+
+**Constructs the gate refuses (GHSA-rxv5-4c3x-g4q6 E).** The command runs in the user's `$SHELL`, which may be bash, dash or zsh. Where these shells read the same text differently, or where the gate cannot tell which commands a construct runs, the command is refused rather than guessed at. Rewrite the command without the construct:
+
+- legacy `$[ … ]` arithmetic (use `$(( … ))`);
+- zsh parameter flags `${(…)…}` and bash prompt expansion `${x@P}`, both of which can evaluate a value as code;
+- a `(` attached to a word: zsh glob qualifiers (`*(e:…:)`, `*(+cmd)`) and bash extended globs (`@(…)`, `!(…)`); function heads `f()` and arrays `a=(…)` are fine;
+- a bare `{` argument (zsh brace bodies such as `while c { … }` or `repeat n { … }`), zsh short loops (`for x (…) cmd`), and a brace group followed by anything other than redirections (`{ a; } b`, `{ a } always { b }`);
+- `hash -p` and `enable -f`; a `trap` action is checked like a command;
+- a carriage return not followed by a line feed, and the Unicode line/paragraph separators U+2028/U+2029;
+- a here-document whose terminator line never appears;
+- constructs that bash, dash and zsh end at different places: `$'…'` with an escaped quote, a `'` or `{` inside `${…}`, `<<` inside `(( … ))`, and here-documents queued across a command-substitution boundary.
+
+Assignments to variables that redirect which binary, library or startup code runs (`LD_*`, `DYLD_*`, `BASH_ENV`, `ENV`, `PROMPT_COMMAND`, `PS4`, `SHELLOPTS`, `ZDOTDIR`, `GIT_CONFIG*`, `BASH_FUNC_*`, pager and editor variables other than harmless values like `cat`, `NODE_OPTIONS`, `PERL5OPT`, `RUBYOPT`, …) are blocked anywhere in the assignment prefix and through `export`/`declare`/`env`/`read`/`printf -v`. `PATH` is blocked only as the first word of a command (`PATH=… cmd`); `export PATH=…` stays allowed.
+
+**Known limitation: arithmetic evaluation of variable contents.** The gate is syntactic. bash evaluates array subscripts inside variable *values* at run time whenever a value is used in an arithmetic context, and that evaluation performs command substitution: `x='a[$(cmd)]'; echo $((x))` runs `cmd`, as do `let`, `[[ x -eq … ]]`, `test -v`, `printf -v`, `unset` and `declare` with such a value. The value can come from a quoted string or from a file read at run time, so no syntactic check can see it. This is one more reason the allowlist is not a sandbox: for untrusted input, use an OS sandbox or the agent's approval flow.
 
 **Explicitly out of scope:** commands run with the invoking user's full privileges. Anything the user can do, an allowed command can do — `cp`/`rsync` can copy any file the OS lets the user read, package managers execute arbitrary install scripts, `npm test` runs project code. A blocklist cannot enumerate these; pretending otherwise would be security theater.
 
@@ -358,7 +402,7 @@ export LEAN_CTX_ROLE=bank
 
 | Endpoint | Purpose | Disable |
 |----------|---------|---------|
-| `leanctx.com/version.txt` | Update check (daily GET) | `update_check_disabled = true` |
+| `api.github.com/repos/yvgude/lean-ctx/releases/latest` | Update check (daily GET) | `update_check_disabled = true` |
 | `api.leanctx.com` | Enabled telemetry (version, OS/arch, installation ID, client/setup categories, aggregate tool usage) | `lean-ctx telemetry off` or `DO_NOT_TRACK=1` |
 | `huggingface.co` | Embedding model download | Pre-provision models, set `LEAN_CTX_EMBEDDING_MODEL_DIR` |
 | `localhost:PORT` | Dashboard (local TCP) | Don't start dashboard, or bind to loopback only |
@@ -378,7 +422,8 @@ The team server is part of `lean-ctx-enterprise` (ADR-023). When deployed:
 
 - **`cargo audit`** runs on every CI push (zero known CVEs tolerated).
 - **`cargo deny`** checks licenses and advisories.
-- **npm `postinstall.js`** verifies SHA256 of downloaded binaries against `SHA256SUMS` release asset.
+- **Release signing:** `SHA256SUMS` and `release-manifest.json` are Cosign-signed and every published file carries a GitHub build-provenance attestation (see [Verifying Release Artifacts](#verifying-release-artifacts)).
+- **`install.sh` and npm `postinstall.js`** verify downloaded archives against the `SHA256SUMS` release asset and fail closed when it is missing or does not match.
 - **GitHub Actions** uses pinned action versions with hash verification.
 
 ---

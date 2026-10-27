@@ -190,6 +190,8 @@ impl Default for Config {
             secret_detection: SecretDetectionConfig::default(),
             sensitivity: crate::core::sensitivity::SensitivityConfig::default(),
             context_gateway: crate::core::context_admission::ContextGatewayConfig::default(),
+            a2a_accept_untrusted_signers: false,
+            mcp_import_allow_unverified: false,
             gateway: crate::core::mcp_catalog::GatewayConfig::default(),
             gateway_server: GatewayServerConfig::default(),
             enterprise: EnterpriseConfig::default(),

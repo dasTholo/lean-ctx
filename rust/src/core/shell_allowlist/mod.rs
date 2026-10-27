@@ -10,10 +10,12 @@ mod compound;
 mod config;
 mod enforcement;
 mod heredoc;
+mod lexer;
 mod mode;
 mod powershell;
 mod ps_statements;
 mod self_config;
+mod side_doors;
 mod substitution;
 mod tokenizer;
 
@@ -22,7 +24,6 @@ use crate::core::error::ShellError;
 use case_construct::find_shell_word;
 use compound::expand_to_leaf_segments;
 use config::{allowlist_block_message, effective_allowlist};
-use enforcement::SHELL_BUILTINS;
 #[cfg(test)]
 use enforcement::{
     check_all_segments, check_pipe_to_bare_interpreter, check_unconditional_blocked_only,
@@ -40,6 +41,7 @@ pub use enforcement::*;
 pub(crate) use heredoc::heredoc_delims;
 pub(crate) use heredoc::read_heredoc_delim;
 pub use heredoc::strip_all_heredoc_bodies;
+#[cfg(test)]
 pub(crate) use heredoc::{strip_comments, strip_quoted_heredoc_bodies};
 pub use mode::ShellSecurity;
 pub(crate) use substitution::check_substitution_in_args;

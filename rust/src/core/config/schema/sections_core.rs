@@ -740,6 +740,9 @@ pub(super) fn build(sections: &mut BTreeMap<String, SectionSchema>) {
             "LEAN_CTX_ALLOW_REROOT",
         ),
     );
+    for (name, schema) in super::signer_trust_keys() {
+        root.insert(name.into(), schema);
+    }
     root.insert(
         "hook_binary".into(),
         key_with_env(

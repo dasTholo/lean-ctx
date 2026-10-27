@@ -11,8 +11,12 @@ mod delegation_option_tests;
 mod function_def_tests;
 #[path = "inline_script_tests.rs"]
 mod inline_script_tests;
+#[path = "lexer_tests.rs"]
+mod lexer_tests;
 #[path = "quoted_dot_tests.rs"]
 mod quoted_dot_tests;
+#[path = "side_door_tests.rs"]
+mod side_door_tests;
 #[path = "substitution_tests.rs"]
 mod substitution_tests;
 #[path = "tests_powershell.rs"]

@@ -517,7 +517,8 @@ pub struct Config {
     /// Override via the `LEAN_CTX_READ_DEDUP` env var.
     #[serde(default)]
     pub read_dedup: ReadDedup,
-    /// Disable the daily version check against leanctx.com/version.txt.
+    /// Disable the daily version check against
+    /// api.github.com/repos/yvgude/lean-ctx/releases/latest.
     /// Override via LEAN_CTX_NO_UPDATE_CHECK env var.
     #[serde(default)]
     pub update_check_disabled: bool,
@@ -704,6 +705,21 @@ pub struct Config {
     /// On by default. Global-only: a project-local file cannot weaken it.
     #[serde(default)]
     pub context_gateway: crate::core::context_admission::ContextGatewayConfig,
+    /// Accept A2A handoff bundles and context packages whose signature
+    /// verifies but whose signer key is not anchored in `trusted-signers.toml`
+    /// (GHSA-gvg8-285q-m62g). Off by default: anyone can mint a key, so an
+    /// untrusted signature proves nothing about the sender. Global-only
+    /// (never merged from project-local config).
+    #[serde(default)]
+    pub a2a_accept_untrusted_signers: bool,
+    /// Let MCP tools (`ctx_handoff import`, `ctx_pack import`) import handoff
+    /// bundles and context packages that are unsigned or signed by a key not
+    /// anchored in `trusted-signers.toml` (GHSA-gvg8-285q-m62g). A tool
+    /// argument cannot grant this — the model could set it under prompt
+    /// injection. Off by default; global-only. CLI imports keep their own
+    /// human opt-in (`--allow-unsigned`).
+    #[serde(default)]
+    pub mcp_import_allow_unverified: bool,
     /// MCP Tool-Catalog Gateway (#210): aggregate + query-route downstream MCP
     /// servers. Global-only (never merged from project-local config) and a full
     /// no-op until `gateway.enabled = true`.

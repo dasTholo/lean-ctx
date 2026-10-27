@@ -1284,6 +1284,7 @@ async fn relay_context_packages_validate_before_storage() {
     use crate::core::a2a_transport::{AgentIdentityV1, TransportContentType, TransportEnvelopeV1};
     use crate::core::context_package::{PackageBuilder, signing::sign_package};
 
+    let isolated_data_dir = crate::core::data_dir::isolated_data_dir();
     let mut session = crate::core::session::SessionState::new();
     session.set_task("portable context task", None);
     let (mut manifest, content) = PackageBuilder::new("relay-context", "1.0.0")
@@ -1321,17 +1322,28 @@ async fn relay_context_packages_validate_before_storage() {
     cfg.validate().unwrap();
     let app = build_app_router(&cfg, None);
     let packages = root.path().join(".lean-ctx/handoffs/packages");
+    let author_key = crate::core::agent_identity::hex_encode(
+        &test_origin_key("package-author").verifying_key().to_bytes(),
+    );
     let mut accepted = 0;
-    for (payload, expected) in [
-        ("not json".to_string(), StatusCode::BAD_REQUEST),
-        ("{}".to_string(), StatusCode::BAD_REQUEST),
-        ("[]".to_string(), StatusCode::BAD_REQUEST),
-        (tampered, StatusCode::BAD_REQUEST),
-        (serialize(&bad_signature), StatusCode::BAD_REQUEST),
-        (serialize(&addon), StatusCode::BAD_REQUEST),
-        (unsigned, StatusCode::OK),
-        (signed, StatusCode::OK),
+    for (payload, expected, setup) in [
+        ("not json".to_string(), StatusCode::BAD_REQUEST, None),
+        ("{}".to_string(), StatusCode::BAD_REQUEST, None),
+        ("[]".to_string(), StatusCode::BAD_REQUEST, None),
+        (tampered, StatusCode::BAD_REQUEST, None),
+        (serialize(&bad_signature), StatusCode::BAD_REQUEST, None),
+        (serialize(&addon), StatusCode::BAD_REQUEST, None),
+        // GHSA-rxv5-4c3x-g4q6 (P): the network door never stores unsigned content.
+        (unsigned, StatusCode::BAD_REQUEST, None),
+        // GHSA-gvg8-285q-m62g: a valid signature from an unanchored key is
+        // rejected; anyone can mint a key.
+        (signed.clone(), StatusCode::FORBIDDEN, None),
+        // Pinning the publisher key anchors it.
+        (signed, StatusCode::OK, Some("pin")),
     ] {
+        if setup == Some("pin") {
+            crate::core::signer_trust::pin_if_absent("relay-context", &author_key, "test").unwrap();
+        }
         let mut envelope = TransportEnvelopeV1::new(
             AgentIdentityV1::from_current("sender", "test"),
             Some("recipient"),
@@ -1360,12 +1372,7 @@ async fn relay_context_packages_validate_before_storage() {
             .await
             .unwrap();
         assert_eq!(response.status(), expected);
-        if expected == StatusCode::BAD_REQUEST {
-            assert!(
-                !packages.exists(),
-                "invalid package must not create storage"
-            );
-        } else {
+        if expected == StatusCode::OK {
             accepted += 1;
             let files = std::fs::read_dir(&packages)
                 .unwrap()
@@ -1377,8 +1384,121 @@ async fn relay_context_packages_validate_before_storage() {
                     .iter()
                     .any(|entry| std::fs::read_to_string(entry.path()).unwrap() == payload)
             );
+        } else {
+            assert!(
+                !packages.exists(),
+                "rejected package must not create storage"
+            );
         }
     }
+    assert_eq!(accepted, 1);
+    drop(isolated_data_dir);
+}
+
+/// GHSA-gvg8-285q-m62g: `/v1/a2a/handoff` never stores an unsigned bundle,
+/// and a signature from an unanchored key is reported as untrusted, never as
+/// a verified identity.
+#[tokio::test]
+async fn a2a_handoff_rejects_unsigned_and_reports_untrusted_signers() {
+    use crate::core::a2a_transport::{AgentIdentityV1, TransportContentType, TransportEnvelopeV1};
+    use crate::core::handoff_transfer_bundle as bundle_mod;
+
+    let _isolated_data_dir = crate::core::data_dir::isolated_data_dir();
+    let root = tempfile::tempdir().unwrap();
+    let bearer = "handoff-test-bearer";
+    let cfg = HttpServerConfig {
+        project_root: root.path().to_path_buf(),
+        auth_token: Some(bearer.into()),
+        ..HttpServerConfig::default()
+    };
+    let app = build_app_router(&cfg, None);
+    let post = |payload: String| {
+        let envelope = TransportEnvelopeV1::new(
+            AgentIdentityV1::from_current("sender", "test"),
+            None,
+            TransportContentType::HandoffBundle,
+            payload,
+        );
+        Request::builder()
+            .method("POST")
+            .uri("/v1/a2a/handoff")
+            .header("Host", "localhost")
+            .header("Content-Type", "application/json")
+            .header("Authorization", format!("Bearer {bearer}"))
+            .body(Body::from(serde_json::to_vec(&envelope).unwrap()))
+            .unwrap()
+    };
+
+    let unsigned = bundle_mod::build_bundle_v1(
+        crate::core::handoff_ledger::HandoffLedgerV1::default(),
+        None,
+        bundle_mod::BundlePrivacyV1::Redacted,
+    );
+    let response = app
+        .clone()
+        .oneshot(post(serde_json::to_string(&unsigned).unwrap()))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(!root.path().join(".lean-ctx/handoffs").exists());
+
+    let key = ed25519_dalek::SigningKey::from_bytes(&[9u8; 32]);
+    let mut signed = unsigned;
+    signed.signer_public_key = Some(crate::core::agent_identity::hex_encode(
+        &key.verifying_key().to_bytes(),
+    ));
+    signed.signer_agent_id = Some("trusted-release-bot".into());
+    signed.signature_scheme = Some(bundle_mod::BOUND_SIGNATURE_SCHEME.into());
+    let canonical = serde_json::to_string(&signed).unwrap();
+    signed.signature = Some(crate::core::agent_identity::hex_encode(
+        &crate::core::agent_identity::sign_bytes_with(&key, canonical.as_bytes()),
+    ));
+    let signed_json = serde_json::to_string(&signed).unwrap();
+    let pk_hex = signed.signer_public_key.clone().unwrap();
+
+    // An unanchored key is rejected at the network boundary by default.
+    let response = app
+        .clone()
+        .oneshot(post(signed_json.clone()))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let body: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(body["error"], "untrusted_signer");
+    assert!(!root.path().join(".lean-ctx/handoffs").exists());
+
+    // The explicit global opt-in stores it, reported as untrusted.
+    let global = crate::core::config::Config::path().unwrap();
+    std::fs::create_dir_all(global.parent().unwrap()).unwrap();
+    std::fs::write(&global, "a2a_accept_untrusted_signers = true\n").unwrap();
+    let response = app
+        .clone()
+        .oneshot(post(signed_json.clone()))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let body: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(body["signature"]["status"], "untrusted_signer");
+    assert_eq!(body["signature"]["trusted"], false);
+    assert_eq!(body["signature"]["claimed_signer"], "trusted-release-bot");
+    std::fs::remove_file(&global).unwrap();
+
+    // Without the opt-in, a pinned (subject, key) pair is accepted as verified.
+    crate::core::signer_trust::pin_if_absent("trusted-release-bot", &pk_hex, "test").unwrap();
+    let response = app.oneshot(post(signed_json)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let body: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(body["signature"]["status"], "verified");
+    assert_eq!(body["signature"]["trusted"], true);
 }
 
 include!("main_http_tests_tail.rs");

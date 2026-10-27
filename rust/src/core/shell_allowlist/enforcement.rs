@@ -1,11 +1,11 @@
 use crate::core::error::ShellError;
 
+use super::heredoc::strip_for_analysis;
 use super::tokenizer::{Separator, segments_with_separators};
 use super::{
     ShellSecurity, allowlist_block_message, check_substitution_in_args, effective_allowlist,
     expand_to_leaf_segments, extract_all_commands, extract_base_from_segment,
     extract_command_tokens_from_segment, shell_tokenize, skip_env_assignments, split_on_operators,
-    strip_all_heredoc_bodies, strip_comments, strip_quoted_heredoc_bodies,
 };
 
 /// Checks whether a command may run, honouring the active [`ShellSecurity`] mode
@@ -80,21 +80,32 @@ pub fn passes_enforced(command: &str) -> bool {
 /// When the allowlist is empty, all commands pass (blocklist-only mode).
 /// When non-empty, EVERY command segment in the pipeline must match.
 pub(super) fn enforce_shell_allowlist(command: &str) -> Result<(), ShellError> {
+    // GHSA-rxv5-4c3x-g4q6 E: a carriage return not followed by a line feed, or
+    // a Unicode line/paragraph separator, is an ordinary word character to
+    // bash, dash and zsh, but a line break to the checks below (`echo a⏎#$(x)`
+    // would hide `$(x)` as a comment). Such a command cannot be validated.
+    // CRLF stays accepted: its CR always sits right before the line break.
+    if let Some(reason) = unvalidatable_line_break(command) {
+        return Err(unvalidatable(reason, command));
+    }
     let normalized = normalize_line_continuations(command);
+    // The one lexer pass behind every strip below (GHSA-rxv5-4c3x-g4q6 E):
+    // where the shells disagree on a construct, or a heredoc never ends, no
+    // strip can be trusted, so the command is refused.
+    if let Some(reason) = super::lexer::lex(&normalized).problem {
+        return Err(unvalidatable(reason, command));
+    }
     // #876: a quoted-delimiter heredoc body (`<<'EOF' … EOF`) is literal stdin
     // data, not commands. Strip it before analysis so the operator-splitter can't
     // dice a commit message (`feat(...)`) into bogus "segments" and block them.
-    // #876: quoted-delimiter heredoc body = literal stdin, not commands.
-    // Substitution checks ($(), backticks) need the quoted-only strip so they
-    // can still flag expanding substitutions in unquoted bodies.
-    // #1109: a shell comment (`# …`) is not a command. Strip comments after the
-    // heredoc bodies are gone, so a `#` inside a (now-removed) body can't be
-    // mistaken for a comment and, conversely, a real comment line between
-    // commands isn't diced into a bogus `#` segment and blocked.
-    let quoted_stripped = strip_comments(&strip_quoted_heredoc_bodies(&normalized));
+    // Unquoted bodies stay for the checks that read `cmd`: they expand.
+    // #1109: a shell comment (`# …`) is not a command; it goes in the same
+    // lexer pass, so a `#` in a body is never a comment and a comment's
+    // apostrophe never opens a string.
+    let quoted_stripped = strip_for_analysis(&normalized, true, true);
     // #931: for command-segment and redirect checks, strip ALL heredoc bodies
     // (quoted + unquoted) — a `>` or command word in any body is opaque data.
-    let all_stripped = strip_comments(&strip_all_heredoc_bodies(&normalized));
+    let all_stripped = strip_for_analysis(&normalized, false, true);
     let cmd = quoted_stripped.as_str();
     let cmd_all = all_stripped.as_str();
 
@@ -109,7 +120,10 @@ pub(super) fn enforce_shell_allowlist(command: &str) -> Result<(), ShellError> {
     }
 
     let strict = crate::core::config::Config::load().shell_strict_mode;
-    check_substitution_in_args(cmd, strict)?;
+    // The substitution scanner reads heredocs and comments itself and needs
+    // the unstripped line: with a quoted body already removed it would take
+    // the lines after the `<<'EOF'` operator for that body and skip them.
+    check_substitution_in_args(&normalized)?;
     check_pipe_to_bare_interpreter(cmd, strict)?;
 
     let allowlist = effective_allowlist();
@@ -121,13 +135,45 @@ pub(super) fn enforce_shell_allowlist(command: &str) -> Result<(), ShellError> {
     check_all_segments(cmd_all, &Allowlist::new(allowlist, subcommand_scoping))
 }
 
-/// Normalize the command string: remove backslash-newline continuations and
-/// replace Unicode line separators (U+2028, U+2029) with newlines.
+/// Normalize the command string: remove the backslash-newline continuations
+/// the shell removes and replace Unicode line separators (U+2028, U+2029)
+/// with newlines.
+///
+/// Only real continuations go (GHSA-rxv5-4c3x-g4q6 E): an escaped backslash
+/// before a newline (`echo \\⏎cmd` runs `cmd`), one inside single quotes or a
+/// quoted heredoc body is kept, and `\`+CR+LF is an escaped CR followed by a
+/// line break, not a continuation. A blind replace joined `cmd` onto `echo`.
 pub(super) fn normalize_line_continuations(command: &str) -> String {
+    let joined = if command.contains("\\\n") {
+        super::lexer::remove_ranges(command, super::lexer::lex(command).continuations)
+    } else {
+        command.to_string()
+    };
+    joined.replace(['\u{2028}', '\u{2029}'], "\n")
+}
+
+/// Why `command` contains a line break the shell does not see, if it does.
+fn unvalidatable_line_break(command: &str) -> Option<&'static str> {
+    let bare_cr = command
+        .bytes()
+        .enumerate()
+        .any(|(i, b)| b == b'\r' && command.as_bytes().get(i + 1) != Some(&b'\n'));
+    if bare_cr {
+        return Some("a carriage return not followed by a line feed");
+    }
     command
-        .replace("\\\r\n", "")
-        .replace("\\\n", "")
-        .replace(['\u{2028}', '\u{2029}'], "\n")
+        .contains(['\u{2028}', '\u{2029}'])
+        .then_some("a Unicode line or paragraph separator")
+}
+
+fn unvalidatable(reason: &str, command: &str) -> ShellError {
+    format!(
+        "[BLOCKED — DO NOT RETRY] Command contains {reason}: the shells that may run it \
+         (bash, dash, zsh) read it differently, or the gate cannot tell where it ends, \
+         so it cannot be validated. Rewrite it without that construct.\n\
+         Command: {command}"
+    )
+    .into()
 }
 
 /// Piping into a bare interpreter (no script file): warn by default, **block**
@@ -182,6 +228,11 @@ pub(super) fn check_unconditional_blocked_only(command: &str) -> Result<(), Shel
         check_inline_env_block(seg)?;
         check_interpreter_eval_only(seg)?;
         check_dangerous_flags(seg)?;
+        // A `trap` action runs like `eval`: the same rules hold inside it.
+        let tokens = extract_command_tokens_from_segment(seg);
+        if let Some(action) = super::side_doors::trap_action(&tokens) {
+            check_unconditional_blocked_only(action)?;
+        }
     }
     Ok(())
 }
@@ -291,6 +342,13 @@ fn check_interpreter_inner(
                 }
             }
             let rest_str = rest_tokens.join(" ");
+            // GHSA-rxv5-4c3x-g4q6 E: the target runs like a top-level command,
+            // so it gets the same per-command checks at every unwrap level.
+            let mut target_tokens = rest_tokens.clone();
+            if let Some(first) = target_tokens.first_mut() {
+                *first = delegated.to_string();
+            }
+            check_delegated_target(&rest_str, &target_tokens, allowlist)?;
             return check_interpreter_inner(&rest_str, allowlist, depth + 1, inline_ok);
         }
     }
@@ -621,19 +679,6 @@ const DANGEROUS_GIT_FLAGS: &[&str] = &[
 
 const DANGEROUS_TAR_FLAGS: &[&str] = &["--to-command", "--use-compress-program"];
 
-/// Blocked inline environment assignments that can hijack execution.
-const BLOCKED_INLINE_ENV: &[&str] = &[
-    "PATH=",
-    "GIT_ASKPASS=",
-    "GIT_SSH=",
-    "GIT_SSH_COMMAND=",
-    "GIT_EDITOR=",
-    "GIT_EXTERNAL_DIFF=",
-    "SSH_ASKPASS=",
-    "LD_PRELOAD=",
-    "DYLD_INSERT_LIBRARIES=",
-];
-
 fn check_dangerous_flags(segment: &str) -> Result<(), ShellError> {
     let trimmed = skip_env_assignments(segment.trim());
     let tokens = shell_tokenize(trimmed);
@@ -699,29 +744,59 @@ fn check_dangerous_flags(segment: &str) -> Result<(), ShellError> {
     Ok(())
 }
 
+/// Inline or builtin assignments that can hijack execution; see
+/// `side_doors::check_env_assignments` (GHSA-rxv5-4c3x-g4q6 E: every
+/// assignment counts, not only the first word of the segment).
 fn check_inline_env_block(segment: &str) -> Result<(), ShellError> {
-    let trimmed = segment.trim();
-    for blocked in BLOCKED_INLINE_ENV {
-        if trimmed.starts_with(blocked) {
-            let var_name = blocked.trim_end_matches('=');
-            let all_blocked: Vec<&str> = BLOCKED_INLINE_ENV
-                .iter()
-                .map(|b| b.trim_end_matches('='))
-                .collect();
-            return Err(format!(
-                "[BLOCKED — DO NOT RETRY] Inline environment override '{blocked}' is blocked \
-                 (it can redirect which binary runs).\n\
-                 Use the env parameter instead:  ctx_shell(command=\"<your command>\", \
-                 env={{\"{}\": \"<value>\"}})\n\
-                 Blocked variables: {}\n\
-                 Other inline assignments (e.g. FOO=bar cmd) are allowed.",
-                var_name,
-                all_blocked.join(", "),
-            )
-            .into());
-        }
+    super::side_doors::check_env_assignments(segment)
+}
+
+/// Builtins that run code no segment shows (GHSA-rxv5-4c3x-g4q6 E): a `trap`
+/// action is a script of its own and is gated like one; `hash -p` and
+/// `enable -f` are refused.
+fn check_builtin_side_doors(tokens: &[String], allowlist: &Allowlist) -> Result<(), ShellError> {
+    super::side_doors::check_builtin_options(tokens)?;
+    match super::side_doors::trap_action(tokens) {
+        Some(action) => check_trap_action(action, allowlist),
+        None => Ok(()),
     }
-    Ok(())
+}
+
+/// The per-command checks a wrapper's target (`env`, `timeout`, `xargs`,
+/// `command`, …) gets beyond allowlist membership and interpreter flags,
+/// which `check_interpreter_inner` applies itself: environment overrides,
+/// dangerous flags, self-reconfiguration and builtin side doors. Without an
+/// allowlist (blocklist-only mode) a `trap` action gets the unconditional
+/// rules, as at the top level.
+fn check_delegated_target(
+    target: &str,
+    tokens: &[String],
+    allowlist: Option<&Allowlist>,
+) -> Result<(), ShellError> {
+    check_inline_env_block(target)?;
+    check_dangerous_flags(target)?;
+    super::self_config::check_self_reconfiguration(tokens)?;
+    super::side_doors::check_builtin_options(tokens)?;
+    match (super::side_doors::trap_action(tokens), allowlist) {
+        (Some(action), Some(allowlist)) => check_trap_action(action, allowlist),
+        (Some(action), None) => check_unconditional_blocked_only(action),
+        (None, _) => Ok(()),
+    }
+}
+
+/// A `trap` action is a script of its own: it is gated like a command line.
+fn check_trap_action(action: &str, allowlist: &Allowlist) -> Result<(), ShellError> {
+    if let Some(reason) = super::lexer::lex(action).problem {
+        return Err(unvalidatable(reason, action));
+    }
+    check_substitution_in_args(action)?;
+    check_all_segments(&strip_for_analysis(action, false, true), allowlist).map_err(|err| {
+        format!(
+            "[BLOCKED — DO NOT RETRY] A `trap` action runs like a command and is gated like one: {}",
+            err.message().trim_start_matches("[BLOCKED — DO NOT RETRY] ")
+        )
+        .into()
+    })
 }
 /// #813: check whether a command token resolves to an existing file under the
 /// project root. Called as a fallback when the base command name isn't in the
@@ -939,6 +1014,7 @@ pub(super) fn check_all_segments(command: &str, allowlist: &Allowlist) -> Result
                     if DELEGATION_COMMANDS.contains(&body_base.as_str()) {
                         check_interpreter_abuse(body_seg, allowlist)?;
                     }
+                    check_builtin_side_doors(&body_tokens, allowlist)?;
                     continue;
                 }
                 if !matches_allowlist_entry(&body_tokens, allowlist) {
@@ -977,6 +1053,7 @@ pub(super) fn check_all_segments(command: &str, allowlist: &Allowlist) -> Result
             if DELEGATION_COMMANDS.contains(&base.as_str()) {
                 check_interpreter_abuse(seg, allowlist)?;
             }
+            check_builtin_side_doors(&tokens, allowlist)?;
             continue;
         }
         // #1442: PowerShell verb-prefix matching — safe cmdlets (Get-*, Test-*,
